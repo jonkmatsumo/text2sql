@@ -4,7 +4,13 @@ from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest
-from src.tools import execute_sql_query, get_semantic_definitions, get_table_schema, list_tables
+from src.tools import (
+    execute_sql_query,
+    get_semantic_definitions,
+    get_table_schema,
+    list_tables,
+    search_relevant_tables,
+)
 
 
 class TestListTables:
@@ -1091,3 +1097,130 @@ class TestGetSemanticDefinitions:
                 assert "Term1" in data
                 assert "Term2" in data
                 assert "Term3" in data
+
+
+class TestSearchRelevantTables:
+    """Unit tests for search_relevant_tables function."""
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_success(self):
+        """Test successful search with results."""
+        mock_results = [
+            {
+                "table_name": "payment",
+                "schema_text": "Table: payment. Columns: payment_id, amount",
+                "distance": 0.1,
+            },
+            {
+                "table_name": "customer",
+                "schema_text": "Table: customer. Columns: customer_id, name",
+                "distance": 0.2,
+            },
+        ]
+
+        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = mock_results
+
+                result = await search_relevant_tables("customer payment transactions", limit=5)
+
+                # Verify embedding was generated
+                from src.tools import RagEngine
+
+                RagEngine.embed_text.assert_called_once_with("customer payment transactions")
+
+                # Verify search was called
+                mock_search.assert_called_once()
+                call_args = mock_search.call_args
+                assert call_args[0][0] == [0.1] * 384  # embedding (positional)
+                assert call_args[1]["limit"] == 5  # limit (keyword)
+
+                # Verify markdown formatting
+                assert "## Relevant Tables for:" in result
+                assert '"customer payment transactions"' in result
+                assert "Found 2 relevant table(s):" in result
+                assert "### payment" in result
+                assert "### customer" in result
+                assert "similarity: 0.900" in result  # 1 - 0.1
+                assert "similarity: 0.800" in result  # 1 - 0.2
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_empty_result(self):
+        """Test empty results handling."""
+        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = []
+
+                result = await search_relevant_tables("nonexistent query", limit=5)
+
+                assert result == "No relevant tables found. The schema may not be indexed yet."
+                mock_search.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_limit(self):
+        """Test limit parameter."""
+        mock_results = [
+            {"table_name": f"table_{i}", "schema_text": f"text_{i}", "distance": float(i) * 0.1}
+            for i in range(3)
+        ]
+
+        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = mock_results
+
+                result = await search_relevant_tables("test query", limit=3)
+
+                # Verify limit was passed
+                call_args = mock_search.call_args
+                assert call_args[1]["limit"] == 3
+
+                # Verify all results are in output
+                assert "Found 3 relevant table(s):" in result
+                assert "table_0" in result
+                assert "table_1" in result
+                assert "table_2" in result
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_markdown_formatting(self):
+        """Test markdown formatting of results."""
+        mock_results = [
+            {
+                "table_name": "payment",
+                "schema_text": "Table: payment. Columns: payment_id, amount",
+                "distance": 0.15,
+            },
+        ]
+
+        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = mock_results
+
+                result = await search_relevant_tables("payment query", limit=5)
+
+                # Verify markdown structure
+                lines = result.split("\n")
+                assert lines[0].startswith("## Relevant Tables for:")
+                assert "Found 1 relevant table(s):" in lines
+                assert any("### payment" in line for line in lines)
+                assert "similarity: 0.850" in result  # 1 - 0.15
+                assert "Table: payment" in result
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_similarity_calculation(self):
+        """Test similarity score calculation (1 - distance)."""
+        mock_results = [
+            {"table_name": "table1", "schema_text": "text1", "distance": 0.0},  # Perfect match
+            {"table_name": "table2", "schema_text": "text2", "distance": 0.5},  # 50% similar
+            {"table_name": "table3", "schema_text": "text3", "distance": 1.0},  # No similarity
+        ]
+
+        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+                mock_search.return_value = mock_results
+
+                result = await search_relevant_tables("test", limit=5)
+
+                # Verify similarity scores
+                assert "similarity: 1.000" in result  # 1 - 0.0
+                assert "similarity: 0.500" in result  # 1 - 0.5
+                assert "similarity: 0.000" in result  # 1 - 1.0

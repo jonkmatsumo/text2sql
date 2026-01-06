@@ -6,7 +6,13 @@ This module initializes the FastMCP server and registers all database tools.
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from src.db import Database
-from src.tools import execute_sql_query, get_semantic_definitions, get_table_schema, list_tables
+from src.tools import (
+    execute_sql_query,
+    get_semantic_definitions,
+    get_table_schema,
+    list_tables,
+    search_relevant_tables,
+)
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +46,12 @@ async def get_semantic_definitions_tool(terms: list[str]) -> str:
     return await get_semantic_definitions(terms)
 
 
+@mcp.tool()
+async def search_relevant_tables_tool(user_query: str, limit: int = 5) -> str:
+    """Search for tables relevant to a natural language query using semantic similarity."""
+    return await search_relevant_tables(user_query, limit)
+
+
 if __name__ == "__main__":
     import asyncio
     import signal
@@ -47,8 +59,22 @@ if __name__ == "__main__":
 
     # Initialize database connection pool before starting server
     async def init_database():
-        """Initialize database connection pool."""
+        """Initialize database connection pool and index schema."""
         await Database.init()
+
+        # Check if schema_embeddings table is empty
+        from src.indexer import index_all_tables
+
+        conn = await Database.get_connection()
+        try:
+            count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
+            if count == 0:
+                print("Schema embeddings table is empty. Starting indexing...")
+                await index_all_tables()
+            else:
+                print(f"Schema already indexed ({count} tables)")
+        finally:
+            await Database.release_connection(conn)
 
     # Initialize database
     asyncio.run(init_database())

@@ -142,7 +142,7 @@ class TestGenerateSchemaDocument:
         doc = generate_schema_document("customer", columns)
 
         assert "Table: customer" in doc
-        assert "id (integer, not null)" in doc
+        assert "id (integer, identifier, required)" in doc
         assert "name (text, nullable)" in doc
         assert doc.endswith(".")
 
@@ -158,7 +158,7 @@ class TestGenerateSchemaDocument:
         doc = generate_schema_document("order", columns, foreign_keys)
 
         assert "Table: order" in doc
-        assert "customer_id references customer" in doc
+        assert "customer_id links to customer" in doc
         assert "Relationships:" in doc
 
     def test_generate_schema_document_no_fks(self):
@@ -179,7 +179,7 @@ class TestGenerateSchemaDocument:
         ]
         doc = generate_schema_document("user", columns)
 
-        assert "id (integer, not null)" in doc
+        assert "id (integer, identifier, required)" in doc
         assert "email (text, nullable)" in doc
 
     def test_generate_schema_document_empty_columns(self):
@@ -188,6 +188,88 @@ class TestGenerateSchemaDocument:
 
         assert "Table: empty_table" in doc
         assert "Columns:" in doc
+
+    def test_generate_schema_document_with_table_comment(self):
+        """Test with table comment."""
+        columns = [
+            {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
+        ]
+        doc = generate_schema_document(
+            "payment", columns, table_comment="Customer payment transactions"
+        )
+
+        assert "Table payment: Customer payment transactions" in doc
+        assert doc.startswith("Table payment:")
+
+    def test_generate_schema_document_semantic_hints(self):
+        """Test semantic hint detection for various column names."""
+        columns = [
+            {"column_name": "payment_id", "data_type": "integer", "is_nullable": "NO"},
+            {"column_name": "amount", "data_type": "numeric", "is_nullable": "NO"},
+            {"column_name": "payment_date", "data_type": "timestamp", "is_nullable": "NO"},
+            {"column_name": "created_at", "data_type": "timestamp", "is_nullable": "NO"},
+            {"column_name": "price", "data_type": "numeric", "is_nullable": "YES"},
+            {"column_name": "name", "data_type": "text", "is_nullable": "NO"},
+        ]
+        doc = generate_schema_document("payment", columns)
+
+        assert "payment_id (integer, identifier, required)" in doc
+        assert "amount (numeric, monetary value, required)" in doc
+        assert "payment_date (timestamp, timestamp, required)" in doc
+        assert "created_at (timestamp, required)" in doc  # No semantic hint (doesn't match pattern)
+        assert "price (numeric, monetary value, nullable)" in doc
+        assert "name (text, required)" in doc  # No semantic hint
+
+    def test_generate_schema_document_backward_compatibility(self):
+        """Test backward compatibility (no new parameters)."""
+        columns = [
+            {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
+        ]
+        # Call without table_comment (should work as before)
+        doc = generate_schema_document("test_table", columns)
+
+        assert "Table: test_table" in doc
+        assert "id (integer, identifier, required)" in doc
+
+    def test_generate_schema_document_all_semantic_patterns(self):
+        """Test all semantic hint patterns."""
+        columns = [
+            {"column_name": "user_id", "data_type": "integer", "is_nullable": "NO"},
+            {"column_name": "order_id", "data_type": "integer", "is_nullable": "NO"},
+            {"column_name": "transaction_date", "data_type": "date", "is_nullable": "NO"},
+            {"column_name": "updated_time", "data_type": "timestamp", "is_nullable": "NO"},
+            {"column_name": "total_amount", "data_type": "numeric", "is_nullable": "NO"},
+            {"column_name": "unit_price", "data_type": "numeric", "is_nullable": "NO"},
+        ]
+        doc = generate_schema_document("orders", columns)
+
+        # All should have semantic hints
+        assert "identifier" in doc
+        assert "timestamp" in doc
+        assert "monetary value" in doc
+
+    def test_generate_schema_document_combination(self):
+        """Test combination of hints, relationships, and table comment."""
+        columns = [
+            {"column_name": "payment_id", "data_type": "integer", "is_nullable": "NO"},
+            {"column_name": "customer_id", "data_type": "integer", "is_nullable": "NO"},
+            {"column_name": "amount", "data_type": "numeric", "is_nullable": "NO"},
+        ]
+        foreign_keys = [
+            {"column_name": "customer_id", "foreign_table_name": "customer"},
+        ]
+        doc = generate_schema_document(
+            "payment",
+            columns,
+            foreign_keys,
+            table_comment="Customer payment transactions",
+        )
+
+        assert "Table payment: Customer payment transactions" in doc
+        assert "payment_id (integer, identifier, required)" in doc
+        assert "amount (numeric, monetary value, required)" in doc
+        assert "customer_id links to customer" in doc
+        assert "Relationships:" in doc
 
 
 class TestSearchSimilarTables:

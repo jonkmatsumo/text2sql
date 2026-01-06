@@ -69,35 +69,59 @@ def generate_schema_document(
     table_name: str,
     columns: list[dict],
     foreign_keys: list[dict] = None,
+    table_comment: str = None,
 ) -> str:
     """
     Generate enriched schema document for embedding.
+
+    Enhanced version with table comments and semantic descriptions.
 
     Args:
         table_name: Name of the table.
         columns: List of column dicts with 'column_name', 'data_type', 'is_nullable'.
         foreign_keys: Optional list of FK dicts with 'column_name', 'foreign_table_name'.
+        table_comment: Optional table comment/description.
 
     Returns:
         Concatenated text description suitable for semantic search.
     """
-    doc_parts = [f"Table: {table_name}"]
+    doc_parts = []
 
-    # Add column descriptions
+    # Table name and description
+    if table_comment:
+        doc_parts.append(f"Table {table_name}: {table_comment}")
+    else:
+        doc_parts.append(f"Table: {table_name}")
+
+    # Column descriptions with types
     col_descriptions = []
     for col in columns:
         col_name = col["column_name"]
         col_type = col["data_type"]
-        nullable = "nullable" if col["is_nullable"] == "YES" else "not null"
-        col_descriptions.append(f"{col_name} ({col_type}, {nullable})")
+        nullable = "nullable" if col["is_nullable"] == "YES" else "required"
+
+        # Add semantic hints based on column name patterns
+        semantic_hint = ""
+        col_lower = col_name.lower()
+        if "id" in col_lower:
+            semantic_hint = "identifier"
+        elif "date" in col_lower or "time" in col_lower:
+            semantic_hint = "timestamp"
+        elif "amount" in col_lower or "price" in col_lower:
+            semantic_hint = "monetary value"
+
+        if semantic_hint:
+            col_descriptions.append(f"{col_name} ({col_type}, {semantic_hint}, {nullable})")
+        else:
+            col_descriptions.append(f"{col_name} ({col_type}, {nullable})")
 
     doc_parts.append("Columns: " + ", ".join(col_descriptions))
 
-    # Add foreign key relationships
+    # Foreign key relationships
     if foreign_keys:
         fk_descriptions = []
         for fk in foreign_keys:
-            fk_descriptions.append(f"{fk['column_name']} references {fk['foreign_table_name']}")
+            fk_descriptions.append(f"{fk['column_name']} links to {fk['foreign_table_name']}")
         doc_parts.append("Relationships: " + ", ".join(fk_descriptions))
 
     return ". ".join(doc_parts) + "."

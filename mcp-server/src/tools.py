@@ -6,6 +6,7 @@ from typing import Optional
 
 import asyncpg
 from src.db import Database
+from src.rag import RagEngine, search_similar_tables
 
 
 async def list_tables(search_term: Optional[str] = None) -> str:
@@ -209,3 +210,43 @@ async def get_semantic_definitions(terms: list[str]) -> str:
         return json.dumps(result, indent=2)
     finally:
         await Database.release_connection(conn)
+
+
+async def search_relevant_tables(user_query: str, limit: int = 5) -> str:
+    """
+    Search for tables relevant to a natural language query using semantic similarity.
+
+    This tool solves the context window problem by returning only the most relevant
+    table schemas instead of the entire database schema.
+
+    Args:
+        user_query: Natural language question (e.g., "Show me customer payments")
+        limit: Maximum number of relevant tables to return (default: 5)
+
+    Returns:
+        Markdown-formatted string containing schema definitions of relevant tables.
+    """
+    # Generate embedding for user query
+    query_embedding = RagEngine.embed_text(user_query)
+
+    # Search for similar tables
+    results = await search_similar_tables(query_embedding, limit=limit)
+
+    if not results:
+        return "No relevant tables found. The schema may not be indexed yet."
+
+    # Format results as markdown
+    output_parts = [
+        f'## Relevant Tables for: "{user_query}"\n',
+        f"Found {len(results)} relevant table(s):\n",
+    ]
+
+    for result in results:
+        table_name = result["table_name"]
+        schema_text = result["schema_text"]
+        distance = result["distance"]
+
+        output_parts.append(f"### {table_name} (similarity: {1 - distance:.3f})")
+        output_parts.append(f"{schema_text}\n")
+
+    return "\n".join(output_parts)
