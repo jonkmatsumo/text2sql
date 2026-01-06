@@ -199,6 +199,12 @@ pre-commit run --all-files
 python3 -m pre_commit run --all-files
 ```
 
+**Running Pre-commit Hooks:**
+- **Important**: Pre-commit may not be in PATH. Use: `python3 -m pre_commit run --all-files`
+- If pre-commit is not installed, install it first: `python3 -m pip install pre-commit`
+- Pre-commit hooks will auto-format files (black, isort). Re-run to verify all hooks pass after auto-fixes
+- Always run pre-commit hooks after making changes to source code, before running tests
+
 **Troubleshooting**: If hooks still don't run, see `TROUBLESHOOTING.md` for detailed solutions.
 
 **Note**: On macOS, you may need to use `pip3` instead of `pip`, or use `python3 -m pre_commit` if the `pre-commit` command is not in your PATH.
@@ -217,6 +223,33 @@ python3 -m pre_commit run --all-files
 3. Commit again: `git commit -m "your message"`
 
 This ensures all code is properly formatted before it's committed.
+
+### Development Workflow
+
+**ALWAYS run pre-commit hooks AND tests after making changes to source code**
+
+**Standard Workflow:**
+1. Make code changes
+2. Run pre-commit hooks: `python3 -m pre_commit run --all-files`
+3. Run tests: `./venv/bin/pytest mcp-server/tests/ -v` (or specific test file/class)
+4. Verify all hooks and tests pass
+5. If pre-commit auto-fixes files, re-run it to verify all hooks pass
+6. Never commit code that fails pre-commit hooks or tests
+
+**Quick Commands:**
+```bash
+# Run pre-commit hooks
+python3 -m pre_commit run --all-files
+
+# Run all tests
+./venv/bin/pytest mcp-server/tests/ -v
+
+# Run specific test file
+./venv/bin/pytest mcp-server/tests/test_tools.py -v
+
+# Run tests with coverage
+./venv/bin/pytest mcp-server/tests/ --cov=src --cov-report=term-missing
+```
 
 ### CI/CD
 

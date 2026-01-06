@@ -170,3 +170,42 @@ async def execute_sql_query(sql_query: str) -> str:
         return f"Execution Error: {str(e)}"
     finally:
         await Database.release_connection(conn)
+
+
+async def get_semantic_definitions(terms: list[str]) -> str:
+    """
+    Retrieve business metric definitions from the semantic layer.
+
+    Args:
+        terms: List of term names to look up (e.g. ['High Value Customer', 'Churned']).
+
+    Returns:
+        JSON object mapping term names to their definitions and SQL logic.
+    """
+    if not terms:
+        return json.dumps({})
+
+    conn = await Database.get_connection()
+    try:
+
+        # Build parameterized query for multiple terms
+        placeholders = ",".join([f"${i+1}" for i in range(len(terms))])
+        query = f"""
+            SELECT term_name, definition, sql_logic
+            FROM public.semantic_definitions
+            WHERE term_name = ANY(ARRAY[{placeholders}])
+        """
+
+        rows = await conn.fetch(query, *terms)
+
+        result = {
+            row["term_name"]: {
+                "definition": row["definition"],
+                "sql_logic": row["sql_logic"],
+            }
+            for row in rows
+        }
+
+        return json.dumps(result, indent=2)
+    finally:
+        await Database.release_connection(conn)

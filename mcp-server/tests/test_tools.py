@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest
-from src.tools import execute_sql_query, get_table_schema, list_tables
+from src.tools import execute_sql_query, get_semantic_definitions, get_table_schema, list_tables
 
 
 class TestListTables:
@@ -787,3 +787,307 @@ class TestExecuteSqlQuery:
 
                 # Verify it's formatted (indent=2)
                 assert "\n" in result
+
+
+class TestGetSemanticDefinitions:
+    """Unit tests for get_semantic_definitions function."""
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_single_term(self):
+        """Test retrieving definition for a single term."""
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {
+                "term_name": "High Value Customer",
+                "definition": "Customer with lifetime payments > $150",
+                "sql_logic": "SUM(amount) > 150",
+            }
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                result = await get_semantic_definitions(["High Value Customer"])
+
+                # Verify connection was acquired and released
+                mock_get.assert_called_once()
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify query was executed with correct parameters
+                mock_conn.fetch.assert_called_once()
+                call_args = mock_conn.fetch.call_args
+                assert "semantic_definitions" in call_args[0][0]
+                assert "ANY(ARRAY[$1])" in call_args[0][0]
+                assert call_args[0][1] == "High Value Customer"
+
+                # Verify JSON output
+                import json
+
+                data = json.loads(result)
+                assert "High Value Customer" in data
+                assert (
+                    data["High Value Customer"]["definition"]
+                    == "Customer with lifetime payments > $150"
+                )
+                assert data["High Value Customer"]["sql_logic"] == "SUM(amount) > 150"
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_multiple_terms(self):
+        """Test retrieving definitions for multiple terms."""
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {
+                "term_name": "High Value Customer",
+                "definition": "Customer with lifetime payments > $150",
+                "sql_logic": "SUM(amount) > 150",
+            },
+            {
+                "term_name": "Churned",
+                "definition": "No rental activity in the last 30 days",
+                "sql_logic": "last_rental_date < NOW() - INTERVAL '30 days'",
+            },
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                result = await get_semantic_definitions(["High Value Customer", "Churned"])
+
+                # Verify connection was released
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify query used multiple parameters
+                call_args = mock_conn.fetch.call_args
+                assert "ANY(ARRAY[$1,$2])" in call_args[0][0]
+                assert call_args[0][1] == "High Value Customer"
+                assert call_args[0][2] == "Churned"
+
+                # Verify JSON output
+                import json
+
+                data = json.loads(result)
+                assert len(data) == 2
+                assert "High Value Customer" in data
+                assert "Churned" in data
+                assert data["Churned"]["definition"] == "No rental activity in the last 30 days"
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_empty_list(self):
+        """Test handling empty terms list."""
+        result = await get_semantic_definitions([])
+
+        # Should return empty JSON object without querying database
+        import json
+
+        data = json.loads(result)
+        assert data == {}
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_term_not_found(self):
+        """Test handling term not found in database."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])  # Empty result
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                result = await get_semantic_definitions(["Nonexistent Term"])
+
+                # Verify connection was released
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify empty JSON object
+                import json
+
+                data = json.loads(result)
+                assert data == {}
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_partial_match(self):
+        """Test partial match where some terms found, some not."""
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {
+                "term_name": "High Value Customer",
+                "definition": "Customer with lifetime payments > $150",
+                "sql_logic": "SUM(amount) > 150",
+            }
+            # "Churned" not in results
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                result = await get_semantic_definitions(
+                    ["High Value Customer", "Churned", "Nonexistent"]
+                )
+
+                # Verify connection was released
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify only found term is in result
+                import json
+
+                data = json.loads(result)
+                assert len(data) == 1
+                assert "High Value Customer" in data
+                assert "Churned" not in data
+                assert "Nonexistent" not in data
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_connection_error(self):
+        """Test handling connection acquisition errors."""
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            mock_get.side_effect = RuntimeError("Database pool not initialized")
+
+            with pytest.raises(RuntimeError) as exc_info:
+                await get_semantic_definitions(["High Value Customer"])
+
+            assert "Database pool not initialized" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_query_error(self):
+        """Test handling SQL query errors."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                with pytest.raises(asyncpg.PostgresError):
+                    await get_semantic_definitions(["High Value Customer"])
+
+                # Verify connection was still released even on error
+                mock_release.assert_called_once_with(mock_conn)
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_always_releases_connection(self):
+        """Test that connection is always released even if an exception occurs."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                with pytest.raises(Exception):
+                    await get_semantic_definitions(["High Value Customer"])
+
+                # Verify connection was released in finally block
+                mock_release.assert_called_once_with(mock_conn)
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_json_format(self):
+        """Test JSON output format is correct."""
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {
+                "term_name": "High Value Customer",
+                "definition": "Customer with lifetime payments > $150",
+                "sql_logic": "SUM(amount) > 150",
+            },
+            {
+                "term_name": "Gross Revenue",
+                "definition": "Total sum of all payments",
+                "sql_logic": "SUM(amount) FROM payment",
+            },
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                result = await get_semantic_definitions(["High Value Customer", "Gross Revenue"])
+
+                # Verify connection was released
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify JSON is valid and formatted
+                import json
+
+                data = json.loads(result)
+                assert isinstance(data, dict)
+                assert len(data) == 2
+                assert "High Value Customer" in data
+                assert "Gross Revenue" in data
+                assert isinstance(data["High Value Customer"], dict)
+                assert "definition" in data["High Value Customer"]
+                assert "sql_logic" in data["High Value Customer"]
+
+                # Verify it's formatted (indent=2)
+                assert "\n" in result
+
+    @pytest.mark.asyncio
+    async def test_get_semantic_definitions_parameterized_query(self):
+        """Test that query uses parameterized placeholders correctly."""
+        mock_conn = AsyncMock()
+        mock_rows = [
+            {
+                "term_name": "Term1",
+                "definition": "Definition 1",
+                "sql_logic": "SQL 1",
+            },
+            {
+                "term_name": "Term2",
+                "definition": "Definition 2",
+                "sql_logic": "SQL 2",
+            },
+            {
+                "term_name": "Term3",
+                "definition": "Definition 3",
+                "sql_logic": "SQL 3",
+            },
+        ]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+
+        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+            with patch(
+                "src.tools.Database.release_connection", new_callable=AsyncMock
+            ) as mock_release:
+                mock_get.return_value = mock_conn
+
+                terms = ["Term1", "Term2", "Term3"]
+                result = await get_semantic_definitions(terms)
+
+                # Verify connection was released
+                mock_release.assert_called_once_with(mock_conn)
+
+                # Verify parameterized query construction
+                call_args = mock_conn.fetch.call_args
+                query = call_args[0][0]
+                assert "ANY(ARRAY[$1,$2,$3])" in query
+                assert call_args[0][1] == "Term1"
+                assert call_args[0][2] == "Term2"
+                assert call_args[0][3] == "Term3"
+
+                # Verify all terms are in result
+                import json
+
+                data = json.loads(result)
+                assert len(data) == 3
+                assert "Term1" in data
+                assert "Term2" in data
+                assert "Term3" in data

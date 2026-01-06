@@ -66,10 +66,24 @@ text2sql/
 - **Code Style**: Black formatting (100 char line length), isort for imports, flake8 for linting
 - All code must pass pre-commit hooks before committing
 
+### Running Pre-commit Hooks
+- **Important**: Pre-commit may not be in PATH. Use: `python3 -m pre_commit run --all-files`
+- If pre-commit is not installed, install it first: `python3 -m pip install pre-commit`
+- Pre-commit hooks will auto-format files (black, isort). Re-run to verify all hooks pass after auto-fixes
+- Always run pre-commit hooks after making changes to source code, before running tests
+
 ## Testing Approach
 - Verify database health via docker ps and direct SQL connection
 - Test MCP server using @modelcontextprotocol/inspector or curl
 - Security verification: Attempt injection attacks, verify read-only enforcement
+
+### Development Workflow
+- **ALWAYS run pre-commit hooks AND tests after making changes to source code**
+- Workflow: Make changes → Run pre-commit → Run tests → Verify all pass
+- Pre-commit command: `python3 -m pre_commit run --all-files`
+- Test command: `./venv/bin/pytest mcp-server/tests/ -v` (or specific test file/class)
+- If pre-commit auto-fixes files, re-run it to verify all hooks pass
+- Never commit code that fails pre-commit hooks or tests
 
 ## Common Patterns
 - Database connections: Use asyncpg connection pool, always close connections in finally blocks
