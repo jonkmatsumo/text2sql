@@ -1,6 +1,7 @@
 services:
   postgres-db:
-    image: postgres:16-alpine
+    # Upgrade to pgvector image to support vector extension
+    image: pgvector/pgvector:pg16
     container_name: pagila_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
