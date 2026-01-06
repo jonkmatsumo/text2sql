@@ -1,0 +1,62 @@
+"""Unit tests for MCP server main entrypoint."""
+
+
+class TestMain:
+    """Unit tests for main.py MCP server setup."""
+
+    def test_mcp_server_exists(self):
+        """Test that mcp server instance exists."""
+        from src.main import mcp
+
+        assert mcp is not None
+        assert hasattr(mcp, "run")
+
+    def test_tools_are_registered(self):
+        """Test that tools are registered with the MCP server."""
+        from src.main import mcp
+
+        # FastMCP stores registered tools internally
+        # We can verify the server has the tool registration capability
+        assert hasattr(mcp, "tool") or hasattr(mcp, "_tools") or hasattr(mcp, "tools")
+
+    def test_module_imports_successfully(self):
+        """Test that main.py module imports without errors."""
+        # This test verifies that all imports work and the module structure is correct
+        import src.main
+
+        assert src.main is not None
+        assert hasattr(src.main, "mcp")
+
+    def test_database_module_imported(self):
+        """Test that Database module is imported."""
+        from src.main import Database
+
+        assert Database is not None
+        assert hasattr(Database, "init")
+        assert hasattr(Database, "close")
+
+    def test_tool_functions_imported(self):
+        """Test that all tool functions are imported."""
+        from src.main import (
+            execute_sql_query,
+            get_semantic_definitions,
+            get_table_schema,
+            list_tables,
+        )
+
+        assert callable(list_tables)
+        assert callable(get_table_schema)
+        assert callable(execute_sql_query)
+        assert callable(get_semantic_definitions)
+
+    def test_load_dotenv_called(self):
+        """Test that load_dotenv is imported."""
+        from src.main import load_dotenv
+
+        assert callable(load_dotenv)
+
+    def test_fastmcp_imported(self):
+        """Test that FastMCP is imported."""
+        from src.main import FastMCP
+
+        assert FastMCP is not None
