@@ -80,3 +80,9 @@ sys.modules["langgraph"] = MagicMock()
 sys.modules["langgraph.graph"] = MagicMock()
 sys.modules["langgraph.graph.message"] = MagicMock()
 sys.modules["langgraph.graph.message"].add_messages = mock_add_messages
+
+# Mock langchain_openai and langchain_postgres for agent tests
+sys.modules["langchain_openai"] = MagicMock()
+sys.modules["langchain_openai"].OpenAIEmbeddings = MagicMock
+sys.modules["langchain_postgres"] = MagicMock()
+sys.modules["langchain_postgres"].PGVector = MagicMock
