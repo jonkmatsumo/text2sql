@@ -65,10 +65,10 @@ The architecture follows the "Agentic" pattern where the AI agent (Brain) commun
 
 The MCP server exposes four tools:
 
-1. **`list_tables`**: Discover available tables (with optional fuzzy search)
-2. **`get_table_schema`**: Retrieve detailed schema metadata (columns, types, foreign keys)
-3. **`execute_sql_query`**: Execute read-only SQL queries (with safety checks)
-4. **`get_semantic_definitions`**: Retrieve business metric definitions
+1. **`list_tables`** ✅: Discover available tables (with optional fuzzy search) - *Implemented*
+2. **`get_table_schema`**: Retrieve detailed schema metadata (columns, types, foreign keys) - *Pending*
+3. **`execute_sql_query`**: Execute read-only SQL queries (with safety checks) - *Pending*
+4. **`get_semantic_definitions`**: Retrieve business metric definitions - *Pending*
 
 ## 🔒 Security
 
@@ -84,6 +84,7 @@ text2sql/
 ├── docker-compose.yml          # Service orchestration
 ├── .env                        # Environment variables (not in git)
 ├── .pre-commit-config.yaml     # Pre-commit hooks configuration
+├── pytest.ini                  # Pytest configuration (root level)
 ├── .github/
 │   ├── workflows/              # GitHub Actions CI/CD
 │   │   ├── ci.yml             # Continuous Integration
@@ -98,37 +99,74 @@ text2sql/
 └── mcp-server/
     ├── Dockerfile
     ├── pyproject.toml          # Python dependencies
-    └── src/
-        ├── main.py             # MCP server entrypoint
-        ├── db.py               # Database connection pool
-        └── tools.py            # MCP tool implementations
+    ├── pytest.ini              # Pytest configuration (module level)
+    ├── src/
+    │   ├── main.py             # MCP server entrypoint
+    │   ├── db.py               # Database connection pool
+    │   └── tools.py            # MCP tool implementations
+    └── tests/
+        ├── __init__.py
+        ├── test_db.py          # Database module unit tests
+        └── test_tools.py       # Tools module unit tests
 ```
 
 ## 🧪 Testing
 
-### Database Health Check
+### Unit Tests
+
+The project includes comprehensive unit tests using pytest with mocking (no database required).
+
+**Run all tests:**
+```bash
+# From project root
+pytest
+
+# Or from mcp-server directory
+cd mcp-server
+pytest tests/ -v
+```
+
+**Run with coverage:**
+```bash
+pytest mcp-server/tests/ --cov=src --cov-report=term-missing
+```
+
+**Run specific test file:**
+```bash
+pytest mcp-server/tests/test_db.py -v      # Database module tests
+pytest mcp-server/tests/test_tools.py -v   # Tools module tests
+```
+
+**Test Coverage:**
+- `db.py`: 100% coverage (8 tests)
+- `tools.py`: 100% coverage (6 tests for list_tables)
+
+**Install test dependencies:**
+```bash
+cd mcp-server
+pip install -e ".[test]"
+```
+
+### Integration Tests
+
+**Database Health Check:**
 ```bash
 docker ps  # Both containers should be "Up (healthy)"
 psql -h localhost -U postgres -d pagila  # Verify schema and data
 ```
 
-### MCP Server Test
+**MCP Server Test:**
 ```bash
 curl -v http://localhost:8000/sse  # Should return 200 OK with SSE headers
 ```
 
-### Security Verification
+**Security Verification:**
 Attempt to execute a mutative query via the MCP tools - it should be rejected at the application layer.
 
 ## 📚 Documentation
 
 Detailed implementation guides and technical specifications are available in the `docs/` directory (local only, not committed to git).
 
-## 🔄 Development Workflow
-
-1. **Sprint 1**: Infrastructure & Database Initialization (includes pre-commit hooks & GitHub Actions)
-2. **Sprint 2**: MCP Server Development
-3. **Sprint 3**: Integration & Verification
 
 See `docs/implementation-guide.md` for detailed, step-by-step instructions optimized for Cursor workflow.
 
@@ -191,8 +229,9 @@ GitHub Actions workflows are configured in `.github/workflows/`. The CI pipeline
 - **Security Scan job**: Runs Trivy vulnerability scanner and uploads results to GitHub Security
 
 **Test Workflow** (`.github/workflows/test.yml`):
-- Placeholder for future MCP server integration tests
-- Includes PostgreSQL service setup for testing
+- Runs unit tests with pytest
+- Includes PostgreSQL service setup for integration testing
+- Generates coverage reports
 
 **Dependabot** (`.github/dependabot.yml`):
 - Automatically creates PRs for dependency updates:
