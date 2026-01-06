@@ -1,8 +1,10 @@
 """MCP tool implementations for database operations."""
 
 import json
+import re
 from typing import Optional
 
+import asyncpg
 from src.db import Database
 
 
@@ -99,5 +101,72 @@ async def get_table_schema(table_names: list[str]) -> str:
             schema_output += "\n"
 
         return schema_output
+    finally:
+        await Database.release_connection(conn)
+
+
+async def execute_sql_query(sql_query: str) -> str:
+    """
+    Execute a valid SQL SELECT statement and return the result as JSON.
+
+    Strictly read-only. Returns error messages as strings for self-correction.
+
+    Args:
+        sql_query: A SQL SELECT query string.
+
+    Returns:
+        JSON array of result rows, or error message as string.
+    """
+    # 1. Application-Level Security Check (Pre-flight)
+    # Reject mutative keywords to prevent injection attacks or accidental deletion
+    forbidden_patterns = [
+        r"(?i)\bDROP\b",
+        r"(?i)\bDELETE\b",
+        r"(?i)\bINSERT\b",
+        r"(?i)\bUPDATE\b",
+        r"(?i)\bALTER\b",
+        r"(?i)\bGRANT\b",
+        r"(?i)\bREVOKE\b",
+        r"(?i)\bTRUNCATE\b",
+        r"(?i)\bCREATE\b",
+    ]
+
+    for pattern in forbidden_patterns:
+        if re.search(pattern, sql_query):
+            return (
+                f"Error: Query contains forbidden keyword matching '{pattern}'. "
+                "Read-only access only."
+            )
+
+    conn = await Database.get_connection()
+    try:
+        # 2. Execution
+        rows = await conn.fetch(sql_query)
+
+        # 3. Serialization
+        # Convert Record objects to dicts, handling non-serializable types
+        result = [dict(row) for row in rows]
+
+        # 4. Size Safety Valve
+        if len(result) > 1000:
+            error_msg = (
+                f"Result set too large ({len(result)} rows). "
+                "Please add a LIMIT clause to your query."
+            )
+            return json.dumps(
+                {
+                    "error": error_msg,
+                    "truncated_result": result[:1000],
+                },
+                default=str,
+            )
+
+        return json.dumps(result, default=str, indent=2)  # default=str handles Date/Decimal types
+
+    except asyncpg.PostgresError as e:
+        # Crucial: Return the DB error as a string so the LLM can read it and fix the query
+        return f"Database Error: {str(e)}"
+    except Exception as e:
+        return f"Execution Error: {str(e)}"
     finally:
         await Database.release_connection(conn)
