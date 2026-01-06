@@ -1,0 +1,19 @@
+[project]
+name = "bi-agent-mcp"
+version = "0.1.0"
+description = "MCP Server for Text 2 SQL"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=0.9.0",
+    "uvicorn>=0.24.0",
+    "asyncpg>=0.29.0",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]
