@@ -17,4 +17,3 @@ curl -f -s -k https://raw.githubusercontent.com/devrimgunduz/pagila/master/pagil
 }
 
 echo "✓ Pagila files downloaded successfully"
-

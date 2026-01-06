@@ -76,4 +76,3 @@ text2sql/
 - Tool responses: Return JSON-serializable data (use `json.dumps` with `default=str` for dates/decimals)
 - Error handling: Catch `asyncpg.PostgresError` and return error message as string (not exception)
 - Schema queries: Always filter by `table_schema = 'public'` to exclude system catalogs
-

@@ -29,4 +29,3 @@ volumes:
 networks:
   bi_net:
     driver: bridge
-

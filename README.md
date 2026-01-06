@@ -147,24 +147,38 @@ This project uses pre-commit hooks to enforce code quality. The configuration is
 ```bash
 # Install pre-commit (use pip3 on macOS if pip is not available)
 pip3 install pre-commit
-# or: python3 -m pip install pre-commit
+# or if pip3 doesn't work:
+python3 -m pip install pre-commit
 
 # Install git hooks (this makes hooks run on 'git commit')
 pre-commit install
+# or if pre-commit command not found:
+python3 -m pre_commit install
 
 # Run hooks manually on all files (optional, to fix existing files)
 pre-commit run --all-files
+# or if pre-commit command not found:
+python3 -m pre_commit run --all-files
 ```
 
-**Note**: On macOS, you may need to use `pip3` instead of `pip`. The setup script handles this automatically.
+**Troubleshooting**: If hooks still don't run, see `TROUBLESHOOTING.md` for detailed solutions.
+
+**Note**: On macOS, you may need to use `pip3` instead of `pip`, or use `python3 -m pre_commit` if the `pre-commit` command is not in your PATH.
 
 **Hooks configured:**
 - **File checks**: Trailing whitespace, end-of-file fixer, YAML/JSON/TOML validation, large file detection, merge conflict detection
 - **Python formatting**: Black (100 char line length) with Python 3.12
-- **Python linting**: flake8 (100 char line length, ignores E203, W503)
+- **Python linting**: flake8 (100 char line length, ignores E203, W503, D100)
 - **Import sorting**: isort (Black profile, 100 char line length)
 - **YAML formatting**: Prettier (excludes docker-compose.yml)
-- **Dockerfile linting**: hadolint (ignores DL3008, DL3009)
+- **Dockerfile linting**: Handled in CI/CD pipeline (not in pre-commit hooks)
+
+**Important**: Some hooks (trailing-whitespace, end-of-file-fixer, prettier) automatically fix files. If a hook modifies files during commit:
+1. The commit will be blocked
+2. Stage the auto-fixed files: `git add .`
+3. Commit again: `git commit -m "your message"`
+
+This ensures all code is properly formatted before it's committed.
 
 ### CI/CD
 
@@ -196,4 +210,3 @@ This is a Phase 1 MVP. Future phases will include:
 ## 📄 License
 
 [Specify your license here]
-

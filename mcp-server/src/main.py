@@ -2,4 +2,3 @@
 
 This module initializes the FastMCP server and registers all database tools.
 """
-

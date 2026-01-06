@@ -12,21 +12,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
-      
+          python-version: "3.12"
+          cache: "pip"
+
       - name: Install pre-commit
         run: pip install pre-commit
-      
+
       - name: Run pre-commit hooks
         run: |
           # Run pre-commit hooks (may modify files)
           pre-commit run --all-files || true
-          
+
           # Check if any files were modified
           if [ -n "$(git status --porcelain)" ]; then
             echo "❌ Pre-commit hooks modified files. Please run 'pre-commit run --all-files' locally and commit the changes."
@@ -39,15 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Build MCP Server image
         run: |
           cd mcp-server
           docker build -t bi-agent-mcp:test .
-      
+
       - name: Validate docker-compose
         run: |
           docker compose config
@@ -69,23 +69,23 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Wait for PostgreSQL
         run: |
           until pg_isready -h localhost -U postgres; do
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
-      
+
       - name: Test database initialization scripts
         run: |
           # Copy init scripts to a test location
           mkdir -p /tmp/init-scripts
           cp database/init-scripts/*.sql /tmp/init-scripts/
-          
+
           # Test that SQL files are valid (syntax check)
           for file in /tmp/init-scripts/*.sql; do
             echo "Validating $file..."
@@ -94,7 +94,7 @@ jobs:
               echo "Warning: $file may be empty or invalid"
             fi
           done
-      
+
       - name: Verify SQL file structure
         run: |
           test -f database/init-scripts/01-schema.sql || exit 1
@@ -107,18 +107,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-      
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
-
+          sarif_file: "trivy-results.sarif"
