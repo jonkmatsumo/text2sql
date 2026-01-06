@@ -1,10 +1,10 @@
-# Generative BI Agent - Phase 1 MVP
+# Text 2 SQL - Phase 1 MVP
 
-A secure, containerized Generative Business Intelligence agent that enables natural language querying of enterprise data warehouses through the Model Context Protocol (MCP).
+A secure, containerized Text 2 SQL agent that enables natural language querying of enterprise data warehouses through the Model Context Protocol (MCP).
 
 ## 🎯 Overview
 
-This project implements Phase 1 of a Generative BI Agent system, focusing on establishing a secure data access layer that decouples the AI reasoning engine from the underlying database infrastructure. The system uses Docker Compose to orchestrate:
+This project implements Phase 1 of a Text 2 SQL system, focusing on establishing a secure data access layer that decouples the AI reasoning engine from the underlying database infrastructure. The system uses Docker Compose to orchestrate:
 
 - **PostgreSQL 16** with the Pagila dataset (DVD rental business schema)
 - **Python MCP Server** (fastmcp) providing secure, read-only database access tools
@@ -29,7 +29,7 @@ The architecture follows the "Agentic" pattern where the AI agent (Brain) commun
 
 1. **Clone and navigate to the project**
    ```bash
-   cd gen-bi-agent
+   cd text2sql
    ```
 
 2. **Create environment file**
@@ -72,7 +72,7 @@ The MCP server exposes four tools:
 ## 📁 Project Structure
 
 ```
-gen-bi-agent/
+text2sql/
 ├── docker-compose.yml          # Service orchestration
 ├── .env                        # Environment variables (not in git)
 ├── .pre-commit-config.yaml     # Pre-commit hooks configuration
