@@ -23,6 +23,81 @@ The system follows a decoupled architecture where the AI reasoning engine commun
 
 The system uses Docker to orchestrate services including PostgreSQL with vector search capabilities and a Python-based server that provides secure database access tools.
 
+### System Flow
+
+```mermaid
+flowchart TB
+    subgraph Agent["🤖 Agent System (LangGraph)"]
+        UserQuery["User Query<br/>'Show payments'"]
+        AgentState["LangGraph Agent State<br/>Maintains conversation history"]
+        RetrieveNode["Retrieve Context Node<br/>agent_core/nodes/retrieve.py"]
+        GenerateNode["Generate SQL Node<br/>agent_core/nodes/generate.py"]
+        ExecuteNode["Execute SQL Node<br/>agent_core/nodes/execute.py"]
+        CorrectNode["Correct SQL Node<br/>agent_core/nodes/correct.py"]
+        SynthesizeNode["Synthesize Insight Node<br/>agent_core/nodes/synthesize.py"]
+        Response["Natural Language Response"]
+
+        UserQuery --> AgentState
+        AgentState --> RetrieveNode
+        RetrieveNode --> GenerateNode
+        GenerateNode --> ExecuteNode
+        ExecuteNode -->|"Error & retries < 3"| CorrectNode
+        CorrectNode -->|"Loop back"| ExecuteNode
+        ExecuteNode -->|"Success"| SynthesizeNode
+        ExecuteNode -->|"Error & retries >= 3"| Response
+        SynthesizeNode --> Response
+    end
+
+    subgraph VectorStore["📊 Vector Store (Agent)"]
+        PGVectorAgent["PGVector Store<br/>agent_core/retriever.py"]
+        OpenAIEmbed["OpenAI Embeddings<br/>text-embedding-3-small"]
+    end
+
+    subgraph MCPServer["🔧 MCP Server (FastMCP)"]
+        MCPTools["MCP Tools<br/>mcp_server/tools.py"]
+        RAGEngine["RAG Engine<br/>mcp_server/rag.py"]
+        FastEmbed["fastembed<br/>BGE-small"]
+        SecurityCheck["SQL Security Checks<br/>Regex validation"]
+    end
+
+    subgraph Database["🗄️ PostgreSQL Database"]
+        PGVectorDB["pgvector Extension<br/>Vector similarity search"]
+        SchemaEmbeddings["schema_embeddings Table<br/>Stores schema vectors"]
+        PagilaDB["Pagila Database<br/>Sample data"]
+    end
+
+    RetrieveNode -->|"Similarity search"| PGVectorAgent
+    PGVectorAgent -->|"Query embeddings"| OpenAIEmbed
+    PGVectorAgent -->|"Vector search"| PGVectorDB
+    PGVectorDB --> SchemaEmbeddings
+
+    ExecuteNode -->|"HTTP/SSE"| MCPTools
+    MCPTools -->|"Semantic search"| RAGEngine
+    RAGEngine -->|"Generate embeddings"| FastEmbed
+    RAGEngine -->|"Vector search"| PGVectorDB
+    MCPTools -->|"Validate SQL"| SecurityCheck
+    SecurityCheck -->|"Execute query"| PagilaDB
+    PagilaDB -->|"Results"| MCPTools
+    MCPTools -->|"JSON response"| ExecuteNode
+
+    GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-4o<br/>SQL generation"]
+    CorrectNode -->|"LLM call"| OpenAILLM
+    SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-4o<br/>Natural language"]
+
+    style Agent fill:#e1f5ff
+    style MCPServer fill:#fff4e1
+    style Database fill:#e8f5e9
+    style VectorStore fill:#f3e5f5
+```
+
+**Key Components:**
+
+- **Agent System**: LangGraph workflow orchestrates the reasoning loop with 5 nodes (retrieve, generate, execute, correct, synthesize)
+- **MCP Server**: FastMCP-based server provides secure database access tools with RAG capabilities
+- **Vector Store**: Dual-purpose - Agent uses PGVector for context retrieval, MCP Server uses fastembed for semantic search
+- **Security Layer**: SQL validation happens in MCP Server before database execution
+- **Self-Correction Loop**: Agent automatically retries failed queries up to 3 times
+
 ## Quick Start
 
 ### Prerequisites
@@ -78,10 +153,15 @@ The semantic search feature uses vector embeddings to understand query intent an
 text2sql/
 ├── docker-compose.yml          # Service orchestration
 ├── agent/                      # AI agent implementation
-│   ├── src/                    # Agent source code
+│   ├── src/agent_core/         # Agent package (LangGraph workflow)
+│   │   ├── nodes/              # Workflow nodes (retrieve, generate, execute, correct, synthesize)
+│   │   ├── graph.py            # LangGraph workflow definition
+│   │   ├── state.py            # Agent state structure
+│   │   ├── retriever.py        # Vector store initialization
+│   │   └── tools.py            # MCP server integration
 │   └── tests/                  # Agent unit tests
 ├── mcp-server/                 # Database access server
-│   ├── src/                    # Server source code
+│   ├── src/mcp_server/         # Server package
 │   └── tests/                  # Server unit tests
 └── database/                   # Database initialization scripts
 ```
@@ -102,7 +182,12 @@ pytest --cov=mcp-server/src/mcp_server --cov=agent/src/agent_core --cov-report=t
 
 **Test Coverage:**
 - MCP Server: 100% coverage across all modules (94+ tests)
-- Agent: 100% coverage for state management and retrieval (34+ tests)
+- Agent: 100% coverage for state management, nodes, and workflow (50+ tests)
+
+**Verify agent workflow:**
+```bash
+python3 -c "from agent_core.graph import app; print('Nodes:', list(app.nodes.keys()))"
+```
 
 ## Code Quality
 
