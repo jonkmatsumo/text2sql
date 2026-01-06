@@ -22,8 +22,17 @@ jobs:
       - name: Install pre-commit
         run: pip install pre-commit
       
-      - name: Run pre-commit
-        run: pre-commit run --all-files
+      - name: Run pre-commit hooks
+        run: |
+          # Run pre-commit hooks (may modify files)
+          pre-commit run --all-files || true
+          
+          # Check if any files were modified
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "❌ Pre-commit hooks modified files. Please run 'pre-commit run --all-files' locally and commit the changes."
+            git diff
+            exit 1
+          fi
 
   docker-build:
     name: Docker Build Test

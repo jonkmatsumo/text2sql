@@ -32,22 +32,30 @@ The architecture follows the "Agentic" pattern where the AI agent (Brain) commun
    cd text2sql
    ```
 
-2. **Create environment file**
+2. **Download database initialization files**
    ```bash
-   cp .env.example .env
-   # Edit .env with your database credentials
+   # The data file (02-data.sql) is gitignored due to size (~3.2MB)
+   # Run the download script to fetch it along with the schema
+   ./database/init-scripts/download_data.sh
+   ```
+   **Note**: The `02-data.sql` file is not committed to git (it's in `.gitignore`) because it's a large generated file (~3.2MB). The download script will fetch both the schema and data files from the official Pagila repository.
+
+3. **Create environment file** (optional)
+   ```bash
+   # .env file is optional - docker-compose.yml has defaults
+   # Create it only if you want to override default credentials
    ```
 
-3. **Start the services**
+4. **Start the services**
    ```bash
    docker compose up --build
    ```
 
-4. **Verify the setup**
-   - Database: Connect to `localhost:5432` (user: `postgres`, password: from `.env`)
+5. **Verify the setup**
+   - Database: Connect to `localhost:5432` (user: `postgres`, password: from `.env` or default `root_password`)
    - MCP Server: Access SSE endpoint at `http://localhost:8000/sse`
 
-5. **Test with MCP Inspector**
+6. **Test with MCP Inspector**
    ```bash
    npx @modelcontextprotocol/inspector
    # Connect to: http://localhost:8000/sse
@@ -83,8 +91,9 @@ text2sql/
 │   └── dependabot.yml         # Dependency updates
 ├── database/
 │   └── init-scripts/           # Database initialization
-│       ├── 01-schema.sql       # Pagila schema
-│       ├── 02-data.sql         # Pagila data
+│       ├── download_data.sh    # Script to download Pagila files
+│       ├── 01-schema.sql       # Pagila schema (committed)
+│       ├── 02-data.sql         # Pagila data (gitignored, ~3.2MB)
 │       └── 03-permissions.sql  # Security configuration
 └── mcp-server/
     ├── Dockerfile
@@ -128,14 +137,26 @@ See `docs/implementation-guide.md` for detailed, step-by-step instructions optim
 This project uses pre-commit hooks to enforce code quality. The configuration is defined in `.pre-commit-config.yaml`.
 
 **Setup:**
+
+**Option 1: Use the setup script (recommended)**
 ```bash
-# Install pre-commit hooks
-pip install pre-commit
+./setup-pre-commit.sh
+```
+
+**Option 2: Manual setup**
+```bash
+# Install pre-commit (use pip3 on macOS if pip is not available)
+pip3 install pre-commit
+# or: python3 -m pip install pre-commit
+
+# Install git hooks (this makes hooks run on 'git commit')
 pre-commit install
 
-# Run hooks manually on all files
+# Run hooks manually on all files (optional, to fix existing files)
 pre-commit run --all-files
 ```
+
+**Note**: On macOS, you may need to use `pip3` instead of `pip`. The setup script handles this automatically.
 
 **Hooks configured:**
 - **File checks**: Trailing whitespace, end-of-file fixer, YAML/JSON/TOML validation, large file detection, merge conflict detection

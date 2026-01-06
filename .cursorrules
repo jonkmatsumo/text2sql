@@ -1,0 +1,79 @@
+# Text 2 SQL - Cursor Rules
+
+## Project Context
+This is a Text 2 SQL MVP (Phase 1) that implements a secure, containerized data access layer using the Model Context Protocol (MCP). The system connects an LLM agent to a PostgreSQL database (Pagila dataset) through a Python MCP server.
+
+## Architecture Principles
+- **Decoupling**: The AI agent (Brain) is decoupled from the data warehouse (Tool) via MCP
+- **Security First**: Multi-layered security (container isolation, least privilege DB roles, application-level gates)
+- **Read-Only**: All database access is strictly read-only
+- **Docker-First**: All services run in containers orchestrated via Docker Compose
+
+## Technology Stack
+- **Database**: PostgreSQL 16 (Alpine)
+- **MCP Server**: Python 3.12 with fastmcp framework
+- **Database Driver**: asyncpg (async PostgreSQL driver)
+- **Transport**: Server-Sent Events (SSE) for Docker compatibility
+- **Validation**: Pydantic for tool input schemas
+
+## Code Style
+- Use async/await patterns for all database operations
+- Implement comprehensive error handling (return errors as strings for LLM self-correction)
+- Use type hints throughout
+- Follow PEP 8 for Python code
+- Use descriptive variable names (e.g., `bi_agent_ro` not `user1`)
+
+## Security Requirements
+- All SQL queries must pass regex pre-flight checks for mutative keywords
+- Database user must have NO write privileges (SELECT only)
+- Error messages must be sanitized (no internal paths, credentials)
+- Result sets limited to 1000 rows to prevent context window overflow
+
+## File Structure
+```
+text2sql/
+├── docker-compose.yml
+├── .env
+├── .pre-commit-config.yaml
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml
+│   │   └── test.yml
+│   └── dependabot.yml
+├── database/
+│   ├── Dockerfile (if needed)
+│   └── init-scripts/
+│       ├── 01-schema.sql
+│       ├── 02-data.sql
+│       └── 03-permissions.sql
+└── mcp-server/
+    ├── Dockerfile
+    ├── pyproject.toml
+    └── src/
+        ├── main.py
+        ├── db.py
+        └── tools.py
+```
+
+## Implementation Priorities
+1. **Sprint 1**: Infrastructure & Database (PostgreSQL with Pagila dataset, pre-commit hooks, GitHub Actions)
+2. **Sprint 2**: MCP Server Development (4 tools: list_tables, get_table_schema, execute_sql_query, get_semantic_definitions)
+3. **Sprint 3**: Integration & Verification (Docker Compose, end-to-end testing)
+
+## Code Quality & CI/CD
+- **Pre-commit hooks**: Enforce code formatting (black, isort), linting (flake8), and file checks
+- **GitHub Actions**: Automated CI/CD for linting, Docker builds, database initialization tests, and security scanning
+- **Code Style**: Black formatting (100 char line length), isort for imports, flake8 for linting
+- All code must pass pre-commit hooks before committing
+
+## Testing Approach
+- Verify database health via docker ps and direct SQL connection
+- Test MCP server using @modelcontextprotocol/inspector or curl
+- Security verification: Attempt injection attacks, verify read-only enforcement
+
+## Common Patterns
+- Database connections: Use asyncpg connection pool, always close connections in finally blocks
+- Tool responses: Return JSON-serializable data (use `json.dumps` with `default=str` for dates/decimals)
+- Error handling: Catch `asyncpg.PostgresError` and return error message as string (not exception)
+- Schema queries: Always filter by `table_schema = 'public'` to exclude system catalogs
+

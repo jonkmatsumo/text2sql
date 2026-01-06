@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: pagila_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-root_password}
+      POSTGRES_DB: pagila
+    volumes:
+      # Mount initialization scripts (Schema -> Data -> Permissions)
+      # They execute in alphanumeric order of filenames
+      - ./database/init-scripts:/docker-entrypoint-initdb.d
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Exposed to host for DBeaver/manual inspection
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pagila"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bi_net
+
+volumes:
+  pg_data:
+
+networks:
+  bi_net:
+    driver: bridge
+

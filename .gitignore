@@ -30,3 +30,8 @@ Thumbs.db
 # Docker
 *.log
 
+# Database initialization - large generated files
+# Keep: download_data.sh, 03-permissions.sql, 01-schema.sql (schema is source of truth)
+# Ignore: 02-data.sql (large generated data file, can be regenerated via download_data.sh)
+database/init-scripts/02-data.sql
+
