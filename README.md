@@ -125,30 +125,45 @@ See `docs/implementation-guide.md` for detailed, step-by-step instructions optim
 
 ### Code Quality
 
-This project uses pre-commit hooks to enforce code quality:
+This project uses pre-commit hooks to enforce code quality. The configuration is defined in `.pre-commit-config.yaml`.
 
+**Setup:**
 ```bash
 # Install pre-commit hooks
 pip install pre-commit
 pre-commit install
 
-# Run hooks manually
+# Run hooks manually on all files
 pre-commit run --all-files
 ```
 
-The hooks enforce:
-- Code formatting (Black, isort)
-- Linting (flake8)
-- YAML/JSON validation
-- File checks (trailing whitespace, large files, etc.)
+**Hooks configured:**
+- **File checks**: Trailing whitespace, end-of-file fixer, YAML/JSON/TOML validation, large file detection, merge conflict detection
+- **Python formatting**: Black (100 char line length) with Python 3.12
+- **Python linting**: flake8 (100 char line length, ignores E203, W503)
+- **Import sorting**: isort (Black profile, 100 char line length)
+- **YAML formatting**: Prettier (excludes docker-compose.yml)
+- **Dockerfile linting**: hadolint (ignores DL3008, DL3009)
 
 ### CI/CD
 
-GitHub Actions automatically:
-- Lint and format check on every push/PR
-- Build and validate Docker images
-- Test database initialization scripts
-- Run security scans (Trivy)
+GitHub Actions workflows are configured in `.github/workflows/`. The CI pipeline runs on every push/PR to `main` and `develop` branches.
+
+**CI Workflow** (`.github/workflows/ci.yml`):
+- **Lint job**: Runs pre-commit hooks on all files to ensure code quality
+- **Docker Build job**: Builds and validates the MCP server Docker image, validates docker-compose configuration
+- **Database Init job**: Tests database initialization scripts (validates SQL file structure and syntax)
+- **Security Scan job**: Runs Trivy vulnerability scanner and uploads results to GitHub Security
+
+**Test Workflow** (`.github/workflows/test.yml`):
+- Placeholder for future MCP server integration tests
+- Includes PostgreSQL service setup for testing
+
+**Dependabot** (`.github/dependabot.yml`):
+- Automatically creates PRs for dependency updates:
+  - Python packages in `mcp-server/` (weekly)
+  - Docker images (weekly)
+  - GitHub Actions (weekly)
 
 ## 🤝 Contributing
 

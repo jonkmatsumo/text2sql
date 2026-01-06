@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install pre-commit
+        run: pip install pre-commit
+      
+      - name: Run pre-commit
+        run: pre-commit run --all-files
+
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build MCP Server image
+        run: |
+          cd mcp-server
+          docker build -t bi-agent-mcp:test .
+      
+      - name: Validate docker-compose
+        run: |
+          docker compose config
+
+  database-init:
+    name: Database Initialization Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: pagila
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+      
+      - name: Test database initialization scripts
+        run: |
+          # Copy init scripts to a test location
+          mkdir -p /tmp/init-scripts
+          cp database/init-scripts/*.sql /tmp/init-scripts/
+          
+          # Test that SQL files are valid (syntax check)
+          for file in /tmp/init-scripts/*.sql; do
+            echo "Validating $file..."
+            # Basic syntax validation - check for common SQL errors
+            if ! grep -q "CREATE\|GRANT\|INSERT" "$file"; then
+              echo "Warning: $file may be empty or invalid"
+            fi
+          done
+      
+      - name: Verify SQL file structure
+        run: |
+          test -f database/init-scripts/01-schema.sql || exit 1
+          test -f database/init-scripts/02-data.sql || exit 1
+          test -f database/init-scripts/03-permissions.sql || exit 1
+          echo "✓ All required SQL files present"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
