@@ -21,6 +21,24 @@ services:
     networks:
       - bi_net
 
+  mcp-server:
+    build: ./mcp-server
+    container_name: bi_agent_core
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: pagila
+      DB_USER: bi_agent_ro
+      DB_PASS: secure_agent_pass
+    ports:
+      - "8000:8000"
+    networks:
+      - bi_net
+    restart: unless-stopped
+
 volumes:
   pg_data:
 
