@@ -18,3 +18,19 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO bi_agent_ro;
 -- This fixes the common issue where new tables created by 'postgres' are invisible to the agent.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO bi_agent_ro;
 
+-- 7. Setup Semantic Layer Mock (Phase 1 Requirement)
+-- This table acts as a simple Metric Store for the MVP.
+CREATE TABLE IF NOT EXISTS public.semantic_definitions (
+    term_id SERIAL PRIMARY KEY,
+    term_name TEXT NOT NULL,
+    definition TEXT NOT NULL,
+    sql_logic TEXT
+);
+
+INSERT INTO public.semantic_definitions (term_name, definition, sql_logic) VALUES
+('High Value Customer', 'Customer with lifetime payments > $150', 'SUM(amount) > 150'),
+('Churned', 'No rental activity in the last 30 days', 'last_rental_date < NOW() - INTERVAL ''30 days'''),
+('Gross Revenue', 'Total sum of all payments', 'SUM(amount) FROM payment');
+
+-- Grant access to the semantic layer
+GRANT SELECT ON public.semantic_definitions TO bi_agent_ro;
