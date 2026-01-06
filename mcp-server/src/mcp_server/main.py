@@ -5,8 +5,8 @@ This module initializes the FastMCP server and registers all database tools.
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from src.db import Database
-from src.tools import (
+from mcp_server.db import Database
+from mcp_server.tools import (
     execute_sql_query,
     get_semantic_definitions,
     get_table_schema,
@@ -63,7 +63,7 @@ if __name__ == "__main__":
         await Database.init()
 
         # Check if schema_embeddings table is empty
-        from src.indexer import index_all_tables
+        from mcp_server.indexer import index_all_tables
 
         conn = await Database.get_connection()
         try:

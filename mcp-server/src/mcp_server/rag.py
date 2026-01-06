@@ -3,7 +3,7 @@
 from typing import Optional
 
 from fastembed import TextEmbedding
-from src.db import Database
+from mcp_server.db import Database
 
 
 class RagEngine:

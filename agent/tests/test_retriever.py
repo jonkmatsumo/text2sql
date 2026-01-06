@@ -3,14 +3,14 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from src.retriever import get_vector_store
+from agent_core.retriever import get_vector_store
 
 
 class TestGetVectorStore:
     """Unit tests for get_vector_store function."""
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_success(self, mock_openai, mock_pgvector):
         """Test successful vector store initialization."""
@@ -44,8 +44,8 @@ class TestGetVectorStore:
         # Verify result is the mock store
         assert result == mock_store
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_connection_string(self, mock_openai, mock_pgvector):
         """Test connection string format."""
@@ -67,8 +67,8 @@ class TestGetVectorStore:
         expected_connection = "postgresql://test_user:secret_pass@db.example.com:5433/test_db"
         assert call_kwargs["connection"] == expected_connection
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_env_vars(self, mock_openai, mock_pgvector):
         """Test environment variable loading."""
@@ -93,8 +93,8 @@ class TestGetVectorStore:
         assert "custom_user" in call_kwargs["connection"]
         assert "custom_pass" in call_kwargs["connection"]
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_defaults(self, mock_openai, mock_pgvector):
         """Test default values when environment variables are not set."""
@@ -110,8 +110,8 @@ class TestGetVectorStore:
         expected_connection = "postgresql://postgres:root_password@localhost:5432/pagila"
         assert call_kwargs["connection"] == expected_connection
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_openai_embeddings(self, mock_openai, mock_pgvector):
         """Test OpenAI embeddings model configuration."""
@@ -131,8 +131,8 @@ class TestGetVectorStore:
         call_kwargs = mock_pgvector.call_args[1]
         assert call_kwargs["embeddings"] == mock_embeddings
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_collection_name(self, mock_openai, mock_pgvector):
         """Test collection name configuration."""
@@ -148,8 +148,8 @@ class TestGetVectorStore:
         call_kwargs = mock_pgvector.call_args[1]
         assert call_kwargs["collection_name"] == "schema_metadata"
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_use_jsonb(self, mock_openai, mock_pgvector):
         """Test jsonb configuration."""
@@ -165,8 +165,8 @@ class TestGetVectorStore:
         call_kwargs = mock_pgvector.call_args[1]
         assert call_kwargs["use_jsonb"] is True
 
-    @patch("src.retriever.PGVector")
-    @patch("src.retriever.OpenAIEmbeddings")
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
     @patch.dict(os.environ, {}, clear=True)
     def test_get_vector_store_partial_env_vars(self, mock_openai, mock_pgvector):
         """Test with some environment variables set and others using defaults."""

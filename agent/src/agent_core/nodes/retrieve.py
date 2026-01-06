@@ -1,7 +1,7 @@
 """Context retrieval node for RAG-based schema lookup."""
 
-from src.retriever import get_vector_store
-from src.state import AgentState
+from agent_core.retriever import get_vector_store
+from agent_core.state import AgentState
 
 
 def retrieve_context_node(state: AgentState) -> dict:

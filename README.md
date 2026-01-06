@@ -97,7 +97,7 @@ pytest --import-mode=importlib
 
 **Run with coverage:**
 ```bash
-pytest --cov=mcp-server/src --cov=agent/src --cov-report=term-missing
+pytest --cov=mcp-server/src/mcp_server --cov=agent/src/agent_core --cov-report=term-missing
 ```
 
 **Test Coverage:**

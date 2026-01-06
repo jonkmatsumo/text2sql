@@ -2,8 +2,8 @@
 
 import asyncio
 
-from src.db import Database
-from src.tools import search_relevant_tables
+from mcp_server.db import Database
+from mcp_server.tools import search_relevant_tables
 
 
 async def test_rag():

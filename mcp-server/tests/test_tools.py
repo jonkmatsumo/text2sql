@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest
-from src.tools import (
+from mcp_server.tools import (
     execute_sql_query,
     get_semantic_definitions,
     get_table_schema,
@@ -28,9 +28,9 @@ class TestListTables:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -64,9 +64,9 @@ class TestListTables:
         mock_rows = [{"table_name": "payment"}]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -95,9 +95,9 @@ class TestListTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -115,7 +115,7 @@ class TestListTables:
     @pytest.mark.asyncio
     async def test_list_tables_connection_error(self):
         """Test handling connection acquisition errors."""
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             mock_get.side_effect = RuntimeError("Database pool not initialized")
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -129,9 +129,9 @@ class TestListTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -147,9 +147,9 @@ class TestListTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -182,9 +182,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -221,9 +221,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -263,9 +263,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -297,9 +297,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -322,9 +322,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -339,9 +339,9 @@ class TestGetTableSchema:
         """Test handling empty table_names list."""
         mock_conn = AsyncMock()
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -354,7 +354,7 @@ class TestGetTableSchema:
     @pytest.mark.asyncio
     async def test_get_table_schema_connection_error(self):
         """Test handling connection acquisition errors."""
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             mock_get.side_effect = RuntimeError("Database pool not initialized")
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -368,9 +368,9 @@ class TestGetTableSchema:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -386,9 +386,9 @@ class TestGetTableSchema:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -423,9 +423,9 @@ class TestGetTableSchema:
 
         mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -456,9 +456,9 @@ class TestExecuteSqlQuery:
         mock_rows = [{"count": 1000}]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -484,9 +484,9 @@ class TestExecuteSqlQuery:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -508,9 +508,9 @@ class TestExecuteSqlQuery:
         mock_rows = [{"film_id": 1, "title": "Test Film"}]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -540,9 +540,9 @@ class TestExecuteSqlQuery:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -567,9 +567,9 @@ class TestExecuteSqlQuery:
         mock_rows = [{"id": i} for i in range(1001)]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -683,9 +683,9 @@ class TestExecuteSqlQuery:
         mock_rows = [{"id": 1}]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -708,9 +708,9 @@ class TestExecuteSqlQuery:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -729,9 +729,9 @@ class TestExecuteSqlQuery:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -750,9 +750,9 @@ class TestExecuteSqlQuery:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -771,9 +771,9 @@ class TestExecuteSqlQuery:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -811,9 +811,9 @@ class TestGetSemanticDefinitions:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -859,9 +859,9 @@ class TestGetSemanticDefinitions:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -902,9 +902,9 @@ class TestGetSemanticDefinitions:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])  # Empty result
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -933,9 +933,9 @@ class TestGetSemanticDefinitions:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -958,7 +958,7 @@ class TestGetSemanticDefinitions:
     @pytest.mark.asyncio
     async def test_get_semantic_definitions_connection_error(self):
         """Test handling connection acquisition errors."""
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             mock_get.side_effect = RuntimeError("Database pool not initialized")
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -972,9 +972,9 @@ class TestGetSemanticDefinitions:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -990,9 +990,9 @@ class TestGetSemanticDefinitions:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -1020,9 +1020,9 @@ class TestGetSemanticDefinitions:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -1069,9 +1069,9 @@ class TestGetSemanticDefinitions:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.tools.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.tools.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.tools.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -1118,14 +1118,16 @@ class TestSearchRelevantTables:
             },
         ]
 
-        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
-            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch(
+                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+            ) as mock_search:
                 mock_search.return_value = mock_results
 
                 result = await search_relevant_tables("customer payment transactions", limit=5)
 
                 # Verify embedding was generated
-                from src.tools import RagEngine
+                from mcp_server.rag import RagEngine
 
                 RagEngine.embed_text.assert_called_once_with("customer payment transactions")
 
@@ -1147,8 +1149,10 @@ class TestSearchRelevantTables:
     @pytest.mark.asyncio
     async def test_search_relevant_tables_empty_result(self):
         """Test empty results handling."""
-        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
-            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch(
+                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+            ) as mock_search:
                 mock_search.return_value = []
 
                 result = await search_relevant_tables("nonexistent query", limit=5)
@@ -1164,8 +1168,10 @@ class TestSearchRelevantTables:
             for i in range(3)
         ]
 
-        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
-            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch(
+                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+            ) as mock_search:
                 mock_search.return_value = mock_results
 
                 result = await search_relevant_tables("test query", limit=3)
@@ -1191,8 +1197,10 @@ class TestSearchRelevantTables:
             },
         ]
 
-        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
-            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch(
+                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+            ) as mock_search:
                 mock_search.return_value = mock_results
 
                 result = await search_relevant_tables("payment query", limit=5)
@@ -1214,8 +1222,10 @@ class TestSearchRelevantTables:
             {"table_name": "table3", "schema_text": "text3", "distance": 1.0},  # No similarity
         ]
 
-        with patch("src.tools.RagEngine.embed_text", return_value=[0.1] * 384):
-            with patch("src.tools.search_similar_tables", new_callable=AsyncMock) as mock_search:
+        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+            with patch(
+                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+            ) as mock_search:
                 mock_search.return_value = mock_results
 
                 result = await search_relevant_tables("test", limit=5)

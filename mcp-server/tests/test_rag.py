@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from src.rag import (
+from mcp_server.rag import (
     RagEngine,
     format_vector_for_postgres,
     generate_schema_document,
@@ -26,7 +26,7 @@ class TestRagEngine:
         mock_embedding2 = np.array([0.2] * 384)
         mock_model.embed.side_effect = [iter([mock_embedding1]), iter([mock_embedding2])]
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             # First call should load the model
             embedding1 = RagEngine.embed_text("test text")
             assert RagEngine._model is not None
@@ -45,7 +45,7 @@ class TestRagEngine:
         mock_embedding = np.array([0.1] * 384)
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             embedding = RagEngine.embed_text("test table with customer data")
             assert len(embedding) == 384
 
@@ -55,7 +55,7 @@ class TestRagEngine:
         mock_embedding = np.array([0.1, 0.2, 0.3] * 128)  # 384 elements
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             embedding = RagEngine.embed_text("test")
             assert isinstance(embedding, list)
             assert all(isinstance(x, float) for x in embedding)
@@ -70,7 +70,7 @@ class TestRagEngine:
         ]
         mock_model.embed.return_value = iter(mock_embeddings)
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             texts = ["text1", "text2", "text3"]
             embeddings = RagEngine.embed_batch(texts)
 
@@ -83,7 +83,7 @@ class TestRagEngine:
         mock_model = MagicMock()
         mock_model.embed.return_value = iter([])
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             embeddings = RagEngine.embed_batch([])
             assert embeddings == []
 
@@ -93,7 +93,7 @@ class TestRagEngine:
         mock_embedding = np.array([0.0] * 384)
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("src.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
             embedding = RagEngine.embed_text("")
             assert len(embedding) == 384
 
@@ -293,9 +293,9 @@ class TestSearchSimilarTables:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.rag.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -326,9 +326,9 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("src.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.rag.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -348,9 +348,9 @@ class TestSearchSimilarTables:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("src.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.rag.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -374,9 +374,9 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch("src.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.rag.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -394,9 +394,9 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("src.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
             with patch(
-                "src.rag.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 

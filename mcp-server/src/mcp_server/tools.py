@@ -5,8 +5,8 @@ import re
 from typing import Optional
 
 import asyncpg
-from src.db import Database
-from src.rag import RagEngine, search_similar_tables
+from mcp_server.db import Database
+from mcp_server.rag import RagEngine, search_similar_tables
 
 
 async def list_tables(search_term: Optional[str] = None) -> str:

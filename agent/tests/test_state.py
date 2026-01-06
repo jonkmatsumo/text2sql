@@ -1,8 +1,8 @@
 """Unit tests for AgentState TypedDict."""
 
 # Import mock classes from conftest (set up before this module imports)
+from agent_core.state import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from src.state import AgentState
 
 
 class TestAgentStateStructure:

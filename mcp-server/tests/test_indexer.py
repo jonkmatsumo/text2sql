@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from src.indexer import index_all_tables
+from mcp_server.indexer import index_all_tables
 
 
 class TestIndexAllTables:
@@ -39,11 +39,13 @@ class TestIndexAllTables:
         # Mock embedding generation
         mock_embedding = [0.1] * 384
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
-                with patch("src.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
                     mock_get.return_value = mock_conn
 
                     await index_all_tables()
@@ -84,11 +86,13 @@ class TestIndexAllTables:
 
         mock_embedding = [0.1] * 384
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
-                with patch("src.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
                     mock_get.return_value = mock_conn
 
                     await index_all_tables()
@@ -106,9 +110,11 @@ class TestIndexAllTables:
         mock_conn.fetch = AsyncMock(return_value=[])  # No tables
         mock_conn.execute = AsyncMock()
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -137,11 +143,13 @@ class TestIndexAllTables:
 
         mock_embedding = [0.1] * 384
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
-                with patch("src.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
                     mock_get.return_value = mock_conn
 
                     await index_all_tables()
@@ -159,9 +167,11 @@ class TestIndexAllTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 mock_get.return_value = mock_conn
 
@@ -188,14 +198,16 @@ class TestIndexAllTables:
 
         mock_embedding = [0.5] * 384
 
-        with patch("src.indexer.Database.get_connection", new_callable=AsyncMock) as mock_get:
+        with patch(
+            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
+        ) as mock_get:
             with patch(
-                "src.indexer.Database.release_connection", new_callable=AsyncMock
+                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
             ) as mock_release:
                 with patch(
-                    "src.indexer.RagEngine.embed_text", return_value=mock_embedding
+                    "mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding
                 ) as mock_embed:
-                    with patch("src.indexer.format_vector_for_postgres") as mock_format:
+                    with patch("mcp_server.indexer.format_vector_for_postgres") as mock_format:
                         mock_format.return_value = "[0.5,0.5,...]"
                         mock_get.return_value = mock_conn
 

@@ -1,7 +1,7 @@
 """Schema indexing service for RAG."""
 
-from src.db import Database
-from src.rag import RagEngine, format_vector_for_postgres, generate_schema_document
+from mcp_server.db import Database
+from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
 
 
 async def index_all_tables():
