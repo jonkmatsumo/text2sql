@@ -52,3 +52,53 @@ repos:
   # Dockerfile linting is handled in CI/CD pipeline instead (see .github/workflows/ci.yml).
   # To lint Dockerfiles locally when Docker is running, use:
   #   docker run --rm -i hadolint/hadolint < Dockerfile
+
+  # Pytest - validate test collection with importlib mode (required for multi-directory tests)
+  # This hook ensures pytest can collect tests correctly when running from root directory
+  - repo: local
+    hooks:
+      - id: pytest-check
+        name: pytest-check (test collection validation)
+        entry: bash
+        language: system
+        types: [python]
+        args:
+          - -c
+          - |
+            # Check if pytest is available
+            if ! command -v pytest > /dev/null 2>&1; then
+              echo "⚠ pytest not found, skipping test collection validation"
+              exit 0
+            fi
+
+            # Check if any test files are staged or changed
+            changed_files=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || echo "")
+            if [ -z "$changed_files" ]; then
+              changed_files=$(git diff --name-only --diff-filter=ACM 2>/dev/null || echo "")
+            fi
+
+            # Check if any test files changed
+            if echo "$changed_files" | grep -qE "(test_|tests/|conftest\.py|pytest\.ini)"; then
+              echo "Test files changed, validating pytest collection..."
+              # Validate that pytest can collect tests with importlib mode
+              # Suppress output but capture errors
+              if ! pytest --import-mode=importlib --collect-only -q 2>&1 | grep -v "collected" > /dev/null 2>&1; then
+                # If collection fails, check if it's due to missing dependencies
+                collection_output=$(pytest --import-mode=importlib --collect-only -q 2>&1)
+                if echo "$collection_output" | grep -q "ModuleNotFoundError\|ImportError"; then
+                  echo "⚠ pytest dependencies not installed, skipping validation"
+                  echo "   Install dependencies: cd mcp-server && pip install -e '.[test]'"
+                  exit 0
+                else
+                  echo "❌ pytest test collection failed with --import-mode=importlib"
+                  echo "   This is required when collecting tests from multiple directories."
+                  echo "   Run 'pytest --import-mode=importlib --collect-only' to debug."
+                  exit 1
+                fi
+              fi
+              echo "✓ pytest test collection validated"
+            else
+              echo "No test files changed, skipping pytest validation"
+            fi
+        pass_filenames: false
+        always_run: false

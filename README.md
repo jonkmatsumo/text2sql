@@ -138,23 +138,37 @@ The project includes comprehensive unit tests using pytest with mocking (no data
 
 **Run all tests:**
 ```bash
-# From project root
+# From project root (recommended - runs both agent and mcp-server tests)
+# The pytest.ini config automatically uses --import-mode=importlib
 pytest
 
-# Or from mcp-server directory
+# Or explicitly specify import mode
+pytest --import-mode=importlib
+
+# Or from individual directories
 cd mcp-server
+pytest tests/ -v
+
+cd agent
 pytest tests/ -v
 ```
 
+**Note**: When running tests from the root directory, pytest uses `--import-mode=importlib` (configured in `pytest.ini`) to avoid module conflicts when collecting tests from both `agent/tests` and `mcp-server/tests`. This is required because both directories have a `tests` package.
+
 **Run with coverage:**
 ```bash
-pytest mcp-server/tests/ --cov=src --cov-report=term-missing
+# From root (covers both agent and mcp-server)
+pytest --cov=mcp-server/src --cov=agent/src --cov-report=term-missing
+
+# Or for individual modules
+pytest mcp-server/tests/ --cov=mcp-server/src --cov-report=term-missing
 ```
 
 **Run specific test file:**
 ```bash
 pytest mcp-server/tests/test_db.py -v      # Database module tests
 pytest mcp-server/tests/test_tools.py -v   # Tools module tests
+pytest agent/tests/test_state.py -v        # Agent state tests
 ```
 
 **Test Coverage:**
@@ -187,13 +201,6 @@ curl -v http://localhost:8000/sse  # Should return 200 OK with SSE headers
 
 **Security Verification:**
 Attempt to execute a mutative query via the MCP tools - it should be rejected at the application layer.
-
-## 📚 Documentation
-
-Detailed implementation guides and technical specifications are available in the `docs/` directory (local only, not committed to git).
-
-
-See `docs/implementation-guide.md` for detailed, step-by-step instructions optimized for Cursor workflow.
 
 ### Code Quality
 
@@ -296,10 +303,3 @@ GitHub Actions workflows are configured in `.github/workflows/`. The CI pipeline
   - Python packages in `mcp-server/` (weekly)
   - Docker images (weekly)
   - GitHub Actions (weekly)
-
-## 🤝 Contributing
-
-This is a Phase 1 MVP. Future phases will include:
-- Phase 2: RAG Integration for enhanced context awareness
-- Phase 3: Multi-tenant support with Row-Level Security
-- Phase 4: Advanced query optimization and caching

@@ -26,6 +26,7 @@ htmlcov/
 # Environment variables
 .env
 .env.local
+agent/.env
 
 # IDE
 .vscode/
