@@ -97,6 +97,7 @@ flowchart TB
 - **Vector Store**: Dual-purpose - Agent uses PGVector for context retrieval, MCP Server uses fastembed for semantic search
 - **Security Layer**: SQL validation happens in MCP Server before database execution
 - **Self-Correction Loop**: Agent automatically retries failed queries up to 3 times
+- **Dynamic Few-Shot Learning**: Retrieves relevant SQL examples based on semantic similarity to improve generation accuracy
 
 ## Quick Start
 
@@ -130,13 +131,14 @@ flowchart TB
 
 ## Features
 
-The system provides five core capabilities:
+The system provides six core capabilities:
 
 1. **Table Discovery**: Find available tables with optional search
 2. **Schema Inspection**: Get detailed table structures, columns, and relationships
 3. **Query Execution**: Run read-only SQL queries with automatic safety checks
 4. **Business Metrics**: Access predefined business metric definitions
 5. **Semantic Search**: Find relevant tables using natural language queries
+6. **Dynamic Few-Shot Learning**: Automatically retrieves relevant SQL examples to improve query generation accuracy
 
 The semantic search feature uses vector embeddings to understand query intent and automatically retrieve the most relevant database schemas, solving the challenge of context window limitations.
 

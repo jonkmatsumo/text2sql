@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 from fastmcp import Context, FastMCP
 from mcp_server.db import Database
+from mcp_server.retrieval import get_relevant_examples
 from mcp_server.tools import (
     execute_sql_query,
     get_semantic_definitions,
@@ -113,6 +114,13 @@ async def search_relevant_tables_tool(user_query: str, limit: int = 5, ctx: Cont
     """Search for tables relevant to a natural language query using semantic similarity."""
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await search_relevant_tables(user_query, limit, tenant_id)
+
+
+@mcp.tool()
+async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Context = None) -> str:
+    """Retrieve relevant SQL examples for few-shot learning based on user query."""
+    tenant_id = extract_tenant_id(ctx) if ctx else None
+    return await get_relevant_examples(user_query, limit, tenant_id)
 
 
 if __name__ == "__main__":
