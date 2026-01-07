@@ -98,9 +98,9 @@ flowchart TB
     MCPTools -->|"Cache update"| CacheModule
     CacheModule -->|"Store SQL"| SemanticCache
 
-    GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-4o<br/>SQL generation"]
+    GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-5.2<br/>SQL generation"]
     CorrectNode -->|"LLM call"| OpenAILLM
-    SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-4o<br/>Natural language"]
+    SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-5.2<br/>Natural language"]
 
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
@@ -138,26 +138,28 @@ flowchart TB
    ./database/init-scripts/download_data.sh
    ```
 
-3. **Start services**
+3. **Start all services**
    ```bash
-   docker compose up --build
+   docker compose up -d --build
    ```
 
-4. **Test the system**
+4. **Access the services**
+   - **Streamlit Web UI**: http://localhost:8501
+   - **MCP Server**: http://localhost:8000/sse
+   - **MLflow UI**: http://localhost:5001
+   - **MinIO Console**: http://localhost:9001
+   - **PostgreSQL**: localhost:5432
+
+5. **Test the system**
    ```bash
+   # Using MCP Inspector
    npx @modelcontextprotocol/inspector
    # Connect to: http://localhost:8000/sse
+
+   # Or use the Streamlit UI at http://localhost:8501
    ```
 
-5. **Run Streamlit Web UI (Optional)**
-   ```bash
-   # Install Streamlit if not already installed
-   pip install streamlit>=1.28.0
-
-   # Run the Streamlit application
-   streamlit run streamlit/app.py
-   # Open http://localhost:8501 in your browser
-   ```
+**Note**: All services (Database, MCP Server, and Streamlit) are now started together with `docker compose up`. See [Startup Guide](docs/startup-guide.md) for detailed instructions.
 
 ## Features
 

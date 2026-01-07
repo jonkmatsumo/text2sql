@@ -1,0 +1,36 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project structure (build context is project root)
+COPY streamlit/pyproject.toml ./streamlit/
+COPY streamlit/app.py ./streamlit/
+COPY streamlit/app_logic.py ./streamlit/
+
+# Copy Streamlit config directory
+RUN mkdir -p ./streamlit/.streamlit
+COPY streamlit/.streamlit/ ./streamlit/.streamlit/
+
+# Copy Agent dependencies and source (needed for agent_core imports)
+COPY agent/pyproject.toml ./agent/
+COPY agent/src/ ./agent/src/
+
+# Install Streamlit dependencies
+RUN pip install --no-cache-dir -e ./streamlit
+
+# Install Agent dependencies (needed for agent_core.graph import)
+RUN pip install --no-cache-dir -e ./agent
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Set working directory to streamlit for app.py
+WORKDIR /app/streamlit
+
+# Run Streamlit
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

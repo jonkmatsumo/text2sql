@@ -71,7 +71,7 @@ async def generate_summary(question: str, sql: str) -> str:
     This bridges the semantic gap between natural language questions and SQL code.
     """
     llm = ChatOpenAI(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+        model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
         temperature=0.3,  # Lower temperature for more consistent summaries
     )
 

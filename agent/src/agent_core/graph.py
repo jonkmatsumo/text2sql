@@ -1,5 +1,8 @@
-"""LangGraph workflow definition for Text 2 SQL agent."""
+"""LangGraph workflow definition for Text 2 SQL agent with MLflow tracing."""
 
+import os
+
+import mlflow
 from agent_core.nodes.correct import correct_sql_node
 from agent_core.nodes.execute import validate_and_execute_node
 from agent_core.nodes.generate import generate_sql_node
@@ -7,6 +10,11 @@ from agent_core.nodes.retrieve import retrieve_context_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.state import AgentState
 from langgraph.graph import END, StateGraph
+
+# Configure MLflow tracking URI
+# Default to localhost for local dev, but use container name in Docker
+mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+mlflow.set_tracking_uri(mlflow_tracking_uri)
 
 
 def route_after_execution(state: AgentState) -> str:
@@ -73,3 +81,74 @@ def create_workflow() -> StateGraph:
 
 # Compile workflow
 app = create_workflow().compile()
+
+
+# Wrapper function with MLflow tracing
+async def run_agent_with_tracing(
+    question: str,
+    tenant_id: int = 1,
+    session_id: str = None,
+    user_id: str = None,
+) -> dict:
+    """
+    Run agent workflow with MLflow tracing.
+
+    Args:
+        question: Natural language question
+        tenant_id: Tenant identifier
+        session_id: Session identifier for multi-turn conversations
+        user_id: User identifier for attribution
+
+    Returns:
+        Agent state after workflow completion
+    """
+    # Start root span (MLflow 3.x uses start_span instead of start_trace)
+    with mlflow.start_span(
+        name="agent_workflow",
+        span_type="AGENT",
+    ) as trace:
+        # Set trace inputs
+        trace.set_inputs(
+            {
+                "question": question,
+                "tenant_id": tenant_id,
+            }
+        )
+
+        # Add contextual tags
+        if session_id:
+            trace.set_tag("session_id", session_id)
+        if user_id:
+            trace.set_tag("user_id", user_id)
+        trace.set_tag("tenant_id", str(tenant_id))
+        trace.set_tag("environment", os.getenv("ENVIRONMENT", "development"))
+        trace.set_tag("deployment", os.getenv("DEPLOYMENT", "development"))
+        trace.set_tag("version", "1.0.0")
+
+        # Prepare initial state
+        from langchain_core.messages import HumanMessage
+
+        inputs = {
+            "messages": [HumanMessage(content=question)],
+            "schema_context": "",
+            "current_sql": None,
+            "query_result": None,
+            "error": None,
+            "retry_count": 0,
+            "tenant_id": tenant_id,
+        }
+
+        # Execute workflow
+        result = await app.ainvoke(inputs)
+
+        # Set trace outputs
+        trace.set_outputs(
+            {
+                "sql": result.get("current_sql"),
+                "has_result": result.get("query_result") is not None,
+                "error": result.get("error"),
+                "retry_count": result.get("retry_count", 0),
+            }
+        )
+
+        return result

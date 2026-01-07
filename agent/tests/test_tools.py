@@ -23,7 +23,7 @@ class TestGetMcpTools:
         mock_tool2 = MagicMock()
         mock_tool2.name = "get_table_schema"
         mock_tool3 = MagicMock()
-        mock_tool3.name = "execute_sql_query"
+        mock_tool3.name = "execute_sql_query_tool"
         mock_tool4 = MagicMock()
         mock_tool4.name = "get_semantic_definitions"
         mock_tool5 = MagicMock()
@@ -40,7 +40,7 @@ class TestGetMcpTools:
         mock_client_class.return_value = mock_client
 
         # Set environment variable
-        os.environ["MCP_SERVER_URL"] = "http://localhost:8000/sse"
+        os.environ["MCP_SERVER_URL"] = "http://localhost:8000/mcp"
 
         result = await get_mcp_tools()
 
@@ -48,8 +48,8 @@ class TestGetMcpTools:
         mock_client_class.assert_called_once_with(
             {
                 "data-layer": {
-                    "url": "http://localhost:8000/sse",
-                    "transport": "sse",
+                    "url": "http://localhost:8000/mcp",
+                    "transport": "http",
                 }
             }
         )
@@ -62,7 +62,7 @@ class TestGetMcpTools:
         tool_names = [tool.name for tool in result]
         assert "list_tables" in tool_names
         assert "get_table_schema" in tool_names
-        assert "execute_sql_query" in tool_names
+        assert "execute_sql_query_tool" in tool_names
         assert "get_semantic_definitions" in tool_names
         assert "search_relevant_tables" in tool_names
 
@@ -83,8 +83,8 @@ class TestGetMcpTools:
         mock_client_class.assert_called_once_with(
             {
                 "data-layer": {
-                    "url": "http://localhost:8000/sse",
-                    "transport": "sse",
+                    "url": "http://localhost:8000/mcp",
+                    "transport": "http",
                 }
             }
         )
@@ -102,7 +102,7 @@ class TestGetMcpTools:
         mock_client_class.return_value = mock_client
 
         # Set custom URL
-        os.environ["MCP_SERVER_URL"] = "http://custom-host:9000/sse"
+        os.environ["MCP_SERVER_URL"] = "http://custom-host:9000/mcp"
 
         await get_mcp_tools()
 
@@ -110,8 +110,8 @@ class TestGetMcpTools:
         mock_client_class.assert_called_once_with(
             {
                 "data-layer": {
-                    "url": "http://custom-host:9000/sse",
-                    "transport": "sse",
+                    "url": "http://custom-host:9000/mcp",
+                    "transport": "http",
                 }
             }
         )
@@ -131,7 +131,7 @@ class TestGetMcpTools:
         # Verify server name is 'data-layer'
         call_args = mock_client_class.call_args[0][0]
         assert "data-layer" in call_args
-        assert call_args["data-layer"]["transport"] == "sse"
+        assert call_args["data-layer"]["transport"] == "http"
 
     @pytest.mark.asyncio
     @patch("agent_core.tools.MultiServerMCPClient")
@@ -147,7 +147,7 @@ class TestGetMcpTools:
 
         # Verify transport is 'sse'
         call_args = mock_client_class.call_args[0][0]
-        assert call_args["data-layer"]["transport"] == "sse"
+        assert call_args["data-layer"]["transport"] == "http"
 
     @pytest.mark.asyncio
     @patch("agent_core.tools.MultiServerMCPClient")
@@ -187,7 +187,7 @@ class TestGetMcpTools:
         mock_tool1 = MagicMock()
         mock_tool1.name = "list_tables"
         mock_tool2 = MagicMock()
-        mock_tool2.name = "execute_sql_query"
+        mock_tool2.name = "execute_sql_query_tool"
         mock_client.get_tools = AsyncMock(return_value=[mock_tool1, mock_tool2])
         mock_client_class.return_value = mock_client
 
@@ -196,4 +196,4 @@ class TestGetMcpTools:
         assert len(result) == 2
         tool_names = [tool.name for tool in result]
         assert "list_tables" in tool_names
-        assert "execute_sql_query" in tool_names
+        assert "execute_sql_query_tool" in tool_names

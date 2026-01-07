@@ -13,4 +13,4 @@ RUN pip install --no-cache-dir -e .
 EXPOSE 8000
 
 # Run the MCP server
-CMD ["python", "src/main.py"]
+CMD ["python", "src/mcp_server/main.py"]

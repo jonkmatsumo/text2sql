@@ -1,9 +1,9 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
-import asyncio
 import os
 from typing import Optional
 
+import mlflow
 from agent_core.state import AgentState
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
@@ -11,10 +11,12 @@ from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
+# Enable MLflow autolog for OpenAI
+mlflow.openai.autolog()
 
 # Initialize LLM
 llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+    model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
     temperature=0,  # Deterministic SQL generation
 )
 
@@ -99,9 +101,9 @@ async def get_few_shot_examples(user_query: str) -> str:
         return ""
 
 
-def generate_sql_node(state: AgentState) -> dict:
+async def generate_sql_node(state: AgentState) -> dict:
     """
-    Node 3: GenerateSQL.
+    Node 2: GenerateSQL.
 
     Checks cache first, then synthesizes executable SQL from the retrieved context,
     few-shot examples, and user question if cache miss.
@@ -112,40 +114,61 @@ def generate_sql_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with current_sql populated and from_cache flag
     """
-    # Extract the last user message
-    question = state["messages"][-1].content
-    tenant_id = state.get("tenant_id")
+    with mlflow.start_span(
+        name="generate_sql",
+        span_type="CHAT_MODEL",
+    ) as span:
+        messages = state["messages"]
+        context = state.get("schema_context", "")
+        user_query = messages[-1].content if messages else ""
+        tenant_id = state.get("tenant_id")
 
-    # Check cache first (before generating SQL)
-    cached_sql = None
-    if tenant_id:
+        span.set_inputs(
+            {
+                "user_query": user_query,
+                "context_length": len(context),
+                "tenant_id": tenant_id,
+            }
+        )
+
+        # Check cache first (before generating SQL)
+        cached_sql = None
+        if tenant_id:
+            try:
+                cached_sql = await check_cache(user_query, tenant_id)
+            except Exception as e:
+                print(f"Warning: Cache check failed: {e}")
+
+        if cached_sql:
+            span.set_attribute("cache_hit", "true")
+            span.set_outputs(
+                {
+                    "sql": cached_sql,
+                    "from_cache": True,
+                }
+            )
+            print("✓ Using cached SQL")
+            return {
+                "current_sql": cached_sql,
+                "from_cache": True,
+            }
+
+        span.set_attribute("cache_hit", "false")
+
+        # Cache miss - proceed with normal generation
+        # Retrieve few-shot examples
+        few_shot_examples = ""
         try:
-            cached_sql = asyncio.run(check_cache(question, tenant_id))
+            few_shot_examples = await get_few_shot_examples(user_query)
         except Exception as e:
-            print(f"Warning: Cache check failed: {e}")
+            print(f"Warning: Could not retrieve few-shot examples: {e}")
 
-    if cached_sql:
-        print("✓ Using cached SQL")
-        return {
-            "current_sql": cached_sql,
-            "from_cache": True,
-        }
+        # Build system prompt with examples section
+        examples_section = (
+            f"\n\n{few_shot_examples}" if few_shot_examples else "\n\nNo examples available."
+        )
 
-    # Cache miss - proceed with normal generation
-    # Retrieve few-shot examples
-    few_shot_examples = ""
-    try:
-        # Use asyncio.run to call async function from sync context
-        few_shot_examples = asyncio.run(get_few_shot_examples(question))
-    except Exception as e:
-        print(f"Warning: Could not retrieve few-shot examples: {e}")
-
-    # Build system prompt with examples section
-    examples_section = (
-        f"\n\n{few_shot_examples}" if few_shot_examples else "\n\nNo examples available."
-    )
-
-    system_prompt = f"""You are a PostgreSQL expert.
+        system_prompt = f"""You are a PostgreSQL expert.
 Using the provided SCHEMA CONTEXT and EXAMPLES, generate a SQL query to answer the question.
 
 Rules:
@@ -161,36 +184,44 @@ Schema Context:
 {examples_section}
 """
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            (
-                "user",
-                "Question: {question}",
-            ),
-        ]
-    )
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                (
+                    "user",
+                    "Question: {question}",
+                ),
+            ]
+        )
 
-    chain = prompt | llm
+        chain = prompt | llm
 
-    response = chain.invoke(
-        {
-            "schema_context": state["schema_context"],
-            "question": question,
+        # Generate SQL (MLflow autolog will capture token usage)
+        response = chain.invoke(
+            {
+                "schema_context": context,
+                "question": user_query,
+            }
+        )
+
+        # Extract SQL from response (remove markdown code blocks if present)
+        sql = response.content.strip()
+        if sql.startswith("```sql"):
+            sql = sql[6:]
+        if sql.startswith("```"):
+            sql = sql[3:]
+        if sql.endswith("```"):
+            sql = sql[:-3]
+        sql = sql.strip()
+
+        span.set_outputs(
+            {
+                "sql": sql,
+                "from_cache": False,
+            }
+        )
+
+        return {
+            "current_sql": sql,
+            "from_cache": False,
         }
-    )
-
-    # Extract SQL from response (remove markdown code blocks if present)
-    sql = response.content.strip()
-    if sql.startswith("```sql"):
-        sql = sql[6:]
-    if sql.startswith("```"):
-        sql = sql[3:]
-    if sql.endswith("```"):
-        sql = sql[:-3]
-    sql = sql.strip()
-
-    return {
-        "current_sql": sql,
-        "from_cache": False,
-    }

@@ -10,9 +10,18 @@ from agent_core.state import AgentState
 class TestRetrieveContextNode:
     """Unit tests for retrieve_context_node function."""
 
+    def _mock_mlflow_span(self, mock_start_span):
+        """Mock the MLflow span context manager."""
+        mock_span = MagicMock()
+        mock_start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_start_span.return_value.__exit__ = MagicMock(return_value=False)
+        return mock_span
+
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_success(self, mock_get_vector_store):
+    def test_retrieve_context_node_success(self, mock_get_vector_store, mock_start_span):
         """Test successful context retrieval."""
+        self._mock_mlflow_span(mock_start_span)
         # Create mock vector store and documents
         mock_store = MagicMock()
         mock_doc1 = MagicMock()
@@ -48,9 +57,12 @@ class TestRetrieveContextNode:
         assert "Table: payment" in result["schema_context"]
         assert "\n\n" in result["schema_context"]
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_extracts_query(self, mock_get_vector_store):
+    def test_retrieve_context_node_extracts_query(self, mock_get_vector_store, mock_start_span):
         """Test that query is extracted from last message."""
+        self._mock_mlflow_span(mock_start_span)
+
         mock_store = MagicMock()
         mock_store.similarity_search.return_value = []
         mock_get_vector_store.return_value = mock_store
@@ -72,9 +84,12 @@ class TestRetrieveContextNode:
         # Verify similarity search was called with the extracted query
         mock_store.similarity_search.assert_called_once_with(test_query, k=5)
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_top_k(self, mock_get_vector_store):
+    def test_retrieve_context_node_top_k(self, mock_get_vector_store, mock_start_span):
         """Test that k=5 is used for similarity search."""
+        self._mock_mlflow_span(mock_start_span)
+
         mock_store = MagicMock()
         mock_store.similarity_search.return_value = []
         mock_get_vector_store.return_value = mock_store
@@ -95,9 +110,12 @@ class TestRetrieveContextNode:
         # Verify k=5 was used
         mock_store.similarity_search.assert_called_once_with("test query", k=5)
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_formatting(self, mock_get_vector_store):
+    def test_retrieve_context_node_formatting(self, mock_get_vector_store, mock_start_span):
         """Test context string formatting."""
+        self._mock_mlflow_span(mock_start_span)
+
         mock_store = MagicMock()
         mock_doc1 = MagicMock()
         mock_doc1.page_content = "Schema 1"
@@ -125,8 +143,11 @@ class TestRetrieveContextNode:
         expected = "Schema 1\n\nSchema 2\n\nSchema 3"
         assert result["schema_context"] == expected
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_empty_results(self, mock_get_vector_store):
+    def test_retrieve_context_node_empty_results(self, mock_get_vector_store, mock_start_span):
+        """Test handling of empty search results."""
+        self._mock_mlflow_span(mock_start_span)
         """Test handling of empty search results."""
         mock_store = MagicMock()
         mock_store.similarity_search.return_value = []
@@ -148,8 +169,11 @@ class TestRetrieveContextNode:
         # Verify empty context string is returned
         assert result["schema_context"] == ""
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_multiple_messages(self, mock_get_vector_store):
+    def test_retrieve_context_node_multiple_messages(self, mock_get_vector_store, mock_start_span):
+        """Test that query is extracted from the last message when multiple messages exist."""
+        self._mock_mlflow_span(mock_start_span)
         """Test that query is extracted from the last message when multiple messages exist."""
         mock_store = MagicMock()
         mock_store.similarity_search.return_value = []
@@ -176,8 +200,11 @@ class TestRetrieveContextNode:
         # Verify last message content was used
         mock_store.similarity_search.assert_called_once_with("Second query", k=5)
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_error_handling(self, mock_get_vector_store):
+    def test_retrieve_context_node_error_handling(self, mock_get_vector_store, mock_start_span):
+        """Test error handling when vector store raises an exception."""
+        self._mock_mlflow_span(mock_start_span)
         """Test error handling when vector store fails."""
         mock_store = MagicMock()
         mock_store.similarity_search.side_effect = Exception("Vector store error")
@@ -198,8 +225,11 @@ class TestRetrieveContextNode:
         with pytest.raises(Exception, match="Vector store error"):
             retrieve_context_node(state)
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_single_result(self, mock_get_vector_store):
+    def test_retrieve_context_node_single_result(self, mock_get_vector_store, mock_start_span):
+        """Test context retrieval with a single result."""
+        self._mock_mlflow_span(mock_start_span)
         """Test formatting with single result."""
         mock_store = MagicMock()
         mock_doc = MagicMock()
@@ -223,9 +253,12 @@ class TestRetrieveContextNode:
         # Verify single result is returned without separators
         assert result["schema_context"] == "Single schema"
 
+    @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_vector_store")
-    def test_retrieve_context_node_max_results(self, mock_get_vector_store):
-        """Test that exactly k=5 results are returned when available."""
+    def test_retrieve_context_node_max_results(self, mock_get_vector_store, mock_start_span):
+        """Test that maximum k=5 results are returned."""
+        self._mock_mlflow_span(mock_start_span)
+
         mock_store = MagicMock()
         # Create 5 mock documents
         mock_docs = [MagicMock() for _ in range(5)]

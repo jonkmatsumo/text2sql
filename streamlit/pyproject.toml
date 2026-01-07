@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "streamlit>=1.28.0",
     "python-dotenv>=1.0.0",
+    "nest-asyncio>=1.5.0",
 ]
 
 [project.optional-dependencies]

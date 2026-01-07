@@ -5,6 +5,7 @@ This module initializes the FastMCP server and registers all database tools.
 
 import json
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastmcp import Context, FastMCP
@@ -22,8 +23,40 @@ from mcp_server.tools import (
 # Load environment variables
 load_dotenv()
 
-# Initialize the MCP Server
-mcp = FastMCP("Text 2 SQL Agent")
+
+@asynccontextmanager
+async def lifespan(app):
+    """Lifespan context manager for database connection pool.
+
+    This ensures the database pool is created in the same event loop
+    as the server, avoiding "Event loop is closed" errors.
+    """
+    # Startup: Initialize database connection pool
+    await Database.init()
+
+    # Check if schema_embeddings table is empty and try to index
+    # This is optional - server should still work without it
+    try:
+        from mcp_server.indexer import index_all_tables
+
+        async with Database.get_connection() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
+            if count == 0:
+                print("Schema embeddings table is empty. Starting indexing...")
+                await index_all_tables()
+            else:
+                print(f"Schema already indexed ({count} tables)")
+    except Exception as e:
+        print(f"Warning: Schema indexing skipped: {e}")
+
+    yield  # Server runs here
+
+    # Shutdown: Close database connection pool
+    await Database.close()
+
+
+# Initialize the MCP Server with lifespan
+mcp = FastMCP("Text 2 SQL Agent", lifespan=lifespan)
 
 
 def extract_tenant_id(ctx: Context) -> int | None:
@@ -145,38 +178,6 @@ async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> s
 
 
 if __name__ == "__main__":
-    import asyncio
-    import signal
-    import sys
-
-    # Initialize database connection pool before starting server
-    async def init_database():
-        """Initialize database connection pool and index schema."""
-        await Database.init()
-
-        # Check if schema_embeddings table is empty
-        from mcp_server.indexer import index_all_tables
-
-        async with Database.get_connection() as conn:
-            count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
-            if count == 0:
-                print("Schema embeddings table is empty. Starting indexing...")
-                await index_all_tables()
-            else:
-                print(f"Schema already indexed ({count} tables)")
-
-    # Initialize database
-    asyncio.run(init_database())
-
-    # Register cleanup handler for graceful shutdown
-    def cleanup(signum, frame):
-        """Cleanup database connections on shutdown."""
-        asyncio.run(Database.close())
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
-
-    # Run via SSE for Docker compatibility.
+    # Run via streamable-http for better stability.
     # Host must be 0.0.0.0 to be accessible from outside the container.
-    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)

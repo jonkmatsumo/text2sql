@@ -9,9 +9,13 @@ import os
 import sys
 from pathlib import Path
 
+import nest_asyncio
 from dotenv import load_dotenv
 
 import streamlit as st
+
+# Apply nest_asyncio to allow nested event loops (required for MCP SSE client)
+nest_asyncio.apply()
 
 # Add app_logic to path
 sys.path.insert(0, str(Path(__file__).parent))

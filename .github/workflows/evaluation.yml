@@ -1,0 +1,109 @@
+name: Golden Dataset Evaluation
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  evaluate:
+    name: Run Golden Dataset Evaluation
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: pagila
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -e "./agent[test]"
+          pip install -e "./mcp-server[test]"
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Initialize database
+        run: |
+          # Run database initialization scripts
+          # (Simplified - would need actual schema/data loading)
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/01-schema.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/02-data.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/03-permissions.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/04-vector-setup.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/05-multi-tenancy.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/06-few-shot.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/07-caching.sql || true
+          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/09-golden-dataset.sql || true
+
+      - name: Seed Golden Dataset
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: pagila
+          DB_USER: postgres
+          DB_PASS: test_password
+        run: |
+          cd mcp-server
+          python3 scripts/seed_golden_dataset.py
+
+      - name: Run evaluation suite
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: pagila
+          DB_USER: postgres
+          DB_PASS: test_password
+        run: |
+          cd agent
+          python3 scripts/run_evaluation.py --tenant-id 1
+
+      - name: Generate evaluation report
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: pagila
+          DB_USER: postgres
+          DB_PASS: test_password
+        run: |
+          cd agent
+          python3 scripts/evaluation_metrics.py --days 1 > evaluation_report.txt
+
+      - name: Upload evaluation report
+        uses: actions/upload-artifact@v3
+        with:
+          name: evaluation-report
+          path: agent/evaluation_report.txt
+
+      - name: Check accuracy threshold
+        run: |
+          # Parse report and fail if accuracy below threshold
+          # (Implementation would parse evaluation_report.txt)
+          echo "Accuracy check would go here"

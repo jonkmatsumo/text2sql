@@ -37,7 +37,7 @@ ALTER TABLE payment FORCE ROW LEVEL SECURITY;
 ALTER TABLE staff FORCE ROW LEVEL SECURITY;
 ALTER TABLE inventory FORCE ROW LEVEL SECURITY;
 
--- 4. Create Isolation Policies
+-- 4. Create Isolation Policies (Natural store_id match)
 -- Strategy: Users can only see rows where store_id matches their session tenant.
 
 -- Customer Policy
@@ -55,44 +55,48 @@ CREATE POLICY tenant_isolation_inventory ON inventory
     FOR ALL
     USING (store_id = current_tenant_id());
 
--- Rental Policy
+-- 5. Indexing for Performance (Natural store_id)
+CREATE INDEX IF NOT EXISTS idx_customer_store_id ON customer(store_id);
+CREATE INDEX IF NOT EXISTS idx_staff_store_id ON staff(store_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_store_id ON inventory(store_id);
+
+-- 6. Denormalize RENTAL table for RLS performance
+-- Add store_id column
+ALTER TABLE rental ADD COLUMN IF NOT EXISTS store_id INTEGER;
+
+-- Populate store_id from inventory table (rental item belongs to store)
+UPDATE rental r
+SET store_id = i.store_id
+FROM inventory i
+WHERE r.inventory_id = i.inventory_id
+AND r.store_id IS NULL;
+
+-- Make store_id NOT NULL
+ALTER TABLE rental ALTER COLUMN store_id SET NOT NULL;
+
+-- Add foreign key constraint
+ALTER TABLE rental
+ADD CONSTRAINT fk_rental_store
+FOREIGN KEY (store_id) REFERENCES store(store_id);
+
+-- Create Index and Policy
+CREATE INDEX IF NOT EXISTS idx_rental_store_id ON rental(store_id);
 CREATE POLICY tenant_isolation_rental ON rental
     FOR ALL
     USING (store_id = current_tenant_id());
 
--- Payment Policy (temporary - will be updated after denormalization)
--- Note: Payment table will be denormalized below to include store_id
--- For now, we link via staff.store_id
-CREATE POLICY tenant_isolation_payment ON payment
-    FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 FROM staff s
-            WHERE s.staff_id = payment.staff_id
-            AND s.store_id = current_tenant_id()
-        )
-    );
-
--- 5. Indexing for Performance
--- RLS adds a WHERE clause. If this column isn't indexed, every query becomes a Seq Scan.
-CREATE INDEX IF NOT EXISTS idx_customer_store_id ON customer(store_id);
-CREATE INDEX IF NOT EXISTS idx_payment_store_id ON payment(store_id);
-CREATE INDEX IF NOT EXISTS idx_rental_store_id ON rental(store_id);
-CREATE INDEX IF NOT EXISTS idx_staff_store_id ON staff(store_id);
-CREATE INDEX IF NOT EXISTS idx_inventory_store_id ON inventory(store_id);
-
--- 6. Denormalize payment table for RLS performance
--- Add store_id column to payment table
+-- 7. Denormalize PAYMENT table for RLS performance
+-- Add store_id column
 ALTER TABLE payment ADD COLUMN IF NOT EXISTS store_id INTEGER;
 
--- Populate store_id from staff table (one-time migration)
+-- Populate store_id from staff table (payment processed by staff member of store)
 UPDATE payment p
 SET store_id = s.store_id
 FROM staff s
 WHERE p.staff_id = s.staff_id
 AND p.store_id IS NULL;
 
--- Make store_id NOT NULL after population
+-- Make store_id NOT NULL
 ALTER TABLE payment ALTER COLUMN store_id SET NOT NULL;
 
 -- Add foreign key constraint
@@ -100,14 +104,11 @@ ALTER TABLE payment
 ADD CONSTRAINT fk_payment_store
 FOREIGN KEY (store_id) REFERENCES store(store_id);
 
--- 7. Update RLS policy to use direct store_id (replaces temporary policy above)
-DROP POLICY IF EXISTS tenant_isolation_payment ON payment;
+-- Create Index and Policy
+CREATE INDEX IF NOT EXISTS idx_payment_store_id ON payment(store_id);
 CREATE POLICY tenant_isolation_payment ON payment
     FOR ALL
     USING (store_id = current_tenant_id());
 
--- Ensure index exists (already created above, but verify)
-CREATE INDEX IF NOT EXISTS idx_payment_store_id ON payment(store_id);
-
--- Grant execute permission on the function to the read-only user
+-- 8. Grant execute permission on the function to the read-only user
 GRANT EXECUTE ON FUNCTION current_tenant_id() TO bi_agent_ro;
