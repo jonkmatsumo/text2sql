@@ -124,6 +124,7 @@ flowchart TB
 - Docker and Docker Compose
 - Python 3.12+ (for local development)
 - MCP client (e.g., Claude Desktop, or `@modelcontextprotocol/inspector`)
+- Streamlit (for web UI - optional)
 
 ### Setup
 
@@ -148,6 +149,16 @@ flowchart TB
    # Connect to: http://localhost:8000/sse
    ```
 
+5. **Run Streamlit Web UI (Optional)**
+   ```bash
+   # Install Streamlit if not already installed
+   pip install streamlit>=1.28.0
+
+   # Run the Streamlit application
+   streamlit run streamlit/app.py
+   # Open http://localhost:8501 in your browser
+   ```
+
 ## Features
 
 The system provides seven core capabilities:
@@ -161,6 +172,18 @@ The system provides seven core capabilities:
 7. **Semantic Caching**: Caches successful SQL queries to reduce latency and API costs for recurring queries
 
 The semantic search feature uses vector embeddings to understand query intent and automatically retrieve the most relevant database schemas, solving the challenge of context window limitations.
+
+### Web Interface
+
+A Streamlit web application provides an intuitive UI for interacting with the agent:
+- Natural language question interface
+- Real-time SQL query generation and execution
+- Formatted result tables with syntax highlighting
+- Conversation history tracking
+- Cache hit indicators
+- Tenant ID configuration for multi-tenant scenarios
+
+See [Streamlit Application Guide](docs/streamlit-application-guide.md) for detailed setup and usage instructions.
 
 ## Security
 
@@ -185,6 +208,11 @@ text2sql/
 ├── mcp-server/                 # Database access server
 │   ├── src/mcp_server/         # Server package
 │   └── tests/                  # Server unit tests
+├── streamlit/                  # Streamlit web application
+│   ├── app_logic.py            # Testable business logic
+│   ├── app.py                  # Streamlit UI layer
+│   ├── tests/                  # Streamlit unit tests
+│   └── .streamlit/             # Streamlit configuration
 └── database/                   # Database initialization scripts
 ```
 
@@ -194,17 +222,18 @@ The project includes comprehensive unit tests with 100% coverage for core module
 
 **Run all tests:**
 ```bash
-pytest --import-mode=importlib
+pytest -m "not integration"
 ```
 
 **Run with coverage:**
 ```bash
-pytest --cov=mcp-server/src/mcp_server --cov=agent/src/agent_core --cov-report=term-missing
+pytest --cov=mcp-server/src/mcp_server --cov=agent/src/agent_core --cov=streamlit/app_logic --cov-report=term-missing
 ```
 
 **Test Coverage:**
 - MCP Server: 100% coverage across all modules (94+ tests)
 - Agent: 100% coverage for state management, nodes, and workflow (50+ tests)
+- Streamlit: 100% coverage on business logic (11 tests)
 
 **Verify agent workflow:**
 ```bash
