@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS public.sql_examples (
     sql_query TEXT NOT NULL,          -- The verified SQL answer
     embedding vector(384),            -- Embedding of the question (bge-small model)
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT uq_sql_examples_question UNIQUE (question)
 );
 
 -- Create HNSW index for fast cosine similarity search

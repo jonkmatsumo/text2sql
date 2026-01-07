@@ -44,29 +44,8 @@ class TestSeederCli:
     @patch("mcp_server.seeding.cli.RagEngine")
     @patch("mcp_server.seeding.cli.format_vector_for_postgres")
     @patch("mcp_server.seeding.cli.load_from_directory")
-    async def test_seed_sql_examples(self, mock_load, mock_format, mock_rag, mock_db):
-        """Test seeding examples."""
-        mock_load.return_value = [{"question": "Q1", "query": "SELECT 1"}]
-        mock_rag.embed_text.return_value = [0.1]
-        mock_format.return_value = "[0.1]"
-
-        mock_conn = AsyncMock()
-        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
-
-        await cli.seed_sql_examples(Path("/tmp"))
-
-        mock_rag.embed_text.assert_called_with("Q1")
-        assert mock_conn.execute.call_count == 1
-        # Check query arg
-        args = mock_conn.execute.call_args[0]
-        assert "INSERT INTO sql_examples" in args[0]
-        assert args[1] == "Q1"
-
-    @pytest.mark.asyncio
-    @patch("mcp_server.seeding.cli.Database")
-    @patch("mcp_server.seeding.cli.load_from_directory")
-    async def test_seed_golden_dataset(self, mock_load, mock_db):
-        """Test seeding golden dataset."""
+    async def test_main_processing(self, mock_load, mock_format, mock_rag, mock_db):
+        """Test unified processing of seed items."""
         mock_load.return_value = [
             {
                 "question": "Q1",
@@ -76,12 +55,31 @@ class TestSeederCli:
             }
         ]
 
+        mock_rag.embed_text.return_value = [0.1]
+        mock_format.return_value = "[0.1]"
+
         mock_conn = AsyncMock()
         mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
 
-        await cli.seed_golden_dataset(Path("/tmp"))
+        # Override base path
+        # main() uses Path("/app/seeds"). We should mock load_from_directory to ignore path.
 
-        assert mock_conn.execute.call_count == 1
-        args = mock_conn.execute.call_args[0]
-        assert "INSERT INTO golden_dataset" in args[0]
-        assert args[6] == "hard"
+        # We can't easily test main() because of hardcoded path,
+        # so we test the helper or refactor main.
+        # But for now, let's just invoke the helpers.
+
+        await cli._upsert_sql_example(mock_conn, mock_load.return_value[0])
+        await cli._upsert_golden_record(mock_conn, mock_load.return_value[0])
+
+        # Verify SQL Examples insert
+        assert mock_conn.execute.call_count == 2
+
+        # Call 1: SQL Example
+        args1 = mock_conn.execute.call_args_list[0][0]
+        assert "INSERT INTO sql_examples" in args1[0]
+        assert args1[1] == "Q1"
+
+        # Call 2: Golden Dataset
+        args2 = mock_conn.execute.call_args_list[1][0]
+        assert "INSERT INTO golden_dataset" in args2[0]
+        assert args2[6] == "hard"

@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS public.golden_dataset (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     is_active BOOLEAN DEFAULT true,             -- Enable/disable test cases
-    notes TEXT                                  -- Additional context or notes
+    notes TEXT,                                 -- Additional context or notes
+    CONSTRAINT uq_golden_dataset_question UNIQUE (question)
 );
 
 -- Index for efficient querying
