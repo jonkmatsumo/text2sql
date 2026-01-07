@@ -24,6 +24,9 @@ def load_from_directory(directory: Path) -> List[Dict[str, Any]]:
 
     data = []
     for file_path in directory.glob("*.json"):
+        if file_path.name == "tables.json":
+            continue
+
         try:
             with open(file_path, "r") as f:
                 content = json.load(f)
@@ -40,3 +43,23 @@ def load_from_directory(directory: Path) -> List[Dict[str, Any]]:
 
     print(f"Loaded {len(data)} items from {directory}")
     return data
+
+
+def load_table_summaries(base_path: Path) -> List[Dict[str, Any]]:
+    """Load table summaries from tables.json."""
+    path = base_path / "tables.json"
+    if not path.exists():
+        print(f"Warning: {path} not found.")
+        return []
+
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+            if not isinstance(data, list):
+                print(f"Error: {path} must contain a list of objects.")
+                return []
+            print(f"Loaded {len(data)} table summaries from parameters.")
+            return data
+    except Exception as e:
+        print(f"Error loading {path}: {e}")
+        return []

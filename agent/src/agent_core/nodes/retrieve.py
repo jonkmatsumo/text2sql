@@ -1,22 +1,24 @@
 """Context retrieval node for RAG-based schema lookup with MLflow tracing."""
 
+import re
+
 import mlflow
-from agent_core.retriever import get_vector_store
 from agent_core.state import AgentState
+from agent_core.tools import get_mcp_tools
 
 
-def retrieve_context_node(state: AgentState) -> dict:
+async def retrieve_context_node(state: AgentState) -> dict:
     """
     Node 1: RetrieveContext.
 
-    Queries vector store for relevant tables based on user question.
-    Uses the schema_embeddings table from Phase 2.
+    Queries vector store via MCP server for relevant tables.
+    Uses the search_relevant_tables_tool.
 
     Args:
         state: Current agent state containing conversation messages
 
     Returns:
-        dict: Updated state with schema_context populated
+        dict: Updated state with schema_context and table_names populated
     """
     with mlflow.start_span(
         name="retrieve_context",
@@ -28,26 +30,41 @@ def retrieve_context_node(state: AgentState) -> dict:
 
         span.set_inputs({"user_query": user_query})
 
-        # Get vector store connection
-        vector_store = get_vector_store()
+        context_str = ""
+        table_names = []
 
-        # Retrieve top 5 most relevant table definitions
-        # Uses cosine similarity search on schema_embeddings
-        docs = vector_store.similarity_search(user_query, k=5)
+        try:
+            tools = await get_mcp_tools()
+            search_tool = next((t for t in tools if t.name == "search_relevant_tables_tool"), None)
 
-        # Format into a context string for the LLM
-        # Each doc contains schema_text from schema_embeddings table
-        context_parts = []
-        for doc in docs:
-            context_parts.append(doc.page_content)
+            if search_tool:
+                # Call the tool
+                # Output format: Markdown with "### {table_name} (similarity: ...)"
+                context_str = await search_tool.ainvoke({"user_query": user_query, "limit": 5})
 
-        context_str = "\n\n".join(context_parts)
+                if isinstance(context_str, str):
+                    # Parse table names
+                    # Matches "### table_name (similarity:" or just "### table_name"
+                    matches = re.finditer(r"###\s+([a-zA-Z0-9_]+)", context_str)
+                    for match in matches:
+                        name = match.group(1)
+                        if (
+                            name not in table_names and name != "Relevant"
+                        ):  # Avoid "Relevant Tables" header
+                            table_names.append(name)
+            else:
+                print("Warning: search_relevant_tables_tool not found.")
+
+        except Exception as e:
+            print(f"Error during retrieval: {e}")
+            context_str = f"Error retrieving context: {e}"
 
         span.set_outputs(
             {
                 "context_length": len(context_str),
-                "tables_retrieved": len(context_parts),
+                "tables_retrieved": len(table_names),
+                "table_names": table_names,
             }
         )
 
-        return {"schema_context": context_str}
+        return {"schema_context": context_str, "table_names": table_names}

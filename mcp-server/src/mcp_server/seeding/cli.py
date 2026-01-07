@@ -6,6 +6,8 @@ before the main MCP server starts.
 
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 
 from mcp_server.db import Database
@@ -69,36 +71,129 @@ async def _upsert_golden_record(conn, item: dict):
     )
 
 
+async def _process_seed_data(conn: any, base_path: Path):
+    """Load and upsert query examples."""
+    items = load_from_directory(base_path)
+    if not items:
+        print("No seed files found.")
+        return
+
+    print(f"Processing {len(items)} items from {base_path}...")
+    for item in items:
+        await _upsert_sql_example(conn, item)
+        await _upsert_golden_record(conn, item)
+
+
+async def _seed_table_summaries(conn: any, base_path: Path):
+    """Load and index table summaries."""
+    from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
+    from mcp_server.seeding.loader import load_table_summaries
+
+    summaries = load_table_summaries(base_path)
+    if not summaries:
+        print("No table summaries found.")
+        return
+
+    print(f"Seeding {len(summaries)} table summaries...")
+    for item in summaries:
+        table_name = item.get("table_name")
+        summary = item.get("summary")
+        if not table_name:
+            continue
+
+        # Fetch authoritative columns from DB
+        cols_query = """
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = $1 AND table_schema = 'public'
+            ORDER BY ordinal_position
+        """
+        columns = await conn.fetch(cols_query, table_name)
+
+        # If columns not found, skipping might be safer, but maybe the table is in another schema?
+        # Assuming public schema for now as per Pagila.
+        if not columns:
+            # Just index the summary if table doesn't exist? No, better to skip or warn.
+            # But for 'Identification' phase, we might want it even if table missing?
+            # No, if table missing, we can't query it.
+            # However, we should fetch FKs too.
+            pass
+
+        # Get foreign keys
+        fk_query = """
+            SELECT
+                kcu.column_name,
+                ccu.table_name AS foreign_table_name
+            FROM information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name
+            JOIN information_schema.constraint_column_usage AS ccu
+                ON ccu.constraint_name = tc.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_name = $1
+                AND tc.table_schema = 'public'
+        """
+        foreign_keys = await conn.fetch(fk_query, table_name)
+
+        # Generate enriched schema document
+        # We pass the summary as 'table_comment' to be embedded
+        schema_text = generate_schema_document(
+            table_name,
+            [dict(col) for col in columns],
+            [dict(fk) for fk in foreign_keys] if foreign_keys else None,
+            table_comment=summary,
+        )
+
+        # Generate embedding
+        embedding = RagEngine.embed_text(schema_text)
+        pg_vector = format_vector_for_postgres(embedding)
+
+        # Upsert
+        upsert_query = """
+            INSERT INTO public.schema_embeddings (table_name, schema_text, embedding)
+            VALUES ($1, $2, $3::vector)
+            ON CONFLICT (table_name)
+            DO UPDATE SET
+                schema_text = EXCLUDED.schema_text,
+                embedding = EXCLUDED.embedding,
+                updated_at = CURRENT_TIMESTAMP
+        """
+        await conn.execute(upsert_query, table_name, schema_text, pg_vector)
+        print(f"  ✓ Indexed Summary: {table_name}")
+
+
 async def main():
     """Run the seeding process."""
     print("Starting Seeder Service...")
+
+    # Reuse the MCP Server's DB logic
     await Database.init()
 
     try:
-        base_path = Path("/app/seeds")
-        items = load_from_directory(base_path)
-
-        if not items:
-            print("No seed files found.")
-            return
-
-        print(f"Processing {len(items)} items from {base_path}...")
-
         async with Database.get_connection() as conn:
-            for item in items:
-                # 1. Seed SQL Example
-                await _upsert_sql_example(conn, item)
+            print(
+                f"✓ Database connection pool established: "
+                f"{os.getenv('POSTGRES_USER')}@{os.getenv('DB_HOST')}/{os.getenv('POSTGRES_DB')}"
+            )
 
-                # 2. Seed Golden Dataset
-                await _upsert_golden_record(conn, item)
+            # 1. Seed Few-Shot Examples & Golden Dataset
+            await _process_seed_data(conn, Path("/app/seeds"))
 
-        print(f"✓ Successfully processed {len(items)} items into both tables.")
+            # 2. Seed Table Summaries (Schema Context)
+            await _seed_table_summaries(conn, Path("/app/seeds"))
+
+            print("✓ Successfully processed all seed operations.")
 
     except Exception as e:
-        print(f"Seeding failed: {e}")
-        raise
+        print(f"Error during seeding: {e}")
+        import traceback
+
+        traceback.print_exc()
+        # Non-zero exit code to restart container or signal failure
+        sys.exit(1)
     finally:
         await Database.close()
+        print("✓ Database connection pool closed")
 
 
 if __name__ == "__main__":

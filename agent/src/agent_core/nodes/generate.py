@@ -159,6 +159,27 @@ async def generate_sql_node(state: AgentState) -> dict:
         except Exception as e:
             print(f"Warning: Could not retrieve few-shot examples: {e}")
 
+        # Fetch Live Schema DDL for identified tables
+        table_names = state.get("table_names", [])
+        live_schema_ddl = ""
+        if table_names:
+            try:
+                from agent_core.tools import get_mcp_tools
+
+                tools = await get_mcp_tools()
+                schema_tool = next((t for t in tools if t.name == "get_table_schema_tool"), None)
+                if schema_tool:
+                    print(f"Fetching schema for: {table_names}")
+                    # Fetch live schema
+                    kwargs = {"table_names": table_names}
+                    live_schema_ddl = await schema_tool.ainvoke(kwargs)
+            except Exception as e:
+                print(f"Warning: Failed to fetch live schema: {e}")
+
+        # Use Live DDL if available, otherwise fallback to context (Summary) + Warning?
+        # Actually context only has summaries now, so mapped to DDL is critical.
+        schema_context_to_use = live_schema_ddl if live_schema_ddl else context
+
         # Build system prompt with examples section
         examples_section = (
             f"\n\n{few_shot_examples}" if few_shot_examples else "\n\nNo examples available."
@@ -171,9 +192,10 @@ Rules:
 - Return ONLY the SQL query. No markdown, no explanations.
 - Always limit results to 1000 rows unless the user specifies otherwise.
 - Use proper SQL syntax for PostgreSQL.
-- Only use tables and columns mentioned in the SCHEMA CONTEXT.
+- Only use tables and columns explicitly defined in the SCHEMA CONTEXT DDL.
 - If the question is ambiguous, make reasonable assumptions and note them.
-- Learn from the EXAMPLES provided to understand similar query patterns.
+- Learn from the EXAMPLES provided to understand similar query patterns,
+  but prioritize the actual schema DDL.
 
 Schema Context:
 {{schema_context}}
@@ -195,7 +217,7 @@ Schema Context:
         # Generate SQL (MLflow autolog will capture token usage)
         response = chain.invoke(
             {
-                "schema_context": context,
+                "schema_context": schema_context_to_use,
                 "question": user_query,
             }
         )

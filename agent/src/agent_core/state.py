@@ -21,6 +21,9 @@ class AgentState(TypedDict):
     # Context retrieved from RAG (Schema DDLs + Semantic Definitions)
     schema_context: str
 
+    # Identified table names from retrieval (used to fetch live DDL)
+    table_names: Optional[List[str]]
+
     # The SQL query currently being generated/executed
     current_sql: Optional[str]
 

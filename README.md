@@ -51,16 +51,16 @@ flowchart TB
         MLflow --> MinIO
     end
 
-    subgraph VectorStore["📊 Vector Store (Agent)"]
-        PGVectorAgent["PGVector Store<br/>agent_core/retriever.py"]
-        OpenAIEmbed["OpenAI Embeddings<br/>text-embedding-3-small"]
+    subgraph Init["🌱 Initialization"]
+        SeederService["Seeder Service (Ephemeral)<br/>mcp_server/seeding/cli.py"]
+        SeedData["Seed Data (JSON)<br/>Tables & Examples"]
     end
 
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
         MCPTools["MCP Tools<br/>mcp_server/tools.py"]
         RAGEngine["RAG Engine<br/>mcp_server/rag.py"]
         CacheModule["Cache Module<br/>mcp_server/cache.py"]
-        FastEmbed["fastembed<br/>BGE-small"]
+        FastEmbed["fastembed<br/>Retrieval Model"]
         SecurityCheck["SQL Security Checks<br/>Regex validation"]
     end
 
@@ -71,6 +71,11 @@ flowchart TB
         PagilaDB["Pagila Database<br/>Sample data"]
     end
 
+    %% Initialization Flow
+    SeedData --> SeederService
+    SeederService -->|"Upsert Embeddings"| SchemaEmbeddings
+    SeederService -->|"Upsert Examples"| PGVectorDB
+
     %% Agent Observability
     RetrieveNode -.->|"Trace"| MLflow
     GenerateNode -.->|"Trace"| MLflow
@@ -78,28 +83,32 @@ flowchart TB
     CorrectNode -.->|"Trace"| MLflow
     SynthesizeNode -.->|"Trace"| MLflow
 
-    %% Agent to Vector Store
-    RetrieveNode -->|"Similarity search"| PGVectorAgent
-    PGVectorAgent -->|"Query embeddings"| OpenAIEmbed
-    PGVectorAgent -->|"Vector search"| PGVectorDB
-    PGVectorDB --> SchemaEmbeddings
+    %% Agent to MCP Server (Retrieval Phase)
+    RetrieveNode -->|"Call Tool: search_relevant_tables"| MCPTools
+    MCPTools -->|"Semantic Search"| RAGEngine
+    RAGEngine -->|"Embed Query"| FastEmbed
+    RAGEngine -->|"Query Vectors"| SchemaEmbeddings
+    SchemaEmbeddings -->|"Return Summaries"| RetrieveNode
 
-    %% Agent to MCP Server
-    CheckCache -->|"HTTP/JSON"| MCPTools
+    %% Agent to MCP Server (Generation Phase)
+    CheckCache -->|"Call Tool: lookup_cache"| MCPTools
     MCPTools -->|"Cache lookup"| CacheModule
     CacheModule -->|"Vector search"| PGVectorDB
     PGVectorDB --> SemanticCache
 
-    ExecuteNode -->|"HTTP/JSON"| MCPTools
-    MCPTools -->|"Semantic search"| RAGEngine
-    RAGEngine -->|"Generate embeddings"| FastEmbed
-    RAGEngine -->|"Vector search"| PGVectorDB
+    GenerateNode -->|"Call Tool: get_table_schema"| MCPTools
+    GenerateNode -->|"Call Tool: get_few_shot_examples"| MCPTools
+    MCPTools -->|"Fetch DDL"| PagilaDB
+    MCPTools -->|"Fetch Examples"| PGVectorDB
+
+    %% Agent to MCP Server (Execution Phase)
+    ExecuteNode -->|"Call Tool: execute_sql_query"| MCPTools
     MCPTools -->|"Validate SQL"| SecurityCheck
-    SecurityCheck -->|"execute_sql_query_tool"| PagilaDB
+    SecurityCheck -->|"Execute"| PagilaDB
     PagilaDB -->|"Results"| MCPTools
     MCPTools -->|"JSON response"| ExecuteNode
 
-    CacheUpdate -->|"HTTP/JSON"| MCPTools
+    CacheUpdate -->|"Call Tool: update_cache"| MCPTools
     MCPTools -->|"Cache update"| CacheModule
     CacheModule -->|"Store SQL"| SemanticCache
 
@@ -111,7 +120,7 @@ flowchart TB
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
-    style VectorStore fill:#9C27B0
+    style Init fill:#FFC107
     style Observability fill:#E1BEE7
 ```
 
@@ -120,7 +129,8 @@ flowchart TB
 *   **Multi-Provider LLM Support**: Switch between OpenAI, Anthropic (Claude), and Google (Gemini) via UI or environment variables.
 *   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
 *   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
-*   **RAG & Semantic Search**: Uses `pgvector` and `fastembed` to dynamically find relevant tables and few-shot examples based on the user's question.
+*   **Schema Reality**: Uses a two-stage "Identify -> Define" workflow. First identifies relevant tables using semantic search (`fastembed`), then fetches authoritative DDL from the live database.
+*   **Dynamic Seeding**: Ephemeral seeder service initializes the database with schema summaries and golden examples on startup.
 *   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
 *   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
