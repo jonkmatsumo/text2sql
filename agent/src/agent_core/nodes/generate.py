@@ -1,24 +1,20 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
-import os
 from typing import Optional
 
 import mlflow
+from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
 # Enable MLflow autolog for OpenAI
 mlflow.openai.autolog()
 
-# Initialize LLM
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
-    temperature=0,  # Deterministic SQL generation
-)
+# Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
+llm = get_llm_client(temperature=0)
 
 
 async def check_cache(user_query: str, tenant_id: Optional[int] = None) -> Optional[str]:

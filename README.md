@@ -117,6 +117,7 @@ flowchart TB
 
 ## Core Features
 
+*   **Multi-Provider LLM Support**: Switch between OpenAI, Anthropic (Claude), and Google (Gemini) via UI or environment variables.
 *   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
 *   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
 *   **RAG & Semantic Search**: Uses `pgvector` and `fastembed` to dynamically find relevant tables and few-shot examples based on the user's question.
@@ -154,7 +155,15 @@ text2sql/
     ./database/init-scripts/download_data.sh
     ```
 
-2.  **Start Services**: Build and launch the container cluster.
+2.  **Configure Environment** (optional): Set your preferred LLM provider in `.env`:
+    ```bash
+    LLM_PROVIDER=openai      # Options: openai, anthropic, google
+    LLM_MODEL=gpt-5.2        # Or: claude-sonnet-4-20250514, gemini-2.5-flash-preview-05-20
+    ANTHROPIC_API_KEY=...    # Required for Anthropic
+    GOOGLE_API_KEY=...       # Required for Google
+    ```
+
+3.  **Start Services**: Build and launch the container cluster.
     ```bash
     docker compose up -d --build
     ```

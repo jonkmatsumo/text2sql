@@ -46,6 +46,66 @@ def main():
     # Sidebar for configuration
     with st.sidebar:
         st.header("Configuration")
+
+        # LLM Provider and Model selection
+        st.subheader("LLM Settings")
+
+        # Import get_available_providers and get_available_models
+        try:
+            from agent_core.llm_client import get_available_models, get_available_providers
+
+            providers = get_available_providers()
+        except ImportError:
+            providers = ["openai", "anthropic", "google"]
+            get_available_models = lambda p: []  # noqa: E731
+
+        # Initialize session state for LLM settings
+        if "llm_provider" not in st.session_state:
+            st.session_state.llm_provider = os.getenv("LLM_PROVIDER", "openai")
+        if "llm_model" not in st.session_state:
+            st.session_state.llm_model = os.getenv("LLM_MODEL", "gpt-5.2")
+
+        # Provider dropdown
+        provider_index = (
+            providers.index(st.session_state.llm_provider)
+            if st.session_state.llm_provider in providers
+            else 0
+        )
+        selected_provider = st.selectbox(
+            "Provider",
+            options=providers,
+            index=provider_index,
+            help="Select the LLM provider",
+        )
+
+        # Update provider in session state
+        if selected_provider != st.session_state.llm_provider:
+            st.session_state.llm_provider = selected_provider
+            # Reset model when provider changes
+            models = get_available_models(selected_provider)
+            st.session_state.llm_model = models[0] if models else "gpt-5.2"
+
+        # Model dropdown (based on selected provider)
+        available_models = get_available_models(selected_provider)
+        if not available_models:
+            available_models = ["gpt-5.2"]  # Fallback
+
+        model_index = (
+            available_models.index(st.session_state.llm_model)
+            if st.session_state.llm_model in available_models
+            else 0
+        )
+        selected_model = st.selectbox(
+            "Model",
+            options=available_models,
+            index=model_index,
+            help="Select the model to use",
+        )
+        st.session_state.llm_model = selected_model
+
+        st.markdown("---")
+
+        # Tenant ID configuration
         tenant_id = st.number_input(
             "Tenant ID",
             min_value=1,
@@ -58,6 +118,7 @@ def main():
         st.markdown("### System Status")
         mcp_url = os.getenv("MCP_SERVER_URL", "http://localhost:8000/sse")
         st.text(f"MCP Server: {mcp_url}")
+        st.text(f"LLM: {st.session_state.llm_provider}/{st.session_state.llm_model}")
 
         if st.button("Clear History"):
             st.session_state.conversation_history = []

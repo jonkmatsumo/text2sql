@@ -1,19 +1,15 @@
 """SQL correction node for self-healing queries with MLflow tracing."""
 
-import os
-
 import mlflow
+from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
-    temperature=0,
-)
+# Initialize LLM using the factory (temperature=0 for deterministic SQL correction)
+llm = get_llm_client(temperature=0)
 
 
 def correct_sql_node(state: AgentState) -> dict:

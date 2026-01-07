@@ -53,6 +53,10 @@ services:
         condition: service_started
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
       MCP_SERVER_URL: http://mcp-server:8000/mcp
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
       DB_HOST: postgres-db

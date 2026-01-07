@@ -1,20 +1,17 @@
 """Insight synthesis node for formatting results."""
 
 import json
-import os
 
+from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
-    temperature=0.7,  # More creative for natural language responses
-)
+# Initialize LLM using the factory (temperature=0.7 for more creative responses)
+llm = get_llm_client(temperature=0.7)
 
 
 def synthesize_insight_node(state: AgentState) -> dict:
