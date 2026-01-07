@@ -34,3 +34,6 @@ INSERT INTO public.semantic_definitions (term_name, definition, sql_logic) VALUE
 
 -- Grant access to the semantic layer
 GRANT SELECT ON public.semantic_definitions TO bi_agent_ro;
+
+-- Grant INSERT on sql_examples for auto-seeding at server startup
+GRANT INSERT ON public.sql_examples TO bi_agent_ro;

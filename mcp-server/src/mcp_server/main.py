@@ -49,6 +49,25 @@ async def lifespan(app):
     except Exception as e:
         print(f"Warning: Schema indexing skipped: {e}")
 
+    # Seed SQL examples for few-shot learning if table is empty
+    try:
+        from pathlib import Path
+
+        from mcp_server.seeding.examples import seed_examples
+
+        async with Database.get_connection() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM public.sql_examples")
+            if count == 0:
+                print("SQL examples table is empty. Seeding from JSON...")
+                # In Docker container, /app is the working directory
+                base_path = Path("/app")
+                patterns = ["database/seed_queries.json"]
+                await seed_examples(patterns, base_path, dry_run=False)
+            else:
+                print(f"SQL examples already seeded ({count} examples)")
+    except Exception as e:
+        print(f"Warning: SQL examples seeding skipped: {e}")
+
     yield  # Server runs here
 
     # Shutdown: Close database connection pool

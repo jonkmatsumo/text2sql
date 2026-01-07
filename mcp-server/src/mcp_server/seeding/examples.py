@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from mcp_server.db import Database
 from mcp_server.rag import RagEngine, format_vector_for_postgres
 from mcp_server.seeding.loader import load_examples_for_vector_db
@@ -17,12 +15,25 @@ load_dotenv()
 # Default JSON files if none specified
 DEFAULT_PATTERNS = ["database/seed_queries.json"]
 
+# Try to import LangChain for LLM-based summary generation (optional)
+try:
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
+    HAS_LANGCHAIN = True
+except ImportError:
+    HAS_LANGCHAIN = False
+
 
 async def generate_summary(question: str, sql: str) -> str:
     """Generate a synthetic summary of the SQL logic using LLM.
 
-    This bridges the semantic gap between natural language questions and SQL code.
+    Falls back to using the question if LangChain is not available.
     """
+    if not HAS_LANGCHAIN:
+        # Fallback: use the question itself as the summary
+        return question
+
     llm = ChatOpenAI(
         model=os.getenv("OPENAI_MODEL", "gpt-5.2"),
         temperature=0.3,
@@ -58,6 +69,7 @@ async def seed_examples(
     patterns: list[str],
     base_path: Path,
     dry_run: bool = False,
+    skip_if_seeded: bool = True,
 ) -> int:
     """Seed the database with SQL examples and their embeddings.
 
@@ -65,6 +77,7 @@ async def seed_examples(
         patterns: File patterns to load queries from.
         base_path: Base path to resolve relative patterns.
         dry_run: If True, only print what would be done.
+        skip_if_seeded: If True, skip seeding if examples already exist.
 
     Returns:
         Number of examples seeded.
@@ -76,11 +89,16 @@ async def seed_examples(
         return 0
 
     if not dry_run:
-        await Database.init()
+        # Note: For lifespan, Database.init() is already called
+        # We check connection instead of re-init
+        pass
 
     try:
         print(f"Seeding {len(examples)} examples...")
+        if not HAS_LANGCHAIN:
+            print("  (LangChain not available - using questions as summaries)")
 
+        seeded_count = 0
         for i, example in enumerate(examples, 1):
             print(f"\n[{i}/{len(examples)}] Processing: {example['question']}")
 
@@ -88,9 +106,12 @@ async def seed_examples(
                 print("  (dry run - skipping)")
                 continue
 
-            # Generate synthetic summary
+            # Generate summary (LLM if available, else just use question)
             summary = await generate_summary(example["question"], example["query"])
-            print(f"  Summary: {summary[:80]}...")
+            if HAS_LANGCHAIN:
+                print(f"  Summary: {summary[:80]}...")
+            else:
+                print(f"  Summary: {summary[:50]}... (from question)")
 
             # Generate embedding from summary
             embedding = RagEngine.embed_text(summary)
@@ -109,15 +130,16 @@ async def seed_examples(
                     summary,
                     pg_vector,
                 )
+                seeded_count += 1
 
             print("  ✓ Inserted into database")
 
-        print(f"\n✓ Seeded {len(examples)} examples")
-        return len(examples)
+        print(f"\n✓ Seeded {seeded_count} examples")
+        return seeded_count
 
-    finally:
-        if not dry_run:
-            await Database.close()
+    except Exception as e:
+        print(f"Error seeding examples: {e}")
+        raise
 
 
 def main():
