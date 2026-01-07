@@ -49,24 +49,22 @@ async def lifespan(app):
     except Exception as e:
         print(f"Warning: Schema indexing skipped: {e}")
 
-    # Seed SQL examples for few-shot learning if table is empty
+    # Phase 2: Generate embeddings for SQL examples (Phase 1 inserts done by DB init)
     try:
-        from pathlib import Path
-
-        from mcp_server.seeding.examples import seed_examples
+        from mcp_server.seeding.examples import generate_missing_embeddings
 
         async with Database.get_connection() as conn:
-            count = await conn.fetchval("SELECT COUNT(*) FROM public.sql_examples")
-            if count == 0:
-                print("SQL examples table is empty. Seeding from JSON...")
-                # In Docker container, /app is the working directory
-                base_path = Path("/app")
-                patterns = ["database/seed_queries.json"]
-                await seed_examples(patterns, base_path, dry_run=False)
+            missing = await conn.fetchval(
+                "SELECT COUNT(*) FROM public.sql_examples WHERE embedding IS NULL"
+            )
+            if missing > 0:
+                print(f"Found {missing} examples without embeddings. Generating...")
+                await generate_missing_embeddings()
             else:
-                print(f"SQL examples already seeded ({count} examples)")
+                total = await conn.fetchval("SELECT COUNT(*) FROM public.sql_examples")
+                print(f"All {total} SQL examples have embeddings")
     except Exception as e:
-        print(f"Warning: SQL examples seeding skipped: {e}")
+        print(f"Warning: Embedding generation skipped: {e}")
 
     yield  # Server runs here
 

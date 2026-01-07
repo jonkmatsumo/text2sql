@@ -35,8 +35,6 @@ services:
       DB_USER: bi_agent_ro
       DB_PASS: secure_agent_pass
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
-    volumes:
-      - ./database:/app/database:ro
     ports:
       - "8000:8000"
     networks:

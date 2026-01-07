@@ -1,5 +1,10 @@
-"""Seeding utilities for populating database with examples and test data."""
+"""Seeding utilities for database initialization.
 
-from mcp_server.seeding.loader import load_queries_from_files
+Two-phase seeding architecture:
+- Phase 1: SQL scripts insert static data (database init)
+- Phase 2: Python generates embeddings (MCP server startup)
+"""
 
-__all__ = ["load_queries_from_files"]
+from mcp_server.seeding.examples import generate_missing_embeddings
+
+__all__ = ["generate_missing_embeddings"]

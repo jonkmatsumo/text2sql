@@ -23,8 +23,8 @@ CREATE INDEX IF NOT EXISTS idx_sql_examples_question
 ON public.sql_examples
 USING gin (to_tsvector('english', question));
 
--- Grant read access to the agent user
-GRANT SELECT ON public.sql_examples TO bi_agent_ro;
+-- Grant access to the agent user (SELECT for retrieval, INSERT for embedding generation)
+GRANT SELECT, INSERT, UPDATE ON public.sql_examples TO bi_agent_ro;
 GRANT USAGE ON SEQUENCE public.sql_examples_id_seq TO bi_agent_ro;
 
 -- Add comment for documentation
