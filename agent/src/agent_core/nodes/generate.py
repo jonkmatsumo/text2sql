@@ -1,7 +1,8 @@
-"""SQL generation node using LLM with RAG context and few-shot learning."""
+"""SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
 import asyncio
 import os
+from typing import Optional
 
 from agent_core.state import AgentState
 from dotenv import load_dotenv
@@ -16,6 +17,50 @@ llm = ChatOpenAI(
     model=os.getenv("OPENAI_MODEL", "gpt-4o"),
     temperature=0,  # Deterministic SQL generation
 )
+
+
+async def check_cache(user_query: str, tenant_id: Optional[int] = None) -> Optional[str]:
+    """
+    Check semantic cache for similar query.
+
+    Args:
+        user_query: The user's natural language question
+        tenant_id: Optional tenant ID (required for cache lookup)
+
+    Returns:
+        Cached SQL if found, None otherwise
+    """
+    if not tenant_id:
+        return None
+
+    try:
+        import json
+
+        from agent_core.tools import get_mcp_tools
+
+        tools = await get_mcp_tools()
+        if not tools:
+            return None
+
+        # Find the lookup_cache_tool
+        cache_tool = None
+        for tool in tools:
+            if tool.name == "lookup_cache_tool":
+                cache_tool = tool
+                break
+
+        if not cache_tool:
+            return None
+
+        # Call the tool
+        result = await cache_tool.ainvoke({"user_query": user_query})
+        if isinstance(result, str):
+            parsed = json.loads(result)
+            return parsed.get("sql")
+        return None
+    except Exception as e:
+        print(f"Warning: Cache lookup failed: {e}")
+        return None
 
 
 async def get_few_shot_examples(user_query: str) -> str:
@@ -58,17 +103,35 @@ def generate_sql_node(state: AgentState) -> dict:
     """
     Node 3: GenerateSQL.
 
-    Synthesizes executable SQL from the retrieved context, few-shot examples, and user question.
+    Checks cache first, then synthesizes executable SQL from the retrieved context,
+    few-shot examples, and user question if cache miss.
 
     Args:
-        state: Current agent state with schema_context and messages
+        state: Current agent state with schema_context, messages, and optional tenant_id
 
     Returns:
-        dict: Updated state with current_sql populated
+        dict: Updated state with current_sql populated and from_cache flag
     """
     # Extract the last user message
     question = state["messages"][-1].content
+    tenant_id = state.get("tenant_id")
 
+    # Check cache first (before generating SQL)
+    cached_sql = None
+    if tenant_id:
+        try:
+            cached_sql = asyncio.run(check_cache(question, tenant_id))
+        except Exception as e:
+            print(f"Warning: Cache check failed: {e}")
+
+    if cached_sql:
+        print("✓ Using cached SQL")
+        return {
+            "current_sql": cached_sql,
+            "from_cache": True,
+        }
+
+    # Cache miss - proceed with normal generation
     # Retrieve few-shot examples
     few_shot_examples = ""
     try:
@@ -127,4 +190,7 @@ Schema Context:
         sql = sql[:-3]
     sql = sql.strip()
 
-    return {"current_sql": sql}
+    return {
+        "current_sql": sql,
+        "from_cache": False,
+    }

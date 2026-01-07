@@ -54,7 +54,25 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 return {"error": result, "query_result": None}
 
         # If result is already a dict/list, use it directly
-        return {"query_result": result, "error": None}
-
+        query_result = result
+        error = None
     except Exception as e:
         return {"error": str(e), "query_result": None}
+
+    # Cache successful SQL generation (if not from cache and tenant_id exists)
+    if not error and query_result and query:
+        tenant_id = state.get("tenant_id")
+        from_cache = state.get("from_cache", False)
+        if tenant_id and not from_cache:
+            try:
+                # Get cache update tool
+                cache_tool = next((t for t in tools if t.name == "update_cache_tool"), None)
+                if cache_tool:
+                    # Extract user query from first message
+                    user_query = state["messages"][0].content if state["messages"] else ""
+                    if user_query:
+                        await cache_tool.ainvoke({"user_query": user_query, "sql": query})
+            except Exception as e:
+                print(f"Warning: Cache update failed: {e}")
+
+    return {"query_result": query_result, "error": error}

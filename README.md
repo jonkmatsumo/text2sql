@@ -31,19 +31,26 @@ flowchart TB
         UserQuery["User Query<br/>'Show payments'"]
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
         RetrieveNode["Retrieve Context Node<br/>agent_core/nodes/retrieve.py"]
+        CheckCache["Check Cache<br/>Semantic similarity"]
+        CacheHit{"Cache<br/>Hit?"}
         GenerateNode["Generate SQL Node<br/>agent_core/nodes/generate.py"]
         ExecuteNode["Execute SQL Node<br/>agent_core/nodes/execute.py"]
+        CacheUpdate["Cache SQL<br/>On success"]
         CorrectNode["Correct SQL Node<br/>agent_core/nodes/correct.py"]
         SynthesizeNode["Synthesize Insight Node<br/>agent_core/nodes/synthesize.py"]
         Response["Natural Language Response"]
 
         UserQuery --> AgentState
         AgentState --> RetrieveNode
-        RetrieveNode --> GenerateNode
+        RetrieveNode --> CheckCache
+        CheckCache --> CacheHit
+        CacheHit -->|"Similarity >= 0.95"| ExecuteNode
+        CacheHit -->|"Miss"| GenerateNode
         GenerateNode --> ExecuteNode
+        ExecuteNode -->|"Success"| CacheUpdate
+        CacheUpdate --> SynthesizeNode
         ExecuteNode -->|"Error & retries < 3"| CorrectNode
         CorrectNode -->|"Loop back"| ExecuteNode
-        ExecuteNode -->|"Success"| SynthesizeNode
         ExecuteNode -->|"Error & retries >= 3"| Response
         SynthesizeNode --> Response
     end
@@ -56,6 +63,7 @@ flowchart TB
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
         MCPTools["MCP Tools<br/>mcp_server/tools.py"]
         RAGEngine["RAG Engine<br/>mcp_server/rag.py"]
+        CacheModule["Cache Module<br/>mcp_server/cache.py"]
         FastEmbed["fastembed<br/>BGE-small"]
         SecurityCheck["SQL Security Checks<br/>Regex validation"]
     end
@@ -63,6 +71,7 @@ flowchart TB
     subgraph Database["🗄️ PostgreSQL Database"]
         PGVectorDB["pgvector Extension<br/>Vector similarity search"]
         SchemaEmbeddings["schema_embeddings Table<br/>Stores schema vectors"]
+        SemanticCache["semantic_cache Table<br/>Cached SQL queries"]
         PagilaDB["Pagila Database<br/>Sample data"]
     end
 
@@ -70,6 +79,11 @@ flowchart TB
     PGVectorAgent -->|"Query embeddings"| OpenAIEmbed
     PGVectorAgent -->|"Vector search"| PGVectorDB
     PGVectorDB --> SchemaEmbeddings
+
+    CheckCache -->|"HTTP/SSE"| MCPTools
+    MCPTools -->|"Cache lookup"| CacheModule
+    CacheModule -->|"Vector search"| PGVectorDB
+    PGVectorDB --> SemanticCache
 
     ExecuteNode -->|"HTTP/SSE"| MCPTools
     MCPTools -->|"Semantic search"| RAGEngine
@@ -79,6 +93,10 @@ flowchart TB
     SecurityCheck -->|"Execute query"| PagilaDB
     PagilaDB -->|"Results"| MCPTools
     MCPTools -->|"JSON response"| ExecuteNode
+
+    CacheUpdate -->|"HTTP/SSE"| MCPTools
+    MCPTools -->|"Cache update"| CacheModule
+    CacheModule -->|"Store SQL"| SemanticCache
 
     GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-4o<br/>SQL generation"]
     CorrectNode -->|"LLM call"| OpenAILLM
@@ -98,6 +116,7 @@ flowchart TB
 - **Security Layer**: SQL validation happens in MCP Server before database execution
 - **Self-Correction Loop**: Agent automatically retries failed queries up to 3 times
 - **Dynamic Few-Shot Learning**: Retrieves relevant SQL examples based on semantic similarity to improve generation accuracy
+- **Semantic Caching**: Caches successful SQL queries using vector similarity (threshold 0.95) to reduce latency and LLM API costs
 
 ## Quick Start
 
@@ -131,7 +150,7 @@ flowchart TB
 
 ## Features
 
-The system provides six core capabilities:
+The system provides seven core capabilities:
 
 1. **Table Discovery**: Find available tables with optional search
 2. **Schema Inspection**: Get detailed table structures, columns, and relationships
@@ -139,6 +158,7 @@ The system provides six core capabilities:
 4. **Business Metrics**: Access predefined business metric definitions
 5. **Semantic Search**: Find relevant tables using natural language queries
 6. **Dynamic Few-Shot Learning**: Automatically retrieves relevant SQL examples to improve query generation accuracy
+7. **Semantic Caching**: Caches successful SQL queries to reduce latency and API costs for recurring queries
 
 The semantic search feature uses vector embeddings to understand query intent and automatically retrieve the most relevant database schemas, solving the challenge of context window limitations.
 

@@ -8,6 +8,7 @@ import os
 
 from dotenv import load_dotenv
 from fastmcp import Context, FastMCP
+from mcp_server.cache import lookup_cache, update_cache
 from mcp_server.db import Database
 from mcp_server.retrieval import get_relevant_examples
 from mcp_server.tools import (
@@ -121,6 +122,26 @@ async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Conte
     """Retrieve relevant SQL examples for few-shot learning based on user query."""
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await get_relevant_examples(user_query, limit, tenant_id)
+
+
+@mcp.tool()
+async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
+    """Check semantic cache for similar query. Returns cached SQL if similarity >= 0.95."""
+    tenant_id = extract_tenant_id(ctx) if ctx else None
+    if not tenant_id:
+        return json.dumps({"error": "Tenant ID required for cache lookup"})
+    cached = await lookup_cache(user_query, tenant_id)
+    return json.dumps({"sql": cached}) if cached else json.dumps({"sql": None})
+
+
+@mcp.tool()
+async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> str:
+    """Cache a successful SQL generation for future use."""
+    tenant_id = extract_tenant_id(ctx) if ctx else None
+    if not tenant_id:
+        return json.dumps({"error": "Tenant ID required for cache update"})
+    await update_cache(user_query, sql, tenant_id)
+    return json.dumps({"status": "cached"})
 
 
 if __name__ == "__main__":

@@ -32,3 +32,6 @@ class AgentState(TypedDict):
 
     # Counter to track retries and prevent infinite loops
     retry_count: int
+
+    # Tenant identifier for multi-tenant scenarios (required for caching and RLS)
+    tenant_id: Optional[int]
