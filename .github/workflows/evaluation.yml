@@ -97,7 +97,7 @@ jobs:
           python3 scripts/evaluation_metrics.py --days 1 > evaluation_report.txt
 
       - name: Upload evaluation report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v6
         with:
           name: evaluation-report
           path: agent/evaluation_report.txt
