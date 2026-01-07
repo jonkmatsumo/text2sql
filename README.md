@@ -1,29 +1,16 @@
 # Text 2 SQL
 
-A natural language interface that enables users to query databases using plain English. The system uses AI to understand questions, retrieve relevant schema information, and generate accurate SQL queries automatically.
+A natural language interface that enables users to query databases using plain English. This project demonstrates an intelligent system that bridges the gap between natural language and SQL.
 
-## Overview
+The system automatically:
+*   **Understands intent**: Deciphers the meaning behind user questions.
+*   **Retrieves context**: Finds relevant database tables and schemas.
+*   **Executes securely**: Generates and runs SQL queries with built-in safety checks.
+*   **Formats results**: Returns data in a clear, user-friendly format.
 
-This project demonstrates an intelligent database query system that bridges the gap between natural language and SQL. Users can ask questions in plain English, and the system automatically:
+Designed for security and scalability, it uses modern containerization and secure access patterns to ensure robust performance.
 
-- Understands the intent behind questions
-- Finds relevant database tables and schemas
-- Generates and executes SQL queries
-- Returns results in a user-friendly format
-
-The system is designed with security and scalability in mind, using modern containerization and secure access patterns.
-
-## Architecture
-
-The system follows a decoupled architecture where the AI reasoning engine communicates with the database through a standardized interface. This design ensures:
-
-- **Vendor Agnostic**: Works with PostgreSQL, Snowflake, Databricks, and other databases
-- **Secure**: Multi-layered security with read-only access and application-level safeguards
-- **Intelligent**: Uses semantic search to find relevant schema information automatically
-
-The system uses Docker to orchestrate services including PostgreSQL with vector search capabilities and a Python-based server that provides secure database access tools.
-
-### System Flow
+## System Flow
 
 ```mermaid
 flowchart TB
@@ -55,6 +42,15 @@ flowchart TB
         SynthesizeNode --> Response
     end
 
+    subgraph Observability["📡 Observability"]
+        MLflow["MLflow Tracking Server<br/>Traces & Metrics"]
+        MLflowDB[("MLflow DB")]
+        MinIO[("MinIO Artifacts")]
+
+        MLflow --> MLflowDB
+        MLflow --> MinIO
+    end
+
     subgraph VectorStore["📊 Vector Store (Agent)"]
         PGVectorAgent["PGVector Store<br/>agent_core/retriever.py"]
         OpenAIEmbed["OpenAI Embeddings<br/>text-embedding-3-small"]
@@ -75,29 +71,39 @@ flowchart TB
         PagilaDB["Pagila Database<br/>Sample data"]
     end
 
+    %% Agent Observability
+    RetrieveNode -.->|"Trace"| MLflow
+    GenerateNode -.->|"Trace"| MLflow
+    ExecuteNode -.->|"Trace"| MLflow
+    CorrectNode -.->|"Trace"| MLflow
+    SynthesizeNode -.->|"Trace"| MLflow
+
+    %% Agent to Vector Store
     RetrieveNode -->|"Similarity search"| PGVectorAgent
     PGVectorAgent -->|"Query embeddings"| OpenAIEmbed
     PGVectorAgent -->|"Vector search"| PGVectorDB
     PGVectorDB --> SchemaEmbeddings
 
-    CheckCache -->|"HTTP/SSE"| MCPTools
+    %% Agent to MCP Server
+    CheckCache -->|"HTTP/JSON"| MCPTools
     MCPTools -->|"Cache lookup"| CacheModule
     CacheModule -->|"Vector search"| PGVectorDB
     PGVectorDB --> SemanticCache
 
-    ExecuteNode -->|"HTTP/SSE"| MCPTools
+    ExecuteNode -->|"HTTP/JSON"| MCPTools
     MCPTools -->|"Semantic search"| RAGEngine
     RAGEngine -->|"Generate embeddings"| FastEmbed
     RAGEngine -->|"Vector search"| PGVectorDB
     MCPTools -->|"Validate SQL"| SecurityCheck
-    SecurityCheck -->|"Execute query"| PagilaDB
+    SecurityCheck -->|"execute_sql_query_tool"| PagilaDB
     PagilaDB -->|"Results"| MCPTools
     MCPTools -->|"JSON response"| ExecuteNode
 
-    CacheUpdate -->|"HTTP/SSE"| MCPTools
+    CacheUpdate -->|"HTTP/JSON"| MCPTools
     MCPTools -->|"Cache update"| CacheModule
     CacheModule -->|"Store SQL"| SemanticCache
 
+    %% Agent to LLM
     GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-5.2<br/>SQL generation"]
     CorrectNode -->|"LLM call"| OpenAILLM
     SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-5.2<br/>Natural language"]
@@ -106,168 +112,65 @@ flowchart TB
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
     style VectorStore fill:#9C27B0
+    style Observability fill:#E1BEE7
 ```
 
-**Key Components:**
+## Core Features
 
-- **Agent System**: LangGraph workflow orchestrates the reasoning loop with 5 nodes (retrieve, generate, execute, correct, synthesize)
-- **MCP Server**: FastMCP-based server provides secure database access tools with RAG capabilities
-- **Vector Store**: Dual-purpose - Agent uses PGVector for context retrieval, MCP Server uses fastembed for semantic search
-- **Security Layer**: SQL validation happens in MCP Server before database execution
-- **Self-Correction Loop**: Agent automatically retries failed queries up to 3 times
-- **Dynamic Few-Shot Learning**: Retrieves relevant SQL examples based on semantic similarity to improve generation accuracy
-- **Semantic Caching**: Caches successful SQL queries using vector similarity (threshold 0.95) to reduce latency and LLM API costs
+*   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
+*   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
+*   **RAG & Semantic Search**: Uses `pgvector` and `fastembed` to dynamically find relevant tables and few-shot examples based on the user's question.
+*   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
+*   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
+*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
+
+## Project Structure
+
+```text
+text2sql/
+├── agent/                      # LangGraph AI agent
+│   ├── src/agent_core/         # Core logic (nodes, graph, state)
+│   ├── tests/                  # Unit tests (mocked)
+│   └── tests_integration/      # Live integration tests
+├── mcp-server/                 # Database access tools (FastMCP)
+│   ├── src/mcp_server/         # Server implementation
+│   ├── tests/                  # Unit tests
+│   └── tests_integration/      # RLS & database integration tests
+├── streamlit/                  # Web interface
+├── database/                   # Init scripts & schema
+└── docker-compose.yml          # Service orchestration
+```
 
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose
-- Python 3.12+ (for local development)
-- MCP client (e.g., Claude Desktop, or `@modelcontextprotocol/inspector`)
-- Streamlit (for web UI - optional)
+*   Docker & Docker Compose
+*   Python 3.12+ (for local development)
 
-### Setup
+### Setup & Run
 
-1. **Clone the repository**
-   ```bash
-   cd text2sql
-   ```
+1.  **Initialize Data**: Download the Pagila sample database.
+    ```bash
+    ./database/init-scripts/download_data.sh
+    ```
 
-2. **Download database files**
-   ```bash
-   ./database/init-scripts/download_data.sh
-   ```
+2.  **Start Services**: Build and launch the container cluster.
+    ```bash
+    docker compose up -d --build
+    ```
 
-3. **Start all services**
-   ```bash
-   docker compose up -d --build
-   ```
+### Access Points
 
-4. **Access the services**
-   - **Streamlit Web UI**: http://localhost:8501
-   - **MCP Server**: http://localhost:8000/sse
-   - **MLflow UI**: http://localhost:5001
-   - **MinIO Console**: http://localhost:9001
-   - **PostgreSQL**: localhost:5432
-
-5. **Test the system**
-   ```bash
-   # Using MCP Inspector
-   npx @modelcontextprotocol/inspector
-   # Connect to: http://localhost:8000/sse
-
-   # Or use the Streamlit UI at http://localhost:8501
-   ```
-
-**Note**: All services (Database, MCP Server, and Streamlit) are now started together with `docker compose up`. See [Startup Guide](docs/startup-guide.md) for detailed instructions.
-
-## Features
-
-The system provides seven core capabilities:
-
-1. **Table Discovery**: Find available tables with optional search
-2. **Schema Inspection**: Get detailed table structures, columns, and relationships
-3. **Query Execution**: Run read-only SQL queries with automatic safety checks
-4. **Business Metrics**: Access predefined business metric definitions
-5. **Semantic Search**: Find relevant tables using natural language queries
-6. **Dynamic Few-Shot Learning**: Automatically retrieves relevant SQL examples to improve query generation accuracy
-7. **Semantic Caching**: Caches successful SQL queries to reduce latency and API costs for recurring queries
-
-The semantic search feature uses vector embeddings to understand query intent and automatically retrieve the most relevant database schemas, solving the challenge of context window limitations.
-
-### Web Interface
-
-A Streamlit web application provides an intuitive UI for interacting with the agent:
-- Natural language question interface
-- Real-time SQL query generation and execution
-- Formatted result tables with syntax highlighting
-- Conversation history tracking
-- Cache hit indicators
-- Tenant ID configuration for multi-tenant scenarios
-
-See [Streamlit Application Guide](docs/streamlit-application-guide.md) for detailed setup and usage instructions.
-
-## Security
-
-- **Read-Only Access**: Database connections use restricted privileges (SELECT only)
-- **Application-Level Gates**: Automatic rejection of potentially dangerous SQL operations
-- **Container Isolation**: Services run in isolated containers with controlled network access
-- **Error Sanitization**: Error messages exclude sensitive information
-
-## Project Structure
-
-```
-text2sql/
-├── docker-compose.yml          # Service orchestration
-├── agent/                      # AI agent implementation
-│   ├── src/agent_core/         # Agent package (LangGraph workflow)
-│   │   ├── nodes/              # Workflow nodes (retrieve, generate, execute, correct, synthesize)
-│   │   ├── graph.py            # LangGraph workflow definition
-│   │   ├── state.py            # Agent state structure
-│   │   ├── retriever.py        # Vector store initialization
-│   │   └── tools.py            # MCP server integration
-│   └── tests/                  # Agent unit tests
-├── mcp-server/                 # Database access server
-│   ├── src/mcp_server/         # Server package
-│   └── tests/                  # Server unit tests
-├── streamlit/                  # Streamlit web application
-│   ├── app_logic.py            # Testable business logic
-│   ├── app.py                  # Streamlit UI layer
-│   ├── tests/                  # Streamlit unit tests
-│   └── .streamlit/             # Streamlit configuration
-└── database/                   # Database initialization scripts
-```
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Web UI** | `http://localhost:8501` | Streamlit interface for end-users |
+| **MCP Server** | `http://localhost:8000/sse` | Tool server for the agent |
+| **MLflow UI** | `http://localhost:5001` | Traces and metrics dashboard |
+| **MinIO** | `http://localhost:9001` | S3-compatible artifact store |
 
 ## Testing
 
-The project includes comprehensive unit tests with 100% coverage for core modules.
-
-**Run all tests:**
+Run the isolated unit test suite (no Docker required):
 ```bash
-pytest -m "not integration"
+pytest agent/tests mcp-server/tests
 ```
-
-**Run with coverage:**
-```bash
-pytest --cov=mcp-server/src/mcp_server --cov=agent/src/agent_core --cov=streamlit/app_logic --cov-report=term-missing
-```
-
-**Test Coverage:**
-- MCP Server: 100% coverage across all modules (94+ tests)
-- Agent: 100% coverage for state management, nodes, and workflow (50+ tests)
-- Streamlit: 100% coverage on business logic (11 tests)
-
-**Verify agent workflow:**
-```bash
-python3 -c "from agent_core.graph import app; print('Nodes:', list(app.nodes.keys()))"
-```
-
-## Code Quality
-
-Pre-commit hooks enforce code formatting and quality standards. Run hooks manually:
-
-```bash
-python3 -m pre_commit run --all-files
-```
-
-**Configured checks:**
-- Python formatting (Black, isort)
-- Linting (flake8)
-- File validation (YAML, JSON, TOML)
-- Test collection validation
-
-## Development Workflow
-
-1. Make code changes
-2. Run pre-commit hooks: `python3 -m pre_commit run --all-files`
-3. Run tests: `pytest --import-mode=importlib`
-4. Verify all checks pass before committing
-
-## CI/CD
-
-GitHub Actions workflows automatically:
-- Run linting and formatting checks
-- Build and validate Docker images
-- Execute test suites
-- Scan for security vulnerabilities
-- Update dependencies via Dependabot
