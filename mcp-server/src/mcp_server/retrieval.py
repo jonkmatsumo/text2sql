@@ -33,7 +33,7 @@ async def get_relevant_examples(
     # 2. Search for similar examples using Cosine Distance (<=>)
     # We select the question, SQL, and summary to show the LLM
     query = """
-        SELECT question, sql_query, summary,
+        SELECT question, sql_query,
                (1 - (embedding <=> $1)) as similarity
         FROM sql_examples
         WHERE embedding IS NOT NULL
@@ -51,12 +51,8 @@ async def get_relevant_examples(
         return ""
 
     # 3. Format as a prompt section for the LLM
-    formatted = "Here are some similar verified SQL examples that might help:\n\n"
+    examples_text = ""
     for row in rows:
-        formatted += f"User Question: {row['question']}\n"
-        if row["summary"]:
-            formatted += f"Reasoning: {row['summary']}\n"
-        formatted += f"SQL: {row['sql_query']}\n"
-        formatted += "---\n"
+        examples_text += f"Question: {row['question']}\nSQL: {row['sql_query']}\n\n"
 
-    return formatted
+    return examples_text

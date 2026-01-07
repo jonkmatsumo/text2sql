@@ -1,89 +1,87 @@
-"""Unit tests for seeding module."""
+"""Unit tests for seeding service."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp_server.seeding import cli
+from mcp_server.seeding.loader import load_from_directory
 
 
-class TestGenerateMissingEmbeddings:
-    """Tests for generate_missing_embeddings function."""
+class TestLoader:
+    """Tests for JSON loader."""
 
-    @pytest.mark.asyncio
-    @patch("mcp_server.seeding.examples.Database")
-    @patch("mcp_server.seeding.examples.RagEngine")
-    @patch("mcp_server.seeding.examples.format_vector_for_postgres")
-    async def test_generates_embeddings_for_null_rows(self, mock_format, mock_rag, mock_db):
-        """Test that embeddings are generated for rows with NULL embedding."""
-        from mcp_server.seeding.examples import generate_missing_embeddings
+    def test_load_from_directory(self, tmp_path):
+        """Test loading JSONs from directory."""
+        # Create dummy files
+        d = tmp_path / "seeds"
+        d.mkdir()
 
-        # Setup mock data
-        mock_rows = [
-            {"id": 1, "question": "Q1", "summary": "Q1"},
-            {"id": 2, "question": "Q2", "summary": "Q2"},
-        ]
+        # File 1: List
+        f1 = d / "1.json"
+        f1.write_text('[{"q": 1}]')
 
-        # Mock database connection
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
-        mock_conn.execute = AsyncMock()
+        # File 2: Dict
+        f2 = d / "2.json"
+        f2.write_text('{"queries": [{"q": 2}]}')
 
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_context.__aexit__ = AsyncMock(return_value=None)
-        mock_db.get_connection.return_value = mock_context
+        data = load_from_directory(d)
+        assert len(data) == 2
+        assert {"q": 1} in data
+        assert {"q": 2} in data
 
-        # Mock embedding generation
-        mock_rag.embed_text.return_value = [0.1, 0.2, 0.3]
-        mock_format.return_value = "[0.1,0.2,0.3]"
+    def test_load_invalid_dir(self):
+        """Test graceful failure on missing dir."""
+        data = load_from_directory(Path("/non/existent"))
+        assert data == []
 
-        result = await generate_missing_embeddings()
 
-        assert result == 2
-        assert mock_rag.embed_text.call_count == 2
-        assert mock_conn.execute.call_count == 2
+class TestSeederCli:
+    """Tests for Seeder CLI functions."""
 
     @pytest.mark.asyncio
-    @patch("mcp_server.seeding.examples.Database")
-    async def test_returns_zero_when_no_missing_embeddings(self, mock_db):
-        """Test that 0 is returned when all rows have embeddings."""
-        from mcp_server.seeding.examples import generate_missing_embeddings
-
-        # Mock empty result
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_context.__aexit__ = AsyncMock(return_value=None)
-        mock_db.get_connection.return_value = mock_context
-
-        result = await generate_missing_embeddings()
-
-        assert result == 0
-
-    @pytest.mark.asyncio
-    @patch("mcp_server.seeding.examples.Database")
-    @patch("mcp_server.seeding.examples.RagEngine")
-    @patch("mcp_server.seeding.examples.format_vector_for_postgres")
-    async def test_uses_question_when_summary_is_none(self, mock_format, mock_rag, mock_db):
-        """Test fallback to question when summary is NULL."""
-        from mcp_server.seeding.examples import generate_missing_embeddings
-
-        mock_rows = [{"id": 1, "question": "Test question?", "summary": None}]
-
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
-        mock_conn.execute = AsyncMock()
-
-        mock_context = AsyncMock()
-        mock_context.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_context.__aexit__ = AsyncMock(return_value=None)
-        mock_db.get_connection.return_value = mock_context
-
+    @patch("mcp_server.seeding.cli.Database")
+    @patch("mcp_server.seeding.cli.RagEngine")
+    @patch("mcp_server.seeding.cli.format_vector_for_postgres")
+    @patch("mcp_server.seeding.cli.load_from_directory")
+    async def test_seed_sql_examples(self, mock_load, mock_format, mock_rag, mock_db):
+        """Test seeding examples."""
+        mock_load.return_value = [{"question": "Q1", "query": "SELECT 1"}]
         mock_rag.embed_text.return_value = [0.1]
         mock_format.return_value = "[0.1]"
 
-        await generate_missing_embeddings()
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
 
-        # Should use question when summary is None
-        mock_rag.embed_text.assert_called_once_with("Test question?")
+        await cli.seed_sql_examples(Path("/tmp"))
+
+        mock_rag.embed_text.assert_called_with("Q1")
+        assert mock_conn.execute.call_count == 1
+        # Check query arg
+        args = mock_conn.execute.call_args[0]
+        assert "INSERT INTO sql_examples" in args[0]
+        assert args[1] == "Q1"
+
+    @pytest.mark.asyncio
+    @patch("mcp_server.seeding.cli.Database")
+    @patch("mcp_server.seeding.cli.load_from_directory")
+    async def test_seed_golden_dataset(self, mock_load, mock_db):
+        """Test seeding golden dataset."""
+        mock_load.return_value = [
+            {
+                "question": "Q1",
+                "query": "SELECT 1",
+                "expected_result": [{"a": 1}],
+                "difficulty": "hard",
+            }
+        ]
+
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
+
+        await cli.seed_golden_dataset(Path("/tmp"))
+
+        assert mock_conn.execute.call_count == 1
+        args = mock_conn.execute.call_args[0]
+        assert "INSERT INTO golden_dataset" in args[0]
+        assert args[6] == "hard"

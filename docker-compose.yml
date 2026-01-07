@@ -22,12 +22,33 @@ services:
     networks:
       - bi_net
 
+  seeder:
+    image: text2sql-mcp-server:latest
+    container_name: bi_agent_seeder
+    command: python -m mcp_server.seeding.cli
+    build: ./mcp-server
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: pagila
+      DB_USER: bi_agent_ro
+      DB_PASS: secure_agent_pass
+    volumes:
+      - ./database/seeds:/app/seeds:ro
+    networks:
+      - bi_net
+
   mcp-server:
     build: ./mcp-server
     container_name: bi_agent_core
     depends_on:
       postgres-db:
         condition: service_healthy
+      seeder:
+        condition: service_completed_successfully
     environment:
       DB_HOST: postgres-db
       DB_PORT: 5432

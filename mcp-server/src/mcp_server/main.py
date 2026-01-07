@@ -49,23 +49,6 @@ async def lifespan(app):
     except Exception as e:
         print(f"Warning: Schema indexing skipped: {e}")
 
-    # Phase 2: Generate embeddings for SQL examples (Phase 1 inserts done by DB init)
-    try:
-        from mcp_server.seeding.examples import generate_missing_embeddings
-
-        async with Database.get_connection() as conn:
-            missing = await conn.fetchval(
-                "SELECT COUNT(*) FROM public.sql_examples WHERE embedding IS NULL"
-            )
-            if missing > 0:
-                print(f"Found {missing} examples without embeddings. Generating...")
-                await generate_missing_embeddings()
-            else:
-                total = await conn.fetchval("SELECT COUNT(*) FROM public.sql_examples")
-                print(f"All {total} SQL examples have embeddings")
-    except Exception as e:
-        print(f"Warning: Embedding generation skipped: {e}")
-
     yield  # Server runs here
 
     # Shutdown: Close database connection pool
