@@ -15,8 +15,8 @@ async def index_all_tables():
     4. Creates embeddings
     5. Inserts/updates schema_embeddings table
     """
-    conn = await Database.get_connection()
-    try:
+    # Schema indexing is global (not tenant-scoped), so no tenant_id needed
+    async with Database.get_connection() as conn:
         # Get all tables in public schema
         tables_query = """
             SELECT table_name
@@ -83,5 +83,3 @@ async def index_all_tables():
             print(f"  ✓ Indexed: {table_name}")
 
         print(f"✓ Schema indexing complete: {len(tables)} tables indexed")
-    finally:
-        await Database.release_connection(conn)

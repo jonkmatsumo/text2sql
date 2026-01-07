@@ -84,10 +84,10 @@ flowchart TB
     CorrectNode -->|"LLM call"| OpenAILLM
     SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-4o<br/>Natural language"]
 
-    style Agent fill:#e1f5ff
-    style MCPServer fill:#fff4e1
-    style Database fill:#e8f5e9
-    style VectorStore fill:#f3e5f5
+    style Agent fill:#5B9BD5
+    style MCPServer fill:#FF9800
+    style Database fill:#4CAF50
+    style VectorStore fill:#9C27B0
 ```
 
 **Key Components:**

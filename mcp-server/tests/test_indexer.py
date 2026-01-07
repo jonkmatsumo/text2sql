@@ -1,6 +1,6 @@
 """Unit tests for schema indexer service."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.indexer import index_all_tables
@@ -39,26 +39,24 @@ class TestIndexAllTables:
         # Mock embedding generation
         mock_embedding = [0.1] * 384
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
-            with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
-                    mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                    await index_all_tables()
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
+            with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                await index_all_tables()
 
-                    # Verify connection was acquired and released
-                    mock_get.assert_called_once()
-                    mock_release.assert_called_once_with(mock_conn)
+                # Verify connection was acquired (context manager called)
+                mock_get.assert_called_once()
 
-                    # Verify tables query was executed
-                    assert mock_conn.fetch.call_count == 5  # 1 tables + 2*2 (cols + fks)
+                # Verify tables query was executed
+                assert mock_conn.fetch.call_count == 5  # 1 tables + 2*2 (cols + fks)
 
-                    # Verify execute was called twice (once per table)
-                    assert mock_conn.execute.call_count == 2
+                # Verify execute was called twice (once per table)
+                assert mock_conn.execute.call_count == 2
 
     @pytest.mark.asyncio
     async def test_index_all_tables_with_foreign_keys(self):
@@ -86,22 +84,22 @@ class TestIndexAllTables:
 
         mock_embedding = [0.1] * 384
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
-            with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
-                    mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                    await index_all_tables()
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
+            with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                await index_all_tables()
 
-                    # Verify foreign keys were queried
-                    fetch_calls = [call[0][0] for call in mock_conn.fetch.call_args_list]
-                    assert any("FOREIGN KEY" in call for call in fetch_calls)
+                # Verify foreign keys were queried
+                fetch_calls = [call[0][0] for call in mock_conn.fetch.call_args_list]
+                assert any("FOREIGN KEY" in call for call in fetch_calls)
 
-                    mock_release.assert_called_once_with(mock_conn)
+                # Verify connection was acquired
+                mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_index_all_tables_empty_database(self):
@@ -110,21 +108,20 @@ class TestIndexAllTables:
         mock_conn.fetch = AsyncMock(return_value=[])  # No tables
         mock_conn.execute = AsyncMock()
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
-            with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                await index_all_tables()
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
+            await index_all_tables()
 
-                # Verify no execute calls (no tables to index)
-                mock_conn.execute.assert_not_called()
+            # Verify no execute calls (no tables to index)
+            mock_conn.execute.assert_not_called()
 
-                # Verify connection was still released
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired
+            mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_index_all_tables_on_conflict_update(self):
@@ -143,23 +140,23 @@ class TestIndexAllTables:
 
         mock_embedding = [0.1] * 384
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
-            with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
-                    mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                    await index_all_tables()
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
+            with patch("mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding):
+                await index_all_tables()
 
-                    # Verify upsert query contains ON CONFLICT
-                    execute_call = mock_conn.execute.call_args[0][0]
-                    assert "ON CONFLICT" in execute_call
-                    assert "DO UPDATE SET" in execute_call
+                # Verify upsert query contains ON CONFLICT
+                execute_call = mock_conn.execute.call_args[0][0]
+                assert "ON CONFLICT" in execute_call
+                assert "DO UPDATE SET" in execute_call
 
-                    mock_release.assert_called_once_with(mock_conn)
+                # Verify connection was acquired
+                mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_index_all_tables_connection_cleanup(self):
@@ -167,19 +164,18 @@ class TestIndexAllTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
-            with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                with pytest.raises(Exception):
-                    await index_all_tables()
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
+            with pytest.raises(Exception):
+                await index_all_tables()
 
-                # Connection should still be released
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired (context manager handles cleanup)
+            mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_index_all_tables_embedding_generation(self):
@@ -198,25 +194,26 @@ class TestIndexAllTables:
 
         mock_embedding = [0.5] * 384
 
-        with patch(
-            "mcp_server.indexer.Database.get_connection", new_callable=AsyncMock
-        ) as mock_get:
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
+
+        with patch("mcp_server.indexer.Database.get_connection", mock_get):
             with patch(
-                "mcp_server.indexer.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                with patch(
-                    "mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding
-                ) as mock_embed:
-                    with patch("mcp_server.indexer.format_vector_for_postgres") as mock_format:
-                        mock_format.return_value = "[0.5,0.5,...]"
-                        mock_get.return_value = mock_conn
+                "mcp_server.indexer.RagEngine.embed_text", return_value=mock_embedding
+            ) as mock_embed:
+                with patch("mcp_server.indexer.format_vector_for_postgres") as mock_format:
+                    mock_format.return_value = "[0.5,0.5,...]"
 
-                        await index_all_tables()
+                    await index_all_tables()
 
-                        # Verify embedding was generated
-                        mock_embed.assert_called_once()
+                    # Verify embedding was generated
+                    mock_embed.assert_called_once()
 
-                        # Verify vector was formatted
-                        mock_format.assert_called_once_with(mock_embedding)
+                    # Verify vector was formatted
+                    mock_format.assert_called_once_with(mock_embedding)
 
-                        mock_release.assert_called_once_with(mock_conn)
+                    # Verify connection was acquired
+                    mock_get.assert_called_once()

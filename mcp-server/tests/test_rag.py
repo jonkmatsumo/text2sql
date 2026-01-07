@@ -293,32 +293,32 @@ class TestSearchSimilarTables:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
-            with patch(
-                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                query_embedding = [0.1] * 384
-                results = await search_similar_tables(query_embedding, limit=5)
+        with patch("mcp_server.rag.Database.get_connection", mock_get):
+            query_embedding = [0.1] * 384
+            results = await search_similar_tables(query_embedding, limit=5)
 
-                # Verify connection was acquired and released
-                mock_get.assert_called_once()
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired (context manager called)
+            mock_get.assert_called_once()
 
-                # Verify query was executed
-                mock_conn.fetch.assert_called_once()
-                call_args = mock_conn.fetch.call_args[0]
-                assert "SELECT" in call_args[0]
-                assert "schema_embeddings" in call_args[0]
-                assert "<=>" in call_args[0]  # Cosine distance operator
+            # Verify query was executed
+            mock_conn.fetch.assert_called_once()
+            call_args = mock_conn.fetch.call_args[0]
+            assert "SELECT" in call_args[0]
+            assert "schema_embeddings" in call_args[0]
+            assert "<=>" in call_args[0]  # Cosine distance operator
 
-                # Verify results
-                assert len(results) == 2
-                assert results[0]["table_name"] == "customer"
-                assert results[0]["distance"] == 0.1
-                assert results[1]["table_name"] == "order"
-                assert results[1]["distance"] == 0.2
+            # Verify results
+            assert len(results) == 2
+            assert results[0]["table_name"] == "customer"
+            assert results[0]["distance"] == 0.1
+            assert results[1]["table_name"] == "order"
+            assert results[1]["distance"] == 0.2
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_empty_result(self):
@@ -326,17 +326,18 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
-            with patch(
-                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                query_embedding = [0.1] * 384
-                results = await search_similar_tables(query_embedding, limit=5)
+        with patch("mcp_server.rag.Database.get_connection", mock_get):
+            query_embedding = [0.1] * 384
+            results = await search_similar_tables(query_embedding, limit=5)
 
-                assert results == []
-                mock_release.assert_called_once_with(mock_conn)
+            assert results == []
+            mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_limit(self):
@@ -348,25 +349,25 @@ class TestSearchSimilarTables:
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
-            with patch(
-                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                query_embedding = [0.1] * 384
-                results = await search_similar_tables(query_embedding, limit=3)
+        with patch("mcp_server.rag.Database.get_connection", mock_get):
+            query_embedding = [0.1] * 384
+            results = await search_similar_tables(query_embedding, limit=3)
 
-                # Verify connection was acquired and released
-                mock_get.assert_called_once()
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired (context manager called)
+            mock_get.assert_called_once()
 
-                # Verify limit was passed to query
-                call_args = mock_conn.fetch.call_args[0]
-                assert call_args[2] == 3  # limit parameter
+            # Verify limit was passed to query
+            call_args = mock_conn.fetch.call_args[0]
+            assert call_args[2] == 3  # limit parameter
 
-                # Results should be limited (though mock returns all)
-                assert len(results) == 10  # Mock returns all, but in real DB it would be limited
+            # Results should be limited (though mock returns all)
+            assert len(results) == 10  # Mock returns all, but in real DB it would be limited
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_connection_cleanup(self):
@@ -374,19 +375,20 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(side_effect=Exception("Database error"))
 
-        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
-            with patch(
-                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                query_embedding = [0.1] * 384
+        with patch("mcp_server.rag.Database.get_connection", mock_get):
+            query_embedding = [0.1] * 384
 
-                with pytest.raises(Exception):
-                    await search_similar_tables(query_embedding, limit=5)
+            with pytest.raises(Exception):
+                await search_similar_tables(query_embedding, limit=5)
 
-                # Connection should still be released
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired (context manager handles cleanup)
+            mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_query_structure(self):
@@ -394,28 +396,28 @@ class TestSearchSimilarTables:
         mock_conn = AsyncMock()
         mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("mcp_server.rag.Database.get_connection", new_callable=AsyncMock) as mock_get:
-            with patch(
-                "mcp_server.rag.Database.release_connection", new_callable=AsyncMock
-            ) as mock_release:
-                mock_get.return_value = mock_conn
+        # Setup async context manager mock
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
 
-                query_embedding = [0.1] * 384
-                await search_similar_tables(query_embedding, limit=5)
+        with patch("mcp_server.rag.Database.get_connection", mock_get):
+            query_embedding = [0.1] * 384
+            await search_similar_tables(query_embedding, limit=5)
 
-                # Verify connection was acquired and released
-                mock_get.assert_called_once()
-                mock_release.assert_called_once_with(mock_conn)
+            # Verify connection was acquired (context manager called)
+            mock_get.assert_called_once()
 
-                # Verify query structure
-                call_args = mock_conn.fetch.call_args[0]
-                query = call_args[0]
-                assert "SELECT" in query
-                assert "table_name" in query
-                assert "schema_text" in query
-                assert "distance" in query
-                assert "schema_embeddings" in query
-                assert "ORDER BY distance ASC" in query
-                assert "LIMIT" in query
-                assert "$1::vector" in query  # Parameterized query
-                assert "$2" in query  # Limit parameter
+            # Verify query structure
+            call_args = mock_conn.fetch.call_args[0]
+            query = call_args[0]
+            assert "SELECT" in query
+            assert "table_name" in query
+            assert "schema_text" in query
+            assert "distance" in query
+            assert "schema_embeddings" in query
+            assert "ORDER BY distance ASC" in query
+            assert "LIMIT" in query
+            assert "$1::vector" in query  # Parameterized query
+            assert "$2" in query  # Limit parameter

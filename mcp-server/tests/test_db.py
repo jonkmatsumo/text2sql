@@ -1,6 +1,6 @@
 """Unit tests for Database connection pool management."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
@@ -30,9 +30,10 @@ class TestDatabase:
                 assert Database._pool == mock_pool
                 mock_create.assert_called_once()
                 call_kwargs = mock_create.call_args[1]
-                assert call_kwargs["min_size"] == 2
-                assert call_kwargs["max_size"] == 10
+                assert call_kwargs["min_size"] == 5
+                assert call_kwargs["max_size"] == 20
                 assert call_kwargs["command_timeout"] == 60
+                assert "server_settings" in call_kwargs
 
     @pytest.mark.asyncio
     async def test_init_with_env_vars(self):
@@ -96,17 +97,57 @@ class TestDatabase:
         await Database.close()
 
     @pytest.mark.asyncio
-    async def test_get_connection_success(self):
-        """Test successfully acquiring a connection from the pool."""
+    async def test_get_connection_context_manager(self):
+        """Test that get_connection works as async context manager."""
         mock_pool = AsyncMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
-        mock_pool.acquire = AsyncMock(return_value=mock_conn)
+        mock_transaction = AsyncMock()
+
+        # Setup transaction context manager behavior
+        mock_transaction.__aenter__ = AsyncMock(return_value=mock_transaction)
+        mock_transaction.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        # Setup acquire() to return an async context manager
+        mock_acquire_cm = AsyncMock()
+        mock_acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_cm)
         Database._pool = mock_pool
 
-        conn = await Database.get_connection()
+        async with Database.get_connection() as conn:
+            assert conn == mock_conn
+            mock_pool.acquire.assert_called_once()
+            mock_conn.transaction.assert_called_once()
 
-        assert conn == mock_conn
-        mock_pool.acquire.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_get_connection_with_tenant_id(self):
+        """Test that tenant context is set when tenant_id is provided."""
+        mock_pool = AsyncMock(spec=asyncpg.Pool)
+        mock_conn = AsyncMock()
+        mock_transaction = AsyncMock()
+
+        # Setup transaction context manager behavior
+        mock_transaction.__aenter__ = AsyncMock(return_value=mock_transaction)
+        mock_transaction.__aexit__ = AsyncMock(return_value=False)
+        mock_conn.transaction = MagicMock(return_value=mock_transaction)
+        mock_conn.execute = AsyncMock()
+
+        # Setup acquire() to return an async context manager
+        mock_acquire_cm = AsyncMock()
+        mock_acquire_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_acquire_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_pool.acquire = MagicMock(return_value=mock_acquire_cm)
+        Database._pool = mock_pool
+
+        tenant_id = 1
+        async with Database.get_connection(tenant_id=tenant_id) as conn:
+            assert conn == mock_conn
+            # Verify set_config was called with tenant_id
+            mock_conn.execute.assert_called_once()
+            call_args = mock_conn.execute.call_args
+            assert "set_config" in call_args[0][0]
+            assert str(tenant_id) in call_args[0]
 
     @pytest.mark.asyncio
     async def test_get_connection_not_initialized(self):
@@ -114,26 +155,7 @@ class TestDatabase:
         Database._pool = None
 
         with pytest.raises(RuntimeError) as exc_info:
-            await Database.get_connection()
+            async with Database.get_connection():
+                pass
 
         assert "Database pool not initialized" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_release_connection_success(self):
-        """Test releasing a connection back to the pool."""
-        mock_pool = AsyncMock(spec=asyncpg.Pool)
-        mock_conn = AsyncMock()
-        Database._pool = mock_pool
-
-        await Database.release_connection(mock_conn)
-
-        mock_pool.release.assert_called_once_with(mock_conn)
-
-    @pytest.mark.asyncio
-    async def test_release_connection_no_pool(self):
-        """Test releasing when no pool exists (should not raise error)."""
-        Database._pool = None
-        mock_conn = AsyncMock()
-
-        # Should not raise an error
-        await Database.release_connection(mock_conn)

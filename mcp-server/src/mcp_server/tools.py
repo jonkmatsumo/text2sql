@@ -9,50 +9,48 @@ from mcp_server.db import Database
 from mcp_server.rag import RagEngine, search_similar_tables
 
 
-async def list_tables(search_term: Optional[str] = None) -> str:
+async def list_tables(search_term: Optional[str] = None, tenant_id: Optional[int] = None) -> str:
     """
     List available tables in the database. Use this to discover table names.
 
     Args:
         search_term: Optional fuzzy search string to filter table names (e.g. 'pay' -> 'payment').
+        tenant_id: Optional tenant identifier (not required for schema queries).
 
     Returns:
         JSON array of table names as strings.
     """
-    conn = await Database.get_connection()
-    try:
-        query = """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-        """
-        args = []
+    query = """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+    """
+    args = []
 
-        if search_term:
-            query += " AND table_name ILIKE $1"
-            args.append(f"%{search_term}%")
+    if search_term:
+        query += " AND table_name ILIKE $1"
+        args.append(f"%{search_term}%")
 
+    async with Database.get_connection(tenant_id) as conn:
         rows = await conn.fetch(query, *args)
         tables = [row["table_name"] for row in rows]
         return json.dumps(tables, indent=2)
-    finally:
-        await Database.release_connection(conn)
 
 
-async def get_table_schema(table_names: list[str]) -> str:
+async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = None) -> str:
     """
     Retrieve the schema (columns, data types, foreign keys) for a list of tables.
 
     Args:
         table_names: A list of exact table names (e.g. ['film', 'actor']).
+        tenant_id: Optional tenant identifier (not required for schema queries).
 
     Returns:
         Markdown-formatted schema documentation.
     """
-    conn = await Database.get_connection()
     schema_output = ""
 
-    try:
+    async with Database.get_connection(tenant_id) as conn:
         for table in table_names:
             # Get Columns
             col_query = """
@@ -102,22 +100,30 @@ async def get_table_schema(table_names: list[str]) -> str:
             schema_output += "\n"
 
         return schema_output
-    finally:
-        await Database.release_connection(conn)
 
 
-async def execute_sql_query(sql_query: str) -> str:
+async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> str:
     """
     Execute a valid SQL SELECT statement and return the result as JSON.
 
     Strictly read-only. Returns error messages as strings for self-correction.
+    Requires tenant_id for RLS enforcement.
 
     Args:
         sql_query: A SQL SELECT query string.
+        tenant_id: Required tenant identifier for RLS enforcement.
 
     Returns:
         JSON array of result rows, or error message as string.
     """
+    # Require tenant_id for RLS enforcement
+    if tenant_id is None:
+        error_msg = (
+            "Unauthorized. No Tenant ID context found. "
+            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
+        )
+        return json.dumps({"error": error_msg})
+
     # 1. Application-Level Security Check (Pre-flight)
     # Reject mutative keywords to prevent injection attacks or accidental deletion
     forbidden_patterns = [
@@ -139,46 +145,47 @@ async def execute_sql_query(sql_query: str) -> str:
                 "Read-only access only."
             )
 
-    conn = await Database.get_connection()
-    try:
-        # 2. Execution
-        rows = await conn.fetch(sql_query)
+    async with Database.get_connection(tenant_id) as conn:
+        try:
+            # 2. Execution
+            rows = await conn.fetch(sql_query)
 
-        # 3. Serialization
-        # Convert Record objects to dicts, handling non-serializable types
-        result = [dict(row) for row in rows]
+            # 3. Serialization
+            # Convert Record objects to dicts, handling non-serializable types
+            result = [dict(row) for row in rows]
 
-        # 4. Size Safety Valve
-        if len(result) > 1000:
-            error_msg = (
-                f"Result set too large ({len(result)} rows). "
-                "Please add a LIMIT clause to your query."
-            )
+            # 4. Size Safety Valve
+            if len(result) > 1000:
+                error_msg = (
+                    f"Result set too large ({len(result)} rows). "
+                    "Please add a LIMIT clause to your query."
+                )
+                return json.dumps(
+                    {
+                        "error": error_msg,
+                        "truncated_result": result[:1000],
+                    },
+                    default=str,
+                )
+
             return json.dumps(
-                {
-                    "error": error_msg,
-                    "truncated_result": result[:1000],
-                },
-                default=str,
-            )
+                result, default=str, indent=2
+            )  # default=str handles Date/Decimal types
 
-        return json.dumps(result, default=str, indent=2)  # default=str handles Date/Decimal types
-
-    except asyncpg.PostgresError as e:
-        # Crucial: Return the DB error as a string so the LLM can read it and fix the query
-        return f"Database Error: {str(e)}"
-    except Exception as e:
-        return f"Execution Error: {str(e)}"
-    finally:
-        await Database.release_connection(conn)
+        except asyncpg.PostgresError as e:
+            # Crucial: Return the DB error as a string so the LLM can read it and fix the query
+            return f"Database Error: {str(e)}"
+        except Exception as e:
+            return f"Execution Error: {str(e)}"
 
 
-async def get_semantic_definitions(terms: list[str]) -> str:
+async def get_semantic_definitions(terms: list[str], tenant_id: Optional[int] = None) -> str:
     """
     Retrieve business metric definitions from the semantic layer.
 
     Args:
         terms: List of term names to look up (e.g. ['High Value Customer', 'Churned']).
+        tenant_id: Optional tenant identifier (not required for semantic definitions).
 
     Returns:
         JSON object mapping term names to their definitions and SQL logic.
@@ -186,17 +193,15 @@ async def get_semantic_definitions(terms: list[str]) -> str:
     if not terms:
         return json.dumps({})
 
-    conn = await Database.get_connection()
-    try:
+    # Build parameterized query for multiple terms
+    placeholders = ",".join([f"${i+1}" for i in range(len(terms))])
+    query = f"""
+        SELECT term_name, definition, sql_logic
+        FROM public.semantic_definitions
+        WHERE term_name = ANY(ARRAY[{placeholders}])
+    """
 
-        # Build parameterized query for multiple terms
-        placeholders = ",".join([f"${i+1}" for i in range(len(terms))])
-        query = f"""
-            SELECT term_name, definition, sql_logic
-            FROM public.semantic_definitions
-            WHERE term_name = ANY(ARRAY[{placeholders}])
-        """
-
+    async with Database.get_connection(tenant_id) as conn:
         rows = await conn.fetch(query, *terms)
 
         result = {
@@ -208,11 +213,11 @@ async def get_semantic_definitions(terms: list[str]) -> str:
         }
 
         return json.dumps(result, indent=2)
-    finally:
-        await Database.release_connection(conn)
 
 
-async def search_relevant_tables(user_query: str, limit: int = 5) -> str:
+async def search_relevant_tables(
+    user_query: str, limit: int = 5, tenant_id: Optional[int] = None
+) -> str:
     """
     Search for tables relevant to a natural language query using semantic similarity.
 
@@ -222,6 +227,7 @@ async def search_relevant_tables(user_query: str, limit: int = 5) -> str:
     Args:
         user_query: Natural language question (e.g., "Show me customer payments")
         limit: Maximum number of relevant tables to return (default: 5)
+        tenant_id: Optional tenant identifier (not required for schema queries).
 
     Returns:
         Markdown-formatted string containing schema definitions of relevant tables.
@@ -230,7 +236,7 @@ async def search_relevant_tables(user_query: str, limit: int = 5) -> str:
     query_embedding = RagEngine.embed_text(user_query)
 
     # Search for similar tables
-    results = await search_similar_tables(query_embedding, limit=limit)
+    results = await search_similar_tables(query_embedding, limit=limit, tenant_id=tenant_id)
 
     if not results:
         return "No relevant tables found. The schema may not be indexed yet."

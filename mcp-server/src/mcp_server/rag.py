@@ -130,6 +130,7 @@ def generate_schema_document(
 async def search_similar_tables(
     query_embedding: list[float],
     limit: int = 5,
+    tenant_id: Optional[int] = None,
 ) -> list[dict]:
     """
     Search for similar tables using cosine distance.
@@ -137,27 +138,27 @@ async def search_similar_tables(
     Args:
         query_embedding: Embedding vector of the user query.
         limit: Maximum number of results to return.
+        tenant_id: Optional tenant identifier (not required for schema queries).
 
     Returns:
         List of dicts with 'table_name', 'schema_text', 'distance'.
     """
-    conn = await Database.get_connection()
-    try:
-        # Format embedding for PostgreSQL
-        pg_vector = format_vector_for_postgres(query_embedding)
+    # Format embedding for PostgreSQL
+    pg_vector = format_vector_for_postgres(query_embedding)
 
-        # Use cosine distance operator (<=>)
-        # Lower distance = more similar
-        query = """
-            SELECT
-                table_name,
-                schema_text,
-                (embedding <=> $1::vector) as distance
-            FROM public.schema_embeddings
-            ORDER BY distance ASC
-            LIMIT $2
-        """
+    # Use cosine distance operator (<=>)
+    # Lower distance = more similar
+    query = """
+        SELECT
+            table_name,
+            schema_text,
+            (embedding <=> $1::vector) as distance
+        FROM public.schema_embeddings
+        ORDER BY distance ASC
+        LIMIT $2
+    """
 
+    async with Database.get_connection(tenant_id) as conn:
         rows = await conn.fetch(query, pg_vector, limit)
         return [
             {
@@ -167,5 +168,3 @@ async def search_similar_tables(
             }
             for row in rows
         ]
-    finally:
-        await Database.release_connection(conn)

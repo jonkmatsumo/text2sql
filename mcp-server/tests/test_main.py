@@ -1,6 +1,6 @@
 """Unit tests for MCP server main entrypoint."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -76,40 +76,36 @@ class TestMain:
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=0)  # Empty table
 
+        # Setup async context manager mock for get_connection
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
+
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
-            with patch.object(Database, "get_connection", new_callable=AsyncMock) as mock_get:
-                with patch.object(
-                    Database, "release_connection", new_callable=AsyncMock
-                ) as mock_release:
-                    with patch(
-                        "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
-                    ) as mock_index:
-                        mock_get.return_value = mock_conn
+            with patch.object(Database, "get_connection", mock_get):
+                with patch(
+                    "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
+                ) as mock_index:
+                    # Replicate init_database logic
+                    await mock_init()
 
-                        # Replicate init_database logic
-                        await mock_init()
+                    async with Database.get_connection() as conn:
+                        count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
+                        if count == 0:
+                            await mock_index()
 
-                        conn = await mock_get()
-                        try:
-                            count = await conn.fetchval(
-                                "SELECT COUNT(*) FROM public.schema_embeddings"
-                            )
-                            if count == 0:
-                                await mock_index()
-                        finally:
-                            await mock_release(conn)
+                    # Verify database was initialized
+                    mock_init.assert_called_once()
 
-                        # Verify database was initialized
-                        mock_init.assert_called_once()
+                    # Verify count was checked
+                    mock_conn.fetchval.assert_called_once()
 
-                        # Verify count was checked
-                        mock_conn.fetchval.assert_called_once()
+                    # Verify indexing was triggered
+                    mock_index.assert_called_once()
 
-                        # Verify indexing was triggered
-                        mock_index.assert_called_once()
-
-                        # Verify connection was released
-                        mock_release.assert_called_once_with(mock_conn)
+                    # Verify connection context manager was used
+                    mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_init_database_skips_indexing_when_populated(self):
@@ -120,37 +116,33 @@ class TestMain:
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=15)  # 15 tables already indexed
 
+        # Setup async context manager mock for get_connection
+        mock_get_cm = AsyncMock()
+        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_get_cm)
+
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
-            with patch.object(Database, "get_connection", new_callable=AsyncMock) as mock_get:
-                with patch.object(
-                    Database, "release_connection", new_callable=AsyncMock
-                ) as mock_release:
-                    with patch(
-                        "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
-                    ) as mock_index:
-                        mock_get.return_value = mock_conn
+            with patch.object(Database, "get_connection", mock_get):
+                with patch(
+                    "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
+                ) as mock_index:
+                    # Replicate init_database logic
+                    await mock_init()
 
-                        # Replicate init_database logic
-                        await mock_init()
+                    async with Database.get_connection() as conn:
+                        count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
+                        if count == 0:
+                            await mock_index()
 
-                        conn = await mock_get()
-                        try:
-                            count = await conn.fetchval(
-                                "SELECT COUNT(*) FROM public.schema_embeddings"
-                            )
-                            if count == 0:
-                                await mock_index()
-                        finally:
-                            await mock_release(conn)
+                    # Verify database was initialized
+                    mock_init.assert_called_once()
 
-                        # Verify database was initialized
-                        mock_init.assert_called_once()
+                    # Verify count was checked
+                    mock_conn.fetchval.assert_called_once()
 
-                        # Verify count was checked
-                        mock_conn.fetchval.assert_called_once()
+                    # Verify indexing was NOT triggered
+                    mock_index.assert_not_called()
 
-                        # Verify indexing was NOT triggered
-                        mock_index.assert_not_called()
-
-                        # Verify connection was released
-                        mock_release.assert_called_once_with(mock_conn)
+                    # Verify connection context manager was used
+                    mock_get.assert_called_once()
