@@ -11,31 +11,33 @@ import sys
 from pathlib import Path
 
 from mcp_server.db import Database
-from mcp_server.graph_ingestion.schema_parser import SchemaParser
+from mcp_server.factory.retriever import get_retriever
+from mcp_server.graph_ingestion.hydrator import GraphHydrator
 from mcp_server.rag import RagEngine, format_vector_for_postgres
 from mcp_server.seeding.loader import load_from_directory
 
 
-async def _ingest_graph_schema(conn: any, schema_path: Path):
-    """Parse schema and (placeholder) ingest into graph."""
-    if not schema_path.exists():
-        print(f"Warning: Schema file not found at {schema_path}")
-        return
-
-    print(f"Parsing schema from {schema_path}...")
+async def _ingest_graph_schema():
+    """Ingest schema into Memgraph using DataSchemaRetriever."""
+    print("Ingesting graph schema...")
     try:
-        parser = SchemaParser()
-        # Read file manually to pass content or let parser handle it if it supports file path
-        # Our parser supports parse_file(path)
-        parsed_schema = parser.parse_file(str(schema_path))
+        # Get retriever (Postgres connection assumed via env vars)
+        retriever = get_retriever()
 
-        table_count = len(parsed_schema.get("tables", []))
-        print(f"✓ Parsed {table_count} tables from schema.")
-
-        # future: Ingest into Memgraph or Postgres Graph representation
+        # Hydrate
+        hydrator = GraphHydrator()
+        try:
+            # Run blocking hydration code in executor if needed,
+            # but for seeding script simplicity we can run it directly
+            # as long as we accept it blocks the asyncio loop temporarily
+            # (which is fine for a linear CLI script).
+            hydrator.hydrate_schema(retriever)
+            print("✓ Graph schema ingestion complete.")
+        finally:
+            hydrator.close()
 
     except Exception as e:
-        print(f"Error parsing schema: {e}")
+        print(f"Error ingesting graph schema: {e}")
 
 
 async def _upsert_sql_example(conn, item: dict):
@@ -206,7 +208,7 @@ async def main():
             await _seed_table_summaries(conn, Path("/app/queries"))
 
             # 3. Graph Ingestion (Schema Parsing)
-            await _ingest_graph_schema(conn, Path("/app/schema.sql"))
+            await _ingest_graph_schema()
 
             print("✓ Successfully processed all seed operations.")
 
