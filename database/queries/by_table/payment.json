@@ -1,0 +1,945 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:07.859959+00:00",
+    "tenant_id": 25,
+    "description": "Enriched seeds for payment"
+  },
+  "queries": [
+    {
+      "id": 1100,
+      "question": "List the last 10 payments",
+      "query": "SELECT * FROM payment ORDER BY payment_date DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "payment_id": 31469,
+          "customer_id": 227,
+          "staff_id": 1,
+          "rental_id": 8936,
+          "amount": 2.99,
+          "payment_date": "2022-07-27T10:39:20.739759+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22736,
+          "customer_id": 6,
+          "staff_id": 1,
+          "rental_id": 11591,
+          "amount": 6.99,
+          "payment_date": "2022-07-27T10:25:53.638592+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19236,
+          "customer_id": 190,
+          "staff_id": 1,
+          "rental_id": 2057,
+          "amount": 4.99,
+          "payment_date": "2022-07-27T09:49:40.902317+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23762,
+          "customer_id": 117,
+          "staff_id": 1,
+          "rental_id": 12143,
+          "amount": 2.99,
+          "payment_date": "2022-07-27T07:49:26.056848+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28672,
+          "customer_id": 580,
+          "staff_id": 1,
+          "rental_id": 5937,
+          "amount": 6.99,
+          "payment_date": "2022-07-27T07:39:01.117340+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16970,
+          "customer_id": 148,
+          "staff_id": 1,
+          "rental_id": 682,
+          "amount": 4.99,
+          "payment_date": "2022-07-27T07:38:02.694609+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 24149,
+          "customer_id": 152,
+          "staff_id": 1,
+          "rental_id": 13204,
+          "amount": 4.99,
+          "payment_date": "2022-07-27T07:14:39.588452+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16543,
+          "customer_id": 531,
+          "staff_id": 1,
+          "rental_id": 681,
+          "amount": 2.99,
+          "payment_date": "2022-07-27T06:45:01.874389+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16968,
+          "customer_id": 147,
+          "staff_id": 1,
+          "rental_id": 362,
+          "amount": 0.99,
+          "payment_date": "2022-07-27T06:44:10.835084+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19397,
+          "customer_id": 238,
+          "staff_id": 1,
+          "rental_id": 1660,
+          "amount": 4.99,
+          "payment_date": "2022-07-27T05:42:00.768706+00:00",
+          "store_id": 25
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1101,
+      "question": "Find payments made by customer ID 1",
+      "query": "SELECT * FROM payment WHERE customer_id = 1;",
+      "expected_result": [
+        {
+          "payment_id": 28999,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 7841,
+          "amount": 4.99,
+          "payment_date": "2022-01-29T13:03:02.267403+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18501,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 3284,
+          "amount": 3.99,
+          "payment_date": "2022-02-04T02:24:08.306998+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22690,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 15315,
+          "amount": 5.99,
+          "payment_date": "2022-02-19T19:34:21.993082+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22688,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 14825,
+          "amount": 1.99,
+          "payment_date": "2022-03-04T11:44:15.022112+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28994,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 4611,
+          "amount": 5.99,
+          "payment_date": "2022-03-17T08:29:04.348881+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18495,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 1185,
+          "amount": 5.99,
+          "payment_date": "2022-04-19T20:13:01.277968+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22682,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 11367,
+          "amount": 0.99,
+          "payment_date": "2022-04-26T03:48:06.924227+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 29001,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 8074,
+          "amount": 0.99,
+          "payment_date": "2022-04-16T23:27:31.152811+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18499,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 2308,
+          "amount": 4.99,
+          "payment_date": "2022-05-23T11:58:26.753479+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28997,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 6163,
+          "amount": 7.99,
+          "payment_date": "2022-05-14T20:11:57.301179+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16678,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 573,
+          "amount": 0.99,
+          "payment_date": "2022-06-22T11:02:29.703344+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16677,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 76,
+          "amount": 2.99,
+          "payment_date": "2022-06-29T18:09:50.346988+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28996,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 5326,
+          "amount": 4.99,
+          "payment_date": "2022-06-17T12:55:51.363867+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18498,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 1725,
+          "amount": 4.99,
+          "payment_date": "2022-07-23T07:44:21.017100+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22687,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 14762,
+          "amount": 0.99,
+          "payment_date": "2022-07-04T12:24:19.139905+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22684,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 12250,
+          "amount": 0.99,
+          "payment_date": "2022-07-12T03:31:30.294604+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28995,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 5244,
+          "amount": 4.99,
+          "payment_date": "2022-07-01T20:48:15.842226+00:00",
+          "store_id": 25
+        }
+      ],
+      "expected_row_count": 17,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1102,
+      "question": "Calculate total revenue",
+      "query": "SELECT SUM(amount) FROM payment;",
+      "expected_result": [
+        {
+          "sum": 33489.47
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1103,
+      "question": "List payments over $10.00",
+      "query": "SELECT * FROM payment WHERE amount > 10.00;",
+      "expected_result": [
+        {
+          "payment_id": 27452,
+          "customer_id": 470,
+          "staff_id": 1,
+          "rental_id": 6927,
+          "amount": 10.99,
+          "payment_date": "2022-01-28T20:59:30.986557+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 26835,
+          "customer_id": 414,
+          "staff_id": 1,
+          "rental_id": 3957,
+          "amount": 10.99,
+          "payment_date": "2022-01-26T02:08:01.831015+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18366,
+          "customer_id": 571,
+          "staff_id": 1,
+          "rental_id": 2977,
+          "amount": 10.99,
+          "payment_date": "2022-02-16T10:31:41.989610+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16883,
+          "customer_id": 104,
+          "staff_id": 1,
+          "rental_id": 163,
+          "amount": 10.99,
+          "payment_date": "2022-02-27T01:00:52.481368+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16358,
+          "customer_id": 433,
+          "staff_id": 1,
+          "rental_id": 691,
+          "amount": 10.99,
+          "payment_date": "2022-02-22T12:56:36.816232+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23211,
+          "customer_id": 54,
+          "staff_id": 1,
+          "rental_id": 15226,
+          "amount": 10.99,
+          "payment_date": "2022-02-24T02:38:51.609761+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20869,
+          "customer_id": 410,
+          "staff_id": 1,
+          "rental_id": 11187,
+          "amount": 10.99,
+          "payment_date": "2022-02-10T13:34:30.781978+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28449,
+          "customer_id": 561,
+          "staff_id": 1,
+          "rental_id": 8504,
+          "amount": 10.99,
+          "payment_date": "2022-02-06T02:35:14.350576+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 26280,
+          "customer_id": 364,
+          "staff_id": 1,
+          "rental_id": 5872,
+          "amount": 10.99,
+          "payment_date": "2022-02-19T18:26:34.592100+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 25083,
+          "customer_id": 259,
+          "staff_id": 1,
+          "rental_id": 15425,
+          "amount": 10.99,
+          "payment_date": "2022-02-25T22:39:54.250335+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 30287,
+          "customer_id": 114,
+          "staff_id": 1,
+          "rental_id": 8590,
+          "amount": 10.99,
+          "payment_date": "2022-02-08T19:56:05.961825+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20449,
+          "customer_id": 367,
+          "staff_id": 1,
+          "rental_id": 14481,
+          "amount": 10.99,
+          "payment_date": "2022-03-13T19:22:55.338403+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19815,
+          "customer_id": 297,
+          "staff_id": 1,
+          "rental_id": 12472,
+          "amount": 10.99,
+          "payment_date": "2022-03-06T06:14:58.537038+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19764,
+          "customer_id": 292,
+          "staff_id": 1,
+          "rental_id": 12739,
+          "amount": 10.99,
+          "payment_date": "2022-03-19T18:14:23.218959+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18576,
+          "customer_id": 21,
+          "staff_id": 1,
+          "rental_id": 3212,
+          "amount": 10.99,
+          "payment_date": "2022-03-06T06:31:21.624432+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18290,
+          "customer_id": 550,
+          "staff_id": 1,
+          "rental_id": 3272,
+          "amount": 10.99,
+          "payment_date": "2022-03-15T21:57:02.000827+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18035,
+          "customer_id": 477,
+          "staff_id": 1,
+          "rental_id": 2306,
+          "amount": 10.99,
+          "payment_date": "2022-03-09T09:33:32.699519+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 24093,
+          "customer_id": 148,
+          "staff_id": 1,
+          "rental_id": 11357,
+          "amount": 10.99,
+          "payment_date": "2022-03-24T03:08:25.899248+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23417,
+          "customer_id": 76,
+          "staff_id": 1,
+          "rental_id": 15566,
+          "amount": 10.99,
+          "payment_date": "2022-03-28T22:22:09.752426+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 27230,
+          "customer_id": 448,
+          "staff_id": 1,
+          "rental_id": 9178,
+          "amount": 10.99,
+          "payment_date": "2022-03-02T14:48:18.100919+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22186,
+          "customer_id": 550,
+          "staff_id": 1,
+          "rental_id": 13114,
+          "amount": 10.99,
+          "payment_date": "2022-04-12T08:51:59.774346+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20664,
+          "customer_id": 388,
+          "staff_id": 1,
+          "rental_id": 14273,
+          "amount": 10.99,
+          "payment_date": "2022-04-05T08:26:12.237056+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20403,
+          "customer_id": 362,
+          "staff_id": 1,
+          "rental_id": 14759,
+          "amount": 11.99,
+          "payment_date": "2022-04-16T04:35:36.904758+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19642,
+          "customer_id": 277,
+          "staff_id": 1,
+          "rental_id": 15008,
+          "amount": 10.99,
+          "payment_date": "2022-04-01T22:48:10.380843+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19481,
+          "customer_id": 260,
+          "staff_id": 1,
+          "rental_id": 2091,
+          "amount": 10.99,
+          "payment_date": "2022-04-04T06:07:13.041212+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19336,
+          "customer_id": 221,
+          "staff_id": 1,
+          "rental_id": 2660,
+          "amount": 10.99,
+          "payment_date": "2022-04-20T17:25:32.520649+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18640,
+          "customer_id": 33,
+          "staff_id": 1,
+          "rental_id": 1301,
+          "amount": 10.99,
+          "payment_date": "2022-04-24T19:46:56.100343+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 18175,
+          "customer_id": 516,
+          "staff_id": 1,
+          "rental_id": 1718,
+          "amount": 10.99,
+          "payment_date": "2022-04-14T05:46:08.616488+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 25632,
+          "customer_id": 307,
+          "staff_id": 1,
+          "rental_id": 6991,
+          "amount": 10.99,
+          "payment_date": "2022-04-08T17:35:32.100344+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 25542,
+          "customer_id": 300,
+          "staff_id": 1,
+          "rental_id": 5705,
+          "amount": 10.99,
+          "payment_date": "2022-04-05T04:07:18.613920+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23119,
+          "customer_id": 45,
+          "staff_id": 1,
+          "rental_id": 15812,
+          "amount": 10.99,
+          "payment_date": "2022-04-04T10:36:52.680249+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 30839,
+          "customer_id": 163,
+          "staff_id": 1,
+          "rental_id": 5574,
+          "amount": 10.99,
+          "payment_date": "2022-04-25T19:14:45.497284+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 27569,
+          "customer_id": 481,
+          "staff_id": 1,
+          "rental_id": 4668,
+          "amount": 10.99,
+          "payment_date": "2022-04-17T12:47:40.704810+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 17354,
+          "customer_id": 305,
+          "staff_id": 1,
+          "rental_id": 2166,
+          "amount": 11.99,
+          "payment_date": "2022-05-12T11:28:17.949049+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16125,
+          "customer_id": 304,
+          "staff_id": 1,
+          "rental_id": 135,
+          "amount": 10.99,
+          "payment_date": "2022-05-03T13:58:33.135578+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 22014,
+          "customer_id": 531,
+          "staff_id": 1,
+          "rental_id": 11265,
+          "amount": 10.99,
+          "payment_date": "2022-05-04T06:46:03.295040+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20244,
+          "customer_id": 345,
+          "staff_id": 1,
+          "rental_id": 14702,
+          "amount": 10.99,
+          "payment_date": "2022-05-01T01:33:08.887049+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20152,
+          "customer_id": 336,
+          "staff_id": 1,
+          "rental_id": 15073,
+          "amount": 10.99,
+          "payment_date": "2022-05-22T07:06:43.548951+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 24291,
+          "customer_id": 168,
+          "staff_id": 1,
+          "rental_id": 11627,
+          "amount": 10.99,
+          "payment_date": "2022-05-17T23:37:24.188178+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23860,
+          "customer_id": 127,
+          "staff_id": 1,
+          "rental_id": 10787,
+          "amount": 10.99,
+          "payment_date": "2022-05-10T20:08:36.983654+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 31013,
+          "customer_id": 178,
+          "staff_id": 1,
+          "rental_id": 5094,
+          "amount": 10.99,
+          "payment_date": "2022-05-14T22:42:00.098941+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28010,
+          "customer_id": 520,
+          "staff_id": 1,
+          "rental_id": 5802,
+          "amount": 10.99,
+          "payment_date": "2022-05-16T01:24:55.120666+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 17286,
+          "customer_id": 289,
+          "staff_id": 1,
+          "rental_id": 2784,
+          "amount": 10.99,
+          "payment_date": "2022-06-16T00:03:47.561463+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 16073,
+          "customer_id": 276,
+          "staff_id": 1,
+          "rental_id": 860,
+          "amount": 10.99,
+          "payment_date": "2022-06-03T20:10:31.235993+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 23431,
+          "customer_id": 78,
+          "staff_id": 1,
+          "rental_id": 10942,
+          "amount": 10.99,
+          "payment_date": "2022-06-30T04:53:28.940009+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 20480,
+          "customer_id": 371,
+          "staff_id": 1,
+          "rental_id": 11086,
+          "amount": 10.99,
+          "payment_date": "2022-06-30T22:52:22.111542+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 19856,
+          "customer_id": 301,
+          "staff_id": 1,
+          "rental_id": 15201,
+          "amount": 10.99,
+          "payment_date": "2022-06-01T14:41:10.851107+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 27426,
+          "customer_id": 469,
+          "staff_id": 1,
+          "rental_id": 3526,
+          "amount": 10.99,
+          "payment_date": "2022-06-05T05:41:53.853535+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 25886,
+          "customer_id": 331,
+          "staff_id": 1,
+          "rental_id": 4326,
+          "amount": 10.99,
+          "payment_date": "2022-06-20T10:01:57.168445+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 30700,
+          "customer_id": 149,
+          "staff_id": 1,
+          "rental_id": 5298,
+          "amount": 10.99,
+          "payment_date": "2022-06-13T02:29:34.151777+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 29946,
+          "customer_id": 86,
+          "staff_id": 1,
+          "rental_id": 7874,
+          "amount": 10.99,
+          "payment_date": "2022-06-13T09:03:12.607984+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 31700,
+          "customer_id": 245,
+          "staff_id": 1,
+          "rental_id": 8811,
+          "amount": 10.99,
+          "payment_date": "2022-06-02T19:40:59.279112+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 24604,
+          "customer_id": 200,
+          "staff_id": 1,
+          "rental_id": 14034,
+          "amount": 10.99,
+          "payment_date": "2022-07-20T18:21:44.390054+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 21962,
+          "customer_id": 526,
+          "staff_id": 1,
+          "rental_id": 11503,
+          "amount": 10.99,
+          "payment_date": "2022-07-03T15:19:30.010090+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 21470,
+          "customer_id": 470,
+          "staff_id": 1,
+          "rental_id": 12753,
+          "amount": 10.99,
+          "payment_date": "2022-07-17T11:59:19.134310+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 28814,
+          "customer_id": 592,
+          "staff_id": 1,
+          "rental_id": 3973,
+          "amount": 11.99,
+          "payment_date": "2022-07-06T12:15:38.928947+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 26978,
+          "customer_id": 426,
+          "staff_id": 1,
+          "rental_id": 7527,
+          "amount": 10.99,
+          "payment_date": "2022-07-16T11:31:05.361793+00:00",
+          "store_id": 25
+        },
+        {
+          "payment_id": 26471,
+          "customer_id": 380,
+          "staff_id": 1,
+          "rental_id": 9710,
+          "amount": 10.99,
+          "payment_date": "2022-07-13T17:29:25.543420+00:00",
+          "store_id": 25
+        }
+      ],
+      "expected_row_count": 58,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1104,
+      "question": "Find payments for rental ID 573",
+      "query": "SELECT * FROM payment WHERE rental_id = 573;",
+      "expected_result": [
+        {
+          "payment_id": 16678,
+          "customer_id": 1,
+          "staff_id": 1,
+          "rental_id": 573,
+          "amount": 0.99,
+          "payment_date": "2022-06-22T11:02:29.703344+00:00",
+          "store_id": 25
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1105,
+      "question": "Count total number of payments",
+      "query": "SELECT COUNT(*) FROM payment;",
+      "expected_result": [
+        {
+          "count": 8057
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1106,
+      "question": "Average payment amount",
+      "query": "SELECT AVG(amount) FROM payment;",
+      "expected_result": [
+        {
+          "avg": 4.156568201563857
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "easy",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1107,
+      "question": "What is the average payment amount processed by each staff member?",
+      "query": "SELECT staff.first_name, staff.last_name, AVG(payment.amount)::numeric(5,2) as avg_amount FROM payment JOIN staff ON payment.staff_id = staff.staff_id GROUP BY 1, 2 ORDER BY 3 DESC;",
+      "expected_result": [
+        {
+          "first_name": "Warner",
+          "last_name": "Hudson",
+          "avg_amount": 4.16
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment",
+        "staff"
+      ]
+    },
+    {
+      "id": 1108,
+      "question": "Who are the top 3 customers by single highest payment amount?",
+      "query": "SELECT customer_id, MAX(amount) as max_payment FROM payment GROUP BY 1 ORDER BY 2 DESC LIMIT 3;",
+      "expected_result": [
+        {
+          "customer_id": 305,
+          "max_payment": 11.99
+        },
+        {
+          "customer_id": 592,
+          "max_payment": 11.99
+        },
+        {
+          "customer_id": 362,
+          "max_payment": 11.99
+        }
+      ],
+      "expected_row_count": 3,
+      "category": "payment",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1109,
+      "question": "Total payments between Feb 14 and Feb 21, 2022",
+      "query": "SELECT COUNT(*) as count, SUM(amount) as total_amount FROM payment WHERE payment_date BETWEEN '2022-02-14' AND '2022-02-21';",
+      "expected_result": [
+        {
+          "count": 297,
+          "total_amount": 1187.04
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "payment",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    }
+  ]
+}

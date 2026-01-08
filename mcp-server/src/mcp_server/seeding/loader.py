@@ -23,7 +23,8 @@ def load_from_directory(directory: Path) -> List[Dict[str, Any]]:
         return []
 
     data = []
-    for file_path in directory.glob("*.json"):
+    # Use rglob to recursively find .json files in subdirectories
+    for file_path in directory.rglob("*.json"):
         if file_path.name == "tables.json":
             continue
 

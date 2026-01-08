@@ -1,0 +1,1227 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:07.771629+00:00",
+    "tenant_id": 1,
+    "description": "Enriched seeds for inventory"
+  },
+  "queries": [
+    {
+      "id": 1080,
+      "question": "List all inventory items",
+      "query": "SELECT * FROM inventory LIMIT 100;",
+      "expected_result": [
+        {
+          "inventory_id": 1,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 2,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 3,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 4,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 16,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 17,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 18,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 19,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 26,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 27,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 28,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 32,
+          "film_id": 7,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 33,
+          "film_id": 7,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 41,
+          "film_id": 9,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 42,
+          "film_id": 9,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 43,
+          "film_id": 9,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 46,
+          "film_id": 10,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 47,
+          "film_id": 10,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 48,
+          "film_id": 10,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 49,
+          "film_id": 10,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 53,
+          "film_id": 11,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 54,
+          "film_id": 11,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 55,
+          "film_id": 11,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 56,
+          "film_id": 11,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 60,
+          "film_id": 12,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 61,
+          "film_id": 12,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 62,
+          "film_id": 12,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 71,
+          "film_id": 15,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 72,
+          "film_id": 15,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 77,
+          "film_id": 16,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 78,
+          "film_id": 16,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 81,
+          "film_id": 17,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 82,
+          "film_id": 17,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 83,
+          "film_id": 17,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 87,
+          "film_id": 18,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 88,
+          "film_id": 18,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 89,
+          "film_id": 18,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 93,
+          "film_id": 19,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 94,
+          "film_id": 19,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 95,
+          "film_id": 19,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 96,
+          "film_id": 19,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 99,
+          "film_id": 20,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 100,
+          "film_id": 20,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 101,
+          "film_id": 20,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 102,
+          "film_id": 21,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 103,
+          "film_id": 21,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 108,
+          "film_id": 22,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 109,
+          "film_id": 22,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 110,
+          "film_id": 22,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 111,
+          "film_id": 22,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 115,
+          "film_id": 23,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 116,
+          "film_id": 23,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 117,
+          "film_id": 23,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 120,
+          "film_id": 24,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 121,
+          "film_id": 24,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 122,
+          "film_id": 24,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 123,
+          "film_id": 24,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 124,
+          "film_id": 25,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 125,
+          "film_id": 25,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 126,
+          "film_id": 25,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 127,
+          "film_id": 25,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 130,
+          "film_id": 26,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 131,
+          "film_id": 26,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 135,
+          "film_id": 27,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 136,
+          "film_id": 27,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 137,
+          "film_id": 27,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 138,
+          "film_id": 27,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 139,
+          "film_id": 28,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 140,
+          "film_id": 28,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 141,
+          "film_id": 28,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 142,
+          "film_id": 29,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 143,
+          "film_id": 29,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 144,
+          "film_id": 30,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 145,
+          "film_id": 30,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 146,
+          "film_id": 31,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 147,
+          "film_id": 31,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 148,
+          "film_id": 31,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 149,
+          "film_id": 31,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 160,
+          "film_id": 35,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 161,
+          "film_id": 35,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 162,
+          "film_id": 35,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 163,
+          "film_id": 35,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 167,
+          "film_id": 37,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 168,
+          "film_id": 37,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 169,
+          "film_id": 37,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 170,
+          "film_id": 37,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 174,
+          "film_id": 39,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 175,
+          "film_id": 39,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 176,
+          "film_id": 39,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 189,
+          "film_id": 43,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 190,
+          "film_id": 43,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 191,
+          "film_id": 43,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 196,
+          "film_id": 44,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 197,
+          "film_id": 44,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 201,
+          "film_id": 45,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 202,
+          "film_id": 45,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 203,
+          "film_id": 45,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 204,
+          "film_id": 45,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 212,
+          "film_id": 48,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 213,
+          "film_id": 48,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 100,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1081,
+      "question": "Find inventory for film ID 1",
+      "query": "SELECT * FROM inventory WHERE film_id = 1;",
+      "expected_result": [
+        {
+          "inventory_id": 1,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 2,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 3,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 4,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 4,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1082,
+      "question": "Count total inventory items",
+      "query": "SELECT COUNT(*) FROM inventory;",
+      "expected_result": [
+        {
+          "count": 2270
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1083,
+      "question": "Find inventory details for item ID 100",
+      "query": "SELECT * FROM inventory WHERE inventory_id = 100;",
+      "expected_result": [
+        {
+          "inventory_id": 100,
+          "film_id": 20,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1084,
+      "question": "Count inventory per store",
+      "query": "SELECT store_id, COUNT(*) FROM inventory GROUP BY store_id;",
+      "expected_result": [
+        {
+          "store_id": 1,
+          "count": 2270
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1085,
+      "question": "Show recently updated inventory",
+      "query": "SELECT * FROM inventory ORDER BY last_update DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "inventory_id": 2,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 3,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 4,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 16,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 17,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 18,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 19,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 26,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 27,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 1,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1086,
+      "question": "Find inventory for film 'Academy Dinosaur' (ID 1) at Store 1",
+      "query": "SELECT * FROM inventory WHERE film_id = 1 AND store_id = 1;",
+      "expected_result": [
+        {
+          "inventory_id": 1,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 2,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 3,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 4,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 4,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1087,
+      "question": "List distinct film IDs in inventory",
+      "query": "SELECT DISTINCT film_id FROM inventory LIMIT 100;",
+      "expected_result": [
+        {
+          "film_id": 652
+        },
+        {
+          "film_id": 273
+        },
+        {
+          "film_id": 51
+        },
+        {
+          "film_id": 951
+        },
+        {
+          "film_id": 70
+        },
+        {
+          "film_id": 350
+        },
+        {
+          "film_id": 539
+        },
+        {
+          "film_id": 278
+        },
+        {
+          "film_id": 176
+        },
+        {
+          "film_id": 292
+        },
+        {
+          "film_id": 929
+        },
+        {
+          "film_id": 663
+        },
+        {
+          "film_id": 271
+        },
+        {
+          "film_id": 22
+        },
+        {
+          "film_id": 417
+        },
+        {
+          "film_id": 764
+        },
+        {
+          "film_id": 556
+        },
+        {
+          "film_id": 529
+        },
+        {
+          "film_id": 638
+        },
+        {
+          "film_id": 791
+        },
+        {
+          "film_id": 775
+        },
+        {
+          "film_id": 940
+        },
+        {
+          "film_id": 390
+        },
+        {
+          "film_id": 173
+        },
+        {
+          "film_id": 189
+        },
+        {
+          "film_id": 876
+        },
+        {
+          "film_id": 161
+        },
+        {
+          "film_id": 632
+        },
+        {
+          "film_id": 120
+        },
+        {
+          "film_id": 578
+        },
+        {
+          "film_id": 815
+        },
+        {
+          "film_id": 695
+        },
+        {
+          "film_id": 440
+        },
+        {
+          "film_id": 794
+        },
+        {
+          "film_id": 57
+        },
+        {
+          "film_id": 19
+        },
+        {
+          "film_id": 160
+        },
+        {
+          "film_id": 644
+        },
+        {
+          "film_id": 266
+        },
+        {
+          "film_id": 366
+        },
+        {
+          "film_id": 307
+        },
+        {
+          "film_id": 841
+        },
+        {
+          "film_id": 91
+        },
+        {
+          "film_id": 803
+        },
+        {
+          "film_id": 305
+        },
+        {
+          "film_id": 54
+        },
+        {
+          "film_id": 181
+        },
+        {
+          "film_id": 743
+        },
+        {
+          "film_id": 10
+        },
+        {
+          "film_id": 35
+        },
+        {
+          "film_id": 963
+        },
+        {
+          "film_id": 220
+        },
+        {
+          "film_id": 823
+        },
+        {
+          "film_id": 400
+        },
+        {
+          "film_id": 241
+        },
+        {
+          "film_id": 175
+        },
+        {
+          "film_id": 596
+        },
+        {
+          "film_id": 285
+        },
+        {
+          "film_id": 50
+        },
+        {
+          "film_id": 391
+        },
+        {
+          "film_id": 699
+        },
+        {
+          "film_id": 344
+        },
+        {
+          "film_id": 906
+        },
+        {
+          "film_id": 745
+        },
+        {
+          "film_id": 534
+        },
+        {
+          "film_id": 152
+        },
+        {
+          "film_id": 428
+        },
+        {
+          "film_id": 637
+        },
+        {
+          "film_id": 747
+        },
+        {
+          "film_id": 222
+        },
+        {
+          "film_id": 777
+        },
+        {
+          "film_id": 164
+        },
+        {
+          "film_id": 922
+        },
+        {
+          "film_id": 453
+        },
+        {
+          "film_id": 787
+        },
+        {
+          "film_id": 186
+        },
+        {
+          "film_id": 501
+        },
+        {
+          "film_id": 750
+        },
+        {
+          "film_id": 545
+        },
+        {
+          "film_id": 182
+        },
+        {
+          "film_id": 18
+        },
+        {
+          "film_id": 528
+        },
+        {
+          "film_id": 27
+        },
+        {
+          "film_id": 811
+        },
+        {
+          "film_id": 563
+        },
+        {
+          "film_id": 143
+        },
+        {
+          "film_id": 496
+        },
+        {
+          "film_id": 228
+        },
+        {
+          "film_id": 667
+        },
+        {
+          "film_id": 814
+        },
+        {
+          "film_id": 668
+        },
+        {
+          "film_id": 850
+        },
+        {
+          "film_id": 294
+        },
+        {
+          "film_id": 481
+        },
+        {
+          "film_id": 645
+        },
+        {
+          "film_id": 438
+        },
+        {
+          "film_id": 382
+        },
+        {
+          "film_id": 853
+        },
+        {
+          "film_id": 378
+        },
+        {
+          "film_id": 483
+        }
+      ],
+      "expected_row_count": 100,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1088,
+      "question": "Check if inventory ID 4000 exists",
+      "query": "SELECT * FROM inventory WHERE inventory_id = 4000;",
+      "expected_result": [
+        {
+          "inventory_id": 4000,
+          "film_id": 871,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    },
+    {
+      "id": 1089,
+      "question": "Find inventory items in Store 2",
+      "query": "SELECT * FROM inventory WHERE store_id = 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "inventory_id": 1,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 2,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 3,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 4,
+          "film_id": 1,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 16,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 17,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 18,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 19,
+          "film_id": 4,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 26,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        },
+        {
+          "inventory_id": 27,
+          "film_id": 6,
+          "store_id": 1,
+          "last_update": "2022-02-15T10:09:17+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "inventory",
+      "difficulty": "easy",
+      "tables_used": [
+        "inventory"
+      ]
+    }
+  ]
+}

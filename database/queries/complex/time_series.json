@@ -1,0 +1,1259 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:08.113586+00:00",
+    "tenant_id": 25,
+    "description": "Enriched seeds for time_series"
+  },
+  "queries": [
+    {
+      "id": 1139,
+      "question": "Calculate cumulative revenue over time",
+      "query": "SELECT payment_date, SUM(amount) OVER (ORDER BY payment_date) as cumulative_revenue FROM payment LIMIT 100;",
+      "expected_result": [
+        {
+          "payment_date": "2022-01-23T13:24:17.906429+00:00",
+          "cumulative_revenue": 2.99
+        },
+        {
+          "payment_date": "2022-01-23T13:43:42.505434+00:00",
+          "cumulative_revenue": 5.98
+        },
+        {
+          "payment_date": "2022-01-23T14:05:24.118128+00:00",
+          "cumulative_revenue": 11.97
+        },
+        {
+          "payment_date": "2022-01-23T15:20:02.390905+00:00",
+          "cumulative_revenue": 12.96
+        },
+        {
+          "payment_date": "2022-01-23T15:20:21.954692+00:00",
+          "cumulative_revenue": 22.95
+        },
+        {
+          "payment_date": "2022-01-23T15:52:33.638966+00:00",
+          "cumulative_revenue": 25.94
+        },
+        {
+          "payment_date": "2022-01-23T16:01:21.848837+00:00",
+          "cumulative_revenue": 26.93
+        },
+        {
+          "payment_date": "2022-01-23T17:24:52.109704+00:00",
+          "cumulative_revenue": 29.92
+        },
+        {
+          "payment_date": "2022-01-23T17:55:40.589140+00:00",
+          "cumulative_revenue": 34.91
+        },
+        {
+          "payment_date": "2022-01-23T18:02:14.707836+00:00",
+          "cumulative_revenue": 39.9
+        },
+        {
+          "payment_date": "2022-01-23T18:20:08.440348+00:00",
+          "cumulative_revenue": 42.89
+        },
+        {
+          "payment_date": "2022-01-23T18:23:05.221128+00:00",
+          "cumulative_revenue": 47.88
+        },
+        {
+          "payment_date": "2022-01-23T18:35:29.965529+00:00",
+          "cumulative_revenue": 51.87
+        },
+        {
+          "payment_date": "2022-01-23T18:47:31.765476+00:00",
+          "cumulative_revenue": 59.86
+        },
+        {
+          "payment_date": "2022-01-23T19:39:48.158080+00:00",
+          "cumulative_revenue": 63.85
+        },
+        {
+          "payment_date": "2022-01-23T19:51:36.691653+00:00",
+          "cumulative_revenue": 66.84
+        },
+        {
+          "payment_date": "2022-01-23T20:10:42.493436+00:00",
+          "cumulative_revenue": 68.83
+        },
+        {
+          "payment_date": "2022-01-23T20:13:05.618859+00:00",
+          "cumulative_revenue": 73.82
+        },
+        {
+          "payment_date": "2022-01-23T20:28:02.191688+00:00",
+          "cumulative_revenue": 76.81
+        },
+        {
+          "payment_date": "2022-01-23T20:35:04.736603+00:00",
+          "cumulative_revenue": 80.8
+        },
+        {
+          "payment_date": "2022-01-23T20:41:57.706703+00:00",
+          "cumulative_revenue": 85.79
+        },
+        {
+          "payment_date": "2022-01-23T20:42:06.804108+00:00",
+          "cumulative_revenue": 86.78
+        },
+        {
+          "payment_date": "2022-01-23T21:26:25.924728+00:00",
+          "cumulative_revenue": 92.77
+        },
+        {
+          "payment_date": "2022-01-23T21:55:59.088886+00:00",
+          "cumulative_revenue": 97.76
+        },
+        {
+          "payment_date": "2022-01-23T22:33:44.464232+00:00",
+          "cumulative_revenue": 103.75
+        },
+        {
+          "payment_date": "2022-01-24T00:08:16.496342+00:00",
+          "cumulative_revenue": 110.74
+        },
+        {
+          "payment_date": "2022-01-24T01:22:50.894972+00:00",
+          "cumulative_revenue": 111.73
+        },
+        {
+          "payment_date": "2022-01-24T02:46:33.017033+00:00",
+          "cumulative_revenue": 112.72
+        },
+        {
+          "payment_date": "2022-01-24T03:16:59.247680+00:00",
+          "cumulative_revenue": 115.71
+        },
+        {
+          "payment_date": "2022-01-24T04:34:00.859577+00:00",
+          "cumulative_revenue": 122.7
+        },
+        {
+          "payment_date": "2022-01-24T04:39:19.169455+00:00",
+          "cumulative_revenue": 128.69
+        },
+        {
+          "payment_date": "2022-01-24T05:20:16.145622+00:00",
+          "cumulative_revenue": 131.68
+        },
+        {
+          "payment_date": "2022-01-24T05:42:57.803308+00:00",
+          "cumulative_revenue": 134.67
+        },
+        {
+          "payment_date": "2022-01-24T06:02:01.986259+00:00",
+          "cumulative_revenue": 139.66
+        },
+        {
+          "payment_date": "2022-01-24T06:59:57.177210+00:00",
+          "cumulative_revenue": 147.65
+        },
+        {
+          "payment_date": "2022-01-24T07:07:39.845484+00:00",
+          "cumulative_revenue": 152.64
+        },
+        {
+          "payment_date": "2022-01-24T07:14:50.413138+00:00",
+          "cumulative_revenue": 160.63
+        },
+        {
+          "payment_date": "2022-01-24T07:15:44.716986+00:00",
+          "cumulative_revenue": 161.62
+        },
+        {
+          "payment_date": "2022-01-24T08:33:57.282899+00:00",
+          "cumulative_revenue": 165.61
+        },
+        {
+          "payment_date": "2022-01-24T10:57:22.018437+00:00",
+          "cumulative_revenue": 170.6
+        },
+        {
+          "payment_date": "2022-01-24T13:02:10.037545+00:00",
+          "cumulative_revenue": 178.59
+        },
+        {
+          "payment_date": "2022-01-24T13:56:49.411778+00:00",
+          "cumulative_revenue": 183.58
+        },
+        {
+          "payment_date": "2022-01-24T14:14:55.497545+00:00",
+          "cumulative_revenue": 184.57
+        },
+        {
+          "payment_date": "2022-01-24T14:46:55.266984+00:00",
+          "cumulative_revenue": 185.56
+        },
+        {
+          "payment_date": "2022-01-24T15:12:40.657792+00:00",
+          "cumulative_revenue": 193.55
+        },
+        {
+          "payment_date": "2022-01-24T16:21:21.853710+00:00",
+          "cumulative_revenue": 199.54
+        },
+        {
+          "payment_date": "2022-01-24T16:53:08.087622+00:00",
+          "cumulative_revenue": 206.53
+        },
+        {
+          "payment_date": "2022-01-24T17:03:14.157666+00:00",
+          "cumulative_revenue": 209.52
+        },
+        {
+          "payment_date": "2022-01-24T17:42:39.997128+00:00",
+          "cumulative_revenue": 214.51
+        },
+        {
+          "payment_date": "2022-01-24T19:48:05.318601+00:00",
+          "cumulative_revenue": 217.5
+        },
+        {
+          "payment_date": "2022-01-24T20:21:43.360628+00:00",
+          "cumulative_revenue": 218.49
+        },
+        {
+          "payment_date": "2022-01-24T20:33:37.771799+00:00",
+          "cumulative_revenue": 220.48
+        },
+        {
+          "payment_date": "2022-01-24T21:06:57.697542+00:00",
+          "cumulative_revenue": 223.47
+        },
+        {
+          "payment_date": "2022-01-24T21:46:58.410717+00:00",
+          "cumulative_revenue": 232.46
+        },
+        {
+          "payment_date": "2022-01-24T22:23:46.116566+00:00",
+          "cumulative_revenue": 233.45
+        },
+        {
+          "payment_date": "2022-01-24T22:26:45.220420+00:00",
+          "cumulative_revenue": 236.44
+        },
+        {
+          "payment_date": "2022-01-24T22:31:23.915378+00:00",
+          "cumulative_revenue": 245.43
+        },
+        {
+          "payment_date": "2022-01-24T22:43:06.046054+00:00",
+          "cumulative_revenue": 252.42
+        },
+        {
+          "payment_date": "2022-01-24T23:03:03.355436+00:00",
+          "cumulative_revenue": 259.41
+        },
+        {
+          "payment_date": "2022-01-24T23:31:25.435501+00:00",
+          "cumulative_revenue": 262.4
+        },
+        {
+          "payment_date": "2022-01-25T00:50:12.448119+00:00",
+          "cumulative_revenue": 263.39
+        },
+        {
+          "payment_date": "2022-01-25T01:11:22.029254+00:00",
+          "cumulative_revenue": 268.38
+        },
+        {
+          "payment_date": "2022-01-25T01:27:54.217882+00:00",
+          "cumulative_revenue": 269.37
+        },
+        {
+          "payment_date": "2022-01-25T01:30:30.382801+00:00",
+          "cumulative_revenue": 270.36
+        },
+        {
+          "payment_date": "2022-01-25T01:57:07.766857+00:00",
+          "cumulative_revenue": 277.35
+        },
+        {
+          "payment_date": "2022-01-25T02:05:27.650997+00:00",
+          "cumulative_revenue": 282.34
+        },
+        {
+          "payment_date": "2022-01-25T02:06:37.905640+00:00",
+          "cumulative_revenue": 285.33
+        },
+        {
+          "payment_date": "2022-01-25T02:18:08.363636+00:00",
+          "cumulative_revenue": 292.32
+        },
+        {
+          "payment_date": "2022-01-25T02:31:27.967407+00:00",
+          "cumulative_revenue": 294.31
+        },
+        {
+          "payment_date": "2022-01-25T03:23:42.507078+00:00",
+          "cumulative_revenue": 299.3
+        },
+        {
+          "payment_date": "2022-01-25T03:41:53.353692+00:00",
+          "cumulative_revenue": 302.29
+        },
+        {
+          "payment_date": "2022-01-25T04:36:56.350013+00:00",
+          "cumulative_revenue": 306.28
+        },
+        {
+          "payment_date": "2022-01-25T06:39:49.876371+00:00",
+          "cumulative_revenue": 310.27
+        },
+        {
+          "payment_date": "2022-01-25T07:28:48.956372+00:00",
+          "cumulative_revenue": 313.26
+        },
+        {
+          "payment_date": "2022-01-25T08:16:27.711445+00:00",
+          "cumulative_revenue": 316.25
+        },
+        {
+          "payment_date": "2022-01-25T08:17:31.873560+00:00",
+          "cumulative_revenue": 319.24
+        },
+        {
+          "payment_date": "2022-01-25T08:34:21.679506+00:00",
+          "cumulative_revenue": 324.23
+        },
+        {
+          "payment_date": "2022-01-25T09:02:06.924325+00:00",
+          "cumulative_revenue": 329.22
+        },
+        {
+          "payment_date": "2022-01-25T09:09:41.372617+00:00",
+          "cumulative_revenue": 334.21
+        },
+        {
+          "payment_date": "2022-01-25T11:42:23.343897+00:00",
+          "cumulative_revenue": 339.2
+        },
+        {
+          "payment_date": "2022-01-25T11:54:08.748083+00:00",
+          "cumulative_revenue": 344.19
+        },
+        {
+          "payment_date": "2022-01-25T12:14:16.895377+00:00",
+          "cumulative_revenue": 347.18
+        },
+        {
+          "payment_date": "2022-01-25T12:19:52.018782+00:00",
+          "cumulative_revenue": 356.17
+        },
+        {
+          "payment_date": "2022-01-25T12:35:57.361807+00:00",
+          "cumulative_revenue": 361.16
+        },
+        {
+          "payment_date": "2022-01-25T13:08:48.999140+00:00",
+          "cumulative_revenue": 368.15
+        },
+        {
+          "payment_date": "2022-01-25T13:11:19.939041+00:00",
+          "cumulative_revenue": 372.14
+        },
+        {
+          "payment_date": "2022-01-25T14:15:18.197513+00:00",
+          "cumulative_revenue": 378.13
+        },
+        {
+          "payment_date": "2022-01-25T15:05:26.919340+00:00",
+          "cumulative_revenue": 379.12
+        },
+        {
+          "payment_date": "2022-01-25T15:10:20.008222+00:00",
+          "cumulative_revenue": 385.11
+        },
+        {
+          "payment_date": "2022-01-25T15:32:17.026956+00:00",
+          "cumulative_revenue": 390.1
+        },
+        {
+          "payment_date": "2022-01-25T16:03:49.580539+00:00",
+          "cumulative_revenue": 396.09
+        },
+        {
+          "payment_date": "2022-01-25T17:09:00.482080+00:00",
+          "cumulative_revenue": 401.08
+        },
+        {
+          "payment_date": "2022-01-25T19:07:24.992406+00:00",
+          "cumulative_revenue": 409.07
+        },
+        {
+          "payment_date": "2022-01-25T19:12:35.124342+00:00",
+          "cumulative_revenue": 412.06
+        },
+        {
+          "payment_date": "2022-01-25T19:14:02.390989+00:00",
+          "cumulative_revenue": 415.05
+        },
+        {
+          "payment_date": "2022-01-25T20:03:31.321244+00:00",
+          "cumulative_revenue": 419.04
+        },
+        {
+          "payment_date": "2022-01-25T20:35:51.817002+00:00",
+          "cumulative_revenue": 425.03
+        },
+        {
+          "payment_date": "2022-01-25T20:43:10.482476+00:00",
+          "cumulative_revenue": 426.02
+        },
+        {
+          "payment_date": "2022-01-25T21:01:37.510648+00:00",
+          "cumulative_revenue": 431.01
+        },
+        {
+          "payment_date": "2022-01-25T23:07:07.821745+00:00",
+          "cumulative_revenue": 436.0
+        }
+      ],
+      "expected_row_count": 100,
+      "category": "time_series",
+      "difficulty": "hard",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1140,
+      "question": "Compare this month's revenue to last month's",
+      "query": "SELECT DATE_TRUNC('month', payment_date) as month, SUM(amount) as revenue, LAG(SUM(amount)) OVER (ORDER BY DATE_TRUNC('month', payment_date)) as prev_month_revenue FROM payment GROUP BY 1;",
+      "expected_result": [
+        {
+          "month": "2022-01-01T00:00:00+00:00",
+          "revenue": 1547.48,
+          "prev_month_revenue": null
+        },
+        {
+          "month": "2022-02-01T00:00:00+00:00",
+          "revenue": 4880.28,
+          "prev_month_revenue": 1547.48
+        },
+        {
+          "month": "2022-03-01T00:00:00+00:00",
+          "revenue": 5865.9,
+          "prev_month_revenue": 4880.28
+        },
+        {
+          "month": "2022-04-01T00:00:00+00:00",
+          "revenue": 5429.16,
+          "prev_month_revenue": 5865.9
+        },
+        {
+          "month": "2022-05-01T00:00:00+00:00",
+          "revenue": 5733.41,
+          "prev_month_revenue": 5429.16
+        },
+        {
+          "month": "2022-06-01T00:00:00+00:00",
+          "revenue": 5352.87,
+          "prev_month_revenue": 5733.41
+        },
+        {
+          "month": "2022-07-01T00:00:00+00:00",
+          "revenue": 4680.37,
+          "prev_month_revenue": 5352.87
+        }
+      ],
+      "expected_row_count": 7,
+      "category": "time_series",
+      "difficulty": "hard",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1141,
+      "question": "Identify days with zero rentals",
+      "query": "SELECT generate_series('2005-05-24'::date, '2005-08-23'::date, '1 day'::interval) as day EXCEPT SELECT DATE(rental_date) FROM rental;",
+      "expected_result": [
+        {
+          "day": "2005-07-12T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-01T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-19T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-11T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-15T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-09T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-28T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-09T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-17T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-11T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-02T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-31T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-10T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-24T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-06T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-03T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-11T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-26T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-10T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-18T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-24T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-23T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-24T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-21T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-04T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-06T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-28T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-25T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-13T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-19T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-16T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-16T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-17T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-20T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-20T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-03T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-18T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-26T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-13T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-25T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-08T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-20T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-30T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-01T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-30T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-05T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-21T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-07T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-14T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-05T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-19T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-22T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-08T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-15T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-23T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-27T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-16T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-05T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-13T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-26T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-18T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-30T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-14T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-15T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-17T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-02T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-23T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-12T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-14T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-27T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-29T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-27T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-01T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-08T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-04T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-22T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-06T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-09T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-25T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-28T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-07T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-03T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-02T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-29T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-21T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-12T00:00:00+00:00"
+        },
+        {
+          "day": "2005-05-31T00:00:00+00:00"
+        },
+        {
+          "day": "2005-08-22T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-04T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-29T00:00:00+00:00"
+        },
+        {
+          "day": "2005-06-10T00:00:00+00:00"
+        },
+        {
+          "day": "2005-07-07T00:00:00+00:00"
+        }
+      ],
+      "expected_row_count": 92,
+      "category": "time_series",
+      "difficulty": "hard",
+      "tables_used": [
+        "rental"
+      ]
+    },
+    {
+      "id": 1142,
+      "question": "What is the revenue by hour of day?",
+      "query": "SELECT EXTRACT(HOUR FROM payment_date) as hour_of_day, SUM(amount) as revenue FROM payment GROUP BY 1 ORDER BY 1;",
+      "expected_result": [
+        {
+          "hour_of_day": 0.0,
+          "revenue": 1438.61
+        },
+        {
+          "hour_of_day": 1.0,
+          "revenue": 1379.64
+        },
+        {
+          "hour_of_day": 2.0,
+          "revenue": 1480.46
+        },
+        {
+          "hour_of_day": 3.0,
+          "revenue": 1253.87
+        },
+        {
+          "hour_of_day": 4.0,
+          "revenue": 1494.45
+        },
+        {
+          "hour_of_day": 5.0,
+          "revenue": 1329.77
+        },
+        {
+          "hour_of_day": 6.0,
+          "revenue": 1490.44
+        },
+        {
+          "hour_of_day": 7.0,
+          "revenue": 1386.54
+        },
+        {
+          "hour_of_day": 8.0,
+          "revenue": 1266.01
+        },
+        {
+          "hour_of_day": 9.0,
+          "revenue": 1365.64
+        },
+        {
+          "hour_of_day": 10.0,
+          "revenue": 1288.82
+        },
+        {
+          "hour_of_day": 11.0,
+          "revenue": 1411.55
+        },
+        {
+          "hour_of_day": 12.0,
+          "revenue": 1389.66
+        },
+        {
+          "hour_of_day": 13.0,
+          "revenue": 1330.92
+        },
+        {
+          "hour_of_day": 14.0,
+          "revenue": 1340.94
+        },
+        {
+          "hour_of_day": 15.0,
+          "revenue": 1366.63
+        },
+        {
+          "hour_of_day": 16.0,
+          "revenue": 1478.43
+        },
+        {
+          "hour_of_day": 17.0,
+          "revenue": 1308.72
+        },
+        {
+          "hour_of_day": 18.0,
+          "revenue": 1507.46
+        },
+        {
+          "hour_of_day": 19.0,
+          "revenue": 1379.72
+        },
+        {
+          "hour_of_day": 20.0,
+          "revenue": 1524.24
+        },
+        {
+          "hour_of_day": 21.0,
+          "revenue": 1481.52
+        },
+        {
+          "hour_of_day": 22.0,
+          "revenue": 1437.66
+        },
+        {
+          "hour_of_day": 23.0,
+          "revenue": 1357.77
+        }
+      ],
+      "expected_row_count": 24,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1143,
+      "question": "What is the revenue by week number?",
+      "query": "SELECT EXTRACT(WEEK FROM payment_date) as week_num, SUM(amount) as revenue FROM payment GROUP BY 1 ORDER BY 1;",
+      "expected_result": [
+        {
+          "week_num": 3.0,
+          "revenue": 103.75
+        },
+        {
+          "week_num": 4.0,
+          "revenue": 1302.04
+        },
+        {
+          "week_num": 5.0,
+          "revenue": 1221.11
+        },
+        {
+          "week_num": 6.0,
+          "revenue": 1217.15
+        },
+        {
+          "week_num": 7.0,
+          "revenue": 1187.04
+        },
+        {
+          "week_num": 8.0,
+          "revenue": 1235.09
+        },
+        {
+          "week_num": 9.0,
+          "revenue": 1203.1
+        },
+        {
+          "week_num": 10.0,
+          "revenue": 1373.79
+        },
+        {
+          "week_num": 11.0,
+          "revenue": 1326.76
+        },
+        {
+          "week_num": 12.0,
+          "revenue": 1347.85
+        },
+        {
+          "week_num": 13.0,
+          "revenue": 1282.7
+        },
+        {
+          "week_num": 14.0,
+          "revenue": 1264.89
+        },
+        {
+          "week_num": 15.0,
+          "revenue": 1384.92
+        },
+        {
+          "week_num": 16.0,
+          "revenue": 1204.13
+        },
+        {
+          "week_num": 17.0,
+          "revenue": 1253.03
+        },
+        {
+          "week_num": 18.0,
+          "revenue": 1258.09
+        },
+        {
+          "week_num": 19.0,
+          "revenue": 1358.62
+        },
+        {
+          "week_num": 20.0,
+          "revenue": 1329.89
+        },
+        {
+          "week_num": 21.0,
+          "revenue": 1251.15
+        },
+        {
+          "week_num": 22.0,
+          "revenue": 1247.08
+        },
+        {
+          "week_num": 23.0,
+          "revenue": 1244.81
+        },
+        {
+          "week_num": 24.0,
+          "revenue": 1297.83
+        },
+        {
+          "week_num": 25.0,
+          "revenue": 1277.89
+        },
+        {
+          "week_num": 26.0,
+          "revenue": 1246.99
+        },
+        {
+          "week_num": 27.0,
+          "revenue": 1240.79
+        },
+        {
+          "week_num": 28.0,
+          "revenue": 1228.98
+        },
+        {
+          "week_num": 29.0,
+          "revenue": 1193.97
+        },
+        {
+          "week_num": 30.0,
+          "revenue": 406.03
+        }
+      ],
+      "expected_row_count": 28,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1144,
+      "question": "Compare revenue for February and March 2022",
+      "query": "SELECT TO_CHAR(payment_date, 'Month') as month, SUM(amount) as revenue FROM payment WHERE payment_date >= '2022-02-01' AND payment_date < '2022-04-01' GROUP BY 1 ORDER BY MIN(payment_date);",
+      "expected_result": [
+        {
+          "month": "February ",
+          "revenue": 4880.28
+        },
+        {
+          "month": "March    ",
+          "revenue": 5865.9
+        }
+      ],
+      "expected_row_count": 2,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1145,
+      "question": "Calculate 3-day moving average of daily revenue",
+      "query": "SELECT DATE(payment_date) as day, SUM(amount) as daily_revenue, AVG(SUM(amount)) OVER (ORDER BY DATE(payment_date) ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) as moving_avg_3d FROM payment GROUP BY 1 ORDER BY 1 LIMIT 20;",
+      "expected_result": [
+        {
+          "day": "2022-01-23",
+          "daily_revenue": 103.75,
+          "moving_avg_3d": 103.75
+        },
+        {
+          "day": "2022-01-24",
+          "daily_revenue": 158.65,
+          "moving_avg_3d": 131.2
+        },
+        {
+          "day": "2022-01-25",
+          "daily_revenue": 181.58,
+          "moving_avg_3d": 147.99333333333334
+        },
+        {
+          "day": "2022-01-26",
+          "daily_revenue": 185.59,
+          "moving_avg_3d": 175.27333333333334
+        },
+        {
+          "day": "2022-01-27",
+          "daily_revenue": 226.55,
+          "moving_avg_3d": 197.90666666666667
+        },
+        {
+          "day": "2022-01-28",
+          "daily_revenue": 161.61,
+          "moving_avg_3d": 191.25
+        },
+        {
+          "day": "2022-01-29",
+          "daily_revenue": 207.53,
+          "moving_avg_3d": 198.56333333333333
+        },
+        {
+          "day": "2022-01-30",
+          "daily_revenue": 180.53,
+          "moving_avg_3d": 183.22333333333333
+        },
+        {
+          "day": "2022-01-31",
+          "daily_revenue": 141.69,
+          "moving_avg_3d": 176.58333333333334
+        },
+        {
+          "day": "2022-02-01",
+          "daily_revenue": 167.61,
+          "moving_avg_3d": 163.27666666666667
+        },
+        {
+          "day": "2022-02-02",
+          "daily_revenue": 212.53,
+          "moving_avg_3d": 173.94333333333333
+        },
+        {
+          "day": "2022-02-03",
+          "daily_revenue": 137.66,
+          "moving_avg_3d": 172.6
+        },
+        {
+          "day": "2022-02-04",
+          "daily_revenue": 179.52,
+          "moving_avg_3d": 176.57
+        },
+        {
+          "day": "2022-02-05",
+          "daily_revenue": 200.53,
+          "moving_avg_3d": 172.57
+        },
+        {
+          "day": "2022-02-06",
+          "daily_revenue": 181.57,
+          "moving_avg_3d": 187.20666666666668
+        },
+        {
+          "day": "2022-02-07",
+          "daily_revenue": 92.77,
+          "moving_avg_3d": 158.29
+        },
+        {
+          "day": "2022-02-08",
+          "daily_revenue": 201.49,
+          "moving_avg_3d": 158.61
+        },
+        {
+          "day": "2022-02-09",
+          "daily_revenue": 205.55,
+          "moving_avg_3d": 166.60333333333332
+        },
+        {
+          "day": "2022-02-10",
+          "daily_revenue": 151.62,
+          "moving_avg_3d": 186.22
+        },
+        {
+          "day": "2022-02-11",
+          "daily_revenue": 160.64,
+          "moving_avg_3d": 172.60333333333332
+        }
+      ],
+      "expected_row_count": 20,
+      "category": "time_series",
+      "difficulty": "complex",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1146,
+      "question": "Show daily revenue for Store 1",
+      "query": "SELECT DATE(payment_date) as day, SUM(amount) as revenue FROM payment WHERE store_id = 25 GROUP BY 1 ORDER BY 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "day": "2022-01-23",
+          "revenue": 103.75
+        },
+        {
+          "day": "2022-01-24",
+          "revenue": 158.65
+        },
+        {
+          "day": "2022-01-25",
+          "revenue": 181.58
+        },
+        {
+          "day": "2022-01-26",
+          "revenue": 185.59
+        },
+        {
+          "day": "2022-01-27",
+          "revenue": 226.55
+        },
+        {
+          "day": "2022-01-28",
+          "revenue": 161.61
+        },
+        {
+          "day": "2022-01-29",
+          "revenue": 207.53
+        },
+        {
+          "day": "2022-01-30",
+          "revenue": 180.53
+        },
+        {
+          "day": "2022-01-31",
+          "revenue": 141.69
+        },
+        {
+          "day": "2022-02-01",
+          "revenue": 167.61
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1147,
+      "question": "Count number of payments per day",
+      "query": "SELECT DATE(payment_date) as day, COUNT(*) as payment_count FROM payment GROUP BY 1 ORDER BY 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "day": "2022-01-23",
+          "payment_count": 25
+        },
+        {
+          "day": "2022-01-24",
+          "payment_count": 35
+        },
+        {
+          "day": "2022-01-25",
+          "payment_count": 42
+        },
+        {
+          "day": "2022-01-26",
+          "payment_count": 42
+        },
+        {
+          "day": "2022-01-27",
+          "payment_count": 45
+        },
+        {
+          "day": "2022-01-28",
+          "payment_count": 39
+        },
+        {
+          "day": "2022-01-29",
+          "payment_count": 47
+        },
+        {
+          "day": "2022-01-30",
+          "payment_count": 47
+        },
+        {
+          "day": "2022-01-31",
+          "payment_count": 31
+        },
+        {
+          "day": "2022-02-01",
+          "payment_count": 39
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    },
+    {
+      "id": 1148,
+      "question": "What is the revenue by quarter?",
+      "query": "SELECT EXTRACT(QUARTER FROM payment_date) as quarter, SUM(amount) as revenue FROM payment GROUP BY 1 ORDER BY 1;",
+      "expected_result": [
+        {
+          "quarter": 1.0,
+          "revenue": 12293.66
+        },
+        {
+          "quarter": 2.0,
+          "revenue": 16515.44
+        },
+        {
+          "quarter": 3.0,
+          "revenue": 4680.37
+        }
+      ],
+      "expected_row_count": 3,
+      "category": "time_series",
+      "difficulty": "medium",
+      "tables_used": [
+        "payment"
+      ]
+    }
+  ]
+}

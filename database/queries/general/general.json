@@ -1,0 +1,706 @@
+{
+    "version": "1.0",
+    "tenant_id": 1,
+    "description": "General seed dataset for Text-to-SQL agent testing with queries of increasing difficulty",
+    "generated_at": "2026-01-07",
+    "queries": [
+        {
+            "id": 1,
+            "question": "What is the total revenue?",
+            "query": "SELECT SUM(amount) as total_revenue FROM payment;",
+            "expected_result": [
+                {
+                    "total_revenue": 67416.51
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "aggregation",
+            "difficulty": "easy",
+            "tables_used": [
+                "payment"
+            ]
+        },
+        {
+            "id": 2,
+            "question": "How many active customers do we have?",
+            "query": "SELECT COUNT(*) as active_customers FROM customer WHERE activebool = true;",
+            "expected_result": [
+                {
+                    "active_customers": 599
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "filter",
+            "difficulty": "easy",
+            "tables_used": [
+                "customer"
+            ]
+        },
+        {
+            "id": 3,
+            "question": "How many rentals have been made in total?",
+            "query": "SELECT COUNT(*) as total_rentals FROM rental;",
+            "expected_result": [
+                {
+                    "total_rentals": 16044
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "aggregation",
+            "difficulty": "easy",
+            "tables_used": [
+                "rental"
+            ]
+        },
+        {
+            "id": 4,
+            "question": "How many films do we have in each rating category?",
+            "query": "SELECT rating, COUNT(*) as film_count FROM film GROUP BY rating ORDER BY film_count DESC;",
+            "expected_result": [
+                {
+                    "rating": "PG-13",
+                    "film_count": 223
+                },
+                {
+                    "rating": "NC-17",
+                    "film_count": 210
+                },
+                {
+                    "rating": "R",
+                    "film_count": 195
+                },
+                {
+                    "rating": "PG",
+                    "film_count": 194
+                },
+                {
+                    "rating": "G",
+                    "film_count": 178
+                }
+            ],
+            "expected_row_count": 5,
+            "category": "group_by",
+            "difficulty": "easy",
+            "tables_used": [
+                "film"
+            ]
+        },
+        {
+            "id": 5,
+            "question": "What is the average rental duration in days?",
+            "query": "SELECT AVG(EXTRACT(EPOCH FROM (return_date - rental_date))/86400)::numeric(5,2) as avg_rental_days FROM rental WHERE return_date IS NOT NULL;",
+            "expected_result": [
+                {
+                    "avg_rental_days": 5.03
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "aggregation",
+            "difficulty": "easy",
+            "tables_used": [
+                "rental"
+            ]
+        },
+        {
+            "id": 6,
+            "question": "List all film categories",
+            "query": "SELECT name FROM category ORDER BY name;",
+            "expected_result": [
+                {
+                    "name": "Action"
+                },
+                {
+                    "name": "Animation"
+                },
+                {
+                    "name": "Children"
+                },
+                {
+                    "name": "Classics"
+                },
+                {
+                    "name": "Comedy"
+                },
+                {
+                    "name": "Documentary"
+                },
+                {
+                    "name": "Drama"
+                },
+                {
+                    "name": "Family"
+                },
+                {
+                    "name": "Foreign"
+                },
+                {
+                    "name": "Games"
+                },
+                {
+                    "name": "Horror"
+                },
+                {
+                    "name": "Music"
+                },
+                {
+                    "name": "New"
+                },
+                {
+                    "name": "Sci-Fi"
+                },
+                {
+                    "name": "Sports"
+                },
+                {
+                    "name": "Travel"
+                }
+            ],
+            "expected_row_count": 16,
+            "category": "select",
+            "difficulty": "easy",
+            "tables_used": [
+                "category"
+            ]
+        },
+        {
+            "id": 7,
+            "question": "How many films are in our inventory?",
+            "query": "SELECT COUNT(*) as inventory_count FROM inventory;",
+            "expected_result": [
+                {
+                    "inventory_count": 4581
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "aggregation",
+            "difficulty": "easy",
+            "tables_used": [
+                "inventory"
+            ]
+        },
+        {
+            "id": 8,
+            "question": "Who are the top 5 customers by total spending?",
+            "query": "SELECT c.customer_id, c.first_name, c.last_name, SUM(p.amount) as total_spent FROM customer c JOIN payment p ON c.customer_id = p.customer_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY total_spent DESC LIMIT 5;",
+            "expected_result": [
+                {
+                    "customer_id": 526,
+                    "first_name": "KARL",
+                    "last_name": "SEAL",
+                    "total_spent": 221.55
+                },
+                {
+                    "customer_id": 148,
+                    "first_name": "ELEANOR",
+                    "last_name": "HUNT",
+                    "total_spent": 216.54
+                },
+                {
+                    "customer_id": 144,
+                    "first_name": "CLARA",
+                    "last_name": "SHAW",
+                    "total_spent": 195.58
+                },
+                {
+                    "customer_id": 137,
+                    "first_name": "RHONDA",
+                    "last_name": "KENNEDY",
+                    "total_spent": 194.61
+                },
+                {
+                    "customer_id": 178,
+                    "first_name": "MARION",
+                    "last_name": "SNYDER",
+                    "total_spent": 194.61
+                }
+            ],
+            "expected_row_count": 5,
+            "category": "join_aggregation",
+            "difficulty": "medium",
+            "tables_used": [
+                "customer",
+                "payment"
+            ]
+        },
+        {
+            "id": 9,
+            "question": "What is the monthly revenue breakdown?",
+            "query": "SELECT DATE_TRUNC('month', payment_date) as month, SUM(amount) as revenue FROM payment GROUP BY month ORDER BY month;",
+            "expected_result": [
+                {
+                    "month": "2022-01-01T00:00:00+00:00",
+                    "revenue": 3094.78
+                },
+                {
+                    "month": "2022-02-01T00:00:00+00:00",
+                    "revenue": 10164.97
+                },
+                {
+                    "month": "2022-03-01T00:00:00+00:00",
+                    "revenue": 11413.86
+                },
+                {
+                    "month": "2022-04-01T00:00:00+00:00",
+                    "revenue": 10759.52
+                },
+                {
+                    "month": "2022-05-01T00:00:00+00:00",
+                    "revenue": 11347.28
+                },
+                {
+                    "month": "2022-06-01T00:00:00+00:00",
+                    "revenue": 10923.45
+                },
+                {
+                    "month": "2022-07-01T00:00:00+00:00",
+                    "revenue": 9712.65
+                }
+            ],
+            "expected_row_count": 7,
+            "category": "time_series",
+            "difficulty": "medium",
+            "tables_used": [
+                "payment"
+            ]
+        },
+        {
+            "id": 10,
+            "question": "What are the most rented films?",
+            "query": "SELECT f.title, COUNT(r.rental_id) as rental_count FROM film f JOIN inventory i ON f.film_id = i.film_id JOIN rental r ON i.inventory_id = r.inventory_id GROUP BY f.film_id, f.title ORDER BY rental_count DESC LIMIT 10;",
+            "expected_result": [
+                {
+                    "title": "BUCKET BROTHERHOOD",
+                    "rental_count": 34
+                },
+                {
+                    "title": "ROCKETEER MOTHER",
+                    "rental_count": 33
+                },
+                {
+                    "title": "FORWARD TEMPLE",
+                    "rental_count": 32
+                },
+                {
+                    "title": "JUGGLER HARDLY",
+                    "rental_count": 32
+                },
+                {
+                    "title": "RIDGEMONT SUBMARINE",
+                    "rental_count": 32
+                },
+                {
+                    "title": "GRIT CLOCKWORK",
+                    "rental_count": 32
+                },
+                {
+                    "title": "SCALAWAG DUCK",
+                    "rental_count": 32
+                },
+                {
+                    "title": "ROBBERS JOON",
+                    "rental_count": 31
+                },
+                {
+                    "title": "NETWORK PEAK",
+                    "rental_count": 31
+                },
+                {
+                    "title": "TIMBERLAND SKY",
+                    "rental_count": 31
+                }
+            ],
+            "expected_row_count": 10,
+            "category": "join_aggregation",
+            "difficulty": "medium",
+            "tables_used": [
+                "film",
+                "inventory",
+                "rental"
+            ]
+        },
+        {
+            "id": 11,
+            "question": "Which film categories generate the most revenue?",
+            "query": "SELECT cat.name as category, SUM(p.amount) as revenue FROM category cat JOIN film_category fc ON cat.category_id = fc.category_id JOIN film f ON fc.film_id = f.film_id JOIN inventory i ON f.film_id = i.film_id JOIN rental r ON i.inventory_id = r.inventory_id JOIN payment p ON r.rental_id = p.rental_id GROUP BY cat.name ORDER BY revenue DESC LIMIT 5;",
+            "expected_result": [
+                {
+                    "category": "Foreign",
+                    "revenue": 10507.67
+                },
+                {
+                    "category": "Children",
+                    "revenue": 10437.05
+                },
+                {
+                    "category": "Animation",
+                    "revenue": 10369.55
+                },
+                {
+                    "category": "Documentary",
+                    "revenue": 10307.29
+                },
+                {
+                    "category": "Action",
+                    "revenue": 10289.60
+                }
+            ],
+            "expected_row_count": 5,
+            "category": "join_aggregation",
+            "difficulty": "hard",
+            "tables_used": [
+                "category",
+                "film_category",
+                "film",
+                "inventory",
+                "rental",
+                "payment"
+            ]
+        },
+        {
+            "id": 12,
+            "question": "How many customers have made more than 30 rentals?",
+            "query": "SELECT COUNT(*) as high_activity_customers FROM (SELECT customer_id, COUNT(*) as rental_count FROM rental GROUP BY customer_id HAVING COUNT(*) > 30) as active_customers;",
+            "expected_result": [
+                {
+                    "high_activity_customers": 235
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "subquery",
+            "difficulty": "medium",
+            "tables_used": [
+                "rental"
+            ]
+        },
+        {
+            "id": 13,
+            "question": "What is the average payment amount per customer?",
+            "query": "SELECT AVG(total_spent)::numeric(5,2) as avg_customer_spend FROM (SELECT customer_id, SUM(amount) as total_spent FROM payment GROUP BY customer_id) as customer_totals;",
+            "expected_result": [
+                {
+                    "avg_customer_spend": 112.55
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "subquery",
+            "difficulty": "medium",
+            "tables_used": [
+                "payment"
+            ]
+        },
+        {
+            "id": 14,
+            "question": "Which actors appear in the most films?",
+            "query": "SELECT a.first_name, a.last_name, COUNT(fa.film_id) as film_count FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id GROUP BY a.actor_id, a.first_name, a.last_name ORDER BY film_count DESC LIMIT 5;",
+            "expected_result": [
+                {
+                    "first_name": "GINA",
+                    "last_name": "DEGENERES",
+                    "film_count": 42
+                },
+                {
+                    "first_name": "WALTER",
+                    "last_name": "TORN",
+                    "film_count": 41
+                },
+                {
+                    "first_name": "MARY",
+                    "last_name": "KEITEL",
+                    "film_count": 40
+                },
+                {
+                    "first_name": "MATTHEW",
+                    "last_name": "CARREY",
+                    "film_count": 39
+                },
+                {
+                    "first_name": "SANDRA",
+                    "last_name": "KILMER",
+                    "film_count": 37
+                }
+            ],
+            "expected_row_count": 5,
+            "category": "join_aggregation",
+            "difficulty": "medium",
+            "tables_used": [
+                "actor",
+                "film_actor"
+            ]
+        },
+        {
+            "id": 15,
+            "question": "What percentage of rentals are returned late?",
+            "query": "SELECT (COUNT(*) FILTER (WHERE return_date > rental_date + (f.rental_duration || ' days')::interval) * 100.0 / COUNT(*))::numeric(5,2) as late_return_pct FROM rental r JOIN inventory i ON r.inventory_id = i.inventory_id JOIN film f ON i.film_id = f.film_id WHERE return_date IS NOT NULL;",
+            "expected_result": [
+                {
+                    "late_return_pct": 7.82
+                }
+            ],
+            "expected_row_count": 1,
+            "category": "complex_filter",
+            "difficulty": "hard",
+            "tables_used": [
+                "rental",
+                "inventory",
+                "film"
+            ]
+        },
+        {
+            "id": 16,
+            "question": "What is the revenue breakdown by day of week?",
+            "query": "SELECT TO_CHAR(payment_date, 'Day') as day_of_week, SUM(amount) as revenue FROM payment GROUP BY TO_CHAR(payment_date, 'Day'), EXTRACT(DOW FROM payment_date) ORDER BY EXTRACT(DOW FROM payment_date);",
+            "expected_result": [
+                {
+                    "day_of_week": "Sunday   ",
+                    "revenue": 10188.45
+                },
+                {
+                    "day_of_week": "Monday   ",
+                    "revenue": 9519.86
+                },
+                {
+                    "day_of_week": "Tuesday  ",
+                    "revenue": 9797.21
+                },
+                {
+                    "day_of_week": "Wednesday",
+                    "revenue": 9803.14
+                },
+                {
+                    "day_of_week": "Thursday ",
+                    "revenue": 9689.93
+                },
+                {
+                    "day_of_week": "Friday   ",
+                    "revenue": 9570.93
+                },
+                {
+                    "day_of_week": "Saturday ",
+                    "revenue": 8846.99
+                }
+            ],
+            "expected_row_count": 7,
+            "category": "time_series",
+            "difficulty": "medium",
+            "tables_used": [
+                "payment"
+            ]
+        },
+        {
+            "id": 17,
+            "question": "Which customers have not made any rentals in the last 3 months of data?",
+            "query": "SELECT c.customer_id, c.first_name, c.last_name FROM customer c WHERE c.customer_id NOT IN (SELECT DISTINCT customer_id FROM rental WHERE rental_date >= (SELECT MAX(rental_date) - INTERVAL '3 months' FROM rental)) ORDER BY c.customer_id LIMIT 10;",
+            "expected_result": [
+                {
+                    "customer_id": 1,
+                    "first_name": "MARY",
+                    "last_name": "SMITH"
+                },
+                {
+                    "customer_id": 9,
+                    "first_name": "MARGARET",
+                    "last_name": "MOORE"
+                },
+                {
+                    "customer_id": 10,
+                    "first_name": "DOROTHY",
+                    "last_name": "TAYLOR"
+                },
+                {
+                    "customer_id": 16,
+                    "first_name": "SANDRA",
+                    "last_name": "MARTIN"
+                },
+                {
+                    "customer_id": 21,
+                    "first_name": "MICHELLE",
+                    "last_name": "CLARK"
+                },
+                {
+                    "customer_id": 24,
+                    "first_name": "KIMBERLY",
+                    "last_name": "LEE"
+                },
+                {
+                    "customer_id": 33,
+                    "first_name": "ANNA",
+                    "last_name": "HILL"
+                },
+                {
+                    "customer_id": 40,
+                    "first_name": "AMANDA",
+                    "last_name": "CARTER"
+                },
+                {
+                    "customer_id": 42,
+                    "first_name": "CAROLYN",
+                    "last_name": "PEREZ"
+                },
+                {
+                    "customer_id": 45,
+                    "first_name": "JANET",
+                    "last_name": "PHILLIPS"
+                }
+            ],
+            "expected_row_count": 10,
+            "category": "subquery",
+            "difficulty": "hard",
+            "tables_used": [
+                "customer",
+                "rental"
+            ]
+        },
+        {
+            "id": 18,
+            "question": "What is the running total of revenue by month?",
+            "query": "SELECT month, monthly_revenue, SUM(monthly_revenue) OVER (ORDER BY month) as running_total FROM (SELECT DATE_TRUNC('month', payment_date) as month, SUM(amount) as monthly_revenue FROM payment GROUP BY DATE_TRUNC('month', payment_date)) as monthly ORDER BY month;",
+            "expected_result": [
+                {
+                    "month": "2022-01-01T00:00:00+00:00",
+                    "monthly_revenue": 3094.78,
+                    "running_total": 3094.78
+                },
+                {
+                    "month": "2022-02-01T00:00:00+00:00",
+                    "monthly_revenue": 10164.97,
+                    "running_total": 13259.75
+                },
+                {
+                    "month": "2022-03-01T00:00:00+00:00",
+                    "monthly_revenue": 11413.86,
+                    "running_total": 24673.61
+                },
+                {
+                    "month": "2022-04-01T00:00:00+00:00",
+                    "monthly_revenue": 10759.52,
+                    "running_total": 35433.13
+                },
+                {
+                    "month": "2022-05-01T00:00:00+00:00",
+                    "monthly_revenue": 11347.28,
+                    "running_total": 46780.41
+                },
+                {
+                    "month": "2022-06-01T00:00:00+00:00",
+                    "monthly_revenue": 10923.45,
+                    "running_total": 57703.86
+                },
+                {
+                    "month": "2022-07-01T00:00:00+00:00",
+                    "monthly_revenue": 9712.65,
+                    "running_total": 67416.51
+                }
+            ],
+            "expected_row_count": 7,
+            "category": "window_function",
+            "difficulty": "expert",
+            "tables_used": [
+                "payment"
+            ]
+        },
+        {
+            "id": 19,
+            "question": "Rank customers by their total spending",
+            "query": "SELECT customer_id, first_name, last_name, total_spent, RANK() OVER (ORDER BY total_spent DESC) as spending_rank FROM (SELECT c.customer_id, c.first_name, c.last_name, SUM(p.amount) as total_spent FROM customer c JOIN payment p ON c.customer_id = p.customer_id GROUP BY c.customer_id, c.first_name, c.last_name) as customer_spending ORDER BY spending_rank LIMIT 10;",
+            "expected_result": [
+                {
+                    "customer_id": 526,
+                    "first_name": "KARL",
+                    "last_name": "SEAL",
+                    "total_spent": 221.55,
+                    "spending_rank": 1
+                },
+                {
+                    "customer_id": 148,
+                    "first_name": "ELEANOR",
+                    "last_name": "HUNT",
+                    "total_spent": 216.54,
+                    "spending_rank": 2
+                },
+                {
+                    "customer_id": 144,
+                    "first_name": "CLARA",
+                    "last_name": "SHAW",
+                    "total_spent": 195.58,
+                    "spending_rank": 3
+                },
+                {
+                    "customer_id": 137,
+                    "first_name": "RHONDA",
+                    "last_name": "KENNEDY",
+                    "total_spent": 194.61,
+                    "spending_rank": 4
+                },
+                {
+                    "customer_id": 178,
+                    "first_name": "MARION",
+                    "last_name": "SNYDER",
+                    "total_spent": 194.61,
+                    "spending_rank": 4
+                }
+            ],
+            "expected_row_count": 10,
+            "category": "window_function",
+            "difficulty": "expert",
+            "tables_used": [
+                "customer",
+                "payment"
+            ]
+        },
+        {
+            "id": 20,
+            "question": "What is the month-over-month revenue growth rate?",
+            "query": "WITH monthly_revenue AS (SELECT DATE_TRUNC('month', payment_date) as month, SUM(amount) as revenue FROM payment GROUP BY DATE_TRUNC('month', payment_date)) SELECT month, revenue, LAG(revenue) OVER (ORDER BY month) as prev_revenue, ((revenue - LAG(revenue) OVER (ORDER BY month)) / LAG(revenue) OVER (ORDER BY month) * 100)::numeric(5,2) as growth_pct FROM monthly_revenue ORDER BY month;",
+            "expected_result": [
+                {
+                    "month": "2022-01-01T00:00:00+00:00",
+                    "revenue": 3094.78,
+                    "prev_revenue": null,
+                    "growth_pct": null
+                },
+                {
+                    "month": "2022-02-01T00:00:00+00:00",
+                    "revenue": 10164.97,
+                    "prev_revenue": 3094.78,
+                    "growth_pct": 228.47
+                },
+                {
+                    "month": "2022-03-01T00:00:00+00:00",
+                    "revenue": 11413.86,
+                    "prev_revenue": 10164.97,
+                    "growth_pct": 12.29
+                },
+                {
+                    "month": "2022-04-01T00:00:00+00:00",
+                    "revenue": 10759.52,
+                    "prev_revenue": 11413.86,
+                    "growth_pct": -5.73
+                },
+                {
+                    "month": "2022-05-01T00:00:00+00:00",
+                    "revenue": 11347.28,
+                    "prev_revenue": 10759.52,
+                    "growth_pct": 5.46
+                },
+                {
+                    "month": "2022-06-01T00:00:00+00:00",
+                    "revenue": 10923.45,
+                    "prev_revenue": 11347.28,
+                    "growth_pct": -3.73
+                },
+                {
+                    "month": "2022-07-01T00:00:00+00:00",
+                    "revenue": 9712.65,
+                    "prev_revenue": 10923.45,
+                    "growth_pct": -11.09
+                }
+            ],
+            "expected_row_count": 7,
+            "category": "window_function",
+            "difficulty": "expert",
+            "tables_used": [
+                "payment"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,1160 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:07.678035+00:00",
+    "tenant_id": 1,
+    "description": "Enriched seeds for country"
+  },
+  "queries": [
+    {
+      "id": 1040,
+      "question": "List all countries",
+      "query": "SELECT * FROM country;",
+      "expected_result": [
+        {
+          "country_id": 1,
+          "country": "Afghanistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 2,
+          "country": "Algeria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 3,
+          "country": "American Samoa",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 4,
+          "country": "Angola",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 5,
+          "country": "Anguilla",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 6,
+          "country": "Argentina",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 7,
+          "country": "Armenia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 8,
+          "country": "Australia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 9,
+          "country": "Austria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 10,
+          "country": "Azerbaijan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 11,
+          "country": "Bahrain",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 12,
+          "country": "Bangladesh",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 13,
+          "country": "Belarus",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 14,
+          "country": "Bolivia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 15,
+          "country": "Brazil",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 16,
+          "country": "Brunei",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 17,
+          "country": "Bulgaria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 18,
+          "country": "Cambodia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 19,
+          "country": "Cameroon",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 20,
+          "country": "Canada",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 21,
+          "country": "Chad",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 22,
+          "country": "Chile",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 23,
+          "country": "China",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 24,
+          "country": "Colombia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 25,
+          "country": "Congo, The Democratic Republic of the",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 26,
+          "country": "Czech Republic",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 27,
+          "country": "Dominican Republic",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 28,
+          "country": "Ecuador",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 29,
+          "country": "Egypt",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 30,
+          "country": "Estonia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 31,
+          "country": "Ethiopia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 32,
+          "country": "Faroe Islands",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 33,
+          "country": "Finland",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 34,
+          "country": "France",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 35,
+          "country": "French Guiana",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 36,
+          "country": "French Polynesia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 37,
+          "country": "Gambia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 38,
+          "country": "Germany",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 39,
+          "country": "Greece",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 40,
+          "country": "Greenland",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 41,
+          "country": "Holy See (Vatican City State)",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 42,
+          "country": "Hong Kong",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 43,
+          "country": "Hungary",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 44,
+          "country": "India",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 45,
+          "country": "Indonesia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 46,
+          "country": "Iran",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 47,
+          "country": "Iraq",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 48,
+          "country": "Israel",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 49,
+          "country": "Italy",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 50,
+          "country": "Japan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 51,
+          "country": "Kazakstan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 52,
+          "country": "Kenya",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 53,
+          "country": "Kuwait",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 54,
+          "country": "Latvia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 55,
+          "country": "Liechtenstein",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 56,
+          "country": "Lithuania",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 57,
+          "country": "Madagascar",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 58,
+          "country": "Malawi",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 59,
+          "country": "Malaysia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 60,
+          "country": "Mexico",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 61,
+          "country": "Moldova",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 62,
+          "country": "Morocco",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 63,
+          "country": "Mozambique",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 64,
+          "country": "Myanmar",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 65,
+          "country": "Nauru",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 66,
+          "country": "Nepal",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 67,
+          "country": "Netherlands",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 68,
+          "country": "New Zealand",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 69,
+          "country": "Nigeria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 70,
+          "country": "North Korea",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 71,
+          "country": "Oman",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 72,
+          "country": "Pakistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 73,
+          "country": "Paraguay",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 74,
+          "country": "Peru",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 75,
+          "country": "Philippines",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 76,
+          "country": "Poland",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 77,
+          "country": "Puerto Rico",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 78,
+          "country": "Romania",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 79,
+          "country": "Runion",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 80,
+          "country": "Russian Federation",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 81,
+          "country": "Saint Vincent and the Grenadines",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 82,
+          "country": "Saudi Arabia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 83,
+          "country": "Senegal",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 84,
+          "country": "Slovakia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 85,
+          "country": "South Africa",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 86,
+          "country": "South Korea",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 87,
+          "country": "Spain",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 88,
+          "country": "Sri Lanka",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 89,
+          "country": "Sudan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 90,
+          "country": "Sweden",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 91,
+          "country": "Switzerland",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 92,
+          "country": "Taiwan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 93,
+          "country": "Tanzania",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 94,
+          "country": "Thailand",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 95,
+          "country": "Tonga",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 96,
+          "country": "Tunisia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 97,
+          "country": "Turkey",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 98,
+          "country": "Turkmenistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 99,
+          "country": "Tuvalu",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 100,
+          "country": "Ukraine",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 101,
+          "country": "United Arab Emirates",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 102,
+          "country": "United Kingdom",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 103,
+          "country": "United States",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 104,
+          "country": "Venezuela",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 105,
+          "country": "Vietnam",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 106,
+          "country": "Virgin Islands, U.S.",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 107,
+          "country": "Yemen",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 108,
+          "country": "Yugoslavia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 109,
+          "country": "Zambia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 109,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1041,
+      "question": "Find the country 'Afghanistan'",
+      "query": "SELECT * FROM country WHERE country = 'Afghanistan';",
+      "expected_result": [
+        {
+          "country_id": 1,
+          "country": "Afghanistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1042,
+      "question": "Find country with ID 103",
+      "query": "SELECT * FROM country WHERE country_id = 103;",
+      "expected_result": [
+        {
+          "country_id": 103,
+          "country": "United States",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1043,
+      "question": "Count the total number of countries",
+      "query": "SELECT COUNT(*) FROM country;",
+      "expected_result": [
+        {
+          "count": 109
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1044,
+      "question": "List countries starting with 'Un'",
+      "query": "SELECT * FROM country WHERE country LIKE 'Un%';",
+      "expected_result": [
+        {
+          "country_id": 101,
+          "country": "United Arab Emirates",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 102,
+          "country": "United Kingdom",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 103,
+          "country": "United States",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 3,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1045,
+      "question": "Show recently updated countries",
+      "query": "SELECT * FROM country ORDER BY last_update DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "country_id": 2,
+          "country": "Algeria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 3,
+          "country": "American Samoa",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 4,
+          "country": "Angola",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 5,
+          "country": "Anguilla",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 6,
+          "country": "Argentina",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 7,
+          "country": "Armenia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 8,
+          "country": "Australia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 9,
+          "country": "Austria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 10,
+          "country": "Azerbaijan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 1,
+          "country": "Afghanistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1046,
+      "question": "List countries sorted alphabetically",
+      "query": "SELECT country FROM country ORDER BY country;",
+      "expected_result": [
+        {
+          "country": "Afghanistan"
+        },
+        {
+          "country": "Algeria"
+        },
+        {
+          "country": "American Samoa"
+        },
+        {
+          "country": "Angola"
+        },
+        {
+          "country": "Anguilla"
+        },
+        {
+          "country": "Argentina"
+        },
+        {
+          "country": "Armenia"
+        },
+        {
+          "country": "Australia"
+        },
+        {
+          "country": "Austria"
+        },
+        {
+          "country": "Azerbaijan"
+        },
+        {
+          "country": "Bahrain"
+        },
+        {
+          "country": "Bangladesh"
+        },
+        {
+          "country": "Belarus"
+        },
+        {
+          "country": "Bolivia"
+        },
+        {
+          "country": "Brazil"
+        },
+        {
+          "country": "Brunei"
+        },
+        {
+          "country": "Bulgaria"
+        },
+        {
+          "country": "Cambodia"
+        },
+        {
+          "country": "Cameroon"
+        },
+        {
+          "country": "Canada"
+        },
+        {
+          "country": "Chad"
+        },
+        {
+          "country": "Chile"
+        },
+        {
+          "country": "China"
+        },
+        {
+          "country": "Colombia"
+        },
+        {
+          "country": "Congo, The Democratic Republic of the"
+        },
+        {
+          "country": "Czech Republic"
+        },
+        {
+          "country": "Dominican Republic"
+        },
+        {
+          "country": "Ecuador"
+        },
+        {
+          "country": "Egypt"
+        },
+        {
+          "country": "Estonia"
+        },
+        {
+          "country": "Ethiopia"
+        },
+        {
+          "country": "Faroe Islands"
+        },
+        {
+          "country": "Finland"
+        },
+        {
+          "country": "France"
+        },
+        {
+          "country": "French Guiana"
+        },
+        {
+          "country": "French Polynesia"
+        },
+        {
+          "country": "Gambia"
+        },
+        {
+          "country": "Germany"
+        },
+        {
+          "country": "Greece"
+        },
+        {
+          "country": "Greenland"
+        },
+        {
+          "country": "Holy See (Vatican City State)"
+        },
+        {
+          "country": "Hong Kong"
+        },
+        {
+          "country": "Hungary"
+        },
+        {
+          "country": "India"
+        },
+        {
+          "country": "Indonesia"
+        },
+        {
+          "country": "Iran"
+        },
+        {
+          "country": "Iraq"
+        },
+        {
+          "country": "Israel"
+        },
+        {
+          "country": "Italy"
+        },
+        {
+          "country": "Japan"
+        },
+        {
+          "country": "Kazakstan"
+        },
+        {
+          "country": "Kenya"
+        },
+        {
+          "country": "Kuwait"
+        },
+        {
+          "country": "Latvia"
+        },
+        {
+          "country": "Liechtenstein"
+        },
+        {
+          "country": "Lithuania"
+        },
+        {
+          "country": "Madagascar"
+        },
+        {
+          "country": "Malawi"
+        },
+        {
+          "country": "Malaysia"
+        },
+        {
+          "country": "Mexico"
+        },
+        {
+          "country": "Moldova"
+        },
+        {
+          "country": "Morocco"
+        },
+        {
+          "country": "Mozambique"
+        },
+        {
+          "country": "Myanmar"
+        },
+        {
+          "country": "Nauru"
+        },
+        {
+          "country": "Nepal"
+        },
+        {
+          "country": "Netherlands"
+        },
+        {
+          "country": "New Zealand"
+        },
+        {
+          "country": "Nigeria"
+        },
+        {
+          "country": "North Korea"
+        },
+        {
+          "country": "Oman"
+        },
+        {
+          "country": "Pakistan"
+        },
+        {
+          "country": "Paraguay"
+        },
+        {
+          "country": "Peru"
+        },
+        {
+          "country": "Philippines"
+        },
+        {
+          "country": "Poland"
+        },
+        {
+          "country": "Puerto Rico"
+        },
+        {
+          "country": "Romania"
+        },
+        {
+          "country": "Runion"
+        },
+        {
+          "country": "Russian Federation"
+        },
+        {
+          "country": "Saint Vincent and the Grenadines"
+        },
+        {
+          "country": "Saudi Arabia"
+        },
+        {
+          "country": "Senegal"
+        },
+        {
+          "country": "Slovakia"
+        },
+        {
+          "country": "South Africa"
+        },
+        {
+          "country": "South Korea"
+        },
+        {
+          "country": "Spain"
+        },
+        {
+          "country": "Sri Lanka"
+        },
+        {
+          "country": "Sudan"
+        },
+        {
+          "country": "Sweden"
+        },
+        {
+          "country": "Switzerland"
+        },
+        {
+          "country": "Taiwan"
+        },
+        {
+          "country": "Tanzania"
+        },
+        {
+          "country": "Thailand"
+        },
+        {
+          "country": "Tonga"
+        },
+        {
+          "country": "Tunisia"
+        },
+        {
+          "country": "Turkey"
+        },
+        {
+          "country": "Turkmenistan"
+        },
+        {
+          "country": "Tuvalu"
+        },
+        {
+          "country": "Ukraine"
+        },
+        {
+          "country": "United Arab Emirates"
+        },
+        {
+          "country": "United Kingdom"
+        },
+        {
+          "country": "United States"
+        },
+        {
+          "country": "Venezuela"
+        },
+        {
+          "country": "Vietnam"
+        },
+        {
+          "country": "Virgin Islands, U.S."
+        },
+        {
+          "country": "Yemen"
+        },
+        {
+          "country": "Yugoslavia"
+        },
+        {
+          "country": "Zambia"
+        }
+      ],
+      "expected_row_count": 109,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1047,
+      "question": "Find countries with names longer than 15 characters",
+      "query": "SELECT * FROM country WHERE LENGTH(country) > 15;",
+      "expected_result": [
+        {
+          "country_id": 25,
+          "country": "Congo, The Democratic Republic of the",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 27,
+          "country": "Dominican Republic",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 36,
+          "country": "French Polynesia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 41,
+          "country": "Holy See (Vatican City State)",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 80,
+          "country": "Russian Federation",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 81,
+          "country": "Saint Vincent and the Grenadines",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 101,
+          "country": "United Arab Emirates",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 106,
+          "country": "Virgin Islands, U.S.",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 8,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1048,
+      "question": "Does 'Zambia' exist in the database?",
+      "query": "SELECT * FROM country WHERE country = 'Zambia';",
+      "expected_result": [
+        {
+          "country_id": 109,
+          "country": "Zambia",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    },
+    {
+      "id": 1049,
+      "question": "List the top 5 countries by name",
+      "query": "SELECT * FROM country ORDER BY country LIMIT 5;",
+      "expected_result": [
+        {
+          "country_id": 1,
+          "country": "Afghanistan",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 2,
+          "country": "Algeria",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 3,
+          "country": "American Samoa",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 4,
+          "country": "Angola",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        },
+        {
+          "country_id": 5,
+          "country": "Anguilla",
+          "last_update": "2022-02-15T09:44:00+00:00"
+        }
+      ],
+      "expected_row_count": 5,
+      "category": "country",
+      "difficulty": "easy",
+      "tables_used": [
+        "country"
+      ]
+    }
+  ]
+}

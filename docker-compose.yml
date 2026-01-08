@@ -37,7 +37,7 @@ services:
       DB_USER: bi_agent_ro
       DB_PASS: secure_agent_pass
     volumes:
-      - ./database/seeds:/app/seeds:ro
+      - ./database/queries:/app/queries:ro
     networks:
       - bi_net
 

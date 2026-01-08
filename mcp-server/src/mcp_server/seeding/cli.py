@@ -177,10 +177,10 @@ async def main():
             )
 
             # 1. Seed Few-Shot Examples & Golden Dataset
-            await _process_seed_data(conn, Path("/app/seeds"))
+            await _process_seed_data(conn, Path("/app/queries"))
 
             # 2. Seed Table Summaries (Schema Context)
-            await _seed_table_summaries(conn, Path("/app/seeds"))
+            await _seed_table_summaries(conn, Path("/app/queries"))
 
             print("✓ Successfully processed all seed operations.")
 

@@ -1,0 +1,305 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:07.748994+00:00",
+    "tenant_id": 1,
+    "description": "Enriched seeds for film_actor"
+  },
+  "queries": [
+    {
+      "id": 1070,
+      "question": "Find actors in film ID 1",
+      "query": "SELECT * FROM film_actor WHERE film_id = 1;",
+      "expected_result": [
+        {
+          "actor_id": 1,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 10,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 20,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 30,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 40,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 53,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 108,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 162,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 188,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 198,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "film_actor",
+      "difficulty": "easy",
+      "tables_used": [
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1071,
+      "question": "Find films with actor ID 1",
+      "query": "SELECT * FROM film_actor WHERE actor_id = 1;",
+      "expected_result": [
+        {
+          "actor_id": 1,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 23,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 25,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 106,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 140,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 166,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 277,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 361,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 438,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 499,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 506,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 509,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 605,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 635,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 749,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 832,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 939,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 970,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        },
+        {
+          "actor_id": 1,
+          "film_id": 980,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        }
+      ],
+      "expected_row_count": 19,
+      "category": "film_actor",
+      "difficulty": "easy",
+      "tables_used": [
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1072,
+      "question": "Count actors per film",
+      "query": "SELECT film_id, COUNT(*) FROM film_actor GROUP BY film_id ORDER BY COUNT(*) DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "film_id": 508,
+          "count": 15
+        },
+        {
+          "film_id": 188,
+          "count": 13
+        },
+        {
+          "film_id": 87,
+          "count": 13
+        },
+        {
+          "film_id": 714,
+          "count": 13
+        },
+        {
+          "film_id": 606,
+          "count": 13
+        },
+        {
+          "film_id": 146,
+          "count": 13
+        },
+        {
+          "film_id": 249,
+          "count": 13
+        },
+        {
+          "film_id": 34,
+          "count": 12
+        },
+        {
+          "film_id": 529,
+          "count": 12
+        },
+        {
+          "film_id": 802,
+          "count": 12
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "film_actor",
+      "difficulty": "easy",
+      "tables_used": [
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1073,
+      "question": "Count films per actor",
+      "query": "SELECT actor_id, COUNT(*) FROM film_actor GROUP BY actor_id ORDER BY COUNT(*) DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "actor_id": 107,
+          "count": 42
+        },
+        {
+          "actor_id": 102,
+          "count": 41
+        },
+        {
+          "actor_id": 198,
+          "count": 40
+        },
+        {
+          "actor_id": 181,
+          "count": 39
+        },
+        {
+          "actor_id": 23,
+          "count": 37
+        },
+        {
+          "actor_id": 81,
+          "count": 36
+        },
+        {
+          "actor_id": 144,
+          "count": 35
+        },
+        {
+          "actor_id": 158,
+          "count": 35
+        },
+        {
+          "actor_id": 37,
+          "count": 35
+        },
+        {
+          "actor_id": 60,
+          "count": 35
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "film_actor",
+      "difficulty": "easy",
+      "tables_used": [
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1074,
+      "question": "Check if actor 1 played in film 1",
+      "query": "SELECT * FROM film_actor WHERE actor_id = 1 AND film_id = 1;",
+      "expected_result": [
+        {
+          "actor_id": 1,
+          "film_id": 1,
+          "last_update": "2022-02-15T10:05:03+00:00"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "film_actor",
+      "difficulty": "easy",
+      "tables_used": [
+        "film_actor"
+      ]
+    }
+  ]
+}

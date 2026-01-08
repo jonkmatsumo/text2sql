@@ -1,0 +1,6366 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "generated_at": "2026-01-08T01:27:08.368766+00:00",
+    "tenant_id": 1,
+    "description": "Enriched seeds for intermediate_joins"
+  },
+  "queries": [
+    {
+      "id": 1185,
+      "question": "List all films in the 'Action' category",
+      "query": "SELECT f.title FROM film f JOIN film_category fc ON f.film_id = fc.film_id JOIN category c ON fc.category_id = c.category_id WHERE c.name = 'Action' LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "ARIZONA BANG"
+        },
+        {
+          "title": "ACE GOLDFINGER"
+        },
+        {
+          "title": "ALASKA PHANTOM"
+        },
+        {
+          "title": "ANGELS LIFE"
+        },
+        {
+          "title": "AIRPLANE SIERRA"
+        },
+        {
+          "title": "BIRDCAGE CASPER"
+        },
+        {
+          "title": "BIRCH ANTITRUST"
+        },
+        {
+          "title": "CLERKS ANGELS"
+        },
+        {
+          "title": "CORE SUIT"
+        },
+        {
+          "title": "CAT CONEHEADS"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "category",
+        "film",
+        "film_category"
+      ]
+    },
+    {
+      "id": 1186,
+      "question": "List all customers living in 'London'",
+      "query": "SELECT c.first_name, c.last_name FROM customer c JOIN address a ON c.address_id = a.address_id JOIN city ci ON a.city_id = ci.city_id WHERE ci.city = 'London';",
+      "expected_result": [
+        {
+          "first_name": "CECIL",
+          "last_name": "VINES"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "city",
+        "customer"
+      ]
+    },
+    {
+      "id": 1187,
+      "question": "Show full address for each staff member",
+      "query": "SELECT s.first_name, s.last_name, a.address, ci.city FROM staff s JOIN address a ON s.address_id = a.address_id JOIN city ci ON a.city_id = ci.city_id;",
+      "expected_result": [
+        {
+          "first_name": "Mercedes",
+          "last_name": "Gislason",
+          "address": "770 Bydgoszcz Avenue",
+          "city": "Citrus Heights"
+        },
+        {
+          "first_name": "Flor",
+          "last_name": "Toy",
+          "address": "1417 Lancaster Avenue",
+          "city": "Kimberley"
+        },
+        {
+          "first_name": "Theo",
+          "last_name": "Harber",
+          "address": "262 A Corua (La Corua) Parkway",
+          "city": "Tangail"
+        },
+        {
+          "first_name": "Tyree",
+          "last_name": "Dicki",
+          "address": "1342 Abha Boulevard",
+          "city": "Bucuresti"
+        },
+        {
+          "first_name": "Dan",
+          "last_name": "Kling",
+          "address": "1405 Hagonoy Avenue",
+          "city": "Czestochowa"
+        },
+        {
+          "first_name": "Drew",
+          "last_name": "Fahey",
+          "address": "32 Liaocheng Way",
+          "city": "Juiz de Fora"
+        }
+      ],
+      "expected_row_count": 6,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "city",
+        "staff"
+      ]
+    },
+    {
+      "id": 1188,
+      "question": "List all films featuring actor 'PENELOPE GUINESS'",
+      "query": "SELECT f.title FROM film f JOIN film_actor fa ON f.film_id = fa.film_id JOIN actor a ON fa.actor_id = a.actor_id WHERE a.first_name = 'PENELOPE' AND a.last_name = 'GUINESS';",
+      "expected_result": [
+        {
+          "title": "ACADEMY DINOSAUR"
+        },
+        {
+          "title": "ANACONDA CONFESSIONS"
+        },
+        {
+          "title": "ANGELS LIFE"
+        },
+        {
+          "title": "BULWORTH COMMANDMENTS"
+        },
+        {
+          "title": "CHEAPER CLYDE"
+        },
+        {
+          "title": "COLOR PHILADELPHIA"
+        },
+        {
+          "title": "ELEPHANT TROJAN"
+        },
+        {
+          "title": "GLEAMING JAWBREAKER"
+        },
+        {
+          "title": "HUMAN GRAFFITI"
+        },
+        {
+          "title": "KING EVOLUTION"
+        },
+        {
+          "title": "LADY STAGE"
+        },
+        {
+          "title": "LANGUAGE COWBOY"
+        },
+        {
+          "title": "MULHOLLAND BEAST"
+        },
+        {
+          "title": "OKLAHOMA JUMANJI"
+        },
+        {
+          "title": "RULES HUMAN"
+        },
+        {
+          "title": "SPLASH GUMP"
+        },
+        {
+          "title": "VERTIGO NORTHWEST"
+        },
+        {
+          "title": "WESTWARD SEABISCUIT"
+        },
+        {
+          "title": "WIZARD COLDBLOODED"
+        }
+      ],
+      "expected_row_count": 19,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "actor",
+        "film",
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1189,
+      "question": "List customers who have rented 'ACADEMY DINOSAUR'",
+      "query": "SELECT DISTINCT c.first_name, c.last_name FROM customer c JOIN rental r ON c.customer_id = r.customer_id JOIN inventory i ON r.inventory_id = i.inventory_id JOIN film f ON i.film_id = f.film_id WHERE f.title = 'ACADEMY DINOSAUR';",
+      "expected_result": [
+        {
+          "first_name": "BEATRICE",
+          "last_name": "ARNOLD"
+        },
+        {
+          "first_name": "DEBRA",
+          "last_name": "NELSON"
+        },
+        {
+          "first_name": "GABRIEL",
+          "last_name": "HARDER"
+        },
+        {
+          "first_name": "GERALDINE",
+          "last_name": "PERKINS"
+        },
+        {
+          "first_name": "HENRY",
+          "last_name": "BILLINGSLEY"
+        },
+        {
+          "first_name": "NORMAN",
+          "last_name": "CURRIER"
+        },
+        {
+          "first_name": "VIRGIL",
+          "last_name": "WOFFORD"
+        }
+      ],
+      "expected_row_count": 7,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "customer",
+        "film",
+        "inventory",
+        "rental"
+      ]
+    },
+    {
+      "id": 1190,
+      "question": "Count number of rentals per customer",
+      "query": "SELECT c.first_name, c.last_name, COUNT(r.rental_id) as rental_count FROM customer c JOIN rental r ON c.customer_id = r.customer_id GROUP BY c.customer_id ORDER BY rental_count DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "first_name": "GERTRUDE",
+          "last_name": "CASTILLO",
+          "rental_count": 25
+        },
+        {
+          "first_name": "MARCIA",
+          "last_name": "DEAN",
+          "rental_count": 25
+        },
+        {
+          "first_name": "JORDAN",
+          "last_name": "ARCHULETA",
+          "rental_count": 23
+        },
+        {
+          "first_name": "ETHEL",
+          "last_name": "WEBB",
+          "rental_count": 22
+        },
+        {
+          "first_name": "HAZEL",
+          "last_name": "WARREN",
+          "rental_count": 22
+        },
+        {
+          "first_name": "SHERRY",
+          "last_name": "MARSHALL",
+          "rental_count": 21
+        },
+        {
+          "first_name": "ELEANOR",
+          "last_name": "HUNT",
+          "rental_count": 21
+        },
+        {
+          "first_name": "TIM",
+          "last_name": "CARY",
+          "rental_count": 21
+        },
+        {
+          "first_name": "LOUIS",
+          "last_name": "LEONE",
+          "rental_count": 21
+        },
+        {
+          "first_name": "CARRIE",
+          "last_name": "PORTER",
+          "rental_count": 20
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "customer",
+        "rental"
+      ]
+    },
+    {
+      "id": 1191,
+      "question": "Count inventory items per film title",
+      "query": "SELECT f.title, COUNT(i.inventory_id) as stock_count FROM film f JOIN inventory i ON f.film_id = i.film_id GROUP BY f.title ORDER BY stock_count DESC LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "MASSACRE USUAL",
+          "stock_count": 4
+        },
+        {
+          "title": "SUPER WYOMING",
+          "stock_count": 4
+        },
+        {
+          "title": "GIANT TROOPERS",
+          "stock_count": 4
+        },
+        {
+          "title": "MINDS TRUMAN",
+          "stock_count": 4
+        },
+        {
+          "title": "WRONG BEHAVIOR",
+          "stock_count": 4
+        },
+        {
+          "title": "PELICAN COMFORTS",
+          "stock_count": 4
+        },
+        {
+          "title": "CITIZEN SHREK",
+          "stock_count": 4
+        },
+        {
+          "title": "SEARCHERS WAIT",
+          "stock_count": 4
+        },
+        {
+          "title": "PULP BEVERLY",
+          "stock_count": 4
+        },
+        {
+          "title": "WORKING MICROCOSMOS",
+          "stock_count": 4
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "film",
+        "inventory"
+      ]
+    },
+    {
+      "id": 1192,
+      "question": "List all cities in 'France'",
+      "query": "SELECT ci.city FROM city ci JOIN country co ON ci.country_id = co.country_id WHERE co.country = 'France';",
+      "expected_result": [
+        {
+          "city": "Brest"
+        },
+        {
+          "city": "Le Mans"
+        },
+        {
+          "city": "Toulon"
+        },
+        {
+          "city": "Toulouse"
+        }
+      ],
+      "expected_row_count": 4,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "city",
+        "country"
+      ]
+    },
+    {
+      "id": 1193,
+      "question": "List all store locations (City and Country)",
+      "query": "SELECT s.store_id, ci.city, co.country FROM store s JOIN address a ON s.address_id = a.address_id JOIN city ci ON a.city_id = ci.city_id JOIN country co ON ci.country_id = co.country_id;",
+      "expected_result": [
+        {
+          "store_id": 0,
+          "city": "Bchar",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 1,
+          "city": "Boksburg",
+          "country": "South Africa"
+        },
+        {
+          "store_id": 2,
+          "city": "Hamilton",
+          "country": "New Zealand"
+        },
+        {
+          "store_id": 3,
+          "city": "Xiangtan",
+          "country": "China"
+        },
+        {
+          "store_id": 4,
+          "city": "Citrus Heights",
+          "country": "United States"
+        },
+        {
+          "store_id": 5,
+          "city": "Vila Velha",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 6,
+          "city": "Lincoln",
+          "country": "United States"
+        },
+        {
+          "store_id": 7,
+          "city": "Alessandria",
+          "country": "Italy"
+        },
+        {
+          "store_id": 8,
+          "city": "Crdoba",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 9,
+          "city": "Bislig",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 10,
+          "city": "Toulon",
+          "country": "France"
+        },
+        {
+          "store_id": 11,
+          "city": "Goinia",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 12,
+          "city": "Abha",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 13,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 14,
+          "city": "Yerevan",
+          "country": "Armenia"
+        },
+        {
+          "store_id": 15,
+          "city": "Mardan",
+          "country": "Pakistan"
+        },
+        {
+          "store_id": 16,
+          "city": "Citt del Vaticano",
+          "country": "Holy See (Vatican City State)"
+        },
+        {
+          "store_id": 17,
+          "city": "Sal",
+          "country": "Morocco"
+        },
+        {
+          "store_id": 18,
+          "city": "Mysore",
+          "country": "India"
+        },
+        {
+          "store_id": 19,
+          "city": "Ashdod",
+          "country": "Israel"
+        },
+        {
+          "store_id": 20,
+          "city": "Nagareyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 21,
+          "city": "Yamuna Nagar",
+          "country": "India"
+        },
+        {
+          "store_id": 22,
+          "city": "Ilorin",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 23,
+          "city": "Woodridge",
+          "country": "Australia"
+        },
+        {
+          "store_id": 24,
+          "city": "Ife",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 25,
+          "city": "San Bernardino",
+          "country": "United States"
+        },
+        {
+          "store_id": 26,
+          "city": "Smolensk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 27,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 28,
+          "city": "Liaocheng",
+          "country": "China"
+        },
+        {
+          "store_id": 29,
+          "city": "Cheju",
+          "country": "South Korea"
+        },
+        {
+          "store_id": 30,
+          "city": "Simferopol",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 31,
+          "city": "Balaiha",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 32,
+          "city": "Kaduna",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 33,
+          "city": "Xiangtan",
+          "country": "China"
+        },
+        {
+          "store_id": 34,
+          "city": "Nanyang",
+          "country": "China"
+        },
+        {
+          "store_id": 35,
+          "city": "Crdoba",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 36,
+          "city": "Balaiha",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 37,
+          "city": "Sal",
+          "country": "Morocco"
+        },
+        {
+          "store_id": 38,
+          "city": "Atlixco",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 39,
+          "city": "Shivapuri",
+          "country": "India"
+        },
+        {
+          "store_id": 40,
+          "city": "Cuman",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 41,
+          "city": "Lincoln",
+          "country": "United States"
+        },
+        {
+          "store_id": 42,
+          "city": "Varanasi (Benares)",
+          "country": "India"
+        },
+        {
+          "store_id": 43,
+          "city": "Klerksdorp",
+          "country": "South Africa"
+        },
+        {
+          "store_id": 44,
+          "city": "Ashdod",
+          "country": "Israel"
+        },
+        {
+          "store_id": 45,
+          "city": "Mukateve",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 46,
+          "city": "Mysore",
+          "country": "India"
+        },
+        {
+          "store_id": 47,
+          "city": "Taguig",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 48,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 49,
+          "city": "Meixian",
+          "country": "China"
+        },
+        {
+          "store_id": 50,
+          "city": "Citt del Vaticano",
+          "country": "Holy See (Vatican City State)"
+        },
+        {
+          "store_id": 51,
+          "city": "Juazeiro do Norte",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 52,
+          "city": "Merlo",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 53,
+          "city": "Rae Bareli",
+          "country": "India"
+        },
+        {
+          "store_id": 54,
+          "city": "Jelets",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 55,
+          "city": "Bislig",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 56,
+          "city": "Basel",
+          "country": "Switzerland"
+        },
+        {
+          "store_id": 57,
+          "city": "Antofagasta",
+          "country": "Chile"
+        },
+        {
+          "store_id": 58,
+          "city": "Woodridge",
+          "country": "Australia"
+        },
+        {
+          "store_id": 59,
+          "city": "Bchar",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 60,
+          "city": "Kamarhati",
+          "country": "India"
+        },
+        {
+          "store_id": 61,
+          "city": "Vaduz",
+          "country": "Liechtenstein"
+        },
+        {
+          "store_id": 62,
+          "city": "Pavlodar",
+          "country": "Kazakstan"
+        },
+        {
+          "store_id": 63,
+          "city": "Xiangtan",
+          "country": "China"
+        },
+        {
+          "store_id": 64,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 65,
+          "city": "Fontana",
+          "country": "United States"
+        },
+        {
+          "store_id": 66,
+          "city": "Ashdod",
+          "country": "Israel"
+        },
+        {
+          "store_id": 67,
+          "city": "al-Hawiya",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 68,
+          "city": "Augusta-Richmond County",
+          "country": "United States"
+        },
+        {
+          "store_id": 69,
+          "city": "Smolensk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 70,
+          "city": "Shubra al-Khayma",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 71,
+          "city": "Vaduz",
+          "country": "Liechtenstein"
+        },
+        {
+          "store_id": 72,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 73,
+          "city": "Munger (Monghyr)",
+          "country": "India"
+        },
+        {
+          "store_id": 74,
+          "city": "Augusta-Richmond County",
+          "country": "United States"
+        },
+        {
+          "store_id": 75,
+          "city": "Cayenne",
+          "country": "French Guiana"
+        },
+        {
+          "store_id": 76,
+          "city": "Mukateve",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 77,
+          "city": "Rio Claro",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 78,
+          "city": "Liaocheng",
+          "country": "China"
+        },
+        {
+          "store_id": 79,
+          "city": "Toulouse",
+          "country": "France"
+        },
+        {
+          "store_id": 80,
+          "city": "Jelets",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 81,
+          "city": "Funafuti",
+          "country": "Tuvalu"
+        },
+        {
+          "store_id": 82,
+          "city": "Munger (Monghyr)",
+          "country": "India"
+        },
+        {
+          "store_id": 83,
+          "city": "Basel",
+          "country": "Switzerland"
+        },
+        {
+          "store_id": 84,
+          "city": "Southend-on-Sea",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 85,
+          "city": "Bchar",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 86,
+          "city": "Mardan",
+          "country": "Pakistan"
+        },
+        {
+          "store_id": 87,
+          "city": "Bchar",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 88,
+          "city": "Toulon",
+          "country": "France"
+        },
+        {
+          "store_id": 89,
+          "city": "Caracas",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 90,
+          "city": "Shimonoseki",
+          "country": "Japan"
+        },
+        {
+          "store_id": 91,
+          "city": "Songkhla",
+          "country": "Thailand"
+        },
+        {
+          "store_id": 92,
+          "city": "al-Ayn",
+          "country": "United Arab Emirates"
+        },
+        {
+          "store_id": 93,
+          "city": "Goinia",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 94,
+          "city": "Jedda",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 95,
+          "city": "Malm",
+          "country": "Sweden"
+        },
+        {
+          "store_id": 96,
+          "city": "Esfahan",
+          "country": "Iran"
+        },
+        {
+          "store_id": 97,
+          "city": "Toulon",
+          "country": "France"
+        },
+        {
+          "store_id": 98,
+          "city": "Cayenne",
+          "country": "French Guiana"
+        },
+        {
+          "store_id": 99,
+          "city": "al-Ayn",
+          "country": "United Arab Emirates"
+        },
+        {
+          "store_id": 100,
+          "city": "Laredo",
+          "country": "United States"
+        },
+        {
+          "store_id": 101,
+          "city": "Faaa",
+          "country": "French Polynesia"
+        },
+        {
+          "store_id": 102,
+          "city": "Etawah",
+          "country": "India"
+        },
+        {
+          "store_id": 103,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 104,
+          "city": "Gandhinagar",
+          "country": "India"
+        },
+        {
+          "store_id": 105,
+          "city": "Myingyan",
+          "country": "Myanmar"
+        },
+        {
+          "store_id": 106,
+          "city": "Nezahualcyotl",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 107,
+          "city": "Lilongwe",
+          "country": "Malawi"
+        },
+        {
+          "store_id": 108,
+          "city": "Saint-Denis",
+          "country": "Runion"
+        },
+        {
+          "store_id": 109,
+          "city": "Fuyu",
+          "country": "China"
+        },
+        {
+          "store_id": 110,
+          "city": "Phnom Penh",
+          "country": "Cambodia"
+        },
+        {
+          "store_id": 111,
+          "city": "Kirovo-Tepetsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 112,
+          "city": "Taizz",
+          "country": "Yemen"
+        },
+        {
+          "store_id": 113,
+          "city": "Clarksville",
+          "country": "United States"
+        },
+        {
+          "store_id": 114,
+          "city": "Novoterkassk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 115,
+          "city": "Bellevue",
+          "country": "United States"
+        },
+        {
+          "store_id": 116,
+          "city": "Fuyu",
+          "country": "China"
+        },
+        {
+          "store_id": 117,
+          "city": "Ocumare del Tuy",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 118,
+          "city": "Ciudad del Este",
+          "country": "Paraguay"
+        },
+        {
+          "store_id": 119,
+          "city": "Jinchang",
+          "country": "China"
+        },
+        {
+          "store_id": 120,
+          "city": "Witten",
+          "country": "Germany"
+        },
+        {
+          "store_id": 121,
+          "city": "Taizz",
+          "country": "Yemen"
+        },
+        {
+          "store_id": 122,
+          "city": "Oshawa",
+          "country": "Canada"
+        },
+        {
+          "store_id": 123,
+          "city": "Tallahassee",
+          "country": "United States"
+        },
+        {
+          "store_id": 124,
+          "city": "Sterling Heights",
+          "country": "United States"
+        },
+        {
+          "store_id": 125,
+          "city": "Shimoga",
+          "country": "India"
+        },
+        {
+          "store_id": 126,
+          "city": "Yuncheng",
+          "country": "China"
+        },
+        {
+          "store_id": 127,
+          "city": "Taizz",
+          "country": "Yemen"
+        },
+        {
+          "store_id": 128,
+          "city": "Molodetno",
+          "country": "Belarus"
+        },
+        {
+          "store_id": 129,
+          "city": "Fukuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 130,
+          "city": "Fukuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 131,
+          "city": "Zanzibar",
+          "country": "Tanzania"
+        },
+        {
+          "store_id": 132,
+          "city": "Pune",
+          "country": "India"
+        },
+        {
+          "store_id": 133,
+          "city": "Torren",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 134,
+          "city": "Fuyu",
+          "country": "China"
+        },
+        {
+          "store_id": 135,
+          "city": "Skikda",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 136,
+          "city": "Batman",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 137,
+          "city": "Tanza",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 138,
+          "city": "Asuncin",
+          "country": "Paraguay"
+        },
+        {
+          "store_id": 139,
+          "city": "Nuuk",
+          "country": "Greenland"
+        },
+        {
+          "store_id": 140,
+          "city": "Maring",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 141,
+          "city": "Iwaki",
+          "country": "Japan"
+        },
+        {
+          "store_id": 142,
+          "city": "Dundee",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 143,
+          "city": "Iwaki",
+          "country": "Japan"
+        },
+        {
+          "store_id": 144,
+          "city": "Botosani",
+          "country": "Romania"
+        },
+        {
+          "store_id": 145,
+          "city": "Hohhot",
+          "country": "China"
+        },
+        {
+          "store_id": 146,
+          "city": "Haiphong",
+          "country": "Vietnam"
+        },
+        {
+          "store_id": 147,
+          "city": "Aparecida de Goinia",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 148,
+          "city": "Ocumare del Tuy",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 149,
+          "city": "Sumy",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 150,
+          "city": "Jaroslavl",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 151,
+          "city": "Apeldoorn",
+          "country": "Netherlands"
+        },
+        {
+          "store_id": 152,
+          "city": "Greensboro",
+          "country": "United States"
+        },
+        {
+          "store_id": 153,
+          "city": "Lilongwe",
+          "country": "Malawi"
+        },
+        {
+          "store_id": 154,
+          "city": "Jodhpur",
+          "country": "India"
+        },
+        {
+          "store_id": 155,
+          "city": "Ocumare del Tuy",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 156,
+          "city": "Gorontalo",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 157,
+          "city": "Batman",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 158,
+          "city": "Bhilwara",
+          "country": "India"
+        },
+        {
+          "store_id": 159,
+          "city": "Hidalgo",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 160,
+          "city": "Ciudad del Este",
+          "country": "Paraguay"
+        },
+        {
+          "store_id": 161,
+          "city": "Fukuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 162,
+          "city": "Aden",
+          "country": "Yemen"
+        },
+        {
+          "store_id": 163,
+          "city": "Fukuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 164,
+          "city": "Qinhuangdao",
+          "country": "China"
+        },
+        {
+          "store_id": 165,
+          "city": "Ljubertsy",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 166,
+          "city": "Uijongbu",
+          "country": "South Korea"
+        },
+        {
+          "store_id": 167,
+          "city": "Le Mans",
+          "country": "France"
+        },
+        {
+          "store_id": 168,
+          "city": "Bhilwara",
+          "country": "India"
+        },
+        {
+          "store_id": 169,
+          "city": "Touliu",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 170,
+          "city": "Nagaon",
+          "country": "India"
+        },
+        {
+          "store_id": 171,
+          "city": "Apeldoorn",
+          "country": "Netherlands"
+        },
+        {
+          "store_id": 172,
+          "city": "Zaria",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 173,
+          "city": "Shimoga",
+          "country": "India"
+        },
+        {
+          "store_id": 174,
+          "city": "Taizz",
+          "country": "Yemen"
+        },
+        {
+          "store_id": 175,
+          "city": "Allappuzha (Alleppey)",
+          "country": "India"
+        },
+        {
+          "store_id": 176,
+          "city": "Gorontalo",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 177,
+          "city": "Maring",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 178,
+          "city": "Siegen",
+          "country": "Germany"
+        },
+        {
+          "store_id": 179,
+          "city": "Torren",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 180,
+          "city": "Matamoros",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 181,
+          "city": "Halle/Saale",
+          "country": "Germany"
+        },
+        {
+          "store_id": 182,
+          "city": "Maring",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 183,
+          "city": "Witten",
+          "country": "Germany"
+        },
+        {
+          "store_id": 184,
+          "city": "Shahr-e Kord",
+          "country": "Iran"
+        },
+        {
+          "store_id": 185,
+          "city": "Qinhuangdao",
+          "country": "China"
+        },
+        {
+          "store_id": 186,
+          "city": "Nuuk",
+          "country": "Greenland"
+        },
+        {
+          "store_id": 187,
+          "city": "Touliu",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 188,
+          "city": "Sunnyvale",
+          "country": "United States"
+        },
+        {
+          "store_id": 189,
+          "city": "Skikda",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 190,
+          "city": "Udaipur",
+          "country": "India"
+        },
+        {
+          "store_id": 191,
+          "city": "Tallahassee",
+          "country": "United States"
+        },
+        {
+          "store_id": 192,
+          "city": "Touliu",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 193,
+          "city": "Lapu-Lapu",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 194,
+          "city": "Memphis",
+          "country": "United States"
+        },
+        {
+          "store_id": 195,
+          "city": "Graz",
+          "country": "Austria"
+        },
+        {
+          "store_id": 196,
+          "city": "Luzinia",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 197,
+          "city": "Udaipur",
+          "country": "India"
+        },
+        {
+          "store_id": 198,
+          "city": "Jalib al-Shuyukh",
+          "country": "Kuwait"
+        },
+        {
+          "store_id": 199,
+          "city": "Tianjin",
+          "country": "China"
+        },
+        {
+          "store_id": 200,
+          "city": "Jinchang",
+          "country": "China"
+        },
+        {
+          "store_id": 201,
+          "city": "Tallahassee",
+          "country": "United States"
+        },
+        {
+          "store_id": 202,
+          "city": "Kabul",
+          "country": "Afghanistan"
+        },
+        {
+          "store_id": 203,
+          "city": "Tarsus",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 204,
+          "city": "Pune",
+          "country": "India"
+        },
+        {
+          "store_id": 205,
+          "city": "Changzhou",
+          "country": "China"
+        },
+        {
+          "store_id": 206,
+          "city": "Haiphong",
+          "country": "Vietnam"
+        },
+        {
+          "store_id": 207,
+          "city": "Tanza",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 208,
+          "city": "Lapu-Lapu",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 209,
+          "city": "Coacalco de Berriozbal",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 210,
+          "city": "Skikda",
+          "country": "Algeria"
+        },
+        {
+          "store_id": 211,
+          "city": "Ondo",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 212,
+          "city": "Kisumu",
+          "country": "Kenya"
+        },
+        {
+          "store_id": 213,
+          "city": "Tarsus",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 214,
+          "city": "Najafabad",
+          "country": "Iran"
+        },
+        {
+          "store_id": 215,
+          "city": "Dayton",
+          "country": "United States"
+        },
+        {
+          "store_id": 216,
+          "city": "Trshavn",
+          "country": "Faroe Islands"
+        },
+        {
+          "store_id": 217,
+          "city": "Korla",
+          "country": "China"
+        },
+        {
+          "store_id": 218,
+          "city": "Huaian",
+          "country": "China"
+        },
+        {
+          "store_id": 219,
+          "city": "Belm",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 220,
+          "city": "Bydgoszcz",
+          "country": "Poland"
+        },
+        {
+          "store_id": 221,
+          "city": "Tabuk",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 222,
+          "city": "Onomichi",
+          "country": "Japan"
+        },
+        {
+          "store_id": 223,
+          "city": "Tafuna",
+          "country": "American Samoa"
+        },
+        {
+          "store_id": 224,
+          "city": "Matsue",
+          "country": "Japan"
+        },
+        {
+          "store_id": 225,
+          "city": "Daugavpils",
+          "country": "Latvia"
+        },
+        {
+          "store_id": 226,
+          "city": "Bydgoszcz",
+          "country": "Poland"
+        },
+        {
+          "store_id": 227,
+          "city": "Salinas",
+          "country": "United States"
+        },
+        {
+          "store_id": 228,
+          "city": "Tafuna",
+          "country": "American Samoa"
+        },
+        {
+          "store_id": 229,
+          "city": "Huaian",
+          "country": "China"
+        },
+        {
+          "store_id": 230,
+          "city": "Matsue",
+          "country": "Japan"
+        },
+        {
+          "store_id": 231,
+          "city": "Salamanca",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 232,
+          "city": "Braslia",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 233,
+          "city": "San Felipe del Progreso",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 234,
+          "city": "Baku",
+          "country": "Azerbaijan"
+        },
+        {
+          "store_id": 235,
+          "city": "Vitria de Santo Anto",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 236,
+          "city": "Valle de Santiago",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 237,
+          "city": "Ede",
+          "country": "Netherlands"
+        },
+        {
+          "store_id": 238,
+          "city": "Tuguegarao",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 239,
+          "city": "Imus",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 240,
+          "city": "Olomouc",
+          "country": "Czech Republic"
+        },
+        {
+          "store_id": 241,
+          "city": "Mandaluyong",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 242,
+          "city": "Kansas City",
+          "country": "United States"
+        },
+        {
+          "store_id": 243,
+          "city": "Guadalajara",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 244,
+          "city": "Otsu",
+          "country": "Japan"
+        },
+        {
+          "store_id": 245,
+          "city": "Shenzhen",
+          "country": "China"
+        },
+        {
+          "store_id": 246,
+          "city": "Tychy",
+          "country": "Poland"
+        },
+        {
+          "store_id": 247,
+          "city": "Miraj",
+          "country": "India"
+        },
+        {
+          "store_id": 248,
+          "city": "Zeleznogorsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 249,
+          "city": "Bratislava",
+          "country": "Slovakia"
+        },
+        {
+          "store_id": 250,
+          "city": "Manchester",
+          "country": "United States"
+        },
+        {
+          "store_id": 251,
+          "city": "Hagonoy",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 252,
+          "city": "Halisahar",
+          "country": "India"
+        },
+        {
+          "store_id": 253,
+          "city": "Bratislava",
+          "country": "Slovakia"
+        },
+        {
+          "store_id": 254,
+          "city": "Callao",
+          "country": "Peru"
+        },
+        {
+          "store_id": 255,
+          "city": "Mexicali",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 256,
+          "city": "Patiala",
+          "country": "India"
+        },
+        {
+          "store_id": 257,
+          "city": "Sharja",
+          "country": "United Arab Emirates"
+        },
+        {
+          "store_id": 258,
+          "city": "Bratislava",
+          "country": "Slovakia"
+        },
+        {
+          "store_id": 259,
+          "city": "Kumbakonam",
+          "country": "India"
+        },
+        {
+          "store_id": 260,
+          "city": "Oulu",
+          "country": "Finland"
+        },
+        {
+          "store_id": 261,
+          "city": "Tabuk",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 262,
+          "city": "Pachuca de Soto",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 263,
+          "city": "Xinxiang",
+          "country": "China"
+        },
+        {
+          "store_id": 264,
+          "city": "Tabriz",
+          "country": "Iran"
+        },
+        {
+          "store_id": 265,
+          "city": "Otsu",
+          "country": "Japan"
+        },
+        {
+          "store_id": 266,
+          "city": "Zeleznogorsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 267,
+          "city": "Ponce",
+          "country": "Puerto Rico"
+        },
+        {
+          "store_id": 268,
+          "city": "Kurgan",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 269,
+          "city": "Matsue",
+          "country": "Japan"
+        },
+        {
+          "store_id": 270,
+          "city": "Sorocaba",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 271,
+          "city": "Gulbarga",
+          "country": "India"
+        },
+        {
+          "store_id": 272,
+          "city": "Miyakonojo",
+          "country": "Japan"
+        },
+        {
+          "store_id": 273,
+          "city": "Peoria",
+          "country": "United States"
+        },
+        {
+          "store_id": 274,
+          "city": "Salamanca",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 275,
+          "city": "Tiefa",
+          "country": "China"
+        },
+        {
+          "store_id": 276,
+          "city": "Bratislava",
+          "country": "Slovakia"
+        },
+        {
+          "store_id": 277,
+          "city": "Imus",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 278,
+          "city": "Jamalpur",
+          "country": "Bangladesh"
+        },
+        {
+          "store_id": 279,
+          "city": "Sousse",
+          "country": "Tunisia"
+        },
+        {
+          "store_id": 280,
+          "city": "Ogbomosho",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 281,
+          "city": "Effon-Alaiye",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 282,
+          "city": "Bydgoszcz",
+          "country": "Poland"
+        },
+        {
+          "store_id": 283,
+          "city": "Valle de la Pascua",
+          "country": "Venezuela"
+        },
+        {
+          "store_id": 284,
+          "city": "Tychy",
+          "country": "Poland"
+        },
+        {
+          "store_id": 285,
+          "city": "Peoria",
+          "country": "United States"
+        },
+        {
+          "store_id": 286,
+          "city": "Otsu",
+          "country": "Japan"
+        },
+        {
+          "store_id": 287,
+          "city": "San Lorenzo",
+          "country": "Paraguay"
+        },
+        {
+          "store_id": 288,
+          "city": "Ogbomosho",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 289,
+          "city": "Adana",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 290,
+          "city": "Fuzhou",
+          "country": "China"
+        },
+        {
+          "store_id": 291,
+          "city": "Arecibo",
+          "country": "Puerto Rico"
+        },
+        {
+          "store_id": 292,
+          "city": "Santa F",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 293,
+          "city": "Tabriz",
+          "country": "Iran"
+        },
+        {
+          "store_id": 294,
+          "city": "Parbhani",
+          "country": "India"
+        },
+        {
+          "store_id": 295,
+          "city": "Fuzhou",
+          "country": "China"
+        },
+        {
+          "store_id": 296,
+          "city": "Miraj",
+          "country": "India"
+        },
+        {
+          "store_id": 297,
+          "city": "Kumbakonam",
+          "country": "India"
+        },
+        {
+          "store_id": 298,
+          "city": "Ranchi",
+          "country": "India"
+        },
+        {
+          "store_id": 299,
+          "city": "Lengshuijiang",
+          "country": "China"
+        },
+        {
+          "store_id": 300,
+          "city": "Tafuna",
+          "country": "American Samoa"
+        },
+        {
+          "store_id": 301,
+          "city": "Satna",
+          "country": "India"
+        },
+        {
+          "store_id": 302,
+          "city": "Kansas City",
+          "country": "United States"
+        },
+        {
+          "store_id": 303,
+          "city": "Probolinggo",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 304,
+          "city": "Benin City",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 305,
+          "city": "Korla",
+          "country": "China"
+        },
+        {
+          "store_id": 306,
+          "city": "Beira",
+          "country": "Mozambique"
+        },
+        {
+          "store_id": 307,
+          "city": "Balikesir",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 308,
+          "city": "Korla",
+          "country": "China"
+        },
+        {
+          "store_id": 309,
+          "city": "Pachuca de Soto",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 310,
+          "city": "Cuautla",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 311,
+          "city": "Sorocaba",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 312,
+          "city": "San Lorenzo",
+          "country": "Paraguay"
+        },
+        {
+          "store_id": 313,
+          "city": "Ibirit",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 314,
+          "city": "Manchester",
+          "country": "United States"
+        },
+        {
+          "store_id": 315,
+          "city": "Santo Andr",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 316,
+          "city": "Daugavpils",
+          "country": "Latvia"
+        },
+        {
+          "store_id": 317,
+          "city": "Birgunj",
+          "country": "Nepal"
+        },
+        {
+          "store_id": 318,
+          "city": "Ibirit",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 319,
+          "city": "Sungai Petani",
+          "country": "Malaysia"
+        },
+        {
+          "store_id": 320,
+          "city": "Otsu",
+          "country": "Japan"
+        },
+        {
+          "store_id": 321,
+          "city": "Madiun",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 322,
+          "city": "Amersfoort",
+          "country": "Netherlands"
+        },
+        {
+          "store_id": 323,
+          "city": "Uruapan",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 324,
+          "city": "Newcastle",
+          "country": "South Africa"
+        },
+        {
+          "store_id": 325,
+          "city": "Brindisi",
+          "country": "Italy"
+        },
+        {
+          "store_id": 326,
+          "city": "Salala",
+          "country": "Oman"
+        },
+        {
+          "store_id": 327,
+          "city": "Halifax",
+          "country": "Canada"
+        },
+        {
+          "store_id": 328,
+          "city": "Tegal",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 329,
+          "city": "Florencia",
+          "country": "Colombia"
+        },
+        {
+          "store_id": 330,
+          "city": "Mwanza",
+          "country": "Tanzania"
+        },
+        {
+          "store_id": 331,
+          "city": "Koriyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 332,
+          "city": "Pudukkottai",
+          "country": "India"
+        },
+        {
+          "store_id": 333,
+          "city": "Florencia",
+          "country": "Colombia"
+        },
+        {
+          "store_id": 334,
+          "city": "Uruapan",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 335,
+          "city": "Cianjur",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 336,
+          "city": "Akron",
+          "country": "United States"
+        },
+        {
+          "store_id": 337,
+          "city": "Addis Abeba",
+          "country": "Ethiopia"
+        },
+        {
+          "store_id": 338,
+          "city": "Kamjanets-Podilskyi",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 339,
+          "city": "Okayama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 340,
+          "city": "Lublin",
+          "country": "Poland"
+        },
+        {
+          "store_id": 341,
+          "city": "Guaruj",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 342,
+          "city": "Sultanbeyli",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 343,
+          "city": "Ziguinchor",
+          "country": "Senegal"
+        },
+        {
+          "store_id": 344,
+          "city": "Erlangen",
+          "country": "Germany"
+        },
+        {
+          "store_id": 345,
+          "city": "Valparai",
+          "country": "India"
+        },
+        {
+          "store_id": 346,
+          "city": "Battambang",
+          "country": "Cambodia"
+        },
+        {
+          "store_id": 347,
+          "city": "al-Qadarif",
+          "country": "Sudan"
+        },
+        {
+          "store_id": 348,
+          "city": "Sultanbeyli",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 349,
+          "city": "Rancagua",
+          "country": "Chile"
+        },
+        {
+          "store_id": 350,
+          "city": "Pontianak",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 351,
+          "city": "Zapopan",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 352,
+          "city": "Katihar",
+          "country": "India"
+        },
+        {
+          "store_id": 353,
+          "city": "Tsuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 354,
+          "city": "Ozamis",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 355,
+          "city": "Brindisi",
+          "country": "Italy"
+        },
+        {
+          "store_id": 356,
+          "city": "Pjatigorsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 357,
+          "city": "Tegal",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 358,
+          "city": "Purnea (Purnia)",
+          "country": "India"
+        },
+        {
+          "store_id": 359,
+          "city": "York",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 360,
+          "city": "Lhokseumawe",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 361,
+          "city": "ostka",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 362,
+          "city": "Rancagua",
+          "country": "Chile"
+        },
+        {
+          "store_id": 363,
+          "city": "Nakhon Sawan",
+          "country": "Thailand"
+        },
+        {
+          "store_id": 364,
+          "city": "London",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 365,
+          "city": "Stockport",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 366,
+          "city": "Nakhon Sawan",
+          "country": "Thailand"
+        },
+        {
+          "store_id": 367,
+          "city": "Mit Ghamr",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 368,
+          "city": "Johannesburg",
+          "country": "South Africa"
+        },
+        {
+          "store_id": 369,
+          "city": "Denizli",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 370,
+          "city": "Ziguinchor",
+          "country": "Senegal"
+        },
+        {
+          "store_id": 371,
+          "city": "Deba Habe",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 372,
+          "city": "San Juan Bautista Tuxtepec",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 373,
+          "city": "Baiyin",
+          "country": "China"
+        },
+        {
+          "store_id": 374,
+          "city": "Joliet",
+          "country": "United States"
+        },
+        {
+          "store_id": 375,
+          "city": "Nakhon Sawan",
+          "country": "Thailand"
+        },
+        {
+          "store_id": 376,
+          "city": "Tandil",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 377,
+          "city": "Zaoyang",
+          "country": "China"
+        },
+        {
+          "store_id": 378,
+          "city": "Guaruj",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 379,
+          "city": "Katihar",
+          "country": "India"
+        },
+        {
+          "store_id": 380,
+          "city": "Siliguri (Shiliguri)",
+          "country": "India"
+        },
+        {
+          "store_id": 381,
+          "city": "Cuauhtmoc",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 382,
+          "city": "Kitwe",
+          "country": "Zambia"
+        },
+        {
+          "store_id": 383,
+          "city": "Abu Dhabi",
+          "country": "United Arab Emirates"
+        },
+        {
+          "store_id": 384,
+          "city": "Tsuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 385,
+          "city": "San Juan Bautista Tuxtepec",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 386,
+          "city": "Baiyin",
+          "country": "China"
+        },
+        {
+          "store_id": 387,
+          "city": "Usolje-Sibirskoje",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 388,
+          "city": "Pudukkottai",
+          "country": "India"
+        },
+        {
+          "store_id": 389,
+          "city": "Vijayawada",
+          "country": "India"
+        },
+        {
+          "store_id": 390,
+          "city": "Izumisano",
+          "country": "Japan"
+        },
+        {
+          "store_id": 391,
+          "city": "Ourense (Orense)",
+          "country": "Spain"
+        },
+        {
+          "store_id": 392,
+          "city": "Brindisi",
+          "country": "Italy"
+        },
+        {
+          "store_id": 393,
+          "city": "Kamjanets-Podilskyi",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 394,
+          "city": "Sawhaj",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 395,
+          "city": "al-Qatif",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 396,
+          "city": "Rustenburg",
+          "country": "South Africa"
+        },
+        {
+          "store_id": 397,
+          "city": "Cavite",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 398,
+          "city": "Lublin",
+          "country": "Poland"
+        },
+        {
+          "store_id": 399,
+          "city": "Sawhaj",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 400,
+          "city": "Kamyin",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 401,
+          "city": "Tartu",
+          "country": "Estonia"
+        },
+        {
+          "store_id": 402,
+          "city": "Guaruj",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 403,
+          "city": "Cavite",
+          "country": "Philippines"
+        },
+        {
+          "store_id": 404,
+          "city": "Shaoguan",
+          "country": "China"
+        },
+        {
+          "store_id": 405,
+          "city": "Mit Ghamr",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 406,
+          "city": "Rancagua",
+          "country": "Chile"
+        },
+        {
+          "store_id": 407,
+          "city": "Dhule (Dhulia)",
+          "country": "India"
+        },
+        {
+          "store_id": 408,
+          "city": "Okayama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 409,
+          "city": "Lublin",
+          "country": "Poland"
+        },
+        {
+          "store_id": 410,
+          "city": "Addis Abeba",
+          "country": "Ethiopia"
+        },
+        {
+          "store_id": 411,
+          "city": "Atinsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 412,
+          "city": "Sivas",
+          "country": "Turkey"
+        },
+        {
+          "store_id": 413,
+          "city": "al-Qatif",
+          "country": "Saudi Arabia"
+        },
+        {
+          "store_id": 414,
+          "city": "Usolje-Sibirskoje",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 415,
+          "city": "Dzerzinsk",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 416,
+          "city": "Abu Dhabi",
+          "country": "United Arab Emirates"
+        },
+        {
+          "store_id": 417,
+          "city": "Uluberia",
+          "country": "India"
+        },
+        {
+          "store_id": 418,
+          "city": "Tongliao",
+          "country": "China"
+        },
+        {
+          "store_id": 419,
+          "city": "York",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 420,
+          "city": "Korolev",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 421,
+          "city": "Vancouver",
+          "country": "Canada"
+        },
+        {
+          "store_id": 422,
+          "city": "Okara",
+          "country": "Pakistan"
+        },
+        {
+          "store_id": 423,
+          "city": "Berhampore (Baharampur)",
+          "country": "India"
+        },
+        {
+          "store_id": 424,
+          "city": "Syktyvkar",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 425,
+          "city": "Surakarta",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 426,
+          "city": "Tsuyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 427,
+          "city": "Addis Abeba",
+          "country": "Ethiopia"
+        },
+        {
+          "store_id": 428,
+          "city": "Tonghae",
+          "country": "South Korea"
+        },
+        {
+          "store_id": 429,
+          "city": "Zhezqazghan",
+          "country": "Kazakstan"
+        },
+        {
+          "store_id": 430,
+          "city": "Hunuco",
+          "country": "Peru"
+        },
+        {
+          "store_id": 431,
+          "city": "Garland",
+          "country": "United States"
+        },
+        {
+          "store_id": 432,
+          "city": "Lausanne",
+          "country": "Switzerland"
+        },
+        {
+          "store_id": 433,
+          "city": "Crdoba",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 434,
+          "city": "Vila Velha",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 435,
+          "city": "Yamuna Nagar",
+          "country": "India"
+        },
+        {
+          "store_id": 436,
+          "city": "Lausanne",
+          "country": "Switzerland"
+        },
+        {
+          "store_id": 437,
+          "city": "Mardan",
+          "country": "Pakistan"
+        },
+        {
+          "store_id": 438,
+          "city": "Munger (Monghyr)",
+          "country": "India"
+        },
+        {
+          "store_id": 439,
+          "city": "Vaduz",
+          "country": "Liechtenstein"
+        },
+        {
+          "store_id": 440,
+          "city": "Livorno",
+          "country": "Italy"
+        },
+        {
+          "store_id": 441,
+          "city": "Alvorada",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 442,
+          "city": "San Bernardino",
+          "country": "United States"
+        },
+        {
+          "store_id": 443,
+          "city": "Kaduna",
+          "country": "Nigeria"
+        },
+        {
+          "store_id": 444,
+          "city": "Antofagasta",
+          "country": "Chile"
+        },
+        {
+          "store_id": 445,
+          "city": "Crdoba",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 446,
+          "city": "Bilbays",
+          "country": "Egypt"
+        },
+        {
+          "store_id": 447,
+          "city": "Tonghae",
+          "country": "South Korea"
+        },
+        {
+          "store_id": 448,
+          "city": "Aurora",
+          "country": "United States"
+        },
+        {
+          "store_id": 449,
+          "city": "Akishima",
+          "country": "Japan"
+        },
+        {
+          "store_id": 450,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 451,
+          "city": "Nagareyama",
+          "country": "Japan"
+        },
+        {
+          "store_id": 452,
+          "city": "Sal",
+          "country": "Morocco"
+        },
+        {
+          "store_id": 453,
+          "city": "Purwakarta",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 454,
+          "city": "Nanyang",
+          "country": "China"
+        },
+        {
+          "store_id": 455,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 456,
+          "city": "Fengshan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 457,
+          "city": "Cape Coral",
+          "country": "United States"
+        },
+        {
+          "store_id": 458,
+          "city": "Esfahan",
+          "country": "Iran"
+        },
+        {
+          "store_id": 459,
+          "city": "Leshan",
+          "country": "China"
+        },
+        {
+          "store_id": 460,
+          "city": "Purwakarta",
+          "country": "Indonesia"
+        },
+        {
+          "store_id": 461,
+          "city": "Hunuco",
+          "country": "Peru"
+        },
+        {
+          "store_id": 462,
+          "city": "Kamarhati",
+          "country": "India"
+        },
+        {
+          "store_id": 463,
+          "city": "Kanazawa",
+          "country": "Japan"
+        },
+        {
+          "store_id": 464,
+          "city": "Zhezqazghan",
+          "country": "Kazakstan"
+        },
+        {
+          "store_id": 465,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 466,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 467,
+          "city": "Alessandria",
+          "country": "Italy"
+        },
+        {
+          "store_id": 468,
+          "city": "Juazeiro do Norte",
+          "country": "Brazil"
+        },
+        {
+          "store_id": 469,
+          "city": "Monclova",
+          "country": "Mexico"
+        },
+        {
+          "store_id": 470,
+          "city": "Czestochowa",
+          "country": "Poland"
+        },
+        {
+          "store_id": 471,
+          "city": "Jhansi",
+          "country": "India"
+        },
+        {
+          "store_id": 472,
+          "city": "Benguela",
+          "country": "Angola"
+        },
+        {
+          "store_id": 473,
+          "city": "Amroha",
+          "country": "India"
+        },
+        {
+          "store_id": 474,
+          "city": "Ezeiza",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 475,
+          "city": "Hamilton",
+          "country": "New Zealand"
+        },
+        {
+          "store_id": 476,
+          "city": "Konotop",
+          "country": "Ukraine"
+        },
+        {
+          "store_id": 477,
+          "city": "Citt del Vaticano",
+          "country": "Holy See (Vatican City State)"
+        },
+        {
+          "store_id": 478,
+          "city": "Southend-on-Sea",
+          "country": "United Kingdom"
+        },
+        {
+          "store_id": 479,
+          "city": "Bucuresti",
+          "country": "Romania"
+        },
+        {
+          "store_id": 480,
+          "city": "Serpuhov",
+          "country": "Russian Federation"
+        },
+        {
+          "store_id": 481,
+          "city": "Plock",
+          "country": "Poland"
+        },
+        {
+          "store_id": 482,
+          "city": "Citt del Vaticano",
+          "country": "Holy See (Vatican City State)"
+        },
+        {
+          "store_id": 483,
+          "city": "Weifang",
+          "country": "China"
+        },
+        {
+          "store_id": 484,
+          "city": "Cam Ranh",
+          "country": "Vietnam"
+        },
+        {
+          "store_id": 485,
+          "city": "Ezeiza",
+          "country": "Argentina"
+        },
+        {
+          "store_id": 486,
+          "city": "Lungtan",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 487,
+          "city": "NDjamna",
+          "country": "Chad"
+        },
+        {
+          "store_id": 488,
+          "city": "Sal",
+          "country": "Morocco"
+        },
+        {
+          "store_id": 489,
+          "city": "Benguela",
+          "country": "Angola"
+        },
+        {
+          "store_id": 490,
+          "city": "Laredo",
+          "country": "United States"
+        },
+        {
+          "store_id": 491,
+          "city": "Vaduz",
+          "country": "Liechtenstein"
+        },
+        {
+          "store_id": 492,
+          "city": "Szkesfehrvr",
+          "country": "Hungary"
+        },
+        {
+          "store_id": 493,
+          "city": "Fontana",
+          "country": "United States"
+        },
+        {
+          "store_id": 494,
+          "city": "Santiago de Compostela",
+          "country": "Spain"
+        },
+        {
+          "store_id": 495,
+          "city": "Banjul",
+          "country": "Gambia"
+        },
+        {
+          "store_id": 496,
+          "city": "Mysore",
+          "country": "India"
+        },
+        {
+          "store_id": 497,
+          "city": "Tsaotun",
+          "country": "Taiwan"
+        },
+        {
+          "store_id": 498,
+          "city": "Toulouse",
+          "country": "France"
+        },
+        {
+          "store_id": 499,
+          "city": "Woodridge",
+          "country": "Australia"
+        }
+      ],
+      "expected_row_count": 500,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "city",
+        "country",
+        "store"
+      ]
+    },
+    {
+      "id": 1194,
+      "question": "List actors in the film 'ANGELS LIFE'",
+      "query": "SELECT a.first_name, a.last_name FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id JOIN film f ON fa.film_id = f.film_id WHERE f.title = 'ANGELS LIFE';",
+      "expected_result": [
+        {
+          "first_name": "PENELOPE",
+          "last_name": "GUINESS"
+        },
+        {
+          "first_name": "JENNIFER",
+          "last_name": "DAVIS"
+        },
+        {
+          "first_name": "GRACE",
+          "last_name": "MOSTEL"
+        },
+        {
+          "first_name": "JULIA",
+          "last_name": "BARRYMORE"
+        },
+        {
+          "first_name": "CHRISTOPHER",
+          "last_name": "BERRY"
+        },
+        {
+          "first_name": "ED",
+          "last_name": "MANSFIELD"
+        },
+        {
+          "first_name": "NICK",
+          "last_name": "DEGENERES"
+        },
+        {
+          "first_name": "LAURENCE",
+          "last_name": "BULLOCK"
+        },
+        {
+          "first_name": "RENEE",
+          "last_name": "BALL"
+        }
+      ],
+      "expected_row_count": 9,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "actor",
+        "film",
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1195,
+      "question": "List English language films",
+      "query": "SELECT f.title FROM film f JOIN language l ON f.language_id = l.language_id WHERE l.name = 'English' LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "ACADEMY DINOSAUR"
+        },
+        {
+          "title": "ACE GOLDFINGER"
+        },
+        {
+          "title": "AGENT TRUMAN"
+        },
+        {
+          "title": "AIRPLANE SIERRA"
+        },
+        {
+          "title": "AIRPORT POLLOCK"
+        },
+        {
+          "title": "ALABAMA DEVIL"
+        },
+        {
+          "title": "ALADDIN CALENDAR"
+        },
+        {
+          "title": "ALASKA PHANTOM"
+        },
+        {
+          "title": "ALLEY EVOLUTION"
+        },
+        {
+          "title": "ALTER VICTORY"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "film",
+        "language"
+      ]
+    },
+    {
+      "id": 1196,
+      "question": "List films rented by customer with ID 1",
+      "query": "SELECT f.title, r.rental_date FROM rental r JOIN inventory i ON r.inventory_id = i.inventory_id JOIN film f ON i.film_id = f.film_id WHERE r.customer_id = 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "MUSKETEERS WAIT",
+          "rental_date": "2022-06-14T23:54:12+00:00"
+        },
+        {
+          "title": "FERRIS MOTHER",
+          "rental_date": "2022-06-15T20:08:46+00:00"
+        },
+        {
+          "title": "CLOSER BANG",
+          "rental_date": "2022-06-16T14:18:57+00:00"
+        },
+        {
+          "title": "ATTACKS HATE",
+          "rental_date": "2022-06-18T07:41:48+00:00"
+        },
+        {
+          "title": "SAVANNAH TOWN",
+          "rental_date": "2022-06-18T12:33:59+00:00"
+        },
+        {
+          "title": "YOUTH KICK",
+          "rental_date": "2022-06-21T05:24:45+00:00"
+        },
+        {
+          "title": "SATURDAY LAMBS",
+          "rental_date": "2022-07-08T06:33:56+00:00"
+        },
+        {
+          "title": "CONFIDENTIAL INTERVIEW",
+          "rental_date": "2022-07-09T15:38:01+00:00"
+        },
+        {
+          "title": "EXPECATIONS NATURAL",
+          "rental_date": "2022-07-11T09:13:46+00:00"
+        },
+        {
+          "title": "LUCK OPUS",
+          "rental_date": "2022-07-27T10:31:22+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "film",
+        "inventory",
+        "rental"
+      ]
+    },
+    {
+      "id": 1197,
+      "question": "List customers associated with Store 1",
+      "query": "SELECT c.first_name, c.last_name FROM customer c JOIN store s ON c.store_id = s.store_id WHERE s.store_id = 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "first_name": "MARY",
+          "last_name": "SMITH"
+        },
+        {
+          "first_name": "PATRICIA",
+          "last_name": "JOHNSON"
+        },
+        {
+          "first_name": "LINDA",
+          "last_name": "WILLIAMS"
+        },
+        {
+          "first_name": "ELIZABETH",
+          "last_name": "BROWN"
+        },
+        {
+          "first_name": "MARIA",
+          "last_name": "MILLER"
+        },
+        {
+          "first_name": "DOROTHY",
+          "last_name": "TAYLOR"
+        },
+        {
+          "first_name": "NANCY",
+          "last_name": "THOMAS"
+        },
+        {
+          "first_name": "HELEN",
+          "last_name": "HARRIS"
+        },
+        {
+          "first_name": "DONNA",
+          "last_name": "THOMPSON"
+        },
+        {
+          "first_name": "RUTH",
+          "last_name": "MARTINEZ"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "customer",
+        "store"
+      ]
+    },
+    {
+      "id": 1198,
+      "question": "Find actors with the last name 'DEGENERES' and their films",
+      "query": "SELECT a.first_name, f.title FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id JOIN film f ON fa.film_id = f.film_id WHERE a.last_name = 'DEGENERES';",
+      "expected_result": [
+        {
+          "first_name": "JODIE",
+          "title": "AFFAIR PREJUDICE"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "BEAST HUNCHBACK"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "BEVERLY OUTLAW"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "BOOGIE AMELIE"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "BROOKLYN DESERT"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "CIDER DESIRE"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "CLOSER BANG"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "CROW GREASE"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "DAISY MENAGERIE"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "DARN FORRESTER"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "DIARY PANIC"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "DRACULA CRYSTAL"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "DREAM PICKUP"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "FATAL HAUNTED"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "FRENCH HOLIDAY"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "GROOVE FICTION"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "MADISON TRAP"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "MOONSHINE CABIN"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "PARADISE SABRINA"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "PET HAUNTING"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "PICKUP DRIVING"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "REDS POCUS"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "REMEMBER DIARY"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "SENSE GREEK"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "SHANGHAI TYCOON"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "SIMON NORTH"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "TOMATOES HELLFIGHTERS"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "TROJAN TOMORROW"
+        },
+        {
+          "first_name": "JODIE",
+          "title": "VIETNAM SMOOCHY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "BED HIGHBALL"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CALENDAR GUNFIGHT"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CHAMBER ITALIAN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CHAPLIN LICENSE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CHARIOTS CONSPIRACY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CLUELESS BUCKET"
+        },
+        {
+          "first_name": "GINA",
+          "title": "COLDBLOODED DARLING"
+        },
+        {
+          "first_name": "GINA",
+          "title": "CONEHEADS SMOOCHY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "DARKNESS WAR"
+        },
+        {
+          "first_name": "GINA",
+          "title": "DEER VIRGINIAN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "DOGMA FAMILY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "ELEPHANT TROJAN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "EXCITEMENT EVE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "FRISCO FORREST"
+        },
+        {
+          "first_name": "GINA",
+          "title": "GANDHI KWAI"
+        },
+        {
+          "first_name": "GINA",
+          "title": "GOODFELLAS SALUTE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "GUNFIGHT MOON"
+        },
+        {
+          "first_name": "GINA",
+          "title": "HALL CASSIDY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "HEARTBREAKERS BRIGHT"
+        },
+        {
+          "first_name": "GINA",
+          "title": "HOOK CHARIOTS"
+        },
+        {
+          "first_name": "GINA",
+          "title": "HYDE DOCTOR"
+        },
+        {
+          "first_name": "GINA",
+          "title": "IMPACT ALADDIN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "INDIAN LOVE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "INTRIGUE WORST"
+        },
+        {
+          "first_name": "GINA",
+          "title": "LICENSE WEEKEND"
+        },
+        {
+          "first_name": "GINA",
+          "title": "LOUISIANA HARRY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "MAGNIFICENT CHITTY"
+        },
+        {
+          "first_name": "GINA",
+          "title": "METAL ARMAGEDDON"
+        },
+        {
+          "first_name": "GINA",
+          "title": "MIDNIGHT WESTWARD"
+        },
+        {
+          "first_name": "GINA",
+          "title": "MOVIE SHAKESPEARE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "MUMMY CREATURES"
+        },
+        {
+          "first_name": "GINA",
+          "title": "OPEN AFRICAN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "SEARCHERS WAIT"
+        },
+        {
+          "first_name": "GINA",
+          "title": "SEVEN SWARM"
+        },
+        {
+          "first_name": "GINA",
+          "title": "SIERRA DIVIDE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "SPIRITED CASUALTIES"
+        },
+        {
+          "first_name": "GINA",
+          "title": "STORM HAPPINESS"
+        },
+        {
+          "first_name": "GINA",
+          "title": "SUGAR WONKA"
+        },
+        {
+          "first_name": "GINA",
+          "title": "TELEGRAPH VOYAGE"
+        },
+        {
+          "first_name": "GINA",
+          "title": "TRAINSPOTTING STRANGERS"
+        },
+        {
+          "first_name": "GINA",
+          "title": "WIFE TURN"
+        },
+        {
+          "first_name": "GINA",
+          "title": "WINDOW SIDE"
+        },
+        {
+          "first_name": "NICK",
+          "title": "ANGELS LIFE"
+        },
+        {
+          "first_name": "NICK",
+          "title": "ARK RIDGEMONT"
+        },
+        {
+          "first_name": "NICK",
+          "title": "BARBARELLA STREETCAR"
+        },
+        {
+          "first_name": "NICK",
+          "title": "BEAUTY GREASE"
+        },
+        {
+          "first_name": "NICK",
+          "title": "BETRAYED REAR"
+        },
+        {
+          "first_name": "NICK",
+          "title": "BOOGIE AMELIE"
+        },
+        {
+          "first_name": "NICK",
+          "title": "CHITTY LOCK"
+        },
+        {
+          "first_name": "NICK",
+          "title": "DRIVING POLISH"
+        },
+        {
+          "first_name": "NICK",
+          "title": "EXTRAORDINARY CONQUERER"
+        },
+        {
+          "first_name": "NICK",
+          "title": "FEATHERS METAL"
+        },
+        {
+          "first_name": "NICK",
+          "title": "FLYING HOOK"
+        },
+        {
+          "first_name": "NICK",
+          "title": "GLEAMING JAWBREAKER"
+        },
+        {
+          "first_name": "NICK",
+          "title": "GOLDFINGER SENSIBILITY"
+        },
+        {
+          "first_name": "NICK",
+          "title": "HOME PITY"
+        },
+        {
+          "first_name": "NICK",
+          "title": "MINE TITANS"
+        },
+        {
+          "first_name": "NICK",
+          "title": "NEWSIES STORY"
+        },
+        {
+          "first_name": "NICK",
+          "title": "PET HAUNTING"
+        },
+        {
+          "first_name": "NICK",
+          "title": "RANDOM GO"
+        },
+        {
+          "first_name": "NICK",
+          "title": "SHIP WONDERLAND"
+        },
+        {
+          "first_name": "NICK",
+          "title": "SUPER WYOMING"
+        },
+        {
+          "first_name": "NICK",
+          "title": "VIRGIN DAISY"
+        },
+        {
+          "first_name": "NICK",
+          "title": "ZORRO ARK"
+        }
+      ],
+      "expected_row_count": 93,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "actor",
+        "film",
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1199,
+      "question": "List films with a replacement cost greater than 20 and their language",
+      "query": "SELECT f.title, f.replacement_cost, l.name as language FROM film f JOIN language l ON f.language_id = l.language_id WHERE f.replacement_cost > 20 LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "ACADEMY DINOSAUR",
+          "replacement_cost": 20.99,
+          "language": "English             "
+        },
+        {
+          "title": "AFFAIR PREJUDICE",
+          "replacement_cost": 26.99,
+          "language": "German              "
+        },
+        {
+          "title": "AFRICAN EGG",
+          "replacement_cost": 22.99,
+          "language": "Mandarin            "
+        },
+        {
+          "title": "AIRPLANE SIERRA",
+          "replacement_cost": 28.99,
+          "language": "English             "
+        },
+        {
+          "title": "ALABAMA DEVIL",
+          "replacement_cost": 21.99,
+          "language": "English             "
+        },
+        {
+          "title": "ALADDIN CALENDAR",
+          "replacement_cost": 24.99,
+          "language": "English             "
+        },
+        {
+          "title": "ALASKA PHANTOM",
+          "replacement_cost": 22.99,
+          "language": "English             "
+        },
+        {
+          "title": "ALI FOREVER",
+          "replacement_cost": 21.99,
+          "language": "Mandarin            "
+        },
+        {
+          "title": "ALICE FANTASIA",
+          "replacement_cost": 23.99,
+          "language": "Mandarin            "
+        },
+        {
+          "title": "ALLEY EVOLUTION",
+          "replacement_cost": 23.99,
+          "language": "English             "
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "film",
+        "language"
+      ]
+    },
+    {
+      "id": 1200,
+      "question": "List active staff members and their store city",
+      "query": "SELECT s.first_name, s.last_name, ci.city FROM staff s JOIN address a ON s.address_id = a.address_id JOIN city ci ON a.city_id = ci.city_id WHERE s.active = true;",
+      "expected_result": [
+        {
+          "first_name": "Mercedes",
+          "last_name": "Gislason",
+          "city": "Citrus Heights"
+        },
+        {
+          "first_name": "Flor",
+          "last_name": "Toy",
+          "city": "Kimberley"
+        },
+        {
+          "first_name": "Theo",
+          "last_name": "Harber",
+          "city": "Tangail"
+        },
+        {
+          "first_name": "Tyree",
+          "last_name": "Dicki",
+          "city": "Bucuresti"
+        },
+        {
+          "first_name": "Dan",
+          "last_name": "Kling",
+          "city": "Czestochowa"
+        },
+        {
+          "first_name": "Drew",
+          "last_name": "Fahey",
+          "city": "Juiz de Fora"
+        }
+      ],
+      "expected_row_count": 6,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "city",
+        "staff"
+      ]
+    },
+    {
+      "id": 1201,
+      "question": "Find films with 'Trailers' as a special feature in 'Action' category",
+      "query": "SELECT f.title FROM film f JOIN film_category fc ON f.film_id = fc.film_id JOIN category c ON fc.category_id = c.category_id WHERE c.name = 'Action' AND f.special_features::text LIKE '%Trailers%' LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "ARIZONA BANG"
+        },
+        {
+          "title": "ACE GOLDFINGER"
+        },
+        {
+          "title": "ANGELS LIFE"
+        },
+        {
+          "title": "AIRPLANE SIERRA"
+        },
+        {
+          "title": "BIRCH ANTITRUST"
+        },
+        {
+          "title": "CLUE GRAIL"
+        },
+        {
+          "title": "CALIFORNIA BIRDS"
+        },
+        {
+          "title": "CROW GREASE"
+        },
+        {
+          "title": "DAUGHTER MADIGAN"
+        },
+        {
+          "title": "DEVIL DESIRE"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "category",
+        "film",
+        "film_category"
+      ]
+    },
+    {
+      "id": 1202,
+      "question": "List customers in 'London' city",
+      "query": "SELECT c.first_name, c.last_name FROM customer c JOIN address a ON c.address_id = a.address_id JOIN city ci ON a.city_id = ci.city_id WHERE ci.city = 'London';",
+      "expected_result": [
+        {
+          "first_name": "CECIL",
+          "last_name": "VINES"
+        }
+      ],
+      "expected_row_count": 1,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "city",
+        "customer"
+      ]
+    },
+    {
+      "id": 1203,
+      "question": "List films rated 'PG' in 'French' language",
+      "query": "SELECT f.title FROM film f JOIN language l ON f.language_id = l.language_id WHERE f.rating = 'PG' AND l.name = 'French' LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "BOILED DARES"
+        },
+        {
+          "title": "BRINGING HYSTERICAL"
+        },
+        {
+          "title": "DANGEROUS UPTOWN"
+        },
+        {
+          "title": "EGG IGBY"
+        },
+        {
+          "title": "FOOL MOCKINGBIRD"
+        },
+        {
+          "title": "FRENCH HOLIDAY"
+        },
+        {
+          "title": "LEGALLY SECRETARY"
+        },
+        {
+          "title": "PATHS CONTROL"
+        },
+        {
+          "title": "RESURRECTION SILVERADO"
+        },
+        {
+          "title": "ROOM ROMAN"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "film",
+        "language"
+      ]
+    },
+    {
+      "id": 1204,
+      "question": "List rentals processed by Staff ID 1",
+      "query": "SELECT r.rental_id, r.rental_date FROM rental r WHERE r.staff_id = 1 LIMIT 10;",
+      "expected_result": [
+        {
+          "rental_id": 6,
+          "rental_date": "2022-05-24T22:08:07+00:00"
+        },
+        {
+          "rental_id": 9,
+          "rental_date": "2022-05-24T23:00:40+00:00"
+        },
+        {
+          "rental_id": 13,
+          "rental_date": "2022-05-24T23:22:55+00:00"
+        },
+        {
+          "rental_id": 15,
+          "rental_date": "2022-05-24T23:39:22+00:00"
+        },
+        {
+          "rental_id": 23,
+          "rental_date": "2022-05-25T01:40:21+00:00"
+        },
+        {
+          "rental_id": 24,
+          "rental_date": "2022-05-25T01:53:02+00:00"
+        },
+        {
+          "rental_id": 26,
+          "rental_date": "2022-05-25T02:36:50+00:00"
+        },
+        {
+          "rental_id": 30,
+          "rental_date": "2022-05-25T03:01:32+00:00"
+        },
+        {
+          "rental_id": 33,
+          "rental_date": "2022-05-25T03:18:51+00:00"
+        },
+        {
+          "rental_id": 38,
+          "rental_date": "2022-05-25T03:47:44+00:00"
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "rental"
+      ]
+    },
+    {
+      "id": 1205,
+      "question": "List actors in film 'ZOOLANDER FICTION'",
+      "query": "SELECT a.first_name, a.last_name FROM actor a JOIN film_actor fa ON a.actor_id = fa.actor_id JOIN film f ON fa.film_id = f.film_id WHERE f.title = 'ZOOLANDER FICTION';",
+      "expected_result": [
+        {
+          "first_name": "CARMEN",
+          "last_name": "HUNT"
+        },
+        {
+          "first_name": "MARY",
+          "last_name": "TANDY"
+        },
+        {
+          "first_name": "PENELOPE",
+          "last_name": "CRONYN"
+        },
+        {
+          "first_name": "WHOOPI",
+          "last_name": "HURT"
+        },
+        {
+          "first_name": "JADA",
+          "last_name": "RYDER"
+        }
+      ],
+      "expected_row_count": 5,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "actor",
+        "film",
+        "film_actor"
+      ]
+    },
+    {
+      "id": 1206,
+      "question": "List store addresses with postal codes",
+      "query": "SELECT s.store_id, a.address, a.postal_code FROM store s JOIN address a ON s.address_id = a.address_id;",
+      "expected_result": [
+        {
+          "store_id": 0,
+          "address": "1031 Daugavpils Parkway",
+          "postal_code": "59025"
+        },
+        {
+          "store_id": 1,
+          "address": "569 Baicheng Lane",
+          "postal_code": "60304"
+        },
+        {
+          "store_id": 2,
+          "address": "478 Joliet Way",
+          "postal_code": "77948"
+        },
+        {
+          "store_id": 3,
+          "address": "1586 Guaruj Place",
+          "postal_code": "5135"
+        },
+        {
+          "store_id": 4,
+          "address": "770 Bydgoszcz Avenue",
+          "postal_code": "16266"
+        },
+        {
+          "store_id": 5,
+          "address": "306 Antofagasta Place",
+          "postal_code": "3989"
+        },
+        {
+          "store_id": 6,
+          "address": "1214 Hanoi Way",
+          "postal_code": "67055"
+        },
+        {
+          "store_id": 7,
+          "address": "127 Purnea (Purnia) Manor",
+          "postal_code": "79388"
+        },
+        {
+          "store_id": 8,
+          "address": "96 Tafuna Way",
+          "postal_code": "99865"
+        },
+        {
+          "store_id": 9,
+          "address": "152 Kitwe Parkway",
+          "postal_code": "53182"
+        },
+        {
+          "store_id": 10,
+          "address": "1386 Yangor Avenue",
+          "postal_code": "80720"
+        },
+        {
+          "store_id": 11,
+          "address": "984 Effon-Alaiye Avenue",
+          "postal_code": "17119"
+        },
+        {
+          "store_id": 12,
+          "address": "733 Mandaluyong Place",
+          "postal_code": "77459"
+        },
+        {
+          "store_id": 13,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 14,
+          "address": "42 Brindisi Place",
+          "postal_code": "16744"
+        },
+        {
+          "store_id": 15,
+          "address": "1688 Okara Way",
+          "postal_code": "21954"
+        },
+        {
+          "store_id": 16,
+          "address": "18 Duisburg Boulevard",
+          "postal_code": "58327"
+        },
+        {
+          "store_id": 17,
+          "address": "28 Charlotte Amalie Street",
+          "postal_code": "37551"
+        },
+        {
+          "store_id": 18,
+          "address": "1213 Ranchi Parkway",
+          "postal_code": "94352"
+        },
+        {
+          "store_id": 19,
+          "address": "659 Vaduz Drive",
+          "postal_code": "49708"
+        },
+        {
+          "store_id": 20,
+          "address": "17 Kabul Boulevard",
+          "postal_code": "38594"
+        },
+        {
+          "store_id": 21,
+          "address": "808 Bhopal Manor",
+          "postal_code": "10672"
+        },
+        {
+          "store_id": 22,
+          "address": "1177 Jelets Way",
+          "postal_code": "3305"
+        },
+        {
+          "store_id": 23,
+          "address": "28 MySQL Boulevard",
+          "postal_code": ""
+        },
+        {
+          "store_id": 24,
+          "address": "1888 Kabul Drive",
+          "postal_code": "20936"
+        },
+        {
+          "store_id": 25,
+          "address": "1121 Loja Avenue",
+          "postal_code": "17886"
+        },
+        {
+          "store_id": 26,
+          "address": "801 Hagonoy Drive",
+          "postal_code": "8439"
+        },
+        {
+          "store_id": 27,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 28,
+          "address": "1854 Tieli Street",
+          "postal_code": "15819"
+        },
+        {
+          "store_id": 29,
+          "address": "1942 Ciparay Parkway",
+          "postal_code": "82624"
+        },
+        {
+          "store_id": 30,
+          "address": "927 Baha Blanca Parkway",
+          "postal_code": "9495"
+        },
+        {
+          "store_id": 31,
+          "address": "1697 Kowloon and New Kowloon Loop",
+          "postal_code": "57807"
+        },
+        {
+          "store_id": 32,
+          "address": "320 Brest Avenue",
+          "postal_code": "43331"
+        },
+        {
+          "store_id": 33,
+          "address": "1586 Guaruj Place",
+          "postal_code": "5135"
+        },
+        {
+          "store_id": 34,
+          "address": "1440 Fukuyama Loop",
+          "postal_code": "47929"
+        },
+        {
+          "store_id": 35,
+          "address": "96 Tafuna Way",
+          "postal_code": "99865"
+        },
+        {
+          "store_id": 36,
+          "address": "1697 Kowloon and New Kowloon Loop",
+          "postal_code": "57807"
+        },
+        {
+          "store_id": 37,
+          "address": "28 Charlotte Amalie Street",
+          "postal_code": "37551"
+        },
+        {
+          "store_id": 38,
+          "address": "125 Citt del Vaticano Boulevard",
+          "postal_code": "67912"
+        },
+        {
+          "store_id": 39,
+          "address": "57 Arlington Manor",
+          "postal_code": "48960"
+        },
+        {
+          "store_id": 40,
+          "address": "1079 Tel Aviv-Jaffa Boulevard",
+          "postal_code": "10885"
+        },
+        {
+          "store_id": 41,
+          "address": "1214 Hanoi Way",
+          "postal_code": "67055"
+        },
+        {
+          "store_id": 42,
+          "address": "117 Boa Vista Way",
+          "postal_code": "6804"
+        },
+        {
+          "store_id": 43,
+          "address": "682 Junan Way",
+          "postal_code": "30418"
+        },
+        {
+          "store_id": 44,
+          "address": "659 Vaduz Drive",
+          "postal_code": "49708"
+        },
+        {
+          "store_id": 45,
+          "address": "1752 So Leopoldo Parkway",
+          "postal_code": "14014"
+        },
+        {
+          "store_id": 46,
+          "address": "1213 Ranchi Parkway",
+          "postal_code": "94352"
+        },
+        {
+          "store_id": 47,
+          "address": "89 Allappuzha (Alleppey) Manor",
+          "postal_code": "75444"
+        },
+        {
+          "store_id": 48,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 49,
+          "address": "1952 Chatsworth Drive",
+          "postal_code": "25958"
+        },
+        {
+          "store_id": 50,
+          "address": "18 Duisburg Boulevard",
+          "postal_code": "58327"
+        },
+        {
+          "store_id": 51,
+          "address": "686 Garland Manor",
+          "postal_code": "52535"
+        },
+        {
+          "store_id": 52,
+          "address": "1532 Dzerzinsk Way",
+          "postal_code": "9599"
+        },
+        {
+          "store_id": 53,
+          "address": "936 Salzburg Lane",
+          "postal_code": "96709"
+        },
+        {
+          "store_id": 54,
+          "address": "1913 Kamakura Place",
+          "postal_code": "97287"
+        },
+        {
+          "store_id": 55,
+          "address": "152 Kitwe Parkway",
+          "postal_code": "53182"
+        },
+        {
+          "store_id": 56,
+          "address": "915 Ponce Place",
+          "postal_code": "83980"
+        },
+        {
+          "store_id": 57,
+          "address": "1718 Valencia Street",
+          "postal_code": "37359"
+        },
+        {
+          "store_id": 58,
+          "address": "1411 Lillydale Drive",
+          "postal_code": ""
+        },
+        {
+          "store_id": 59,
+          "address": "1031 Daugavpils Parkway",
+          "postal_code": "59025"
+        },
+        {
+          "store_id": 60,
+          "address": "33 Gorontalo Way",
+          "postal_code": "30348"
+        },
+        {
+          "store_id": 61,
+          "address": "943 Tokat Street",
+          "postal_code": "45428"
+        },
+        {
+          "store_id": 62,
+          "address": "602 Paarl Street",
+          "postal_code": "98889"
+        },
+        {
+          "store_id": 63,
+          "address": "1586 Guaruj Place",
+          "postal_code": "5135"
+        },
+        {
+          "store_id": 64,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 65,
+          "address": "1135 Izumisano Parkway",
+          "postal_code": "48150"
+        },
+        {
+          "store_id": 66,
+          "address": "659 Vaduz Drive",
+          "postal_code": "49708"
+        },
+        {
+          "store_id": 67,
+          "address": "1124 Buenaventura Drive",
+          "postal_code": "6856"
+        },
+        {
+          "store_id": 68,
+          "address": "1308 Arecibo Way",
+          "postal_code": "30695"
+        },
+        {
+          "store_id": 69,
+          "address": "801 Hagonoy Drive",
+          "postal_code": "8439"
+        },
+        {
+          "store_id": 70,
+          "address": "1987 Coacalco de Berriozbal Loop",
+          "postal_code": "96065"
+        },
+        {
+          "store_id": 71,
+          "address": "943 Tokat Street",
+          "postal_code": "45428"
+        },
+        {
+          "store_id": 72,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 73,
+          "address": "1425 Shikarpur Manor",
+          "postal_code": "65599"
+        },
+        {
+          "store_id": 74,
+          "address": "1308 Arecibo Way",
+          "postal_code": "30695"
+        },
+        {
+          "store_id": 75,
+          "address": "698 Otsu Street",
+          "postal_code": "71110"
+        },
+        {
+          "store_id": 76,
+          "address": "1752 So Leopoldo Parkway",
+          "postal_code": "14014"
+        },
+        {
+          "store_id": 77,
+          "address": "1206 Dos Quebradas Place",
+          "postal_code": "20207"
+        },
+        {
+          "store_id": 78,
+          "address": "1854 Tieli Street",
+          "postal_code": "15819"
+        },
+        {
+          "store_id": 79,
+          "address": "391 Callao Drive",
+          "postal_code": "34021"
+        },
+        {
+          "store_id": 80,
+          "address": "1913 Kamakura Place",
+          "postal_code": "97287"
+        },
+        {
+          "store_id": 81,
+          "address": "454 Nakhon Sawan Boulevard",
+          "postal_code": "76383"
+        },
+        {
+          "store_id": 82,
+          "address": "1425 Shikarpur Manor",
+          "postal_code": "65599"
+        },
+        {
+          "store_id": 83,
+          "address": "915 Ponce Place",
+          "postal_code": "83980"
+        },
+        {
+          "store_id": 84,
+          "address": "360 Toulouse Parkway",
+          "postal_code": "54308"
+        },
+        {
+          "store_id": 85,
+          "address": "1031 Daugavpils Parkway",
+          "postal_code": "59025"
+        },
+        {
+          "store_id": 86,
+          "address": "1688 Okara Way",
+          "postal_code": "21954"
+        },
+        {
+          "store_id": 87,
+          "address": "1031 Daugavpils Parkway",
+          "postal_code": "59025"
+        },
+        {
+          "store_id": 88,
+          "address": "1386 Yangor Avenue",
+          "postal_code": "80720"
+        },
+        {
+          "store_id": 89,
+          "address": "1378 Alvorada Avenue",
+          "postal_code": "75834"
+        },
+        {
+          "store_id": 90,
+          "address": "786 Aurora Avenue",
+          "postal_code": "65750"
+        },
+        {
+          "store_id": 91,
+          "address": "870 Ashqelon Loop",
+          "postal_code": "84931"
+        },
+        {
+          "store_id": 92,
+          "address": "669 Firozabad Loop",
+          "postal_code": "92265"
+        },
+        {
+          "store_id": 93,
+          "address": "984 Effon-Alaiye Avenue",
+          "postal_code": "17119"
+        },
+        {
+          "store_id": 94,
+          "address": "725 Isesaki Place",
+          "postal_code": "74428"
+        },
+        {
+          "store_id": 95,
+          "address": "1150 Kimchon Manor",
+          "postal_code": "96109"
+        },
+        {
+          "store_id": 96,
+          "address": "1531 Sal Drive",
+          "postal_code": "53628"
+        },
+        {
+          "store_id": 97,
+          "address": "1386 Yangor Avenue",
+          "postal_code": "80720"
+        },
+        {
+          "store_id": 98,
+          "address": "698 Otsu Street",
+          "postal_code": "71110"
+        },
+        {
+          "store_id": 99,
+          "address": "669 Firozabad Loop",
+          "postal_code": "92265"
+        },
+        {
+          "store_id": 100,
+          "address": "1795 Santiago de Compostela Way",
+          "postal_code": "18743"
+        },
+        {
+          "store_id": 101,
+          "address": "1447 Imus Way",
+          "postal_code": "48942"
+        },
+        {
+          "store_id": 102,
+          "address": "211 Chiayi Drive",
+          "postal_code": "58186"
+        },
+        {
+          "store_id": 103,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 104,
+          "address": "1967 Sincelejo Place",
+          "postal_code": "73644"
+        },
+        {
+          "store_id": 105,
+          "address": "1566 Inegl Manor",
+          "postal_code": "53561"
+        },
+        {
+          "store_id": 106,
+          "address": "1107 Nakhon Sawan Avenue",
+          "postal_code": "75149"
+        },
+        {
+          "store_id": 107,
+          "address": "710 San Felipe del Progreso Avenue",
+          "postal_code": "76901"
+        },
+        {
+          "store_id": 108,
+          "address": "1952 Pune Lane",
+          "postal_code": "92150"
+        },
+        {
+          "store_id": 109,
+          "address": "1333 Haldia Street",
+          "postal_code": "82161"
+        },
+        {
+          "store_id": 110,
+          "address": "754 Valencia Place",
+          "postal_code": "87911"
+        },
+        {
+          "store_id": 111,
+          "address": "1089 Iwatsuki Avenue",
+          "postal_code": "35109"
+        },
+        {
+          "store_id": 112,
+          "address": "1001 Miyakonojo Lane",
+          "postal_code": "67924"
+        },
+        {
+          "store_id": 113,
+          "address": "1666 Beni-Mellal Place",
+          "postal_code": "13377"
+        },
+        {
+          "store_id": 114,
+          "address": "1077 San Felipe de Puerto Plata Place",
+          "postal_code": "65387"
+        },
+        {
+          "store_id": 115,
+          "address": "660 Jedda Boulevard",
+          "postal_code": "25053"
+        },
+        {
+          "store_id": 116,
+          "address": "1333 Haldia Street",
+          "postal_code": "82161"
+        },
+        {
+          "store_id": 117,
+          "address": "1848 Salala Boulevard",
+          "postal_code": "25220"
+        },
+        {
+          "store_id": 118,
+          "address": "1679 Antofagasta Street",
+          "postal_code": "86599"
+        },
+        {
+          "store_id": 119,
+          "address": "475 Atinsk Way",
+          "postal_code": "59571"
+        },
+        {
+          "store_id": 120,
+          "address": "68 Molodetno Manor",
+          "postal_code": "4662"
+        },
+        {
+          "store_id": 121,
+          "address": "1001 Miyakonojo Lane",
+          "postal_code": "67924"
+        },
+        {
+          "store_id": 122,
+          "address": "891 Novi Sad Manor",
+          "postal_code": "5379"
+        },
+        {
+          "store_id": 123,
+          "address": "1309 Weifang Street",
+          "postal_code": "57338"
+        },
+        {
+          "store_id": 124,
+          "address": "879 Newcastle Way",
+          "postal_code": "90732"
+        },
+        {
+          "store_id": 125,
+          "address": "1964 Gijn Manor",
+          "postal_code": "14408"
+        },
+        {
+          "store_id": 126,
+          "address": "798 Cianjur Avenue",
+          "postal_code": "76990"
+        },
+        {
+          "store_id": 127,
+          "address": "1001 Miyakonojo Lane",
+          "postal_code": "67924"
+        },
+        {
+          "store_id": 128,
+          "address": "1027 Songkhla Manor",
+          "postal_code": "30861"
+        },
+        {
+          "store_id": 129,
+          "address": "928 Jaffna Loop",
+          "postal_code": "93762"
+        },
+        {
+          "store_id": 130,
+          "address": "928 Jaffna Loop",
+          "postal_code": "93762"
+        },
+        {
+          "store_id": 131,
+          "address": "1842 Luzinia Boulevard",
+          "postal_code": "94420"
+        },
+        {
+          "store_id": 132,
+          "address": "943 Johannesburg Avenue",
+          "postal_code": "5892"
+        },
+        {
+          "store_id": 133,
+          "address": "261 Saint Louis Way",
+          "postal_code": "83401"
+        },
+        {
+          "store_id": 134,
+          "address": "1333 Haldia Street",
+          "postal_code": "82161"
+        },
+        {
+          "store_id": 135,
+          "address": "757 Rustenburg Avenue",
+          "postal_code": "89668"
+        },
+        {
+          "store_id": 136,
+          "address": "29 Pyongyang Loop",
+          "postal_code": "47753"
+        },
+        {
+          "store_id": 137,
+          "address": "1479 Rustenburg Boulevard",
+          "postal_code": "18727"
+        },
+        {
+          "store_id": 138,
+          "address": "201 Effon-Alaiye Way",
+          "postal_code": "64344"
+        },
+        {
+          "store_id": 139,
+          "address": "850 Salala Loop",
+          "postal_code": "10800"
+        },
+        {
+          "store_id": 140,
+          "address": "829 Grand Prairie Way",
+          "postal_code": "6461"
+        },
+        {
+          "store_id": 141,
+          "address": "1148 Saarbrcken Parkway",
+          "postal_code": "1921"
+        },
+        {
+          "store_id": 142,
+          "address": "483 Ljubertsy Parkway",
+          "postal_code": "60562"
+        },
+        {
+          "store_id": 143,
+          "address": "1148 Saarbrcken Parkway",
+          "postal_code": "1921"
+        },
+        {
+          "store_id": 144,
+          "address": "1256 Bislig Boulevard",
+          "postal_code": "50598"
+        },
+        {
+          "store_id": 145,
+          "address": "1587 Sullana Lane",
+          "postal_code": "85769"
+        },
+        {
+          "store_id": 146,
+          "address": "1149 A Corua (La Corua) Boulevard",
+          "postal_code": "95824"
+        },
+        {
+          "store_id": 147,
+          "address": "1201 Qomsheh Manor",
+          "postal_code": "21464"
+        },
+        {
+          "store_id": 148,
+          "address": "1848 Salala Boulevard",
+          "postal_code": "25220"
+        },
+        {
+          "store_id": 149,
+          "address": "140 Chiayi Parkway",
+          "postal_code": "38982"
+        },
+        {
+          "store_id": 150,
+          "address": "810 Palghat (Palakkad) Boulevard",
+          "postal_code": "73431"
+        },
+        {
+          "store_id": 151,
+          "address": "1749 Daxian Place",
+          "postal_code": "11044"
+        },
+        {
+          "store_id": 152,
+          "address": "369 Papeete Way",
+          "postal_code": "66639"
+        },
+        {
+          "store_id": 153,
+          "address": "710 San Felipe del Progreso Avenue",
+          "postal_code": "76901"
+        },
+        {
+          "store_id": 154,
+          "address": "60 Poos de Caldas Street",
+          "postal_code": "82338"
+        },
+        {
+          "store_id": 155,
+          "address": "1848 Salala Boulevard",
+          "postal_code": "25220"
+        },
+        {
+          "store_id": 156,
+          "address": "1688 Nador Lane",
+          "postal_code": "61613"
+        },
+        {
+          "store_id": 157,
+          "address": "29 Pyongyang Loop",
+          "postal_code": "47753"
+        },
+        {
+          "store_id": 158,
+          "address": "43 Dadu Avenue",
+          "postal_code": "4855"
+        },
+        {
+          "store_id": 159,
+          "address": "781 Shimonoseki Drive",
+          "postal_code": "95444"
+        },
+        {
+          "store_id": 160,
+          "address": "1679 Antofagasta Street",
+          "postal_code": "86599"
+        },
+        {
+          "store_id": 161,
+          "address": "928 Jaffna Loop",
+          "postal_code": "93762"
+        },
+        {
+          "store_id": 162,
+          "address": "751 Lima Loop",
+          "postal_code": "99405"
+        },
+        {
+          "store_id": 163,
+          "address": "928 Jaffna Loop",
+          "postal_code": "93762"
+        },
+        {
+          "store_id": 164,
+          "address": "1246 Boksburg Parkway",
+          "postal_code": "28349"
+        },
+        {
+          "store_id": 165,
+          "address": "1623 Baha Blanca Manor",
+          "postal_code": "81511"
+        },
+        {
+          "store_id": 166,
+          "address": "300 Junan Street",
+          "postal_code": "81314"
+        },
+        {
+          "store_id": 167,
+          "address": "1740 Le Mans Loop",
+          "postal_code": "22853"
+        },
+        {
+          "store_id": 168,
+          "address": "43 Dadu Avenue",
+          "postal_code": "4855"
+        },
+        {
+          "store_id": 169,
+          "address": "1029 Dzerzinsk Manor",
+          "postal_code": "57519"
+        },
+        {
+          "store_id": 170,
+          "address": "1963 Moscow Place",
+          "postal_code": "64863"
+        },
+        {
+          "store_id": 171,
+          "address": "1749 Daxian Place",
+          "postal_code": "11044"
+        },
+        {
+          "store_id": 172,
+          "address": "885 Yingkou Manor",
+          "postal_code": "31390"
+        },
+        {
+          "store_id": 173,
+          "address": "1964 Gijn Manor",
+          "postal_code": "14408"
+        },
+        {
+          "store_id": 174,
+          "address": "1001 Miyakonojo Lane",
+          "postal_code": "67924"
+        },
+        {
+          "store_id": 175,
+          "address": "431 Xiangtan Avenue",
+          "postal_code": "4854"
+        },
+        {
+          "store_id": 176,
+          "address": "1688 Nador Lane",
+          "postal_code": "61613"
+        },
+        {
+          "store_id": 177,
+          "address": "829 Grand Prairie Way",
+          "postal_code": "6461"
+        },
+        {
+          "store_id": 178,
+          "address": "1792 Valle de la Pascua Place",
+          "postal_code": "15540"
+        },
+        {
+          "store_id": 179,
+          "address": "261 Saint Louis Way",
+          "postal_code": "83401"
+        },
+        {
+          "store_id": 180,
+          "address": "146 Johannesburg Way",
+          "postal_code": "54132"
+        },
+        {
+          "store_id": 181,
+          "address": "1966 Tonghae Street",
+          "postal_code": "36481"
+        },
+        {
+          "store_id": 182,
+          "address": "829 Grand Prairie Way",
+          "postal_code": "6461"
+        },
+        {
+          "store_id": 183,
+          "address": "68 Molodetno Manor",
+          "postal_code": "4662"
+        },
+        {
+          "store_id": 184,
+          "address": "927 Barcelona Street",
+          "postal_code": "65121"
+        },
+        {
+          "store_id": 185,
+          "address": "1246 Boksburg Parkway",
+          "postal_code": "28349"
+        },
+        {
+          "store_id": 186,
+          "address": "850 Salala Loop",
+          "postal_code": "10800"
+        },
+        {
+          "store_id": 187,
+          "address": "1029 Dzerzinsk Manor",
+          "postal_code": "57519"
+        },
+        {
+          "store_id": 188,
+          "address": "226 Brest Manor",
+          "postal_code": "2299"
+        },
+        {
+          "store_id": 189,
+          "address": "757 Rustenburg Avenue",
+          "postal_code": "89668"
+        },
+        {
+          "store_id": 190,
+          "address": "1877 Ezhou Lane",
+          "postal_code": "63337"
+        },
+        {
+          "store_id": 191,
+          "address": "1309 Weifang Street",
+          "postal_code": "57338"
+        },
+        {
+          "store_id": 192,
+          "address": "1029 Dzerzinsk Manor",
+          "postal_code": "57519"
+        },
+        {
+          "store_id": 193,
+          "address": "582 Papeete Loop",
+          "postal_code": "27722"
+        },
+        {
+          "store_id": 194,
+          "address": "682 Garden Grove Place",
+          "postal_code": "67497"
+        },
+        {
+          "store_id": 195,
+          "address": "1010 Klerksdorp Way",
+          "postal_code": "6802"
+        },
+        {
+          "store_id": 196,
+          "address": "1839 Szkesfehrvr Parkway",
+          "postal_code": "55709"
+        },
+        {
+          "store_id": 197,
+          "address": "1877 Ezhou Lane",
+          "postal_code": "63337"
+        },
+        {
+          "store_id": 198,
+          "address": "346 Skikda Parkway",
+          "postal_code": "90628"
+        },
+        {
+          "store_id": 199,
+          "address": "1760 Oshawa Manor",
+          "postal_code": "38140"
+        },
+        {
+          "store_id": 200,
+          "address": "475 Atinsk Way",
+          "postal_code": "59571"
+        },
+        {
+          "store_id": 201,
+          "address": "1309 Weifang Street",
+          "postal_code": "57338"
+        },
+        {
+          "store_id": 202,
+          "address": "1168 Najafabad Parkway",
+          "postal_code": "40301"
+        },
+        {
+          "store_id": 203,
+          "address": "842 Salzburg Lane",
+          "postal_code": "3313"
+        },
+        {
+          "store_id": 204,
+          "address": "943 Johannesburg Avenue",
+          "postal_code": "5892"
+        },
+        {
+          "store_id": 205,
+          "address": "817 Bradford Loop",
+          "postal_code": "89459"
+        },
+        {
+          "store_id": 206,
+          "address": "1149 A Corua (La Corua) Boulevard",
+          "postal_code": "95824"
+        },
+        {
+          "store_id": 207,
+          "address": "1479 Rustenburg Boulevard",
+          "postal_code": "18727"
+        },
+        {
+          "store_id": 208,
+          "address": "582 Papeete Loop",
+          "postal_code": "27722"
+        },
+        {
+          "store_id": 209,
+          "address": "1473 Changhwa Parkway",
+          "postal_code": "75933"
+        },
+        {
+          "store_id": 210,
+          "address": "757 Rustenburg Avenue",
+          "postal_code": "89668"
+        },
+        {
+          "store_id": 211,
+          "address": "1367 Yantai Manor",
+          "postal_code": "21294"
+        },
+        {
+          "store_id": 212,
+          "address": "447 Surakarta Loop",
+          "postal_code": "10428"
+        },
+        {
+          "store_id": 213,
+          "address": "842 Salzburg Lane",
+          "postal_code": "3313"
+        },
+        {
+          "store_id": 214,
+          "address": "1922 Miraj Way",
+          "postal_code": "13203"
+        },
+        {
+          "store_id": 215,
+          "address": "32 Pudukkottai Lane",
+          "postal_code": "38834"
+        },
+        {
+          "store_id": 216,
+          "address": "1359 Zhoushan Parkway",
+          "postal_code": "29763"
+        },
+        {
+          "store_id": 217,
+          "address": "226 Halifax Street",
+          "postal_code": "58492"
+        },
+        {
+          "store_id": 218,
+          "address": "500 Lincoln Parkway",
+          "postal_code": "95509"
+        },
+        {
+          "store_id": 219,
+          "address": "1163 London Parkway",
+          "postal_code": "6066"
+        },
+        {
+          "store_id": 220,
+          "address": "1769 Iwaki Lane",
+          "postal_code": "25787"
+        },
+        {
+          "store_id": 221,
+          "address": "780 Kimberley Way",
+          "postal_code": "17032"
+        },
+        {
+          "store_id": 222,
+          "address": "124 al-Manama Way",
+          "postal_code": "52368"
+        },
+        {
+          "store_id": 223,
+          "address": "1892 Nabereznyje Telny Lane",
+          "postal_code": "28396"
+        },
+        {
+          "store_id": 224,
+          "address": "619 Hunuco Avenue",
+          "postal_code": "81508"
+        },
+        {
+          "store_id": 225,
+          "address": "1673 Tangail Drive",
+          "postal_code": "26857"
+        },
+        {
+          "store_id": 226,
+          "address": "1769 Iwaki Lane",
+          "postal_code": "25787"
+        },
+        {
+          "store_id": 227,
+          "address": "920 Kumbakonam Loop",
+          "postal_code": "75090"
+        },
+        {
+          "store_id": 228,
+          "address": "1892 Nabereznyje Telny Lane",
+          "postal_code": "28396"
+        },
+        {
+          "store_id": 229,
+          "address": "500 Lincoln Parkway",
+          "postal_code": "95509"
+        },
+        {
+          "store_id": 230,
+          "address": "619 Hunuco Avenue",
+          "postal_code": "81508"
+        },
+        {
+          "store_id": 231,
+          "address": "144 South Hill Loop",
+          "postal_code": "2012"
+        },
+        {
+          "store_id": 232,
+          "address": "981 Kumbakonam Place",
+          "postal_code": "87611"
+        },
+        {
+          "store_id": 233,
+          "address": "1145 Vilnius Manor",
+          "postal_code": "73170"
+        },
+        {
+          "store_id": 234,
+          "address": "431 Szkesfehrvr Avenue",
+          "postal_code": "57828"
+        },
+        {
+          "store_id": 235,
+          "address": "1133 Rizhao Avenue",
+          "postal_code": "2800"
+        },
+        {
+          "store_id": 236,
+          "address": "86 Higashiosaka Lane",
+          "postal_code": "33768"
+        },
+        {
+          "store_id": 237,
+          "address": "1217 Konotop Avenue",
+          "postal_code": "504"
+        },
+        {
+          "store_id": 238,
+          "address": "862 Xintai Lane",
+          "postal_code": "30065"
+        },
+        {
+          "store_id": 239,
+          "address": "953 Hodeida Street",
+          "postal_code": "18841"
+        },
+        {
+          "store_id": 240,
+          "address": "682 Halisahar Place",
+          "postal_code": "20536"
+        },
+        {
+          "store_id": 241,
+          "address": "1831 Nam Dinh Loop",
+          "postal_code": "51990"
+        },
+        {
+          "store_id": 242,
+          "address": "1191 Sungai Petani Boulevard",
+          "postal_code": "9668"
+        },
+        {
+          "store_id": 243,
+          "address": "817 Laredo Avenue",
+          "postal_code": "77449"
+        },
+        {
+          "store_id": 244,
+          "address": "1336 Benin City Drive",
+          "postal_code": "46044"
+        },
+        {
+          "store_id": 245,
+          "address": "686 Donostia-San Sebastin Lane",
+          "postal_code": "97390"
+        },
+        {
+          "store_id": 246,
+          "address": "1642 Charlotte Amalie Drive",
+          "postal_code": "75442"
+        },
+        {
+          "store_id": 247,
+          "address": "651 Pathankot Loop",
+          "postal_code": "59811"
+        },
+        {
+          "store_id": 248,
+          "address": "1378 Beira Loop",
+          "postal_code": "40792"
+        },
+        {
+          "store_id": 249,
+          "address": "482 Kowloon and New Kowloon Manor",
+          "postal_code": "97056"
+        },
+        {
+          "store_id": 250,
+          "address": "401 Sucre Boulevard",
+          "postal_code": "25007"
+        },
+        {
+          "store_id": 251,
+          "address": "127 Iwakuni Boulevard",
+          "postal_code": "20777"
+        },
+        {
+          "store_id": 252,
+          "address": "1027 Banjul Place",
+          "postal_code": "50390"
+        },
+        {
+          "store_id": 253,
+          "address": "482 Kowloon and New Kowloon Manor",
+          "postal_code": "97056"
+        },
+        {
+          "store_id": 254,
+          "address": "827 Yuncheng Drive",
+          "postal_code": "79047"
+        },
+        {
+          "store_id": 255,
+          "address": "785 Vaduz Street",
+          "postal_code": "36170"
+        },
+        {
+          "store_id": 256,
+          "address": "951 Stara Zagora Manor",
+          "postal_code": "98573"
+        },
+        {
+          "store_id": 257,
+          "address": "1192 Tongliao Street",
+          "postal_code": "19065"
+        },
+        {
+          "store_id": 258,
+          "address": "482 Kowloon and New Kowloon Manor",
+          "postal_code": "97056"
+        },
+        {
+          "store_id": 259,
+          "address": "1675 Xiangfan Manor",
+          "postal_code": "11763"
+        },
+        {
+          "store_id": 260,
+          "address": "898 Jining Lane",
+          "postal_code": "40070"
+        },
+        {
+          "store_id": 261,
+          "address": "780 Kimberley Way",
+          "postal_code": "17032"
+        },
+        {
+          "store_id": 262,
+          "address": "1698 Southport Loop",
+          "postal_code": "49009"
+        },
+        {
+          "store_id": 263,
+          "address": "1909 Benguela Lane",
+          "postal_code": "19913"
+        },
+        {
+          "store_id": 264,
+          "address": "600 Bradford Street",
+          "postal_code": "96204"
+        },
+        {
+          "store_id": 265,
+          "address": "1336 Benin City Drive",
+          "postal_code": "46044"
+        },
+        {
+          "store_id": 266,
+          "address": "1378 Beira Loop",
+          "postal_code": "40792"
+        },
+        {
+          "store_id": 267,
+          "address": "1405 Chisinau Place",
+          "postal_code": "8160"
+        },
+        {
+          "store_id": 268,
+          "address": "1618 Olomouc Manor",
+          "postal_code": "26385"
+        },
+        {
+          "store_id": 269,
+          "address": "619 Hunuco Avenue",
+          "postal_code": "81508"
+        },
+        {
+          "store_id": 270,
+          "address": "1957 Yantai Lane",
+          "postal_code": "59255"
+        },
+        {
+          "store_id": 271,
+          "address": "1049 Matamoros Parkway",
+          "postal_code": "69640"
+        },
+        {
+          "store_id": 272,
+          "address": "752 Ondo Loop",
+          "postal_code": "32474"
+        },
+        {
+          "store_id": 273,
+          "address": "1980 Kamjanets-Podilskyi Street",
+          "postal_code": "89502"
+        },
+        {
+          "store_id": 274,
+          "address": "144 South Hill Loop",
+          "postal_code": "2012"
+        },
+        {
+          "store_id": 275,
+          "address": "1908 Gaziantep Place",
+          "postal_code": "58979"
+        },
+        {
+          "store_id": 276,
+          "address": "482 Kowloon and New Kowloon Manor",
+          "postal_code": "97056"
+        },
+        {
+          "store_id": 277,
+          "address": "953 Hodeida Street",
+          "postal_code": "18841"
+        },
+        {
+          "store_id": 278,
+          "address": "1816 Bydgoszcz Loop",
+          "postal_code": "64308"
+        },
+        {
+          "store_id": 279,
+          "address": "507 Smolensk Loop",
+          "postal_code": "22971"
+        },
+        {
+          "store_id": 280,
+          "address": "556 Baybay Manor",
+          "postal_code": "55802"
+        },
+        {
+          "store_id": 281,
+          "address": "1155 Liaocheng Place",
+          "postal_code": "22650"
+        },
+        {
+          "store_id": 282,
+          "address": "1769 Iwaki Lane",
+          "postal_code": "25787"
+        },
+        {
+          "store_id": 283,
+          "address": "544 Tarsus Boulevard",
+          "postal_code": "53145"
+        },
+        {
+          "store_id": 284,
+          "address": "1642 Charlotte Amalie Drive",
+          "postal_code": "75442"
+        },
+        {
+          "store_id": 285,
+          "address": "1980 Kamjanets-Podilskyi Street",
+          "postal_code": "89502"
+        },
+        {
+          "store_id": 286,
+          "address": "1336 Benin City Drive",
+          "postal_code": "46044"
+        },
+        {
+          "store_id": 287,
+          "address": "1628 Nagareyama Lane",
+          "postal_code": "60079"
+        },
+        {
+          "store_id": 288,
+          "address": "556 Baybay Manor",
+          "postal_code": "55802"
+        },
+        {
+          "store_id": 289,
+          "address": "663 Baha Blanca Parkway",
+          "postal_code": "33463"
+        },
+        {
+          "store_id": 290,
+          "address": "1308 Sumy Loop",
+          "postal_code": "30657"
+        },
+        {
+          "store_id": 291,
+          "address": "1009 Zanzibar Lane",
+          "postal_code": "64875"
+        },
+        {
+          "store_id": 292,
+          "address": "430 Kumbakonam Drive",
+          "postal_code": "28814"
+        },
+        {
+          "store_id": 293,
+          "address": "600 Bradford Street",
+          "postal_code": "96204"
+        },
+        {
+          "store_id": 294,
+          "address": "41 El Alto Parkway",
+          "postal_code": "56883"
+        },
+        {
+          "store_id": 295,
+          "address": "1308 Sumy Loop",
+          "postal_code": "30657"
+        },
+        {
+          "store_id": 296,
+          "address": "651 Pathankot Loop",
+          "postal_code": "59811"
+        },
+        {
+          "store_id": 297,
+          "address": "1675 Xiangfan Manor",
+          "postal_code": "11763"
+        },
+        {
+          "store_id": 298,
+          "address": "604 Bern Place",
+          "postal_code": "5373"
+        },
+        {
+          "store_id": 299,
+          "address": "1762 Paarl Parkway",
+          "postal_code": "53928"
+        },
+        {
+          "store_id": 300,
+          "address": "1892 Nabereznyje Telny Lane",
+          "postal_code": "28396"
+        },
+        {
+          "store_id": 301,
+          "address": "45 Aparecida de Goinia Place",
+          "postal_code": "7431"
+        },
+        {
+          "store_id": 302,
+          "address": "1191 Sungai Petani Boulevard",
+          "postal_code": "9668"
+        },
+        {
+          "store_id": 303,
+          "address": "154 Oshawa Manor",
+          "postal_code": "72771"
+        },
+        {
+          "store_id": 304,
+          "address": "1279 Udine Parkway",
+          "postal_code": "75860"
+        },
+        {
+          "store_id": 305,
+          "address": "226 Halifax Street",
+          "postal_code": "58492"
+        },
+        {
+          "store_id": 306,
+          "address": "771 Yaound Manor",
+          "postal_code": "86768"
+        },
+        {
+          "store_id": 307,
+          "address": "1912 Emeishan Drive",
+          "postal_code": "33050"
+        },
+        {
+          "store_id": 308,
+          "address": "226 Halifax Street",
+          "postal_code": "58492"
+        },
+        {
+          "store_id": 309,
+          "address": "1698 Southport Loop",
+          "postal_code": "49009"
+        },
+        {
+          "store_id": 310,
+          "address": "479 San Felipe del Progreso Avenue",
+          "postal_code": "54949"
+        },
+        {
+          "store_id": 311,
+          "address": "1957 Yantai Lane",
+          "postal_code": "59255"
+        },
+        {
+          "store_id": 312,
+          "address": "1628 Nagareyama Lane",
+          "postal_code": "60079"
+        },
+        {
+          "store_id": 313,
+          "address": "543 Bergamo Avenue",
+          "postal_code": "59686"
+        },
+        {
+          "store_id": 314,
+          "address": "401 Sucre Boulevard",
+          "postal_code": "25007"
+        },
+        {
+          "store_id": 315,
+          "address": "519 Nyeri Manor",
+          "postal_code": "37650"
+        },
+        {
+          "store_id": 316,
+          "address": "1673 Tangail Drive",
+          "postal_code": "26857"
+        },
+        {
+          "store_id": 317,
+          "address": "470 Boksburg Street",
+          "postal_code": "97960"
+        },
+        {
+          "store_id": 318,
+          "address": "543 Bergamo Avenue",
+          "postal_code": "59686"
+        },
+        {
+          "store_id": 319,
+          "address": "715 So Bernardo do Campo Lane",
+          "postal_code": "84804"
+        },
+        {
+          "store_id": 320,
+          "address": "1336 Benin City Drive",
+          "postal_code": "46044"
+        },
+        {
+          "store_id": 321,
+          "address": "519 Brescia Parkway",
+          "postal_code": "69504"
+        },
+        {
+          "store_id": 322,
+          "address": "992 Klerksdorp Loop",
+          "postal_code": "33711"
+        },
+        {
+          "store_id": 323,
+          "address": "251 Florencia Drive",
+          "postal_code": "16119"
+        },
+        {
+          "store_id": 324,
+          "address": "1766 Almirante Brown Street",
+          "postal_code": "63104"
+        },
+        {
+          "store_id": 325,
+          "address": "1 Valle de Santiago Avenue",
+          "postal_code": "86208"
+        },
+        {
+          "store_id": 326,
+          "address": "1416 San Juan Bautista Tuxtepec Avenue",
+          "postal_code": "50592"
+        },
+        {
+          "store_id": 327,
+          "address": "1844 Usak Avenue",
+          "postal_code": "84461"
+        },
+        {
+          "store_id": 328,
+          "address": "935 Aden Boulevard",
+          "postal_code": "64709"
+        },
+        {
+          "store_id": 329,
+          "address": "734 Tanshui Avenue",
+          "postal_code": "70664"
+        },
+        {
+          "store_id": 330,
+          "address": "64 Korla Street",
+          "postal_code": "25145"
+        },
+        {
+          "store_id": 331,
+          "address": "454 Patiala Lane",
+          "postal_code": "13496"
+        },
+        {
+          "store_id": 332,
+          "address": "1661 Abha Drive",
+          "postal_code": "14400"
+        },
+        {
+          "store_id": 333,
+          "address": "734 Tanshui Avenue",
+          "postal_code": "70664"
+        },
+        {
+          "store_id": 334,
+          "address": "251 Florencia Drive",
+          "postal_code": "16119"
+        },
+        {
+          "store_id": 335,
+          "address": "1445 Carmen Parkway",
+          "postal_code": "70809"
+        },
+        {
+          "store_id": 336,
+          "address": "98 Pyongyang Boulevard",
+          "postal_code": "88749"
+        },
+        {
+          "store_id": 337,
+          "address": "614 Pak Kret Street",
+          "postal_code": "27796"
+        },
+        {
+          "store_id": 338,
+          "address": "1793 Meixian Place",
+          "postal_code": "33535"
+        },
+        {
+          "store_id": 339,
+          "address": "591 Sungai Petani Drive",
+          "postal_code": "46400"
+        },
+        {
+          "store_id": 340,
+          "address": "414 Mandaluyong Street",
+          "postal_code": "16370"
+        },
+        {
+          "store_id": 341,
+          "address": "259 Ipoh Drive",
+          "postal_code": "64964"
+        },
+        {
+          "store_id": 342,
+          "address": "319 Plock Parkway",
+          "postal_code": "26101"
+        },
+        {
+          "store_id": 343,
+          "address": "1889 Valparai Way",
+          "postal_code": "75559"
+        },
+        {
+          "store_id": 344,
+          "address": "319 Springs Loop",
+          "postal_code": "99552"
+        },
+        {
+          "store_id": 345,
+          "address": "990 Etawah Loop",
+          "postal_code": "79940"
+        },
+        {
+          "store_id": 346,
+          "address": "1768 Udine Loop",
+          "postal_code": "32347"
+        },
+        {
+          "store_id": 347,
+          "address": "1152 Citrus Heights Manor",
+          "postal_code": "5239"
+        },
+        {
+          "store_id": 348,
+          "address": "319 Plock Parkway",
+          "postal_code": "26101"
+        },
+        {
+          "store_id": 349,
+          "address": "1872 Toulon Loop",
+          "postal_code": "7939"
+        },
+        {
+          "store_id": 350,
+          "address": "1152 al-Qatif Lane",
+          "postal_code": "44816"
+        },
+        {
+          "store_id": 351,
+          "address": "1088 Ibirit Place",
+          "postal_code": "88502"
+        },
+        {
+          "store_id": 352,
+          "address": "1948 Bayugan Parkway",
+          "postal_code": "60622"
+        },
+        {
+          "store_id": 353,
+          "address": "1404 Taguig Drive",
+          "postal_code": "87212"
+        },
+        {
+          "store_id": 354,
+          "address": "1351 Aparecida de Goinia Parkway",
+          "postal_code": "41775"
+        },
+        {
+          "store_id": 355,
+          "address": "1 Valle de Santiago Avenue",
+          "postal_code": "86208"
+        },
+        {
+          "store_id": 356,
+          "address": "185 Mannheim Lane",
+          "postal_code": "23661"
+        },
+        {
+          "store_id": 357,
+          "address": "935 Aden Boulevard",
+          "postal_code": "64709"
+        },
+        {
+          "store_id": 358,
+          "address": "1596 Acua Parkway",
+          "postal_code": "70425"
+        },
+        {
+          "store_id": 359,
+          "address": "1515 Korla Way",
+          "postal_code": "57197"
+        },
+        {
+          "store_id": 360,
+          "address": "1078 Stara Zagora Drive",
+          "postal_code": "69221"
+        },
+        {
+          "store_id": 361,
+          "address": "421 Yaound Street",
+          "postal_code": "11363"
+        },
+        {
+          "store_id": 362,
+          "address": "1872 Toulon Loop",
+          "postal_code": "7939"
+        },
+        {
+          "store_id": 363,
+          "address": "1337 Mit Ghamr Avenue",
+          "postal_code": "29810"
+        },
+        {
+          "store_id": 364,
+          "address": "548 Uruapan Street",
+          "postal_code": "35653"
+        },
+        {
+          "store_id": 365,
+          "address": "808 Naala-Porto Parkway",
+          "postal_code": "41060"
+        },
+        {
+          "store_id": 366,
+          "address": "1337 Mit Ghamr Avenue",
+          "postal_code": "29810"
+        },
+        {
+          "store_id": 367,
+          "address": "775 ostka Drive",
+          "postal_code": "22358"
+        },
+        {
+          "store_id": 368,
+          "address": "270 Tambaram Parkway",
+          "postal_code": "9668"
+        },
+        {
+          "store_id": 369,
+          "address": "698 Jelets Boulevard",
+          "postal_code": "2596"
+        },
+        {
+          "store_id": 370,
+          "address": "1889 Valparai Way",
+          "postal_code": "75559"
+        },
+        {
+          "store_id": 371,
+          "address": "1936 Lapu-Lapu Parkway",
+          "postal_code": "7122"
+        },
+        {
+          "store_id": 372,
+          "address": "355 Vitria de Santo Anto Way",
+          "postal_code": "81758"
+        },
+        {
+          "store_id": 373,
+          "address": "362 Rajkot Lane",
+          "postal_code": "98030"
+        },
+        {
+          "store_id": 374,
+          "address": "786 Matsue Way",
+          "postal_code": "37469"
+        },
+        {
+          "store_id": 375,
+          "address": "1337 Mit Ghamr Avenue",
+          "postal_code": "29810"
+        },
+        {
+          "store_id": 376,
+          "address": "88 Nagaon Manor",
+          "postal_code": "86868"
+        },
+        {
+          "store_id": 377,
+          "address": "1778 Gijn Manor",
+          "postal_code": "35156"
+        },
+        {
+          "store_id": 378,
+          "address": "259 Ipoh Drive",
+          "postal_code": "64964"
+        },
+        {
+          "store_id": 379,
+          "address": "1948 Bayugan Parkway",
+          "postal_code": "60622"
+        },
+        {
+          "store_id": 380,
+          "address": "1197 Sokoto Boulevard",
+          "postal_code": "87687"
+        },
+        {
+          "store_id": 381,
+          "address": "1447 Chatsworth Place",
+          "postal_code": "41545"
+        },
+        {
+          "store_id": 382,
+          "address": "1836 Korla Parkway",
+          "postal_code": "55405"
+        },
+        {
+          "store_id": 383,
+          "address": "535 Ahmadnagar Manor",
+          "postal_code": "41136"
+        },
+        {
+          "store_id": 384,
+          "address": "1404 Taguig Drive",
+          "postal_code": "87212"
+        },
+        {
+          "store_id": 385,
+          "address": "355 Vitria de Santo Anto Way",
+          "postal_code": "81758"
+        },
+        {
+          "store_id": 386,
+          "address": "362 Rajkot Lane",
+          "postal_code": "98030"
+        },
+        {
+          "store_id": 387,
+          "address": "1621 Tongliao Avenue",
+          "postal_code": "22173"
+        },
+        {
+          "store_id": 388,
+          "address": "1661 Abha Drive",
+          "postal_code": "14400"
+        },
+        {
+          "store_id": 389,
+          "address": "758 Korolev Parkway",
+          "postal_code": "75474"
+        },
+        {
+          "store_id": 390,
+          "address": "767 Pyongyang Drive",
+          "postal_code": "83536"
+        },
+        {
+          "store_id": 391,
+          "address": "1469 Plock Lane",
+          "postal_code": "95835"
+        },
+        {
+          "store_id": 392,
+          "address": "1 Valle de Santiago Avenue",
+          "postal_code": "86208"
+        },
+        {
+          "store_id": 393,
+          "address": "1793 Meixian Place",
+          "postal_code": "33535"
+        },
+        {
+          "store_id": 394,
+          "address": "1727 Matamoros Place",
+          "postal_code": "78813"
+        },
+        {
+          "store_id": 395,
+          "address": "289 Santo Andr Manor",
+          "postal_code": "72410"
+        },
+        {
+          "store_id": 396,
+          "address": "1639 Saarbrcken Drive",
+          "postal_code": "9827"
+        },
+        {
+          "store_id": 397,
+          "address": "717 Changzhou Lane",
+          "postal_code": "21615"
+        },
+        {
+          "store_id": 398,
+          "address": "414 Mandaluyong Street",
+          "postal_code": "16370"
+        },
+        {
+          "store_id": 399,
+          "address": "1727 Matamoros Place",
+          "postal_code": "78813"
+        },
+        {
+          "store_id": 400,
+          "address": "886 Tonghae Place",
+          "postal_code": "19450"
+        },
+        {
+          "store_id": 401,
+          "address": "1289 Belm Boulevard",
+          "postal_code": "88306"
+        },
+        {
+          "store_id": 402,
+          "address": "259 Ipoh Drive",
+          "postal_code": "64964"
+        },
+        {
+          "store_id": 403,
+          "address": "717 Changzhou Lane",
+          "postal_code": "21615"
+        },
+        {
+          "store_id": 404,
+          "address": "1909 Dayton Avenue",
+          "postal_code": "88513"
+        },
+        {
+          "store_id": 405,
+          "address": "775 ostka Drive",
+          "postal_code": "22358"
+        },
+        {
+          "store_id": 406,
+          "address": "1872 Toulon Loop",
+          "postal_code": "7939"
+        },
+        {
+          "store_id": 407,
+          "address": "495 Bhimavaram Lane",
+          "postal_code": "3"
+        },
+        {
+          "store_id": 408,
+          "address": "591 Sungai Petani Drive",
+          "postal_code": "46400"
+        },
+        {
+          "store_id": 409,
+          "address": "414 Mandaluyong Street",
+          "postal_code": "16370"
+        },
+        {
+          "store_id": 410,
+          "address": "614 Pak Kret Street",
+          "postal_code": "27796"
+        },
+        {
+          "store_id": 411,
+          "address": "616 Hagonoy Avenue",
+          "postal_code": "46043"
+        },
+        {
+          "store_id": 412,
+          "address": "680 A Corua (La Corua) Manor",
+          "postal_code": "49806"
+        },
+        {
+          "store_id": 413,
+          "address": "289 Santo Andr Manor",
+          "postal_code": "72410"
+        },
+        {
+          "store_id": 414,
+          "address": "1621 Tongliao Avenue",
+          "postal_code": "22173"
+        },
+        {
+          "store_id": 415,
+          "address": "740 Udaipur Lane",
+          "postal_code": "33505"
+        },
+        {
+          "store_id": 416,
+          "address": "535 Ahmadnagar Manor",
+          "postal_code": "41136"
+        },
+        {
+          "store_id": 417,
+          "address": "1704 Tambaram Manor",
+          "postal_code": "2834"
+        },
+        {
+          "store_id": 418,
+          "address": "105 Dzerzinsk Manor",
+          "postal_code": "48570"
+        },
+        {
+          "store_id": 419,
+          "address": "1515 Korla Way",
+          "postal_code": "57197"
+        },
+        {
+          "store_id": 420,
+          "address": "954 Lapu-Lapu Way",
+          "postal_code": "8816"
+        },
+        {
+          "store_id": 421,
+          "address": "983 Santa F Way",
+          "postal_code": "47472"
+        },
+        {
+          "store_id": 422,
+          "address": "734 Bchar Place",
+          "postal_code": "30586"
+        },
+        {
+          "store_id": 423,
+          "address": "126 Acua Parkway",
+          "postal_code": "58888"
+        },
+        {
+          "store_id": 424,
+          "address": "1823 Hoshiarpur Lane",
+          "postal_code": "33191"
+        },
+        {
+          "store_id": 425,
+          "address": "1947 Paarl Way",
+          "postal_code": "23636"
+        },
+        {
+          "store_id": 426,
+          "address": "1404 Taguig Drive",
+          "postal_code": "87212"
+        },
+        {
+          "store_id": 427,
+          "address": "614 Pak Kret Street",
+          "postal_code": "27796"
+        },
+        {
+          "store_id": 428,
+          "address": "193 Bhusawal Place",
+          "postal_code": "9750"
+        },
+        {
+          "store_id": 429,
+          "address": "521 San Juan Bautista Tuxtepec Place",
+          "postal_code": "95093"
+        },
+        {
+          "store_id": 430,
+          "address": "1746 Faaa Way",
+          "postal_code": "32515"
+        },
+        {
+          "store_id": 431,
+          "address": "1894 Boa Vista Way",
+          "postal_code": "77464"
+        },
+        {
+          "store_id": 432,
+          "address": "1331 Usak Boulevard",
+          "postal_code": "61960"
+        },
+        {
+          "store_id": 433,
+          "address": "96 Tafuna Way",
+          "postal_code": "99865"
+        },
+        {
+          "store_id": 434,
+          "address": "306 Antofagasta Place",
+          "postal_code": "3989"
+        },
+        {
+          "store_id": 435,
+          "address": "808 Bhopal Manor",
+          "postal_code": "10672"
+        },
+        {
+          "store_id": 436,
+          "address": "1331 Usak Boulevard",
+          "postal_code": "61960"
+        },
+        {
+          "store_id": 437,
+          "address": "1688 Okara Way",
+          "postal_code": "21954"
+        },
+        {
+          "store_id": 438,
+          "address": "1425 Shikarpur Manor",
+          "postal_code": "65599"
+        },
+        {
+          "store_id": 439,
+          "address": "943 Tokat Street",
+          "postal_code": "45428"
+        },
+        {
+          "store_id": 440,
+          "address": "379 Lublin Parkway",
+          "postal_code": "74568"
+        },
+        {
+          "store_id": 441,
+          "address": "1407 Pachuca de Soto Place",
+          "postal_code": "26284"
+        },
+        {
+          "store_id": 442,
+          "address": "1121 Loja Avenue",
+          "postal_code": "17886"
+        },
+        {
+          "store_id": 443,
+          "address": "320 Brest Avenue",
+          "postal_code": "43331"
+        },
+        {
+          "store_id": 444,
+          "address": "1718 Valencia Street",
+          "postal_code": "37359"
+        },
+        {
+          "store_id": 445,
+          "address": "96 Tafuna Way",
+          "postal_code": "99865"
+        },
+        {
+          "store_id": 446,
+          "address": "1741 Hoshiarpur Boulevard",
+          "postal_code": "22372"
+        },
+        {
+          "store_id": 447,
+          "address": "193 Bhusawal Place",
+          "postal_code": "9750"
+        },
+        {
+          "store_id": 448,
+          "address": "43 Vilnius Manor",
+          "postal_code": "79814"
+        },
+        {
+          "store_id": 449,
+          "address": "923 Tangail Boulevard",
+          "postal_code": "33384"
+        },
+        {
+          "store_id": 450,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 451,
+          "address": "17 Kabul Boulevard",
+          "postal_code": "38594"
+        },
+        {
+          "store_id": 452,
+          "address": "28 Charlotte Amalie Street",
+          "postal_code": "37551"
+        },
+        {
+          "store_id": 453,
+          "address": "1003 Qinhuangdao Street",
+          "postal_code": "25972"
+        },
+        {
+          "store_id": 454,
+          "address": "1440 Fukuyama Loop",
+          "postal_code": "47929"
+        },
+        {
+          "store_id": 455,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 456,
+          "address": "1568 Celaya Parkway",
+          "postal_code": "34750"
+        },
+        {
+          "store_id": 457,
+          "address": "1427 Tabuk Place",
+          "postal_code": "31342"
+        },
+        {
+          "store_id": 458,
+          "address": "1531 Sal Drive",
+          "postal_code": "53628"
+        },
+        {
+          "store_id": 459,
+          "address": "1052 Pathankot Avenue",
+          "postal_code": "77397"
+        },
+        {
+          "store_id": 460,
+          "address": "1003 Qinhuangdao Street",
+          "postal_code": "25972"
+        },
+        {
+          "store_id": 461,
+          "address": "1746 Faaa Way",
+          "postal_code": "32515"
+        },
+        {
+          "store_id": 462,
+          "address": "33 Gorontalo Way",
+          "postal_code": "30348"
+        },
+        {
+          "store_id": 463,
+          "address": "1421 Quilmes Lane",
+          "postal_code": "19151"
+        },
+        {
+          "store_id": 464,
+          "address": "521 San Juan Bautista Tuxtepec Place",
+          "postal_code": "95093"
+        },
+        {
+          "store_id": 465,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 466,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 467,
+          "address": "127 Purnea (Purnia) Manor",
+          "postal_code": "79388"
+        },
+        {
+          "store_id": 468,
+          "address": "686 Garland Manor",
+          "postal_code": "52535"
+        },
+        {
+          "store_id": 469,
+          "address": "1351 Sousse Lane",
+          "postal_code": "37815"
+        },
+        {
+          "store_id": 470,
+          "address": "1405 Hagonoy Avenue",
+          "postal_code": "86587"
+        },
+        {
+          "store_id": 471,
+          "address": "176 Mandaluyong Place",
+          "postal_code": "65213"
+        },
+        {
+          "store_id": 472,
+          "address": "486 Ondo Parkway",
+          "postal_code": "35202"
+        },
+        {
+          "store_id": 473,
+          "address": "949 Allende Lane",
+          "postal_code": "67521"
+        },
+        {
+          "store_id": 474,
+          "address": "166 Jinchang Street",
+          "postal_code": "86760"
+        },
+        {
+          "store_id": 475,
+          "address": "478 Joliet Way",
+          "postal_code": "77948"
+        },
+        {
+          "store_id": 476,
+          "address": "182 Nukualofa Drive",
+          "postal_code": "15414"
+        },
+        {
+          "store_id": 477,
+          "address": "18 Duisburg Boulevard",
+          "postal_code": "58327"
+        },
+        {
+          "store_id": 478,
+          "address": "360 Toulouse Parkway",
+          "postal_code": "54308"
+        },
+        {
+          "store_id": 479,
+          "address": "1342 Abha Boulevard",
+          "postal_code": "10714"
+        },
+        {
+          "store_id": 480,
+          "address": "1407 Surakarta Manor",
+          "postal_code": "33224"
+        },
+        {
+          "store_id": 481,
+          "address": "1501 Pangkal Pinang Avenue",
+          "postal_code": "943"
+        },
+        {
+          "store_id": 482,
+          "address": "18 Duisburg Boulevard",
+          "postal_code": "58327"
+        },
+        {
+          "store_id": 483,
+          "address": "1464 Kursk Parkway",
+          "postal_code": "17381"
+        },
+        {
+          "store_id": 484,
+          "address": "1817 Livorno Way",
+          "postal_code": "79401"
+        },
+        {
+          "store_id": 485,
+          "address": "166 Jinchang Street",
+          "postal_code": "86760"
+        },
+        {
+          "store_id": 486,
+          "address": "1668 Anpolis Street",
+          "postal_code": "50199"
+        },
+        {
+          "store_id": 487,
+          "address": "195 Ilorin Street",
+          "postal_code": "49250"
+        },
+        {
+          "store_id": 488,
+          "address": "28 Charlotte Amalie Street",
+          "postal_code": "37551"
+        },
+        {
+          "store_id": 489,
+          "address": "486 Ondo Parkway",
+          "postal_code": "35202"
+        },
+        {
+          "store_id": 490,
+          "address": "1795 Santiago de Compostela Way",
+          "postal_code": "18743"
+        },
+        {
+          "store_id": 491,
+          "address": "943 Tokat Street",
+          "postal_code": "45428"
+        },
+        {
+          "store_id": 492,
+          "address": "42 Fontana Avenue",
+          "postal_code": "14684"
+        },
+        {
+          "store_id": 493,
+          "address": "1135 Izumisano Parkway",
+          "postal_code": "48150"
+        },
+        {
+          "store_id": 494,
+          "address": "1764 Jalib al-Shuyukh Parkway",
+          "postal_code": "77642"
+        },
+        {
+          "store_id": 495,
+          "address": "247 Jining Parkway",
+          "postal_code": "53446"
+        },
+        {
+          "store_id": 496,
+          "address": "1213 Ranchi Parkway",
+          "postal_code": "94352"
+        },
+        {
+          "store_id": 497,
+          "address": "1923 Stara Zagora Lane",
+          "postal_code": "95179"
+        },
+        {
+          "store_id": 498,
+          "address": "391 Callao Drive",
+          "postal_code": "34021"
+        },
+        {
+          "store_id": 499,
+          "address": "28 MySQL Boulevard",
+          "postal_code": ""
+        }
+      ],
+      "expected_row_count": 500,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "address",
+        "store"
+      ]
+    },
+    {
+      "id": 1207,
+      "question": "List films with replacement cost under 15 in 'Comedy' category",
+      "query": "SELECT f.title, f.replacement_cost FROM film f JOIN film_category fc ON f.film_id = fc.film_id JOIN category c ON fc.category_id = c.category_id WHERE c.name = 'Comedy' AND f.replacement_cost < 15 LIMIT 10;",
+      "expected_result": [
+        {
+          "title": "BLACKOUT PRIVATE",
+          "replacement_cost": 12.99
+        },
+        {
+          "title": "ALIEN CENTER",
+          "replacement_cost": 10.99
+        },
+        {
+          "title": "CONEHEADS SMOOCHY",
+          "replacement_cost": 12.99
+        },
+        {
+          "title": "CATCH AMISTAD",
+          "replacement_cost": 10.99
+        },
+        {
+          "title": "EAGLES PANKY",
+          "replacement_cost": 14.99
+        },
+        {
+          "title": "HOLIDAY GAMES",
+          "replacement_cost": 10.99
+        },
+        {
+          "title": "JUGGLER HARDLY",
+          "replacement_cost": 14.99
+        },
+        {
+          "title": "NEWTON LABYRINTH",
+          "replacement_cost": 9.99
+        },
+        {
+          "title": "MILE MULAN",
+          "replacement_cost": 10.99
+        },
+        {
+          "title": "ROAD ROXANNE",
+          "replacement_cost": 12.99
+        }
+      ],
+      "expected_row_count": 10,
+      "category": "joins",
+      "difficulty": "intermediate",
+      "tables_used": [
+        "category",
+        "film",
+        "film_category"
+      ]
+    }
+  ]
+}
