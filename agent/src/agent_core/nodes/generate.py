@@ -178,62 +178,9 @@ async def generate_sql_node(state: AgentState) -> dict:
         except Exception as e:
             print(f"Warning: Could not retrieve few-shot examples: {e}")
 
-        # Fetch Live Schema DDL for identified tables
-        table_names = state.get("table_names", [])
-        live_schema_ddl = ""
-        if table_names:
-            try:
-                from agent_core.tools import get_mcp_tools
-
-                tools = await get_mcp_tools()
-                schema_tool = next((t for t in tools if t.name == "get_table_schema_tool"), None)
-                if schema_tool:
-                    print(f"Fetching schema for: {table_names}")
-                    # Fetch live schema
-                    kwargs = {"table_names": table_names}
-                    live_schema_json = await schema_tool.ainvoke(kwargs)
-
-                    from agent_core.utils.parsing import parse_tool_output
-
-                    schema_data = parse_tool_output(live_schema_json)
-
-                    # Format as digestible schema
-                    formatted_parts = []
-                    for table in schema_data:
-                        if not isinstance(table, dict):
-                            continue
-                        t_name = table.get("table_name")
-                        formatted_parts.append(f"Table: {t_name}")
-
-                        columns = table.get("columns", [])
-                        formatted_parts.append("Columns:")
-                        for col in columns:
-                            if not isinstance(col, dict):
-                                continue
-                            req = "REQUIRED" if not col.get("nullable") else "NULLABLE"
-                            formatted_parts.append(
-                                f"- {col.get('name')} ({col.get('type')}, {req})"
-                            )
-
-                        fks = table.get("foreign_keys", [])
-                        if fks:
-                            formatted_parts.append("Foreign Keys:")
-                            for fk in fks:
-                                if not isinstance(fk, dict):
-                                    continue
-                                formatted_parts.append(
-                                    f"- {fk.get('column')} -> "
-                                    f"{fk.get('foreign_table')}.{fk.get('foreign_column')}"
-                                )
-                        formatted_parts.append("")
-
-                    live_schema_ddl = "\n".join(formatted_parts)
-            except Exception as e:
-                print(f"Warning: Failed to fetch live schema: {e}")
-
-        # Use Live DDL if available, otherwise fallback to context (Summary) + Warning?
-        # Actually context only has summaries now, so mapped to DDL is critical.
-        schema_context_to_use = live_schema_ddl if live_schema_ddl else context
+        # Use schema_context directly from retrieve node (now powered by semantic subgraph)
+        # No need for redundant get_table_schema_tool call - graph already contains full schema
+        schema_context_to_use = context
 
         # Build system prompt with examples section
         # NOTE: We must escape curly braces in all injected content because ChatPromptTemplate
@@ -284,16 +231,17 @@ USER CLARIFICATION:
 
         system_prompt = f"""You are a PostgreSQL expert.
 Using the provided SCHEMA CONTEXT, PROCEDURAL PLAN, and EXAMPLES, synthesize a SQL query.
+The SCHEMA CONTEXT below is a Relationship Graph showing tables, columns, and foreign keys.
 
 Rules:
 - Return ONLY the SQL query. No markdown, no explanations.
 - Always limit results to 1000 rows unless the user specifies otherwise.
 - Use proper SQL syntax for PostgreSQL.
-- Only use tables and columns explicitly defined in the SCHEMA CONTEXT DDL.
+- Only use tables and columns explicitly defined in the SCHEMA CONTEXT.
 - FOLLOW THE PROCEDURAL PLAN if provided - it contains the logical steps.
 - Learn from the EXAMPLES provided to understand similar query patterns.
 {plan_section}{clarification_section}
-Schema Context:
+Schema Context (Relationship Graph):
 {{schema_context}}
 {examples_section}
 """
