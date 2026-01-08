@@ -1,7 +1,7 @@
 import json
 from typing import List, Optional
 
-from mcp_server.retrievers.factory import get_retriever
+from mcp_server.factory.retriever import get_retriever
 
 # Since we are integrating these tools into the main server.py,
 # we define functions that can be registered or decorating them if we had the app instance here.

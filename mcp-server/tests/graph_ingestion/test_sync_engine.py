@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from mcp_server.graph_ingestion.sync_engine import SyncEngine
-from mcp_server.retrievers.base import ColumnMetadata, TableMetadata
+from mcp_server.models.schema import ColumnMetadata, TableMetadata
 
 
 @patch("mcp_server.graph_ingestion.sync_engine.get_retriever")

@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.retrievers.base import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
 from mcp_server.retrievers.postgres_retriever import PostgresRetriever
 
 

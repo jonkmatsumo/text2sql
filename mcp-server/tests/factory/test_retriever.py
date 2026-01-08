@@ -1,11 +1,11 @@
 from unittest.mock import patch
 
-from mcp_server.retrievers.factory import get_retriever
+from mcp_server.factory.retriever import get_retriever
 
 
 def test_get_retriever_singleton():
     """Test that get_retriever returns a singleton instance."""
-    with patch("mcp_server.retrievers.factory.PostgresRetriever") as mock_cls:
+    with patch("mcp_server.factory.retriever.PostgresRetriever") as mock_cls:
         # First call should create instance
         instance1 = get_retriever()
         mock_cls.assert_called_once()

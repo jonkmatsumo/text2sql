@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from mcp_server.retrievers.factory import get_retriever
+from mcp_server.factory.retriever import get_retriever
 from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)

@@ -2,12 +2,8 @@ import logging
 import os
 from typing import Dict, List
 
-from mcp_server.retrievers.base import (
-    ColumnMetadata,
-    DataSchemaRetriever,
-    ForeignKey,
-    TableMetadata,
-)
+from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.retrievers.data_schema_retriever import DataSchemaRetriever
 from sqlalchemy import create_engine, inspect, text
 
 logger = logging.getLogger(__name__)

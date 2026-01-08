@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from mcp_server.retrievers.base import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
 from mcp_server.tools.schema import get_sample_data, get_table_schema, list_tables
 
 

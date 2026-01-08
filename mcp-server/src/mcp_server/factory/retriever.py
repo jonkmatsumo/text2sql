@@ -1,6 +1,6 @@
 from typing import Optional
 
-from mcp_server.retrievers.base import DataSchemaRetriever
+from mcp_server.retrievers.data_schema_retriever import DataSchemaRetriever
 from mcp_server.retrievers.postgres_retriever import PostgresRetriever
 
 _retriever_instance: Optional[DataSchemaRetriever] = None
