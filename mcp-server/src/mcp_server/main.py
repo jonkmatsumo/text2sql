@@ -16,6 +16,7 @@ from mcp_server.tools import (
     execute_sql_query,
     get_sample_data,
     get_semantic_definitions,
+    get_semantic_subgraph,
     get_table_schema,
     list_tables,
     search_relevant_tables,
@@ -203,6 +204,15 @@ async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> s
         return json.dumps({"error": "Tenant ID required for cache update"})
     await update_cache(user_query, sql, tenant_id)
     return json.dumps({"status": "cached"}, separators=(",", ":"))
+
+
+@mcp.tool()
+async def get_semantic_subgraph_tool(query: str, ctx: Context = None) -> str:
+    """Retrieve relevant subgraph of tables/columns based on query.
+
+    Use this to understand database structure.
+    """
+    return await get_semantic_subgraph(query)
 
 
 if __name__ == "__main__":
