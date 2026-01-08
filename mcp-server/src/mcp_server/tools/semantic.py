@@ -1,6 +1,9 @@
 """Semantic subgraph retrieval tool for MCP server.
 
-Uses vector similarity search with tables-first strategy and adaptive thresholding.
+Uses deterministic "Mini-Schema" expansion:
+1. Seed selection (adaptive vector search)
+2. Seed Table Expansion (get table + columns)
+3. Join Discovery (get foreign keys + referenced tables/columns only)
 """
 
 import asyncio
@@ -19,12 +22,7 @@ COLUMNS_K = 3  # Number of columns to retrieve (fallback only)
 
 
 def _get_mini_graph(query_text: str) -> dict:
-    """Retrieve subgraph synchronously using tables-first strategy.
-
-    Strategy:
-    1. Search for k=5 Table nodes with adaptive thresholding
-    2. Only search Columns if no tables found (fallback)
-    3. Traverse 1 hop from seeds to get related nodes
+    """Retrieve subgraph synchronously using deterministic mini-schema expansion.
 
     Returns:
         Dict with 'nodes' and 'relationships' keys
@@ -36,138 +34,115 @@ def _get_mini_graph(query_text: str) -> dict:
     indexer = VectorIndexer(uri=uri, user=user, password=password)
 
     try:
-        # Tables-first strategy: search tables only
+        # 1. Seed Selection (Tables-First)
         table_hits = indexer.search_nodes(query_text, label="Table", k=TABLES_K)
 
-        # Fallback: if no tables found, try columns
         if not table_hits:
             logger.info("No table hits, falling back to column search")
-            column_hits = indexer.search_nodes(query_text, label="Column", k=COLUMNS_K)
-            seeds = column_hits
+            seeds = indexer.search_nodes(query_text, label="Column", k=COLUMNS_K)
+            # Map column seeds to their parent tables
+            seed_table_names = list(
+                set(s["node"].get("table") for s in seeds if s["node"].get("table"))
+            )
+            seed_scores = {s["node"].get("table"): s["score"] for s in seeds}
         else:
             seeds = table_hits
-            # Add type annotation for formatter
-            for h in seeds:
-                h["type"] = "Table"
+            seed_table_names = [s["node"].get("name") for s in seeds]
+            seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
 
-        if not seeds:
-            return {"nodes": [], "relationships": []}
-
-        # Log what we found
-        seed_names = [h["node"].get("name") for h in seeds]
-        logger.info(
-            f"Semantic search found {len(seeds)} seeds: {seed_names[:5]}... "
-            f"(best_score={seeds[0]['score']:.3f})"
-        )
-
-        # Extract seed table names for traversal
-        seed_table_names = []
-        for h in seeds:
-            node = h["node"]
-            if h.get("type") == "Table" or "table" not in node:
-                # It's a table node
-                seed_table_names.append(node.get("name"))
-            else:
-                # It's a column node - get parent table
-                seed_table_names.append(node.get("table"))
-
-        seed_table_names = [n for n in seed_table_names if n]
         if not seed_table_names:
             return {"nodes": [], "relationships": []}
 
-        # 1-hop traversal from seed tables
+        logger.info(f"Found seeds: {seed_table_names[:5]}")
+
+        nodes_map = {}
+        rels_list = []
+
+        def add_node(node, node_type, score=None):
+            if node is None:
+                return None
+            nid = node.element_id if hasattr(node, "element_id") else str(node.id)
+            if nid not in nodes_map:
+                props = dict(node)
+                props["id"] = nid
+                props["type"] = node_type
+                props.pop("embedding", None)
+                if score is not None:
+                    props["score"] = score
+                nodes_map[nid] = props
+            return nid
+
         with indexer.driver.session() as session:
-            # Simpler traversal query: get tables, their columns, and FK-related tables
-            traversal_query = """
+            # Step 1: Fetch Seed Tables and their Columns
+            # We fetch all columns but will rely on formatter to truncate if too many.
+            query_step1 = """
             MATCH (t:Table)
             WHERE t.name IN $seed_tables
             OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-            OPTIONAL MATCH (c)-[:FOREIGN_KEY_TO]->(fc:Column)<-[:HAS_COLUMN]-(ft:Table)
-            RETURN t, collect(DISTINCT c) as columns,
-                   collect(DISTINCT {fk_col: c, ref_col: fc, ref_table: ft}) as fk_info
+            RETURN t, collect(c) as columns
             """
+            result1 = session.run(query_step1, seed_tables=seed_table_names)
 
-            result = session.run(traversal_query, seed_tables=seed_table_names)
+            for record in result1:
+                t = record["t"]
+                columns = record["columns"]
+                t_name = t.get("name")
 
-            nodes_map = {}
-            rels_list = []
+                # Add Table
+                t_id = add_node(t, "Table", score=seed_scores.get(t_name))
 
-            def add_node(node, node_type):
-                if node is None:
-                    return None
-                nid = node.element_id if hasattr(node, "element_id") else str(node.id)
-                if nid not in nodes_map:
-                    props = dict(node)
-                    props["id"] = nid
-                    props["type"] = node_type
-                    # Remove embedding from output
-                    props.pop("embedding", None)
-                    nodes_map[nid] = props
-                return nid
+                # Add All Columns (capped by formatter later)
+                for col in columns:
+                    if col:
+                        c_id = add_node(col, "Column")
+                        if t_id and c_id:
+                            rels_list.append({"source": t_id, "target": c_id, "type": "HAS_COLUMN"})
 
-            for record in result:
-                # Add table node
-                table_node = record["t"]
-                table_id = add_node(table_node, "Table")
+            # Step 2: Join Discovery
+            # Trace FKs from seed tables to *referenced* tables.
+            # Only include the referenced *columns*, not the full schema of referenced tables.
+            query_step2 = """
+            MATCH (t:Table) WHERE t.name IN $seed_tables
+            MATCH (t)-[:HAS_COLUMN]->(sc:Column)-[:FOREIGN_KEY_TO]->(tc:Column)
+            MATCH (rt:Table)-[:HAS_COLUMN]->(tc)
+            RETURN t.name as source_table_name,
+                   sc as source_col,
+                   rt as target_table,
+                   tc as target_col
+            """
+            result2 = session.run(query_step2, seed_tables=seed_table_names)
 
-                # Add table score if available
-                table_name = table_node.get("name")
-                for h in seeds:
-                    if h["node"].get("name") == table_name:
-                        nodes_map[table_id]["score"] = h["score"]
-                        break
+            for record in result2:
+                # source_table_name = record["source_table_name"] # Already processed in Step 1
+                source_col = record["source_col"]  # Already processed in Step 1
+                target_table = record["target_table"]
+                target_col = record["target_col"]
 
-                # Add column nodes and relationships
-                for col in record["columns"]:
-                    if col is not None:
-                        col_id = add_node(col, "Column")
-                        if table_id and col_id:
-                            rels_list.append(
-                                {
-                                    "source": table_id,
-                                    "target": col_id,
-                                    "type": "HAS_COLUMN",
-                                }
-                            )
+                sc_id = add_node(source_col, "Column")
 
-                # Add FK relationships and referenced tables
-                for fk_info in record["fk_info"]:
-                    fk_col = fk_info.get("fk_col")
-                    ref_col = fk_info.get("ref_col")
-                    ref_table = fk_info.get("ref_table")
+                # Add Referenced Table (rt)
+                rt_id = add_node(target_table, "Table")
 
-                    if fk_col and ref_col and ref_table:
-                        fk_col_id = add_node(fk_col, "Column")
-                        ref_col_id = add_node(ref_col, "Column")
-                        ref_table_id = add_node(ref_table, "Table")
+                # Add Referenced Column (tc) - this is the "Bridge" logic
+                tc_id = add_node(target_col, "Column")
 
-                        if fk_col_id and ref_col_id:
-                            rels_list.append(
-                                {
-                                    "source": fk_col_id,
-                                    "target": ref_col_id,
-                                    "type": "FOREIGN_KEY_TO",
-                                }
-                            )
-                        if ref_table_id and ref_col_id:
-                            rels_list.append(
-                                {
-                                    "source": ref_table_id,
-                                    "target": ref_col_id,
-                                    "type": "HAS_COLUMN",
-                                }
-                            )
+                # Add relationships
+                if sc_id and tc_id:
+                    rels_list.append({"source": sc_id, "target": tc_id, "type": "FOREIGN_KEY_TO"})
 
-            # Dedupe relationships
-            seen_rels = set()
-            unique_rels = []
-            for rel in rels_list:
-                key = (rel["source"], rel["target"], rel["type"])
-                if key not in seen_rels:
-                    seen_rels.add(key)
-                    unique_rels.append(rel)
+                if rt_id and tc_id:
+                    rels_list.append({"source": rt_id, "target": tc_id, "type": "HAS_COLUMN"})
 
-            return {"nodes": list(nodes_map.values()), "relationships": unique_rels}
+        # Process relationships uniqueness
+        seen_rels = set()
+        unique_rels = []
+        for rel in rels_list:
+            key = (rel["source"], rel["target"], rel["type"])
+            if key not in seen_rels:
+                seen_rels.add(key)
+                unique_rels.append(rel)
+
+        return {"nodes": list(nodes_map.values()), "relationships": unique_rels}
 
     except Exception as e:
         logger.error(f"Error in get_semantic_subgraph: {e}")
@@ -178,8 +153,6 @@ def _get_mini_graph(query_text: str) -> dict:
 
 async def get_semantic_subgraph(query: str) -> str:
     """Retrieve relevant subgraph of tables and columns based on a natural language query.
-
-    Uses tables-first strategy with adaptive thresholding.
 
     Args:
         query: The natural language query to search for.
