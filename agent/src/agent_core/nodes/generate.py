@@ -191,7 +191,43 @@ async def generate_sql_node(state: AgentState) -> dict:
                     print(f"Fetching schema for: {table_names}")
                     # Fetch live schema
                     kwargs = {"table_names": table_names}
-                    live_schema_ddl = await schema_tool.ainvoke(kwargs)
+                    live_schema_json = await schema_tool.ainvoke(kwargs)
+
+                    from agent_core.utils.parsing import parse_tool_output
+
+                    schema_data = parse_tool_output(live_schema_json)
+
+                    # Format as digestible schema
+                    formatted_parts = []
+                    for table in schema_data:
+                        if not isinstance(table, dict):
+                            continue
+                        t_name = table.get("table_name")
+                        formatted_parts.append(f"Table: {t_name}")
+
+                        columns = table.get("columns", [])
+                        formatted_parts.append("Columns:")
+                        for col in columns:
+                            if not isinstance(col, dict):
+                                continue
+                            req = "REQUIRED" if not col.get("nullable") else "NULLABLE"
+                            formatted_parts.append(
+                                f"- {col.get('name')} ({col.get('type')}, {req})"
+                            )
+
+                        fks = table.get("foreign_keys", [])
+                        if fks:
+                            formatted_parts.append("Foreign Keys:")
+                            for fk in fks:
+                                if not isinstance(fk, dict):
+                                    continue
+                                formatted_parts.append(
+                                    f"- {fk.get('column')} -> "
+                                    f"{fk.get('foreign_table')}.{fk.get('foreign_column')}"
+                                )
+                        formatted_parts.append("")
+
+                    live_schema_ddl = "\n".join(formatted_parts)
             except Exception as e:
                 print(f"Warning: Failed to fetch live schema: {e}")
 

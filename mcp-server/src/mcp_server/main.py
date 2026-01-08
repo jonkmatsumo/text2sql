@@ -113,7 +113,11 @@ async def list_tables_tool(search_term: str = None, ctx: Context = None) -> str:
 
 @mcp.tool()
 async def get_table_schema_tool(table_names: list[str], ctx: Context = None) -> str:
-    """Retrieve the schema (columns, data types, foreign keys) for a list of tables."""
+    """
+    Retrieve the schema (columns, data types, foreign keys) for a list of tables.
+
+    Returns JSON list of table schemas.
+    """
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await get_table_schema(table_names, tenant_id)
 

@@ -48,9 +48,8 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
     Returns:
         Markdown-formatted schema documentation.
     """
-    schema_output = ""
-
     async with Database.get_connection(tenant_id) as conn:
+        schema_list = []
         for table in table_names:
             # Get Columns
             col_query = """
@@ -62,14 +61,16 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
             cols = await conn.fetch(col_query, table)
 
             if not cols:
-                schema_output += f"### Table: {table} (Not Found)\n\n"
                 continue
 
-            schema_output += f"### Table: `{table}`\n\n"
-            schema_output += "| Column | Type | Nullable |\n|---|---|---|\n"
+            columns_data = []
             for col in cols:
-                schema_output += (
-                    f"| `{col['column_name']}` | {col['data_type']} | {col['is_nullable']} |\n"
+                columns_data.append(
+                    {
+                        "name": col["column_name"],
+                        "type": col["data_type"],
+                        "nullable": col["is_nullable"] == "YES",
+                    }
                 )
 
             # Get Foreign Keys
@@ -89,17 +90,26 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
             """
             fks = await conn.fetch(fk_query, table)
 
+            foreign_keys = []
             if fks:
-                schema_output += "\n**Foreign Keys:**\n"
                 for fk in fks:
-                    fk_col = fk["column_name"]
-                    fk_table = fk["foreign_table_name"]
-                    fk_ref_col = fk["foreign_column_name"]
-                    schema_output += f"- `{fk_col}` → `{fk_table}.{fk_ref_col}`\n"
+                    foreign_keys.append(
+                        {
+                            "column": fk["column_name"],
+                            "foreign_table": fk["foreign_table_name"],
+                            "foreign_column": fk["foreign_column_name"],
+                        }
+                    )
 
-            schema_output += "\n"
+            schema_list.append(
+                {
+                    "table_name": table,
+                    "columns": columns_data,
+                    "foreign_keys": foreign_keys,
+                }
+            )
 
-        return schema_output
+        return json.dumps(schema_list, indent=2)
 
 
 async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> str:
@@ -173,10 +183,10 @@ async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> 
             )  # default=str handles Date/Decimal types
 
         except asyncpg.PostgresError as e:
-            # Crucial: Return the DB error as a string so the LLM can read it and fix the query
-            return f"Database Error: {str(e)}"
+            # Return DB error as JSON object
+            return json.dumps({"error": f"Database Error: {str(e)}"})
         except Exception as e:
-            return f"Execution Error: {str(e)}"
+            return json.dumps({"error": f"Execution Error: {str(e)}"})
 
 
 async def get_semantic_definitions(terms: list[str], tenant_id: Optional[int] = None) -> str:
