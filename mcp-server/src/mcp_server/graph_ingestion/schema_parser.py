@@ -134,9 +134,37 @@ class SchemaParser:
 
     def _extract_constraint_info(self, expression: exp.Constraint) -> Dict[str, Any]:
         """Extract table-level constraint details."""
-        # Basic extraction, can be expanded based on specific needs (FK, Check, etc)
-        return {
-            "type": expression.kind,
+        constraint_type = expression.kind
+        details = {
+            "type": constraint_type,
             "name": expression.this.name if expression.this else None,
             "definition": expression.sql(),
         }
+
+        # Specific extraction for Foreign Keys
+        if isinstance(constraint_type, exp.ForeignKey):
+            # sqlglot expression structure for FK:
+            # kind=ForeignKey(expressions=[Identifier(this='col_name')],
+            # reference=Reference(
+            #     this=Table(this='ref_table'), expressions=[Identifier(this='ref_col')]
+            # ))
+            try:
+                # Source columns (the ones in the current table)
+                source_cols = [e.name for e in constraint_type.expressions]
+
+                # Reference details
+                reference = constraint_type.args.get("reference")
+                if reference:
+                    ref_table = reference.this.name
+                    # Reference columns (the ones in the target table)
+                    ref_cols = [e.name for e in reference.expressions]
+
+                    details["foreign_key"] = {
+                        "source_columns": source_cols,
+                        "reference_table": ref_table,
+                        "reference_columns": ref_cols,
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to parse FK details in {expression.sql()}: {e}")
+
+        return details
