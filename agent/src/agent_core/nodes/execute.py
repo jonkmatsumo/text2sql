@@ -1,7 +1,5 @@
 """SQL execution and validation node with MLflow tracing."""
 
-import json
-
 import mlflow
 from agent_core.state import AgentState
 from agent_core.tools import get_mcp_tools
@@ -61,24 +59,41 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
             )
 
-            # Check if the tool returned a database error string
+            # Check if the tool returned a database error string (simple case)
             if isinstance(result, str):
                 if "Error:" in result or "Database Error:" in result:
                     span.set_outputs({"error": result})
                     return {"error": result, "query_result": None}
 
-                # Try to parse as JSON (successful query result)
-                try:
-                    parsed_result = json.loads(result)
-                    query_result = parsed_result
-                    error = None
-                except json.JSONDecodeError:
-                    # If not JSON, treat as error message
-                    span.set_outputs({"error": result})
-                    return {"error": result, "query_result": None}
+            # Use robust parsing utility
+            from agent_core.utils.parsing import parse_tool_output
+
+            parsed_data = parse_tool_output(result)
+
+            if parsed_data:
+                # Check for wrapped error object {"error": "..."}
+                if (
+                    isinstance(parsed_data, list)
+                    and len(parsed_data) == 1
+                    and isinstance(parsed_data[0], dict)
+                    and "error" in parsed_data[0]
+                ):
+                    error_msg = parsed_data[0]["error"]
+                    span.set_outputs({"error": error_msg})
+                    return {"error": error_msg, "query_result": None}
+
+                query_result = parsed_data
+                error = None
             else:
-                # If result is already a dict/list, use it directly
-                query_result = result
+                # Parsing failed or empty result. Check if it looks like an error string
+                raw_str = str(result)
+                if "Error:" in raw_str or "Database Error:" in raw_str:
+                    error = raw_str
+                    span.set_outputs({"error": error})
+                    return {"error": error, "query_result": None}
+
+                # Otherwise, assume it's just empty result set
+                query_result = []
                 error = None
 
             span.set_outputs(

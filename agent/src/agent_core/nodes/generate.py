@@ -29,7 +29,6 @@ async def check_cache(user_query: str, tenant_id: Optional[int] = None) -> Optio
         return None
 
     try:
-        import json
 
         from agent_core.tools import get_mcp_tools
 
@@ -49,9 +48,13 @@ async def check_cache(user_query: str, tenant_id: Optional[int] = None) -> Optio
 
         # Call the tool
         result = await cache_tool.ainvoke({"user_query": user_query})
-        if isinstance(result, str):
-            parsed = json.loads(result)
-            return parsed.get("sql")
+
+        from agent_core.utils.parsing import parse_tool_output
+
+        parsed = parse_tool_output(result)
+
+        if parsed and isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+            return parsed[0].get("sql")
         return None
     except Exception as e:
         print(f"Warning: Cache lookup failed: {e}")
@@ -88,7 +91,20 @@ async def get_few_shot_examples(user_query: str) -> str:
     try:
         # Call the tool
         result = await few_shot_tool.ainvoke({"user_query": user_query, "limit": 3})
-        return result if isinstance(result, str) else ""
+        if not result:
+            return ""
+
+        from agent_core.utils.parsing import parse_tool_output
+
+        examples = parse_tool_output(result)
+
+        formatted = []
+        for ex in examples:
+            if isinstance(ex, dict):
+                formatted.append(f"Question: {ex.get('question')}\nSQL: {ex.get('sql')}")
+
+        return "\n\n".join(formatted)
+
     except Exception as e:
         print(f"Warning: Could not retrieve few-shot examples: {e}")
         return ""

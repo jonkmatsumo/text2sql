@@ -50,9 +50,16 @@ async def get_relevant_examples(
     if not rows:
         return ""
 
-    # 3. Format as a prompt section for the LLM
-    examples_text = ""
-    for row in rows:
-        examples_text += f"Question: {row['question']}\nSQL: {row['sql_query']}\n\n"
+    import json
 
-    return examples_text
+    # 3. Format as a list of structured objects
+    examples = [
+        {
+            "question": row["question"],
+            "sql": row["sql_query"],
+            "similarity": float(row["similarity"]),
+        }
+        for row in rows
+    ]
+
+    return json.dumps(examples, indent=2)

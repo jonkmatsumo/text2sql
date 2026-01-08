@@ -27,14 +27,28 @@ class TestRetrieveContextNode:
         # Create mock tool
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(
-            return_value=(
-                "### customer (similarity: 0.95)\n"
-                "Table: customer. Columns: id, name\n\n"
-                "### payment (similarity: 0.90)\n"
-                "Table: payment. Columns: amount, customer_id"
-            )
-        )
+
+        import json
+
+        mock_response = [
+            {
+                "table_name": "customer",
+                "description": "Customer table",
+                "columns": [
+                    {"name": "id", "type": "integer", "required": True},
+                    {"name": "name", "type": "text", "required": True},
+                ],
+            },
+            {
+                "table_name": "payment",
+                "description": "Payment table",
+                "columns": [
+                    {"name": "amount", "type": "numeric", "required": True},
+                    {"name": "customer_id", "type": "integer", "required": True},
+                ],
+            },
+        ]
+        mock_search_tool.ainvoke = AsyncMock(return_value=json.dumps(mock_response))
         mock_get_mcp_tools.return_value = [mock_search_tool]
 
         # Create test state
@@ -61,8 +75,11 @@ class TestRetrieveContextNode:
 
         # Verify context was returned correctly
         assert "schema_context" in result
-        assert "customer" in result["schema_context"]
-        assert "payment" in result["schema_context"]
+        # Check for new format: "Table: customer... Description: Customer table... Columns:..."
+        assert "Table: customer" in result["schema_context"]
+        assert "Description: Customer table" in result["schema_context"]
+        assert "- id (integer, REQUIRED)" in result["schema_context"]
+
         assert "table_names" in result
         assert "customer" in result["table_names"]
         assert "payment" in result["table_names"]
@@ -133,8 +150,14 @@ class TestRetrieveContextNode:
 
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search_relevant_tables_tool"
-        context_response = "### table1\nSchema 1\n\n### table2\nSchema 2\n\n### table3\nSchema 3"
-        mock_search_tool.ainvoke = AsyncMock(return_value=context_response)
+
+        mock_data = [
+            {"table_name": "table1", "description": "Schema 1", "columns": []},
+            {"table_name": "table2", "description": "Schema 2", "columns": []},
+            {"table_name": "table3", "description": "Schema 3", "columns": []},
+        ]
+
+        mock_search_tool.ainvoke = AsyncMock(return_value=mock_data)
         mock_get_mcp_tools.return_value = [mock_search_tool]
 
         from langchain_core.messages import HumanMessage
@@ -151,7 +174,9 @@ class TestRetrieveContextNode:
         result = await retrieve_context_node(state)
 
         # Verify schema context matches the response
-        assert result["schema_context"] == context_response
+        assert "Table: table1" in result["schema_context"]
+        assert "Table: table2" in result["schema_context"]
+        assert "Table: table3" in result["schema_context"]
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
@@ -162,7 +187,7 @@ class TestRetrieveContextNode:
 
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value="")
+        mock_search_tool.ainvoke = AsyncMock(return_value=[])
         mock_get_mcp_tools.return_value = [mock_search_tool]
 
         from langchain_core.messages import HumanMessage
@@ -179,7 +204,7 @@ class TestRetrieveContextNode:
         result = await retrieve_context_node(state)
 
         # Verify empty context string is returned
-        assert result["schema_context"] == ""
+        assert "No relevant tables found" in result["schema_context"]
         assert result["table_names"] == []
 
     @pytest.mark.asyncio
@@ -250,7 +275,21 @@ class TestRetrieveContextNode:
 
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value="### single_table\nSingle schema")
+
+        mock_search_tool = MagicMock()
+        mock_search_tool.name = "search_relevant_tables_tool"
+
+        # Test unwrapping nested message-like structure (User scenario)
+        class MockMessage:
+            def __init__(self, text):
+                self.text = text
+
+        json_payload = (
+            '[{"table_name": "single_table", "description": "Single schema", "columns": []}]'
+        )
+        mock_response = [MockMessage(text=json_payload)]
+
+        mock_search_tool.ainvoke = AsyncMock(return_value=mock_response)
         mock_get_mcp_tools.return_value = [mock_search_tool]
 
         from langchain_core.messages import HumanMessage
@@ -280,8 +319,12 @@ class TestRetrieveContextNode:
         mock_search_tool = MagicMock()
         mock_search_tool.name = "search_relevant_tables_tool"
         # Create 5 mock table results
-        context_parts = [f"### table{i + 1}\nSchema {i + 1}" for i in range(5)]
-        mock_search_tool.ainvoke = AsyncMock(return_value="\n\n".join(context_parts))
+        import json
+
+        mock_rows = [
+            {"table_name": f"table{i+1}", "description": f"Schema {i+1}"} for i in range(5)
+        ]
+        mock_search_tool.ainvoke = AsyncMock(return_value=json.dumps(mock_rows))
         mock_get_mcp_tools.return_value = [mock_search_tool]
 
         from langchain_core.messages import HumanMessage

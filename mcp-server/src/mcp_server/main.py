@@ -145,14 +145,22 @@ async def get_semantic_definitions_tool(terms: list[str], ctx: Context = None) -
 
 @mcp.tool()
 async def search_relevant_tables_tool(user_query: str, limit: int = 5, ctx: Context = None) -> str:
-    """Search for tables relevant to a natural language query using semantic similarity."""
+    """
+    Search for tables relevant to a natural language query using semantic similarity.
+
+    Returns JSON list of table schemas.
+    """
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await search_relevant_tables(user_query, limit, tenant_id)
 
 
 @mcp.tool()
 async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Context = None) -> str:
-    """Retrieve relevant SQL examples for few-shot learning based on user query."""
+    """
+    Retrieve relevant SQL examples for few-shot learning based on user query.
+
+    Returns JSON list of examples.
+    """
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await get_relevant_examples(user_query, limit, tenant_id)
 

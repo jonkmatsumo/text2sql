@@ -238,21 +238,42 @@ async def search_relevant_tables(
     # Search for similar tables
     results = await search_similar_tables(query_embedding, limit=limit, tenant_id=tenant_id)
 
-    if not results:
-        return "No relevant tables found. The schema may not be indexed yet."
+    structured_results = []
 
-    # Format results as markdown
-    output_parts = [
-        f'## Relevant Tables for: "{user_query}"\n',
-        f"Found {len(results)} relevant table(s):\n",
-    ]
+    async with Database.get_connection(tenant_id) as conn:
+        # Optimization: Fetch all columns for these tables in one go or loop?
+        # Looping is fine for small N (limit=5).
 
-    for result in results:
-        table_name = result["table_name"]
-        schema_text = result["schema_text"]
-        distance = result["distance"]
+        for result in results:
+            table_name = result["table_name"]
 
-        output_parts.append(f"### {table_name} (similarity: {1 - distance:.3f})")
-        output_parts.append(f"{schema_text}\n")
+            # Fetch columns for this table
+            col_query = """
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_name = $1 AND table_schema = 'public'
+                ORDER BY ordinal_position
+            """
+            cols = await conn.fetch(col_query, table_name)
 
-    return "\n".join(output_parts)
+            table_columns = [
+                {
+                    "name": col["column_name"],
+                    "type": col["data_type"],
+                    "required": col["is_nullable"] == "NO",
+                }
+                for col in cols
+            ]
+
+            structured_results.append(
+                {
+                    "table_name": table_name,
+                    "description": result[
+                        "schema_text"
+                    ],  # Using schema_text as description for now
+                    "similarity": 1 - result["distance"],
+                    "columns": table_columns,
+                }
+            )
+
+    return json.dumps(structured_results, indent=2)
