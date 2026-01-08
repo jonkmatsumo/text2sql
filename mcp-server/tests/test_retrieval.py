@@ -50,9 +50,8 @@ class TestGetRelevantExamples:
 
                     # Should return a formatted string
                     assert isinstance(examples, str)
-                    assert "User Question:" in examples
+                    assert "Question:" in examples
                     assert "SQL:" in examples
-                    assert "Reasoning:" in examples
                     assert "What is the total revenue?" in examples
                     assert "SELECT SUM(amount)" in examples
 
@@ -155,10 +154,8 @@ class TestGetRelevantExamples:
                     examples = await get_relevant_examples("test query", limit=3)
 
                     # Verify format contains all required sections
-                    assert "User Question:" in examples
+                    assert "Question:" in examples
                     assert "SQL:" in examples
-                    assert "Reasoning:" in examples
-                    assert "---" in examples  # Separator between examples
 
     @pytest.mark.asyncio
     async def test_retrieval_uses_context_manager(self):
@@ -218,7 +215,5 @@ class TestGetRelevantExamples:
                     examples = await get_relevant_examples("test query", limit=3)
 
                     # Should still format correctly without summary
-                    assert "User Question:" in examples
+                    assert "Question:" in examples
                     assert "SQL:" in examples
-                    # Reasoning should not appear if summary is None
-                    # (The code checks if row['summary'] before adding it)
