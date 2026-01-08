@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Dict, List
 
-from mcp_server.graph_ingestion.retriever_base import (
+from mcp_server.retrievers.base import (
     ColumnMetadata,
     DataSchemaRetriever,
     ForeignKey,

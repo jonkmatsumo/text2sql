@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Dict, List
 
+from mcp_server.retrievers.factory import get_retriever
 from neo4j import GraphDatabase
-from sqlalchemy import create_engine, inspect
 
 logger = logging.getLogger(__name__)
 
@@ -10,38 +10,38 @@ logger = logging.getLogger(__name__)
 class SyncEngine:
     """Synchronizes live PostgreSQL schema with Memgraph."""
 
-    def __init__(
-        self, pg_url: str, graph_uri: str = "bolt://localhost:7687", graph_auth: tuple = None
-    ):
+    def __init__(self, graph_uri: str = "bolt://localhost:7687", graph_auth: tuple = None):
         """
         Initialize the Sync Engine.
 
         Args:
-            pg_url: PostgreSQL connection string.
             graph_uri: Memgraph/Neo4j Bolt URI.
             graph_auth: Tuple of (user, password) for Memgraph.
         """
-        self.pg_engine = create_engine(pg_url)
+        self.retriever = get_retriever()
         self.graph_driver = GraphDatabase.driver(graph_uri, auth=graph_auth)
 
     def close(self):
         """Close connections."""
-        self.pg_engine.dispose()
+        # Retriever singleton doesn't adhere to close semantics here usually,
+        # or we could add close to it, but for now just close graph driver.
         self.graph_driver.close()
 
     def get_live_schema(self) -> Dict[str, Any]:
-        """Fetch current tables and columns from PostgreSQL."""
-        inspector = inspect(self.pg_engine)
+        """Fetch current tables and columns from PostgreSQL using Retriever."""
         schema_info = {"tables": {}}
 
-        for table_name in inspector.get_table_names():
-            columns = inspector.get_columns(table_name)
+        tables = self.retriever.list_tables()
+        for table in tables:
+            table_name = table.name
+            columns = self.retriever.get_columns(table_name)
+
             col_dict = {}
             for col in columns:
-                col_dict[col["name"]] = {
-                    "type": str(col["type"]),
-                    "nullable": col["nullable"],
-                    "primary_key": col.get("primary_key", False),
+                col_dict[col.name] = {
+                    "type": col.type,
+                    "nullable": True,  # Retriever doesn't expose nullable yet, defaulting
+                    "primary_key": col.is_primary_key,
                 }
             schema_info["tables"][table_name] = col_dict
 
