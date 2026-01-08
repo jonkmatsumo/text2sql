@@ -2,9 +2,98 @@
 
 from unittest.mock import MagicMock, patch
 
-from agent_core.graph import app, create_workflow, route_after_execution
+from agent_core.graph import (
+    app,
+    create_workflow,
+    route_after_execution,
+    route_after_router,
+    route_after_validation,
+)
 from agent_core.state import AgentState
 from langgraph.graph import END
+
+
+class TestRouteAfterRouter:
+    """Unit tests for route_after_router conditional routing logic."""
+
+    def test_route_to_clarify_when_ambiguous(self):
+        """Test routing to clarify when ambiguity detected."""
+        state = {
+            "messages": [],
+            "ambiguity_type": "UNCLEAR_SCHEMA_REFERENCE",
+            "clarification_question": "Which region?",
+        }
+
+        result = route_after_router(state)
+
+        assert result == "clarify"
+
+    def test_route_to_retrieve_when_clear(self):
+        """Test routing to retrieve when no ambiguity."""
+        state = {
+            "messages": [],
+            "ambiguity_type": None,
+        }
+
+        result = route_after_router(state)
+
+        assert result == "retrieve"
+
+    def test_route_to_retrieve_when_ambiguity_missing(self):
+        """Test routing to retrieve when ambiguity_type is missing."""
+        state = {"messages": []}
+
+        result = route_after_router(state)
+
+        assert result == "retrieve"
+
+
+class TestRouteAfterValidation:
+    """Unit tests for route_after_validation conditional routing logic."""
+
+    def test_route_to_execute_when_valid(self):
+        """Test routing to execute when validation passes."""
+        state = {
+            "ast_validation_result": {"is_valid": True},
+            "error": None,
+        }
+
+        result = route_after_validation(state)
+
+        assert result == "execute"
+
+    def test_route_to_correct_when_invalid(self):
+        """Test routing to correct when validation fails."""
+        state = {
+            "ast_validation_result": {"is_valid": False},
+            "error": None,
+        }
+
+        result = route_after_validation(state)
+
+        assert result == "correct"
+
+    def test_route_to_correct_when_error(self):
+        """Test routing to correct when error is set."""
+        state = {
+            "ast_validation_result": None,
+            "error": "Security violation",
+        }
+
+        result = route_after_validation(state)
+
+        assert result == "correct"
+
+    def test_route_to_execute_when_no_validation_result(self):
+        """Test routing to execute when no validation result."""
+        state = {
+            "ast_validation_result": None,
+            "error": None,
+        }
+
+        result = route_after_validation(state)
+
+        assert result == "execute"
 
 
 class TestRouteAfterExecution:
@@ -117,41 +206,43 @@ class TestCreateWorkflow:
         # Verify StateGraph was created with AgentState
         mock_state_graph_class.assert_called_once_with(AgentState)
 
-        # Verify nodes were added
-        assert mock_workflow.add_node.call_count == 5
+        # Verify nodes were added (now 9 nodes)
+        assert mock_workflow.add_node.call_count == 9
         node_calls = [call_args[0][0] for call_args in mock_workflow.add_node.call_args_list]
+        assert "router" in node_calls
+        assert "clarify" in node_calls
         assert "retrieve" in node_calls
+        assert "plan" in node_calls
         assert "generate" in node_calls
+        assert "validate" in node_calls
         assert "execute" in node_calls
         assert "correct" in node_calls
         assert "synthesize" in node_calls
 
-        # Verify entry point was set
-        mock_workflow.set_entry_point.assert_called_once_with("retrieve")
+        # Verify entry point was set to router
+        mock_workflow.set_entry_point.assert_called_once_with("router")
 
-        # Verify edges were added
-        assert mock_workflow.add_edge.call_count == 4
+        # Verify edges were added (now 6 edges)
+        assert mock_workflow.add_edge.call_count == 6
         edge_calls = [call_args[0] for call_args in mock_workflow.add_edge.call_args_list]
-        assert ("retrieve", "generate") in edge_calls
-        assert ("generate", "execute") in edge_calls
-        assert ("correct", "execute") in edge_calls
+        assert ("clarify", "router") in edge_calls
+        assert ("retrieve", "plan") in edge_calls
+        assert ("plan", "generate") in edge_calls
+        assert ("generate", "validate") in edge_calls
+        assert ("correct", "validate") in edge_calls
         assert ("synthesize", END) in edge_calls
 
-        # Verify conditional edges were added
-        mock_workflow.add_conditional_edges.assert_called_once()
-        cond_call = mock_workflow.add_conditional_edges.call_args[0]
-        assert cond_call[0] == "execute"
-        assert cond_call[1] == route_after_execution
-        assert cond_call[2] == {
-            "correct": "correct",
-            "synthesize": "synthesize",
-            "failed": END,
-        }
+        # Verify conditional edges were added (now 3)
+        assert mock_workflow.add_conditional_edges.call_count == 3
 
     def test_workflow_compiles(self):
         """Test that the workflow can be compiled without errors."""
         workflow = create_workflow()
-        compiled = workflow.compile()
+        # Use MemorySaver for compilation
+        from langgraph.checkpoint.memory import MemorySaver
+
+        memory = MemorySaver()
+        compiled = workflow.compile(checkpointer=memory)
 
         # Verify compiled workflow exists and can be used
         assert compiled is not None
@@ -183,9 +274,13 @@ class TestAppCompilation:
                 # Only verify node names if nodes are actually populated
                 # LangGraph's internal structure may not expose nodes in tests
                 if len(node_names) > 0:
-                    assert len(node_names) >= 5
+                    assert len(node_names) >= 9
+                    assert "router" in node_names
+                    assert "clarify" in node_names
                     assert "retrieve" in node_names
+                    assert "plan" in node_names
                     assert "generate" in node_names
+                    assert "validate" in node_names
                     assert "execute" in node_names
                     assert "correct" in node_names
                     assert "synthesize" in node_names

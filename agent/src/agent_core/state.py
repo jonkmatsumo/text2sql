@@ -38,3 +38,62 @@ class AgentState(TypedDict):
 
     # Tenant identifier for multi-tenant scenarios (required for caching and RLS)
     tenant_id: Optional[int]
+
+    # =========================================================================
+    # SQL-of-Thought Planning Fields
+    # =========================================================================
+
+    # Step-by-step procedural plan for SQL generation
+    procedural_plan: Optional[str]
+
+    # JSON decomposition of query clauses (FROM, WHERE, GROUP BY, etc.)
+    clause_map: Optional[dict]
+
+    # Validated required columns/tables from schema
+    schema_ingredients: Optional[List[str]]
+
+    # =========================================================================
+    # AST Validation Fields
+    # =========================================================================
+
+    # Complete AST validation result including violations
+    ast_validation_result: Optional[dict]
+
+    # Tables accessed (for audit logging and lineage tracking)
+    table_lineage: Optional[List[str]]
+
+    # Columns accessed (for compliance audits)
+    column_usage: Optional[List[str]]
+
+    # Join depth score (for complexity analysis)
+    join_complexity: Optional[int]
+
+    # =========================================================================
+    # Ambiguity Resolution Fields
+    # =========================================================================
+
+    # Detected ambiguity category (schema_reference, value, temporal, metric)
+    ambiguity_type: Optional[str]
+
+    # Clarification question to present to user
+    clarification_question: Optional[str]
+
+    # User's response to clarification prompt
+    user_clarification: Optional[str]
+
+    # =========================================================================
+    # Error Taxonomy Fields
+    # =========================================================================
+
+    # Targeted fix instructions from error classification
+    correction_plan: Optional[str]
+
+    # Classified error type (aggregation_misuse, missing_join, type_mismatch, etc.)
+    error_category: Optional[str]
+
+    # =========================================================================
+    # Cache and Metadata
+    # =========================================================================
+
+    # Whether the current SQL was retrieved from cache
+    from_cache: Optional[bool]

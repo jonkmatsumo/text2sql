@@ -3,12 +3,17 @@
 import os
 
 import mlflow
+from agent_core.nodes.clarify import clarify_node
 from agent_core.nodes.correct import correct_sql_node
 from agent_core.nodes.execute import validate_and_execute_node
 from agent_core.nodes.generate import generate_sql_node
+from agent_core.nodes.plan import plan_sql_node
 from agent_core.nodes.retrieve import retrieve_context_node
+from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
+from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 # Configure MLflow tracking URI
@@ -19,6 +24,46 @@ mlflow.set_tracking_uri(mlflow_tracking_uri)
 # Enable LangChain autologging with inline tracer for proper async context propagation
 # This captures the entire graph execution as a hierarchical trace
 mlflow.langchain.autolog(run_tracer_inline=True)
+
+
+def route_after_router(state: AgentState) -> str:
+    """
+    Conditional edge logic after router node.
+
+    Routes to clarify if ambiguity detected, otherwise to retrieve.
+
+    Args:
+        state: Current agent state
+
+    Returns:
+        str: Next node name
+    """
+    if state.get("ambiguity_type"):
+        return "clarify"
+    return "retrieve"
+
+
+def route_after_validation(state: AgentState) -> str:
+    """
+    Conditional edge logic after SQL validation.
+
+    Routes based on AST validation result:
+    - If validation passed: go to execute
+    - If validation failed: go to correction
+
+    Args:
+        state: Current agent state
+
+    Returns:
+        str: Next node name
+    """
+    ast_result = state.get("ast_validation_result")
+    if ast_result and not ast_result.get("is_valid"):
+        return "correct"
+    # Also check for error set by validation
+    if state.get("error"):
+        return "correct"
+    return "execute"
 
 
 def route_after_execution(state: AgentState) -> str:
@@ -47,26 +92,57 @@ def create_workflow() -> StateGraph:
     """
     Create and configure the LangGraph workflow.
 
+    New flow:
+    router → [clarify →] retrieve → plan → generate → validate → execute → [correct →] synthesize
+
     Returns:
-        StateGraph: Compiled workflow graph
+        StateGraph: Configured workflow graph (not compiled)
     """
     workflow = StateGraph(AgentState)
 
-    # Add Nodes
+    # Add all nodes
+    workflow.add_node("router", router_node)
+    workflow.add_node("clarify", clarify_node)
     workflow.add_node("retrieve", retrieve_context_node)
+    workflow.add_node("plan", plan_sql_node)
     workflow.add_node("generate", generate_sql_node)
+    workflow.add_node("validate", validate_sql_node)
     workflow.add_node("execute", validate_and_execute_node)
     workflow.add_node("correct", correct_sql_node)
     workflow.add_node("synthesize", synthesize_insight_node)
 
-    # Set Entry Point
-    workflow.set_entry_point("retrieve")
+    # Set entry point
+    workflow.set_entry_point("router")
 
-    # Add Edges
-    workflow.add_edge("retrieve", "generate")
-    workflow.add_edge("generate", "execute")
+    # Router conditional edges
+    workflow.add_conditional_edges(
+        "router",
+        route_after_router,
+        {
+            "clarify": "clarify",
+            "retrieve": "retrieve",
+        },
+    )
 
-    # Add Conditional Edge for Self-Correction Loop
+    # Clarify loops back to router (to re-evaluate with clarification)
+    workflow.add_edge("clarify", "router")
+
+    # Main flow edges
+    workflow.add_edge("retrieve", "plan")
+    workflow.add_edge("plan", "generate")
+    workflow.add_edge("generate", "validate")
+
+    # Validation conditional edges
+    workflow.add_conditional_edges(
+        "validate",
+        route_after_validation,
+        {
+            "execute": "execute",
+            "correct": "correct",
+        },
+    )
+
+    # Execution conditional edges (self-correction loop)
     workflow.add_conditional_edges(
         "execute",
         route_after_execution,
@@ -77,14 +153,20 @@ def create_workflow() -> StateGraph:
         },
     )
 
-    workflow.add_edge("correct", "execute")  # Loop back to execution
+    # Correction loops back to validate (to re-check corrected SQL)
+    workflow.add_edge("correct", "validate")
+
+    # Final edge
     workflow.add_edge("synthesize", END)
 
     return workflow
 
 
-# Compile workflow
-app = create_workflow().compile()
+# Create checkpointer for interrupt support
+memory = MemorySaver()
+
+# Compile workflow with checkpointer
+app = create_workflow().compile(checkpointer=memory)
 
 
 # Wrapper function with MLflow tracing
@@ -93,6 +175,7 @@ async def run_agent_with_tracing(
     tenant_id: int = 1,
     session_id: str = None,
     user_id: str = None,
+    thread_id: str = None,
 ) -> dict:
     """
     Run agent workflow with MLflow tracing.
@@ -105,13 +188,17 @@ async def run_agent_with_tracing(
         tenant_id: Tenant identifier
         session_id: Session identifier for multi-turn conversations
         user_id: User identifier for attribution
+        thread_id: Thread identifier for checkpointer state persistence
+                   (required for interrupt/resume functionality)
 
     Returns:
         Agent state after workflow completion
     """
-    # Prepare initial state
+    import uuid
+
     from langchain_core.messages import HumanMessage
 
+    # Prepare initial state
     inputs = {
         "messages": [HumanMessage(content=question)],
         "schema_context": "",
@@ -122,8 +209,15 @@ async def run_agent_with_tracing(
         "tenant_id": tenant_id,
     }
 
+    # Generate thread_id if not provided (required for checkpointer)
+    if thread_id is None:
+        thread_id = session_id or str(uuid.uuid4())
+
+    # Config with thread_id for checkpointer
+    config = {"configurable": {"thread_id": thread_id}}
+
     # Execute workflow - autologger will create the root trace
-    result = await app.ainvoke(inputs)
+    result = await app.ainvoke(inputs, config=config)
 
     # Enrich the trace with user/session metadata after invocation
     # Note: update_current_trace must be called within the trace context
@@ -132,7 +226,8 @@ async def run_agent_with_tracing(
             "tenant_id": str(tenant_id),
             "environment": os.getenv("ENVIRONMENT", "development"),
             "deployment": os.getenv("DEPLOYMENT", "development"),
-            "version": "1.0.0",
+            "version": "2.0.0",  # Updated for new architecture
+            "thread_id": thread_id,
         }
         if session_id:
             metadata["mlflow.trace.session"] = session_id

@@ -182,18 +182,45 @@ async def generate_sql_node(state: AgentState) -> dict:
             f"\n\n{few_shot_examples}" if few_shot_examples else "\n\nNo examples available."
         )
 
+        # Include procedural plan if available (from SQL-of-Thought planner)
+        procedural_plan = state.get("procedural_plan", "")
+        clause_map = state.get("clause_map", {})
+        user_clarification = state.get("user_clarification", "")
+
+        plan_section = ""
+        if procedural_plan:
+            plan_section = f"""
+
+PROCEDURAL PLAN (follow this step-by-step):
+{procedural_plan}
+"""
+            if clause_map:
+                import json
+
+                plan_section += f"""
+CLAUSE MAP:
+{json.dumps(clause_map, indent=2)}
+"""
+
+        clarification_section = ""
+        if user_clarification:
+            clarification_section = f"""
+
+USER CLARIFICATION:
+{user_clarification}
+"""
+
         system_prompt = f"""You are a PostgreSQL expert.
-Using the provided SCHEMA CONTEXT and EXAMPLES, generate a SQL query to answer the question.
+Using the provided SCHEMA CONTEXT, PROCEDURAL PLAN, and EXAMPLES, synthesize a SQL query.
 
 Rules:
 - Return ONLY the SQL query. No markdown, no explanations.
 - Always limit results to 1000 rows unless the user specifies otherwise.
 - Use proper SQL syntax for PostgreSQL.
 - Only use tables and columns explicitly defined in the SCHEMA CONTEXT DDL.
-- If the question is ambiguous, make reasonable assumptions and note them.
-- Learn from the EXAMPLES provided to understand similar query patterns,
-  but prioritize the actual schema DDL.
-
+- FOLLOW THE PROCEDURAL PLAN if provided - it contains the logical steps.
+- Learn from the EXAMPLES provided to understand similar query patterns.
+{plan_section}{clarification_section}
 Schema Context:
 {{schema_context}}
 {examples_section}

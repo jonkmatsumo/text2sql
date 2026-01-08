@@ -17,29 +17,42 @@ flowchart TB
     subgraph Agent["🤖 Agent System (LangGraph)"]
         UserQuery["User Query<br/>'Show payments'"]
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
-        RetrieveNode["Retrieve Context Node<br/>agent_core/nodes/retrieve.py"]
-        CheckCache["Check Cache<br/>Semantic similarity"]
-        CacheHit{"Cache<br/>Hit?"}
-        GenerateNode["Generate SQL Node<br/>agent_core/nodes/generate.py"]
-        ExecuteNode["Execute SQL Node<br/>agent_core/nodes/execute.py"]
-        CacheUpdate["Cache SQL<br/>On success"]
-        CorrectNode["Correct SQL Node<br/>agent_core/nodes/correct.py"]
-        SynthesizeNode["Synthesize Insight Node<br/>agent_core/nodes/synthesize.py"]
+
+        %% Nodes
+        RouterNode["Router Node<br/>(LLM)<br/>agent_core/nodes/router.py"]
+        ClarifyNode["Clarify Node<br/>(Human Input)<br/>agent_core/nodes/clarify.py"]
+        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>agent_core/nodes/retrieve.py"]
+        PlanNode["Plan SQL Node<br/>(LLM)<br/>agent_core/nodes/plan.py"]
+        GenerateNode["Generate SQL Node<br/>(LLM)<br/>agent_core/nodes/generate.py"]
+        ValidateNode["Validate SQL Node<br/>(Logic)<br/>agent_core/nodes/validate.py"]
+        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>agent_core/nodes/execute.py"]
+        CorrectNode["Correct SQL Node<br/>(LLM)<br/>agent_core/nodes/correct.py"]
+        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>agent_core/nodes/synthesize.py"]
         Response["Natural Language Response"]
 
+        %% Flow
         UserQuery --> AgentState
-        AgentState --> RetrieveNode
-        RetrieveNode --> CheckCache
-        CheckCache --> CacheHit
-        CacheHit -->|"Similarity >= 0.95"| ExecuteNode
-        CacheHit -->|"Miss"| GenerateNode
-        GenerateNode --> ExecuteNode
-        ExecuteNode -->|"Success"| CacheUpdate
-        CacheUpdate --> SynthesizeNode
-        ExecuteNode -->|"Error & retries < 3"| CorrectNode
-        CorrectNode -->|"Loop back"| ExecuteNode
-        ExecuteNode -->|"Error & retries >= 3"| Response
+        AgentState --> RouterNode
+
+        RouterNode -->|"Ambiguous?"| ClarifyNode
+        ClarifyNode -->|"User feedback"| RouterNode
+
+        RouterNode -->|"Clear"| RetrieveNode
+        RetrieveNode --> PlanNode
+        PlanNode --> GenerateNode
+        GenerateNode --> ValidateNode
+
+        ValidateNode -->|"Invalid"| CorrectNode
+        ValidateNode -->|"Valid"| ExecuteNode
+
+        ExecuteNode -->|"Success"| SynthesizeNode
+        ExecuteNode -->|"Error"| CorrectNode
+
+        CorrectNode -->|"Retry (Loop)"| ValidateNode
         SynthesizeNode --> Response
+
+        %% Fallback for max retries
+        ExecuteNode -->|"Max Retries"| Response
     end
 
     subgraph Observability["📡 Observability"]
@@ -77,8 +90,11 @@ flowchart TB
     SeederService -->|"Upsert Examples"| PGVectorDB
 
     %% Agent Observability
+    RouterNode -.->|"Trace"| MLflow
     RetrieveNode -.->|"Trace"| MLflow
+    PlanNode -.->|"Trace"| MLflow
     GenerateNode -.->|"Trace"| MLflow
+    ValidateNode -.->|"Trace"| MLflow
     ExecuteNode -.->|"Trace"| MLflow
     CorrectNode -.->|"Trace"| MLflow
     SynthesizeNode -.->|"Trace"| MLflow
@@ -91,11 +107,6 @@ flowchart TB
     SchemaEmbeddings -->|"Return Summaries"| RetrieveNode
 
     %% Agent to MCP Server (Generation Phase)
-    CheckCache -->|"Call Tool: lookup_cache"| MCPTools
-    MCPTools -->|"Cache lookup"| CacheModule
-    CacheModule -->|"Vector search"| PGVectorDB
-    PGVectorDB --> SemanticCache
-
     GenerateNode -->|"Call Tool: get_table_schema"| MCPTools
     GenerateNode -->|"Call Tool: get_few_shot_examples"| MCPTools
     MCPTools -->|"Fetch DDL"| PagilaDB
@@ -108,14 +119,12 @@ flowchart TB
     PagilaDB -->|"Results"| MCPTools
     MCPTools -->|"JSON response"| ExecuteNode
 
-    CacheUpdate -->|"Call Tool: update_cache"| MCPTools
-    MCPTools -->|"Cache update"| CacheModule
-    CacheModule -->|"Store SQL"| SemanticCache
-
     %% Agent to LLM
-    GenerateNode -->|"LLM call"| OpenAILLM["OpenAI GPT-5.2<br/>SQL generation"]
+    RouterNode -->|"LLM call"| OpenAILLM["LLM Provider<br/>(OpenAI/Anthropic/Google)"]
+    PlanNode -->|"LLM call"| OpenAILLM
+    GenerateNode -->|"LLM call"| OpenAILLM
     CorrectNode -->|"LLM call"| OpenAILLM
-    SynthesizeNode -->|"LLM call"| OpenAILLM2["OpenAI GPT-5.2<br/>Natural language"]
+    SynthesizeNode -->|"LLM call"| OpenAILLM
 
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
@@ -134,6 +143,32 @@ flowchart TB
 *   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
 *   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
+
+## Advanced Architecture Features
+
+### AST Validation
+SQL queries are parsed and validated using `sqlglot` before execution:
+- **Security Checks**: Blocks access to restricted tables (`payroll`, `credentials`, `pg_*`)
+- **Forbidden Commands**: Prevents `DROP`, `DELETE`, `INSERT`, `UPDATE` operations
+- **Metadata Extraction**: Captures table lineage, column usage, and join complexity
+
+### SQL-of-Thought Planner
+Complex queries are decomposed into logical steps before SQL synthesis:
+- **Schema Linking**: Identifies relevant tables and columns
+- **Clause Mapping**: Breaks down query into FROM, JOIN, WHERE, GROUP BY components
+- **Procedural Planning**: Generates numbered step-by-step execution plan
+
+### Error Taxonomy
+12 error categories with targeted correction strategies:
+- `AGGREGATION_MISUSE`, `MISSING_JOIN`, `TYPE_MISMATCH`, `AMBIGUOUS_COLUMN`
+- `SYNTAX_ERROR`, `NULL_HANDLING`, `SUBQUERY_ERROR`, `PERMISSION_DENIED`
+- `FUNCTION_ERROR`, `CONSTRAINT_VIOLATION`, `LIMIT_EXCEEDED`, `DATE_TIME_ERROR`
+
+### Human-in-the-Loop
+Ambiguous queries trigger clarification via LangGraph interrupts:
+- **Ambiguity Detection**: Identifies unclear schema references, missing temporal constraints
+- **Interrupt Mechanism**: Pauses execution to collect user clarification
+- **State Persistence**: Uses checkpointer for conversation continuity
 
 ## Project Structure
 

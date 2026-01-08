@@ -36,6 +36,10 @@ if "conversation_history" not in st.session_state:
     st.session_state.conversation_history = []
 if "tenant_id" not in st.session_state:
     st.session_state.tenant_id = int(os.getenv("DEFAULT_TENANT_ID", "1"))
+if "thread_id" not in st.session_state:
+    import uuid
+
+    st.session_state.thread_id = str(uuid.uuid4())
 
 
 def main():
@@ -159,7 +163,13 @@ def main():
             with st.spinner("Processing your question..."):
                 try:
                     # Call tested business logic
-                    results = asyncio.run(run_agent(question, st.session_state.tenant_id))
+                    results = asyncio.run(
+                        run_agent(
+                            question,
+                            st.session_state.tenant_id,
+                            st.session_state.thread_id,
+                        )
+                    )
 
                     # Format and store entry
                     entry = format_conversation_entry(question, results)

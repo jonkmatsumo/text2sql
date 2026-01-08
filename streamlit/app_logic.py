@@ -6,6 +6,7 @@ and result processing.
 """
 
 import sys
+import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -17,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
 from agent_core.graph import app  # noqa: E402
 
 
-async def run_agent(question: str, tenant_id: int) -> Dict:
+async def run_agent(question: str, tenant_id: int, thread_id: str = None) -> Dict:
     """
     Run the agent workflow and return structured results.
 
@@ -28,6 +29,7 @@ async def run_agent(question: str, tenant_id: int) -> Dict:
     Args:
         question: Natural language question from the user
         tenant_id: Tenant identifier for multi-tenant scenarios
+        thread_id: Unique identifier for the conversation thread
 
     Returns:
         Dictionary containing:
@@ -40,6 +42,9 @@ async def run_agent(question: str, tenant_id: int) -> Dict:
     Raises:
         Exception: If agent workflow fails unexpectedly
     """
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+
     inputs = {
         "messages": [HumanMessage(content=question)],
         "schema_context": "",
@@ -58,7 +63,9 @@ async def run_agent(question: str, tenant_id: int) -> Dict:
         "from_cache": False,
     }
 
-    async for event in app.astream(inputs):
+    config = {"configurable": {"thread_id": thread_id}}
+
+    async for event in app.astream(inputs, config=config):
         for node_name, node_output in event.items():
             if "current_sql" in node_output:
                 results["sql"] = node_output["current_sql"]
@@ -71,6 +78,11 @@ async def run_agent(question: str, tenant_id: int) -> Dict:
             if node_name == "synthesize" and "messages" in node_output:
                 if node_output["messages"]:
                     results["response"] = node_output["messages"][-1].content
+            # Handle interrupt/clarification if needed (future enhancement for UI)
+            if node_name == "router" and "clarification_question" in node_output:
+                if node_output.get("clarification_question"):
+                    results["response"] = node_output["clarification_question"]
+                    # We might want to flag this as a clarification request in the future
 
     return results
 
