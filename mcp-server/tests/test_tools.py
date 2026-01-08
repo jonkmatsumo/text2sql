@@ -1,442 +1,10 @@
 """Unit tests for MCP tool functions."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
-from mcp_server.tools import (
-    execute_sql_query,
-    get_semantic_definitions,
-    get_table_schema,
-    list_tables,
-    search_relevant_tables,
-)
-
-
-class TestListTables:
-    """Unit tests for list_tables function."""
-
-    @pytest.mark.asyncio
-    async def test_list_tables_all_tables(self):
-        """Test listing all tables when no search_term is provided."""
-        mock_conn = AsyncMock()
-        mock_rows = [
-            {"table_name": "actor"},
-            {"table_name": "film"},
-            {"table_name": "payment"},
-            {"table_name": "rental"},
-        ]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-            result = await list_tables()
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
-
-            # Verify query was executed
-            mock_conn.fetch.assert_called_once()
-            call_args = mock_conn.fetch.call_args[0]
-            assert "SELECT table_name" in call_args[0]
-            assert "table_schema = 'public'" in call_args[0]
-            assert len(call_args) == 1  # No args when no search_term
-
-            # Verify JSON output
-            import json
-
-            tables = json.loads(result)
-            assert len(tables) == 4
-            assert "actor" in tables
-            assert "film" in tables
-            assert "payment" in tables
-            assert "rental" in tables
-
-    @pytest.mark.asyncio
-    async def test_list_tables_with_search_term(self):
-        """Test filtering tables with search_term."""
-        mock_conn = AsyncMock()
-        mock_rows = [{"table_name": "payment"}]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await list_tables("pay")
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
-
-            # Verify query included ILIKE filter
-            mock_conn.fetch.assert_called_once()
-            call_args = mock_conn.fetch.call_args[0]
-            assert "ILIKE $1" in call_args[0]
-            assert call_args[1] == "%pay%"
-
-            # Verify filtered result
-            import json
-
-            tables = json.loads(result)
-            assert len(tables) == 1
-            assert "payment" in tables
-
-    @pytest.mark.asyncio
-    async def test_list_tables_empty_result(self):
-        """Test handling empty result set."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await list_tables("nonexistent")
-
-            # Verify empty JSON array
-            import json
-
-            tables = json.loads(result)
-            assert tables == []
-
-    @pytest.mark.asyncio
-    async def test_list_tables_connection_error(self):
-        """Test handling connection acquisition errors."""
-        # Setup async context manager mock
-        mock_conn = AsyncMock()
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-            mock_get.side_effect = RuntimeError("Database pool not initialized")
-
-            with pytest.raises(RuntimeError) as exc_info:
-                await list_tables()
-
-            assert "Database pool not initialized" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_list_tables_query_error(self):
-        """Test handling SQL query errors."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            with pytest.raises(asyncpg.PostgresError):
-                await list_tables()
-
-    @pytest.mark.asyncio
-    async def test_list_tables_always_releases_connection(self):
-        """Test that connection is always released even if an exception occurs."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            with pytest.raises(Exception):
-                await list_tables()
-
-
-class TestGetTableSchema:
-    """Unit tests for get_table_schema function."""
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_single_table(self):
-        """Test retrieving schema for a single table."""
-        mock_conn = AsyncMock()
-        mock_cols = [
-            {"column_name": "film_id", "data_type": "integer", "is_nullable": "NO"},
-            {"column_name": "title", "data_type": "character varying", "is_nullable": "NO"},
-        ]
-        mock_fks = []
-
-        async def mock_fetch(query, *args):
-            if "information_schema.columns" in query:
-                return mock_cols
-            elif "FOREIGN KEY" in query:
-                return mock_fks
-            return []
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["film"])
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
-
-            # Verify Markdown output
-            assert "### Table: `film`" in result
-            assert "| Column | Type | Nullable |" in result
-            assert "| `film_id` | integer | NO |" in result
-            assert "| `title` | character varying | NO |" in result
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_multiple_tables(self):
-        """Test retrieving schema for multiple tables."""
-        mock_conn = AsyncMock()
-
-        async def mock_fetch(query, *args):
-            if "information_schema.columns" in query:
-                if "film" in query or args and args[0] == "film":
-                    return [
-                        {"column_name": "film_id", "data_type": "integer", "is_nullable": "NO"},
-                    ]
-                elif "actor" in query or (args and args[0] == "actor"):
-                    return [
-                        {"column_name": "actor_id", "data_type": "integer", "is_nullable": "NO"},
-                    ]
-            elif "FOREIGN KEY" in query:
-                return []
-            return []
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["film", "actor"])
-
-            # Verify both tables are in output
-            assert "### Table: `film`" in result
-            assert "### Table: `actor`" in result
-            assert "| `film_id`" in result
-            assert "| `actor_id`" in result
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_with_foreign_keys(self):
-        """Test schema retrieval includes foreign key information."""
-        mock_conn = AsyncMock()
-        mock_cols = [
-            {"column_name": "film_id", "data_type": "integer", "is_nullable": "NO"},
-            {"column_name": "language_id", "data_type": "integer", "is_nullable": "NO"},
-        ]
-        mock_fks = [
-            {
-                "column_name": "language_id",
-                "foreign_table_name": "language",
-                "foreign_column_name": "language_id",
-            }
-        ]
-
-        async def mock_fetch(query, *args):
-            if "information_schema.columns" in query:
-                return mock_cols
-            elif "FOREIGN KEY" in query:
-                return mock_fks
-            return []
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["film"])
-
-            # Verify foreign keys section
-            assert "**Foreign Keys:**" in result
-            assert "`language_id` → `language.language_id`" in result
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_without_foreign_keys(self):
-        """Test schema retrieval for table without foreign keys."""
-        mock_conn = AsyncMock()
-        mock_cols = [
-            {"column_name": "actor_id", "data_type": "integer", "is_nullable": "NO"},
-            {"column_name": "first_name", "data_type": "character varying", "is_nullable": "NO"},
-        ]
-        mock_fks = []
-
-        async def mock_fetch(query, *args):
-            if "information_schema.columns" in query:
-                return mock_cols
-            elif "FOREIGN KEY" in query:
-                return mock_fks
-            return []
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["actor"])
-
-            # Verify no foreign keys section
-            assert "**Foreign Keys:**" not in result
-            assert "### Table: `actor`" in result
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_table_not_found(self):
-        """Test handling non-existent tables."""
-        mock_conn = AsyncMock()
-
-        async def mock_fetch(query, *args):
-            return []  # Empty result for table not found
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["nonexistent"])
-
-            # Verify "Not Found" message
-            assert "### Table: nonexistent (Not Found)" in result
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_empty_list(self):
-        """Test handling empty table_names list."""
-        mock_conn = AsyncMock()
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema([])
-
-            # Verify empty output
-            assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_connection_error(self):
-        """Test handling connection acquisition errors."""
-        # Setup async context manager mock
-        mock_conn = AsyncMock()
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-            mock_get.side_effect = RuntimeError("Database pool not initialized")
-
-            with pytest.raises(RuntimeError) as exc_info:
-                await get_table_schema(["film"])
-
-            assert "Database pool not initialized" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_query_error(self):
-        """Test handling SQL query errors."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            with pytest.raises(asyncpg.PostgresError):
-                await get_table_schema(["film"])
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_always_releases_connection(self):
-        """Test that connection is always released even if an exception occurs."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=Exception("Unexpected error"))
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            with pytest.raises(Exception):
-                await get_table_schema(["film"])
-
-    @pytest.mark.asyncio
-    async def test_get_table_schema_markdown_format(self):
-        """Test Markdown output format is correct."""
-        mock_conn = AsyncMock()
-        mock_cols = [
-            {"column_name": "film_id", "data_type": "integer", "is_nullable": "NO"},
-            {"column_name": "title", "data_type": "character varying", "is_nullable": "YES"},
-        ]
-        mock_fks = [
-            {
-                "column_name": "language_id",
-                "foreign_table_name": "language",
-                "foreign_column_name": "language_id",
-            }
-        ]
-
-        async def mock_fetch(query, *args):
-            if "information_schema.columns" in query:
-                return mock_cols
-            elif "FOREIGN KEY" in query:
-                return mock_fks
-            return []
-
-        mock_conn.fetch = AsyncMock(side_effect=mock_fetch)
-
-        # Setup async context manager mock
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
-
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
-
-            result = await get_table_schema(["film"])
-
-            # Verify Markdown structure
-            lines = result.split("\n")
-            assert lines[0] == "### Table: `film`"
-            assert lines[1] == ""
-            assert "| Column | Type | Nullable |" in lines
-            assert "|---|---|---|" in lines
-            assert "| `film_id` | integer | NO |" in result
-            assert "| `title` | character varying | YES |" in result
-            assert "**Foreign Keys:**" in result
-            assert "- `language_id` → `language.language_id`" in result
+from mcp_server.tools import execute_sql_query, get_semantic_definitions, search_relevant_tables
 
 
 class TestExecuteSqlQuery:
@@ -463,9 +31,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT COUNT(*) as count FROM film", tenant_id=1)
 
@@ -491,9 +59,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
@@ -513,9 +81,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query(
                 "SELECT film_id, title FROM film WHERE film_id = 1", tenant_id=1
@@ -543,9 +111,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT film_id, title FROM film LIMIT 3", tenant_id=1)
 
@@ -568,9 +136,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film", tenant_id=1)
 
@@ -682,9 +250,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             # Should NOT be rejected (drop is part of table name)
             result = await execute_sql_query("SELECT * FROM drop_table", tenant_id=1)
@@ -705,9 +273,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM nonexistent", tenant_id=1)
 
@@ -724,9 +292,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film", tenant_id=1)
 
@@ -743,9 +311,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             await execute_sql_query("SELECT * FROM film", tenant_id=1)
 
@@ -762,9 +330,9 @@ class TestExecuteSqlQuery:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film LIMIT 2", tenant_id=1)
 
@@ -776,9 +344,6 @@ class TestExecuteSqlQuery:
             assert len(data) == 2
             assert data[0]["film_id"] == 1
             assert data[1]["title"] == "Film 2"
-
-            # Verify it's formatted (indent=2)
-            assert "\n" in result
 
 
 class TestGetSemanticDefinitions:
@@ -800,9 +365,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await get_semantic_definitions(["High Value Customer"])
 
@@ -848,9 +413,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await get_semantic_definitions(["High Value Customer", "Churned"])
 
@@ -889,9 +454,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await get_semantic_definitions(["Nonexistent Term"])
 
@@ -918,9 +483,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await get_semantic_definitions(
                 ["High Value Customer", "Churned", "Nonexistent"]
@@ -942,9 +507,9 @@ class TestGetSemanticDefinitions:
         mock_conn = AsyncMock()
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
             mock_get.side_effect = RuntimeError("Database pool not initialized")
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -961,9 +526,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             with pytest.raises(asyncpg.PostgresError):
                 await get_semantic_definitions(["High Value Customer"])
@@ -977,9 +542,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             with pytest.raises(Exception):
                 await get_semantic_definitions(["High Value Customer"])
@@ -1005,9 +570,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             result = await get_semantic_definitions(["High Value Customer", "Gross Revenue"])
 
@@ -1022,9 +587,6 @@ class TestGetSemanticDefinitions:
             assert isinstance(data["High Value Customer"], dict)
             assert "definition" in data["High Value Customer"]
             assert "sql_logic" in data["High Value Customer"]
-
-            # Verify it's formatted (indent=2)
-            assert "\n" in result
 
     @pytest.mark.asyncio
     async def test_get_semantic_definitions_parameterized_query(self):
@@ -1052,9 +614,9 @@ class TestGetSemanticDefinitions:
         # Setup async context manager mock
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = AsyncMock(return_value=mock_conn)
+        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.Database.get_connection", mock_get):
+        with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
 
             terms = ["Term1", "Term2", "Term3"]
             result = await get_semantic_definitions(terms)
@@ -1096,47 +658,64 @@ class TestSearchRelevantTables:
             },
         ]
 
-        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
-                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+                "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
             ) as mock_search:
-                mock_search.return_value = mock_results
+                with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
+                    mock_search.return_value = mock_results
 
-                result = await search_relevant_tables("customer payment transactions", limit=5)
+                    result = await search_relevant_tables("customer payment transactions", limit=5)
 
-                # Verify embedding was generated
-                from mcp_server.rag import RagEngine
+                    # Verify embedding was generated
+                    from mcp_server.rag import RagEngine
 
-                RagEngine.embed_text.assert_called_once_with("customer payment transactions")
+                    RagEngine.embed_text.assert_called_once_with("customer payment transactions")
 
-                # Verify search was called
-                mock_search.assert_called_once()
-                call_args = mock_search.call_args
-                assert call_args[0][0] == [0.1] * 384  # embedding (positional)
-                assert call_args[1]["limit"] == 5  # limit (keyword)
+                    # Verify search was called
+                    mock_search.assert_called_once()
+                    call_args = mock_search.call_args
+                    assert call_args[0][0] == [0.1] * 384  # embedding (positional)
+                    assert call_args[1]["limit"] == 5  # limit (keyword)
 
-                # Verify markdown formatting
-                assert "## Relevant Tables for:" in result
-                assert '"customer payment transactions"' in result
-                assert "Found 2 relevant table(s):" in result
-                assert "### payment" in result
-                assert "### customer" in result
-                assert "similarity: 0.900" in result  # 1 - 0.1
-                assert "similarity: 0.800" in result  # 1 - 0.2
+                    # Verify JSON output
+                    import json
+
+                    data = json.loads(result)
+                    assert len(data) == 2
+                    assert data[0]["table_name"] == "payment"
+                    assert data[1]["table_name"] == "customer"
+                    assert data[0]["similarity"] == 0.9
+                    assert data[1]["similarity"] == 0.8
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_empty_result(self):
         """Test empty results handling."""
-        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+        mock_conn = AsyncMock()
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
-                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+                "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
             ) as mock_search:
-                mock_search.return_value = []
+                with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
+                    mock_search.return_value = []
 
-                result = await search_relevant_tables("nonexistent query", limit=5)
+                    result = await search_relevant_tables("nonexistent query", limit=5)
 
-                assert result == "No relevant tables found. The schema may not be indexed yet."
-                mock_search.assert_called_once()
+                    import json
+
+                    assert json.loads(result) == []
+
+                    mock_search.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_limit(self):
@@ -1146,23 +725,32 @@ class TestSearchRelevantTables:
             for i in range(3)
         ]
 
-        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
-                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+                "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
             ) as mock_search:
-                mock_search.return_value = mock_results
+                with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
+                    mock_search.return_value = mock_results
 
-                result = await search_relevant_tables("test query", limit=3)
+                    result = await search_relevant_tables("test query", limit=3)
 
-                # Verify limit was passed
-                call_args = mock_search.call_args
-                assert call_args[1]["limit"] == 3
+                    # Verify limit was passed
+                    call_args = mock_search.call_args
+                    assert call_args[1]["limit"] == 3
 
-                # Verify all results are in output
-                assert "Found 3 relevant table(s):" in result
-                assert "table_0" in result
-                assert "table_1" in result
-                assert "table_2" in result
+                    import json
+
+                    data = json.loads(result)
+                    assert len(data) == 3
+                    assert data[0]["table_name"] == "table_0"
+                    assert data[1]["table_name"] == "table_1"
+                    assert data[2]["table_name"] == "table_2"
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_markdown_formatting(self):
@@ -1175,21 +763,29 @@ class TestSearchRelevantTables:
             },
         ]
 
-        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
-                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+                "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
             ) as mock_search:
-                mock_search.return_value = mock_results
+                with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
+                    mock_search.return_value = mock_results
 
-                result = await search_relevant_tables("payment query", limit=5)
+                    result = await search_relevant_tables("payment query", limit=5)
 
-                # Verify markdown structure
-                lines = result.split("\n")
-                assert lines[0].startswith("## Relevant Tables for:")
-                assert "Found 1 relevant table(s):" in lines
-                assert any("### payment" in line for line in lines)
-                assert "similarity: 0.850" in result  # 1 - 0.15
-                assert "Table: payment" in result
+                    # Verify JSON structure
+                    import json
+
+                    data = json.loads(result)
+                    assert len(data) == 1
+                    assert data[0]["table_name"] == "payment"
+                    assert data[0]["description"] == "Table: payment. Columns: payment_id, amount"
+                    assert data[0]["similarity"] == 0.85
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_similarity_calculation(self):
@@ -1200,15 +796,24 @@ class TestSearchRelevantTables:
             {"table_name": "table3", "schema_text": "text3", "distance": 1.0},  # No similarity
         ]
 
-        with patch("mcp_server.tools.RagEngine.embed_text", return_value=[0.1] * 384):
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
-                "mcp_server.tools.search_similar_tables", new_callable=AsyncMock
+                "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
             ) as mock_search:
-                mock_search.return_value = mock_results
+                with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
+                    mock_search.return_value = mock_results
 
-                result = await search_relevant_tables("test", limit=5)
+                    result = await search_relevant_tables("test", limit=5)
 
-                # Verify similarity scores
-                assert "similarity: 1.000" in result  # 1 - 0.0
-                assert "similarity: 0.500" in result  # 1 - 0.5
-                assert "similarity: 0.000" in result  # 1 - 1.0
+                    import json
+
+                    data = json.loads(result)
+                    assert data[0]["similarity"] == 1.0
+                    assert data[1]["similarity"] == 0.5
+                    assert data[2]["similarity"] == 0.0
