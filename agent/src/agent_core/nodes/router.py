@@ -77,6 +77,13 @@ Respond in JSON format:
 
 If the query is clear (confidence > 0.8), set is_ambiguous to false.
 Only flag as ambiguous if clarification would meaningfully improve the SQL quality.
+
+IMPORTANT: When generating the clarification question:
+1. Use natural, user-friendly language.
+2. Do NOT mention internal column names (e.g. use "duration" instead of "runtime_minutes").
+3. Do NOT mention table names or joining logic (e.g. "junction table").
+4. Frame the question in terms of business concepts (e.g. "categories" instead of "film_category").
+5. Assume the user is non-technical.
 """
 
 

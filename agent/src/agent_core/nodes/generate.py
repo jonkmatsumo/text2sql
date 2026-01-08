@@ -178,36 +178,50 @@ async def generate_sql_node(state: AgentState) -> dict:
         schema_context_to_use = live_schema_ddl if live_schema_ddl else context
 
         # Build system prompt with examples section
+        # NOTE: We must escape curly braces in all injected content because ChatPromptTemplate
+        # treats them as variables. {{ becomes { and }} becomes }.
+
+        escaped_examples = (
+            few_shot_examples.replace("{", "{{").replace("}", "}}") if few_shot_examples else ""
+        )
         examples_section = (
-            f"\n\n{few_shot_examples}" if few_shot_examples else "\n\nNo examples available."
+            f"\n\n{escaped_examples}" if escaped_examples else "\n\nNo examples available."
         )
 
         # Include procedural plan if available (from SQL-of-Thought planner)
-        procedural_plan = state.get("procedural_plan", "")
+        procedural_plan_raw = state.get("procedural_plan", "")
         clause_map = state.get("clause_map", {})
-        user_clarification = state.get("user_clarification", "")
+        user_clarification_raw = state.get("user_clarification", "")
 
         plan_section = ""
-        if procedural_plan:
+        if procedural_plan_raw:
+            # Escape braces in procedural plan
+            escaped_plan = procedural_plan_raw.replace("{", "{{").replace("}", "}}")
             plan_section = f"""
 
 PROCEDURAL PLAN (follow this step-by-step):
-{procedural_plan}
+{escaped_plan}
 """
             if clause_map:
                 import json
 
+                # Escape braces in JSON
+                clause_map_str = (
+                    json.dumps(clause_map, indent=2).replace("{", "{{").replace("}", "}}")
+                )
                 plan_section += f"""
 CLAUSE MAP:
-{json.dumps(clause_map, indent=2)}
+{clause_map_str}
 """
 
         clarification_section = ""
-        if user_clarification:
+        if user_clarification_raw:
+            # Escape braces in clarification
+            escaped_clarification = user_clarification_raw.replace("{", "{{").replace("}", "}}")
             clarification_section = f"""
 
 USER CLARIFICATION:
-{user_clarification}
+{escaped_clarification}
 """
 
         system_prompt = f"""You are a PostgreSQL expert.
