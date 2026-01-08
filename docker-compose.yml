@@ -72,6 +72,7 @@ services:
       DB_PASS: secure_agent_pass
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     ports:
       - "8000:8000"
     networks:
