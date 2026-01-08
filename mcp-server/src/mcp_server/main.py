@@ -14,7 +14,9 @@ from mcp_server.db import Database
 from mcp_server.retrieval import get_relevant_examples
 from mcp_server.tools import (
     execute_sql_query,
+    get_sample_data,
     get_semantic_definitions,
+    get_semantic_subgraph,
     get_table_schema,
     list_tables,
     search_relevant_tables,
@@ -108,7 +110,7 @@ def extract_tenant_id(ctx: Context) -> int | None:
 async def list_tables_tool(search_term: str = None, ctx: Context = None) -> str:
     """List available tables in the database. Use this to discover table names."""
     tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await list_tables(search_term, tenant_id)
+    return list_tables(search_term, tenant_id)
 
 
 @mcp.tool()
@@ -119,7 +121,18 @@ async def get_table_schema_tool(table_names: list[str], ctx: Context = None) -> 
     Returns JSON list of table schemas.
     """
     tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await get_table_schema(table_names, tenant_id)
+    return get_table_schema(table_names, tenant_id)
+
+
+@mcp.tool()
+async def get_sample_data_tool(table_name: str, limit: int = 3, ctx: Context = None) -> str:
+    """
+    Get sample data rows from a table.
+
+    Returns JSON list of sample rows.
+    """
+    tenant_id = extract_tenant_id(ctx) if ctx else None
+    return get_sample_data(table_name, limit, tenant_id)
 
 
 @mcp.tool()
@@ -191,6 +204,15 @@ async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> s
         return json.dumps({"error": "Tenant ID required for cache update"})
     await update_cache(user_query, sql, tenant_id)
     return json.dumps({"status": "cached"}, separators=(",", ":"))
+
+
+@mcp.tool()
+async def get_semantic_subgraph_tool(query: str, ctx: Context = None) -> str:
+    """Retrieve relevant subgraph of tables/columns based on query.
+
+    Use this to understand database structure.
+    """
+    return await get_semantic_subgraph(query)
 
 
 if __name__ == "__main__":

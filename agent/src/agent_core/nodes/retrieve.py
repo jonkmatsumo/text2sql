@@ -3,14 +3,14 @@
 import mlflow
 from agent_core.state import AgentState
 from agent_core.tools import get_mcp_tools
+from agent_core.utils.graph_formatter import format_graph_to_markdown
 
 
 async def retrieve_context_node(state: AgentState) -> dict:
-    """
-    Node 1: RetrieveContext.
+    """Retrieve schema context using semantic subgraph search.
 
-    Queries vector store via MCP server for relevant tables.
-    Uses the search_relevant_tables_tool.
+    Queries Memgraph via MCP server for relevant tables and relationships.
+    Uses the get_semantic_subgraph_tool for graph-based retrieval.
 
     Args:
         state: Current agent state containing conversation messages
@@ -35,60 +35,48 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         try:
             tools = await get_mcp_tools()
-            search_tool = next((t for t in tools if t.name == "search_relevant_tables_tool"), None)
+            subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph_tool"), None)
 
-            if search_tool:
-                # Call the tool
-                # Output format: JSON list of dicts with 'table_name', 'columns', etc.
-                context_json = await search_tool.ainvoke({"user_query": active_query, "limit": 5})
+            if subgraph_tool:
+                # Call the semantic subgraph tool
+                # Output format: JSON with 'nodes' and 'relationships'
+                graph_json = await subgraph_tool.ainvoke({"query": active_query})
 
                 try:
                     from agent_core.utils.parsing import parse_tool_output
 
-                    results = parse_tool_output(context_json)
+                    graph_data = parse_tool_output(graph_json)
 
-                    context_parts = []
-                    for item in results:
-                        # Handle case where item might be a TextContent object
-                        # or similar if using weird transport
-                        if not isinstance(item, dict):
-                            # Fallback or log? Trying to proceed if it looks like what we expect
-                            if hasattr(item, "model_dump"):
-                                item = item.model_dump()
-                            else:
-                                continue
+                    # Handle case where graph_data is a list with single dict
+                    if isinstance(graph_data, list) and len(graph_data) > 0:
+                        graph_data = graph_data[0]
 
-                        t_name = item.get("table_name")
-                        if not t_name:
-                            continue
+                    if isinstance(graph_data, dict):
+                        # Extract table names from nodes
+                        nodes = graph_data.get("nodes", [])
+                        for node in nodes:
+                            if node.get("type") == "Table":
+                                t_name = node.get("name")
+                                if t_name and t_name not in table_names:
+                                    table_names.append(t_name)
 
-                        if t_name not in table_names:
-                            table_names.append(t_name)
+                        # Format graph to Markdown for LLM consumption
+                        context_str = format_graph_to_markdown(graph_data)
 
-                        # Format for LLM context
-                        description = item.get("description", "")
-                        columns = item.get("columns", [])
-
-                        table_str = f"Table: {t_name}\nDescription: {description}\nColumns:\n"
-                        for col in columns:
-                            req = "REQUIRED" if col.get("required") else "NULLABLE"
-                            table_str += f"- {col['name']} ({col['type']}, {req})\n"
-
-                        context_parts.append(table_str)
-
-                    if not context_parts:
-                        context_str = "No relevant tables found."
+                        if not context_str.strip():
+                            context_str = "No relevant tables found."
                     else:
-                        context_str = "\n---\n".join(context_parts)
+                        context_str = "No relevant tables found."
 
                 except Exception as e:
                     print(
-                        f"Error parsing search tool output: {e}, "
-                        f"Content: {str(context_json)[:100]}..."
+                        f"Error parsing subgraph tool output: {e}, "
+                        f"Content: {str(graph_json)[:100]}..."
                     )
                     context_str = f"Error retrieving context: {e}"
             else:
-                print("Warning: search_relevant_tables_tool not found.")
+                print("Warning: get_semantic_subgraph_tool not found.")
+                context_str = "Schema retrieval tool not available."
 
         except Exception as e:
             print(f"Error during retrieval: {e}")

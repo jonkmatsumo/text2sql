@@ -70,23 +70,26 @@ flowchart TB
     end
 
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
-        MCPTools["MCP Tools<br/>mcp_server/tools.py"]
-        RAGEngine["RAG Engine<br/>mcp_server/rag.py"]
+        MCPTools["MCP Tools<br/>mcp_server/tools/"]
+        SemanticTool["get_semantic_subgraph<br/>mcp_server/tools/semantic.py"]
         CacheModule["Cache Module<br/>mcp_server/cache.py"]
-        FastEmbed["fastembed<br/>Retrieval Model"]
-        SecurityCheck["SQL Security Checks<br/>Regex validation"]
+        SecurityCheck["SQL Security Checks<br/>AST validation"]
+    end
+
+    subgraph GraphDB["🔷 Memgraph (Graph DB)"]
+        VectorIndex["Vector Index (usearch)<br/>Semantic search"]
+        SchemaGraph["Schema Graph<br/>Tables, Columns, FKs"]
     end
 
     subgraph Database["🗄️ PostgreSQL Database"]
-        PGVectorDB["pgvector Extension<br/>Vector similarity search"]
-        SchemaEmbeddings["schema_embeddings Table<br/>Stores schema vectors"]
+        PGVectorDB["pgvector Extension<br/>Few-shot examples"]
         SemanticCache["semantic_cache Table<br/>Cached SQL queries"]
         PagilaDB["Pagila Database<br/>Sample data"]
     end
 
     %% Initialization Flow
     SeedData --> SeederService
-    SeederService -->|"Upsert Embeddings"| SchemaEmbeddings
+    SeederService -->|"Hydrate Graph"| SchemaGraph
     SeederService -->|"Upsert Examples"| PGVectorDB
 
     %% Agent Observability
@@ -99,17 +102,15 @@ flowchart TB
     CorrectNode -.->|"Trace"| MLflow
     SynthesizeNode -.->|"Trace"| MLflow
 
-    %% Agent to MCP Server (Retrieval Phase)
-    RetrieveNode -->|"Call Tool: search_relevant_tables"| MCPTools
-    MCPTools -->|"Semantic Search"| RAGEngine
-    RAGEngine -->|"Embed Query"| FastEmbed
-    RAGEngine -->|"Query Vectors"| SchemaEmbeddings
-    SchemaEmbeddings -->|"Return Summaries"| RetrieveNode
+    %% Agent to MCP Server (Retrieval Phase - Now Graph-based)
+    RetrieveNode -->|"Call Tool: get_semantic_subgraph"| MCPTools
+    MCPTools --> SemanticTool
+    SemanticTool -->|"Vector Search"| VectorIndex
+    SemanticTool -->|"Graph Traversal"| SchemaGraph
+    SchemaGraph -->|"Return Schema Graph"| RetrieveNode
 
-    %% Agent to MCP Server (Generation Phase)
-    GenerateNode -->|"Call Tool: get_table_schema"| MCPTools
+    %% Agent to MCP Server (Generation Phase - Simplified)
     GenerateNode -->|"Call Tool: get_few_shot_examples"| MCPTools
-    MCPTools -->|"Fetch DDL"| PagilaDB
     MCPTools -->|"Fetch Examples"| PGVectorDB
 
     %% Agent to MCP Server (Execution Phase)
@@ -129,17 +130,19 @@ flowchart TB
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
+    style GraphDB fill:#9C27B0
     style Init fill:#FFC107
     style Observability fill:#E1BEE7
 ```
+
 
 ## Core Features
 
 *   **Multi-Provider LLM Support**: Switch between OpenAI, Anthropic (Claude), and Google (Gemini) via UI or environment variables.
 *   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
 *   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
-*   **Schema Reality**: Uses a two-stage "Identify -> Define" workflow. First identifies relevant tables using semantic search (`fastembed`), then fetches authoritative DDL from the live database.
-*   **Dynamic Seeding**: Ephemeral seeder service initializes the database with schema summaries and golden examples on startup.
+*   **Graph-Based Schema Retrieval**: Uses Memgraph for semantic vector search and graph traversal, returning relevant tables, columns, and relationships in a single call.
+*   **Dynamic Seeding**: Ephemeral seeder service hydrates the schema graph and initializes golden examples on startup.
 *   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
 *   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
