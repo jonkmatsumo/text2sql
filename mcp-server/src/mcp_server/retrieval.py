@@ -62,4 +62,4 @@ async def get_relevant_examples(
         for row in rows
     ]
 
-    return json.dumps(examples, indent=2)
+    return json.dumps(examples, separators=(",", ":"))

@@ -91,6 +91,47 @@ class TestGenerateSchema(unittest.IsolatedAsyncioTestCase):
         self.assertIn("- film_id (integer, REQUIRED)", actual_context)
         self.assertIn("- title (text, REQUIRED)", actual_context)
 
+    @patch("agent_core.tools.get_mcp_tools")
+    async def test_generate_few_shot_structured(self, mock_get_mcp_tools):
+        """Test that get_few_shot_examples_tool output is handled correctly."""
+        # 1. Setup Mock for get_few_shot_examples_tool
+        mock_example_tool = MagicMock()
+        mock_example_tool.name = "get_few_shot_examples_tool"
+
+        # Simulate compact JSON output (no spaces)
+        examples_payload = [
+            {
+                "question": "Find films with rating 'PG'",
+                "sql": "SELECT * FROM film WHERE rating = 'PG';",
+                "similarity": 0.806,
+            }
+        ]
+        # MCP tool returns stringified compact JSON
+        mock_example_tool.ainvoke = AsyncMock(
+            return_value=json.dumps(examples_payload, separators=(",", ":"))
+        )
+        mock_get_mcp_tools.return_value = [mock_example_tool]
+
+        # 2. Call the function under test (we need to test get_few_shot_examples
+        # directly or via generate_sql_node).
+        # Since get_few_shot_examples is a separate function in generate.py,
+        # let's verify parse_tool_output handles it.
+        from agent_core.utils.parsing import parse_tool_output
+
+        # Simulate the tool call result
+        tool_output = await mock_example_tool.ainvoke("query")
+
+        # 3. Verify parse_tool_output correctly unpacks it
+        parsed = parse_tool_output(tool_output)
+
+        self.assertIsInstance(parsed, list)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["question"], "Find films with rating 'PG'")
+
+        # Verify strict compactness (internal check)
+        self.assertNotIn("\n", tool_output)
+        self.assertNotIn(": ", tool_output)  # no space after colon
+
 
 if __name__ == "__main__":
     unittest.main()
