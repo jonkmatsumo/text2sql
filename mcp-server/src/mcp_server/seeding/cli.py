@@ -24,8 +24,9 @@ async def _ingest_graph_schema():
         # Get retriever (Postgres connection assumed via env vars)
         retriever = get_retriever()
 
-        # Hydrate
-        hydrator = GraphHydrator()
+        # Hydrate - use MEMGRAPH_URI from environment
+        memgraph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
+        hydrator = GraphHydrator(uri=memgraph_uri)
         try:
             # Run blocking hydration code in executor if needed,
             # but for seeding script simplicity we can run it directly

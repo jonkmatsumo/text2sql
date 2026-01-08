@@ -40,12 +40,16 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
+      memgraph:
+        condition: service_started
     environment:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: pagila
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
+      MEMGRAPH_URI: bolt://memgraph:7687
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
       - ./database/queries:/app/queries:ro
       - ./database/init-scripts/01-schema.sql:/app/schema.sql:ro
@@ -67,6 +71,7 @@ services:
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
+      MEMGRAPH_URI: bolt://memgraph:7687
     ports:
       - "8000:8000"
     networks:

@@ -66,8 +66,8 @@ class GraphHydrator:
         embedding_text = f"Table: {table.name}\nDescription: {table.description or ''}"
         embedding = self.embedding_service.embed_text(embedding_text)
 
-        # Serialize sample data
-        sample_data_json = json.dumps(table.sample_data) if table.sample_data else "[]"
+        # Serialize sample data (handle datetime objects)
+        sample_data_json = json.dumps(table.sample_data, default=str) if table.sample_data else "[]"
 
         query = """
         MERGE (t:Table {name: $name})
