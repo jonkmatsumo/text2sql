@@ -11,8 +11,31 @@ import sys
 from pathlib import Path
 
 from mcp_server.db import Database
+from mcp_server.graph_ingestion.schema_parser import SchemaParser
 from mcp_server.rag import RagEngine, format_vector_for_postgres
 from mcp_server.seeding.loader import load_from_directory
+
+
+async def _ingest_graph_schema(conn: any, schema_path: Path):
+    """Parse schema and (placeholder) ingest into graph."""
+    if not schema_path.exists():
+        print(f"Warning: Schema file not found at {schema_path}")
+        return
+
+    print(f"Parsing schema from {schema_path}...")
+    try:
+        parser = SchemaParser()
+        # Read file manually to pass content or let parser handle it if it supports file path
+        # Our parser supports parse_file(path)
+        parsed_schema = parser.parse_file(str(schema_path))
+
+        table_count = len(parsed_schema.get("tables", []))
+        print(f"✓ Parsed {table_count} tables from schema.")
+
+        # future: Ingest into Memgraph or Postgres Graph representation
+
+    except Exception as e:
+        print(f"Error parsing schema: {e}")
 
 
 async def _upsert_sql_example(conn, item: dict):
@@ -181,6 +204,9 @@ async def main():
 
             # 2. Seed Table Summaries (Schema Context)
             await _seed_table_summaries(conn, Path("/app/queries"))
+
+            # 3. Graph Ingestion (Schema Parsing)
+            await _ingest_graph_schema(conn, Path("/app/schema.sql"))
 
             print("✓ Successfully processed all seed operations.")
 

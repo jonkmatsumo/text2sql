@@ -38,6 +38,7 @@ services:
       DB_PASS: secure_agent_pass
     volumes:
       - ./database/queries:/app/queries:ro
+      - ./database/init-scripts/01-schema.sql:/app/schema.sql:ro
     networks:
       - text2sql_net
 
