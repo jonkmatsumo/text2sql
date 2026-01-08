@@ -115,7 +115,7 @@ services:
     ports:
       - "5001:5000"
     command: >
-      sh -c "mlflow server  --host 0.0.0.0  --port 5000  --backend-store-uri $${MLFLOW_BACKEND_STORE_URI}  --default-artifact-root $${MLFLOW_DEFAULT_ARTIFACT_ROOT}"
+      sh -c "mlflow server  --host 0.0.0.0  --port 5000  --backend-store-uri $${MLFLOW_BACKEND_STORE_URI}  --default-artifact-root $${MLFLOW_DEFAULT_ARTIFACT_ROOT}  --allowed-hosts 'mlflow-server,mlflow-server:5000,localhost,localhost:5000,localhost:5001'"
     networks:
       - bi_net
     restart: unless-stopped
