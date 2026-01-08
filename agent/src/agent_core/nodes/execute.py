@@ -22,7 +22,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
     """
     with mlflow.start_span(
         name="execute_sql",
-        span_type="TOOL",
+        span_type=mlflow.entities.SpanType.TOOL,
     ) as span:
         sql_query = state.get("current_sql")
         tenant_id = state.get("tenant_id")

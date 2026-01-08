@@ -10,9 +10,6 @@ from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
-# Enable MLflow autolog for OpenAI
-mlflow.openai.autolog()
-
 # Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
 llm = get_llm_client(temperature=0)
 
@@ -112,7 +109,7 @@ async def generate_sql_node(state: AgentState) -> dict:
     """
     with mlflow.start_span(
         name="generate_sql",
-        span_type="CHAT_MODEL",
+        span_type=mlflow.entities.SpanType.CHAT_MODEL,
     ) as span:
         messages = state["messages"]
         context = state.get("schema_context", "")

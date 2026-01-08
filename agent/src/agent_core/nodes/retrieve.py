@@ -22,7 +22,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
     """
     with mlflow.start_span(
         name="retrieve_context",
-        span_type="RETRIEVER",
+        span_type=mlflow.entities.SpanType.RETRIEVER,
     ) as span:
         # Extract the last user message
         messages = state["messages"]

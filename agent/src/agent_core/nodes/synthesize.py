@@ -1,7 +1,8 @@
-"""Insight synthesis node for formatting results."""
+"""Insight synthesis node for formatting results with MLflow tracing."""
 
 import json
 
+import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from dotenv import load_dotenv
@@ -26,47 +27,62 @@ def synthesize_insight_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with synthesized response in messages
     """
-    query_result = state["query_result"]
+    with mlflow.start_span(
+        name="synthesize_insight",
+        span_type=mlflow.entities.SpanType.CHAT_MODEL,
+    ) as span:
+        query_result = state["query_result"]
 
-    # Get the original question from the first user message
-    original_question = ""
-    if state["messages"]:
-        original_question = state["messages"][0].content
+        # Get the original question from the first user message
+        original_question = ""
+        if state["messages"]:
+            original_question = state["messages"][0].content
 
-    if not query_result:
-        return {
-            "messages": [
-                AIMessage(content="I couldn't retrieve any results for your query."),
-            ]
-        }
+        span.set_inputs(
+            {
+                "question": original_question,
+                "result_count": len(query_result) if query_result else 0,
+            }
+        )
 
-    # Format result as JSON string for LLM
-    result_str = json.dumps(query_result, indent=2, default=str)
+        if not query_result:
+            response_content = "I couldn't retrieve any results for your query."
+            span.set_outputs({"response": response_content})
+            return {
+                "messages": [
+                    AIMessage(content=response_content),
+                ]
+            }
 
-    system_prompt = """You are a helpful data analyst assistant.
+        # Format result as JSON string for LLM
+        result_str = json.dumps(query_result, indent=2, default=str)
+
+        system_prompt = """You are a helpful data analyst assistant.
 Format the query results into a clear, natural language response.
 Be concise but informative. Use numbers and data from the results.
 """
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            (
-                "user",
-                "Question: {question}\n\nQuery Results:\n{results}\n\nProvide a clear answer:",
-            ),
-        ]
-    )
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                (
+                    "user",
+                    "Question: {question}\n\nQuery Results:\n{results}\n\nProvide a clear answer:",
+                ),
+            ]
+        )
 
-    chain = prompt | llm
+        chain = prompt | llm
 
-    response = chain.invoke(
-        {
-            "question": original_question,
-            "results": result_str,
+        response = chain.invoke(
+            {
+                "question": original_question,
+                "results": result_str,
+            }
+        )
+
+        span.set_outputs({"response_length": len(response.content)})
+
+        return {
+            "messages": [AIMessage(content=response.content)],
         }
-    )
-
-    return {
-        "messages": [AIMessage(content=response.content)],
-    }
