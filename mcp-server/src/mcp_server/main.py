@@ -135,7 +135,7 @@ async def execute_sql_query_tool(sql_query: str, ctx: Context = None) -> str:
             "Unauthorized. No Tenant ID context found. "
             "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
         )
-        return json.dumps({"error": error_msg})
+        return json.dumps({"error": error_msg}, separators=(",", ":"))
 
     return await execute_sql_query(sql_query, tenant_id)
 
@@ -176,7 +176,11 @@ async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
     if not tenant_id:
         return json.dumps({"error": "Tenant ID required for cache lookup"})
     cached = await lookup_cache(user_query, tenant_id)
-    return json.dumps({"sql": cached}) if cached else json.dumps({"sql": None})
+    return (
+        json.dumps({"sql": cached}, separators=(",", ":"))
+        if cached
+        else json.dumps({"sql": None}, separators=(",", ":"))
+    )
 
 
 @mcp.tool()
@@ -186,7 +190,7 @@ async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> s
     if not tenant_id:
         return json.dumps({"error": "Tenant ID required for cache update"})
     await update_cache(user_query, sql, tenant_id)
-    return json.dumps({"status": "cached"})
+    return json.dumps({"status": "cached"}, separators=(",", ":"))
 
 
 if __name__ == "__main__":

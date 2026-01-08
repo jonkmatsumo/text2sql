@@ -34,7 +34,7 @@ async def list_tables(search_term: Optional[str] = None, tenant_id: Optional[int
     async with Database.get_connection(tenant_id) as conn:
         rows = await conn.fetch(query, *args)
         tables = [row["table_name"] for row in rows]
-        return json.dumps(tables, indent=2)
+        return json.dumps(tables, separators=(",", ":"))
 
 
 async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = None) -> str:
@@ -109,7 +109,7 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
                 }
             )
 
-        return json.dumps(schema_list, indent=2)
+        return json.dumps(schema_list, separators=(",", ":"))
 
 
 async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> str:
@@ -179,7 +179,7 @@ async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> 
                 )
 
             return json.dumps(
-                result, default=str, indent=2
+                result, default=str, separators=(",", ":")
             )  # default=str handles Date/Decimal types
 
         except asyncpg.PostgresError as e:
@@ -222,7 +222,7 @@ async def get_semantic_definitions(terms: list[str], tenant_id: Optional[int] = 
             for row in rows
         }
 
-        return json.dumps(result, indent=2)
+        return json.dumps(result, separators=(",", ":"))
 
 
 async def search_relevant_tables(
@@ -286,4 +286,4 @@ async def search_relevant_tables(
                 }
             )
 
-    return json.dumps(structured_results, indent=2)
+    return json.dumps(structured_results, separators=(",", ":"))
