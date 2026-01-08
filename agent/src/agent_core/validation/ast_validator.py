@@ -106,6 +106,7 @@ FORBIDDEN_COMMANDS = frozenset(
         exp.Alter,  # Base Alter class covers all ALTER operations
         exp.Grant,
         exp.Create,
+        exp.Command,  # Generic database commands
     }
 )
 
@@ -124,8 +125,18 @@ def parse_sql(
         Tuple of (parsed AST, error message if parse failed)
     """
     try:
-        parsed = sqlglot.parse_one(sql, dialect=dialect)
-        return parsed, None
+        expressions = sqlglot.parse(sql, dialect=dialect)
+
+        if not expressions:
+            return None, "Empty SQL query"
+
+        if len(expressions) > 1:
+            return (
+                None,
+                "Security Violation: SQL chaining detected. Multiple statements are not allowed.",
+            )
+
+        return expressions[0], None
     except sqlglot.errors.ParseError as e:
         return None, f"SQL syntax error: {str(e)}"
 
@@ -148,14 +159,33 @@ def validate_security(ast: exp.Expression) -> list[SecurityViolation]:
     """
     violations = []
 
-    # Check for forbidden command types
-    for forbidden_type in FORBIDDEN_COMMANDS:
-        if isinstance(ast, forbidden_type):
+    # 1. Enforce strict Root Node Policy (SELECT / CTE / UNION)
+    # Only allow read-only query structures at the root level
+    ALLOWED_ROOTS = (exp.Select, exp.Union, exp.With, exp.Paren, exp.Subquery)
+    if not isinstance(ast, ALLOWED_ROOTS):
+        violations.append(
+            SecurityViolation(
+                violation_type=ViolationType.FORBIDDEN_COMMAND,
+                message=(
+                    f"Invalid Root Statement: {type(ast).__name__}. "
+                    "Only SELECT, WITH (CTE), or UNION are allowed."
+                ),
+                details={"root_type": type(ast).__name__},
+            )
+        )
+
+    # 2. Recursive Forbidden Command Check (Deep Walk)
+    # Traverses the entire tree to find nested forbidden commands
+    for node in ast.walk():
+        if isinstance(node, tuple(FORBIDDEN_COMMANDS)):
             violations.append(
                 SecurityViolation(
                     violation_type=ViolationType.FORBIDDEN_COMMAND,
-                    message=f"Forbidden command: {forbidden_type.__name__}. Read-only access only.",
-                    details={"command": forbidden_type.__name__},
+                    message=(
+                        f"Forbidden command detected: {type(node).__name__}. "
+                        "Read-only access only."
+                    ),
+                    details={"command": type(node).__name__},
                 )
             )
 
