@@ -1,5 +1,12 @@
 """Pytest configuration and fixtures for agent tests."""
 
+import os
+
+# Set dummy API keys for CI/CD compatibility to prevent instantiation errors
+# when validation checks for keys.
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy-key-for-testing")
+os.environ.setdefault("ANTHROPIC_API_KEY", "dummy-key")
+
 try:
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 except ImportError:
