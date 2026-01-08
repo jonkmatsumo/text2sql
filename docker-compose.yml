@@ -22,6 +22,16 @@ services:
     networks:
       - text2sql_net
 
+  memgraph:
+    image: memgraph/memgraph-platform:latest
+    container_name: text2sql_memgraph
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+      - "3000:3000"
+    networks:
+      - text2sql_net
+
   seeder:
     image: text2sql-mcp-server:latest
     container_name: text2sql_seeder

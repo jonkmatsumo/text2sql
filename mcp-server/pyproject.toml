@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.24.0",     # Required by fastembed
     "mlflow>=2.11.0",
     "sqlglot>=20.0.0",
+    "neo4j>=5.0.0",
 ]
 
 [project.optional-dependencies]
