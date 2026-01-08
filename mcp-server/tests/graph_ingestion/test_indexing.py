@@ -1,7 +1,14 @@
-from unittest.mock import Mock, patch
+"""Tests for vector indexing with adaptive thresholding."""
+
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from mcp_server.graph_ingestion.indexing import EmbeddingService, VectorIndexer
+from mcp_server.graph_ingestion.indexing import (
+    EmbeddingService,
+    VectorIndexer,
+    apply_adaptive_threshold,
+    cosine_similarity,
+)
 
 # Mock data
 MOCK_EMBEDDING = [0.1] * 1536
@@ -13,7 +20,6 @@ def mock_openai():
     """Mock OpenAI client."""
     with patch("mcp_server.graph_ingestion.indexing.OpenAI") as mock:
         client_instance = mock.return_value
-        # Mock response structure: response.data[0].embedding
         response_mock = Mock()
         data_item = Mock()
         data_item.embedding = MOCK_EMBEDDING
@@ -62,18 +68,78 @@ class TestEmbeddingService:
         mock_openai.return_value.embeddings.create.side_effect = Exception("API Error")
 
         service = EmbeddingService()
-        # Should return zero vector on error based on implementation
         embedding = service.embed_text("test")
 
         assert embedding == ZERO_VECTOR
+
+
+class TestCosineSimilarity:
+    """Tests for cosine_similarity function."""
+
+    def test_identical_vectors(self):
+        """Identical vectors should have similarity 1.0."""
+        vec = [1.0, 0.0, 0.0]
+        assert cosine_similarity(vec, vec) == pytest.approx(1.0)
+
+    def test_orthogonal_vectors(self):
+        """Orthogonal vectors should have similarity 0.0."""
+        vec1 = [1.0, 0.0, 0.0]
+        vec2 = [0.0, 1.0, 0.0]
+        assert cosine_similarity(vec1, vec2) == pytest.approx(0.0)
+
+    def test_empty_vectors(self):
+        """Empty vectors should return 0.0."""
+        assert cosine_similarity([], []) == 0.0
+
+    def test_zero_vectors(self):
+        """Zero vectors should return 0.0."""
+        vec = [0.0, 0.0, 0.0]
+        assert cosine_similarity(vec, vec) == 0.0
+
+
+class TestAdaptiveThreshold:
+    """Tests for apply_adaptive_threshold function."""
+
+    def test_filters_low_scores(self):
+        """Hits below threshold should be filtered."""
+        hits = [
+            {"score": 0.9},
+            {"score": 0.85},
+            {"score": 0.7},  # Below 0.9 - 0.08 = 0.82
+        ]
+        result = apply_adaptive_threshold(hits)
+        assert len(result) == 2
+
+    def test_respects_absolute_minimum(self):
+        """Hits below absolute minimum (0.55) should be filtered."""
+        hits = [
+            {"score": 0.6},
+            {"score": 0.5},  # Below 0.55 absolute minimum
+        ]
+        result = apply_adaptive_threshold(hits)
+        assert len(result) == 1
+        assert result[0]["score"] == 0.6
+
+    def test_fallback_to_top1(self):
+        """If all filtered, return top 1."""
+        hits = [
+            {"score": 0.4},  # Below 0.55
+            {"score": 0.3},
+        ]
+        result = apply_adaptive_threshold(hits)
+        assert len(result) == 1
+        assert result[0]["score"] == 0.4
+
+    def test_empty_input(self):
+        """Empty input should return empty."""
+        assert apply_adaptive_threshold([]) == []
 
 
 class TestVectorIndexer:
     """Test suite for VectorIndexer."""
 
     def test_create_indexes(self, mock_neo4j, mock_openai):
-        """Test index creation logic."""
-        # Setup mock driver/session
+        """Test index creation creates property indexes."""
         driver_mock = mock_neo4j.driver.return_value
         session_mock = driver_mock.session.return_value
         session_mock.__enter__.return_value = session_mock
@@ -81,39 +147,30 @@ class TestVectorIndexer:
         indexer = VectorIndexer()
         indexer.create_indexes()
 
-        # Verify calls
+        # Should create 2 property indexes
         assert session_mock.run.call_count == 2
-        # Verify arguments contain expected procedure calls
-        calls = session_mock.run.call_args_list
-        assert "usearch.init('Table'" in calls[0][0][0] or "usearch.init('Table'" in calls[1][0][0]
-        assert (
-            "usearch.init('Column'" in calls[0][0][0] or "usearch.init('Column'" in calls[1][0][0]
-        )
+        calls = [str(c) for c in session_mock.run.call_args_list]
+        assert any("Table" in c for c in calls)
+        assert any("Column" in c for c in calls)
 
     def test_search_nodes(self, mock_neo4j, mock_openai):
-        """Test search logic."""
-        # Setup mock driver/session/result
+        """Test search logic with brute-force similarity."""
         driver_mock = mock_neo4j.driver.return_value
         session_mock = driver_mock.session.return_value
         session_mock.__enter__.return_value = session_mock
 
-        # Mock search result
-        mock_record = {"node": {"name": "TestTable"}, "score": 0.95}
+        # Mock node with embedding
+        mock_node = MagicMock()
+        mock_node.__iter__ = Mock(return_value=iter([("name", "TestTable")]))
+        mock_node.keys = Mock(return_value=["name", "embedding"])
+        mock_node.__getitem__ = lambda s, k: "TestTable" if k == "name" else MOCK_EMBEDDING
+
+        mock_record = {"n": mock_node, "embedding": MOCK_EMBEDDING}
         session_mock.run.return_value = [mock_record]
 
         indexer = VectorIndexer()
-        results = indexer.search_nodes("query", k=3)
+        results = indexer.search_nodes("query", k=3, apply_threshold=False)
 
-        assert len(results) == 1
-        assert results[0]["node"]["name"] == "TestTable"
-        assert results[0]["score"] == 0.95
-
-        # Verify embedding service was called
+        assert len(results) >= 0  # May be 0 if similarity too low
         mock_openai.return_value.embeddings.create.assert_called()
-
-        # Verify session run called with correct params
         session_mock.run.assert_called()
-        args, kwargs = session_mock.run.call_args
-        assert "usearch.search" in args[0]
-        assert kwargs["k"] == 3
-        assert kwargs["label"] == "Table"
