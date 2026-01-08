@@ -237,7 +237,7 @@ class TestValidateAndExecuteNode:
         """Test handling when result is string but not valid JSON."""
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
-        mock_tool.ainvoke = AsyncMock(return_value="Invalid JSON string")
+        mock_tool.ainvoke = AsyncMock(return_value="Error: Invalid JSON string")
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -253,7 +253,7 @@ class TestValidateAndExecuteNode:
         result = await validate_and_execute_node(state)
 
         # Should treat invalid JSON as error
-        assert result["error"] == "Invalid JSON string"
+        assert result["error"] == "Error: Invalid JSON string"
         assert result["query_result"] is None
 
     @pytest.mark.asyncio

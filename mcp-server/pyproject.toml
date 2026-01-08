@@ -1,5 +1,5 @@
 [project]
-name = "bi-agent-mcp"
+name = "text2sql-mcp"
 version = "0.1.0"
 description = "MCP Server for Text 2 SQL"
 requires-python = ">=3.12"

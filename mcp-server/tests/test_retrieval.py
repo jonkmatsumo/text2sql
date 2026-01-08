@@ -48,12 +48,11 @@ class TestGetRelevantExamples:
                 ):
                     examples = await get_relevant_examples("Show me total revenue", limit=3)
 
-                    # Should return a formatted string
+                    # Should return a JSON string
                     assert isinstance(examples, str)
-                    assert "Question:" in examples
-                    assert "SQL:" in examples
-                    assert "What is the total revenue?" in examples
-                    assert "SELECT SUM(amount)" in examples
+                    # Verify it contains the JSON structure we expect
+                    assert '"question":"What is the total revenue?"' in examples
+                    assert '"sql":"SELECT SUM(amount) FROM payment;"' in examples
 
                     # Verify connection was acquired
                     mock_get.assert_called_once()
@@ -153,9 +152,9 @@ class TestGetRelevantExamples:
                 ):
                     examples = await get_relevant_examples("test query", limit=3)
 
-                    # Verify format contains all required sections
-                    assert "Question:" in examples
-                    assert "SQL:" in examples
+                    # Verify format contains all required sections in JSON
+                    assert '"question":"Test question"' in examples
+                    assert '"sql":"SELECT * FROM test;"' in examples
 
     @pytest.mark.asyncio
     async def test_retrieval_uses_context_manager(self):
@@ -215,5 +214,5 @@ class TestGetRelevantExamples:
                     examples = await get_relevant_examples("test query", limit=3)
 
                     # Should still format correctly without summary
-                    assert "Question:" in examples
-                    assert "SQL:" in examples
+                    assert '"question":"Test question"' in examples
+                    assert '"sql":"SELECT * FROM test;"' in examples

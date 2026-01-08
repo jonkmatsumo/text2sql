@@ -111,4 +111,4 @@ CREATE POLICY tenant_isolation_payment ON payment
     USING (store_id = current_tenant_id());
 
 -- 8. Grant execute permission on the function to the read-only user
-GRANT EXECUTE ON FUNCTION current_tenant_id() TO bi_agent_ro;
+GRANT EXECUTE ON FUNCTION current_tenant_id() TO text2sql_ro;

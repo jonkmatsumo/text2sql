@@ -32,6 +32,10 @@ def parse_tool_output(tool_output):
             raw_payload = item.content
         elif isinstance(item, str):
             raw_payload = item
+        else:
+            # Fallback for primitives (int, float, etc) or unknown types
+            aggregated_results.append(item)
+            continue
 
         if not raw_payload:
             continue

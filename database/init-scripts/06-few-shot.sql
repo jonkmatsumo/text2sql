@@ -24,8 +24,8 @@ ON public.sql_examples
 USING gin (to_tsvector('english', question));
 
 -- Grant access to the agent user (SELECT for retrieval, INSERT for embedding generation)
-GRANT SELECT, INSERT, UPDATE ON public.sql_examples TO bi_agent_ro;
-GRANT USAGE ON SEQUENCE public.sql_examples_id_seq TO bi_agent_ro;
+GRANT SELECT, INSERT, UPDATE ON public.sql_examples TO text2sql_ro;
+GRANT USAGE ON SEQUENCE public.sql_examples_id_seq TO text2sql_ro;
 
 -- Add comment for documentation
 COMMENT ON TABLE public.sql_examples IS 'Golden SQL examples for dynamic few-shot learning. Embeddings are generated from questions.';

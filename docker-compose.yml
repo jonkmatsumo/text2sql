@@ -20,11 +20,11 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - bi_net
+      - text2sql_net
 
   seeder:
     image: text2sql-mcp-server:latest
-    container_name: bi_agent_seeder
+    container_name: text2sql_seeder
     command: python -m mcp_server.seeding.cli
     build: ./mcp-server
     depends_on:
@@ -34,16 +34,16 @@ services:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: pagila
-      DB_USER: bi_agent_ro
+      DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
     volumes:
       - ./database/queries:/app/queries:ro
     networks:
-      - bi_net
+      - text2sql_net
 
   mcp-server:
     build: ./mcp-server
-    container_name: bi_agent_core
+    container_name: text2sql_core
     depends_on:
       postgres-db:
         condition: service_healthy
@@ -53,13 +53,13 @@ services:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: pagila
-      DB_USER: bi_agent_ro
+      DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
     ports:
       - "8000:8000"
     networks:
-      - bi_net
+      - text2sql_net
     restart: unless-stopped
 
   streamlit:
@@ -83,7 +83,7 @@ services:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: pagila
-      DB_USER: bi_agent_ro
+      DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
       MLFLOW_TRACKING_URI: http://mlflow-server:5000
     ports:
@@ -93,7 +93,7 @@ services:
       - ./streamlit:/app/streamlit
       - ./agent:/app/agent
     networks:
-      - bi_net
+      - text2sql_net
     restart: unless-stopped
 
   mlflow-server:
@@ -117,7 +117,7 @@ services:
     command: >
       sh -c "mlflow server  --host 0.0.0.0  --port 5000  --backend-store-uri $${MLFLOW_BACKEND_STORE_URI}  --default-artifact-root $${MLFLOW_DEFAULT_ARTIFACT_ROOT}  --allowed-hosts 'mlflow-server,mlflow-server:5000,localhost,localhost:5000,localhost:5001'"
     networks:
-      - bi_net
+      - text2sql_net
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
@@ -138,7 +138,7 @@ services:
       - mlflow_artifacts:/data
     command: server /data --console-address ":9001"
     networks:
-      - bi_net
+      - text2sql_net
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
@@ -151,5 +151,5 @@ volumes:
 
 
 networks:
-  bi_net:
+  text2sql_net:
     driver: bridge
