@@ -113,7 +113,13 @@ async def generate_sql_node(state: AgentState) -> dict:
     ) as span:
         messages = state["messages"]
         context = state.get("schema_context", "")
-        user_query = messages[-1].content if messages else ""
+
+        # Use active_query if available, else fallback
+        active_query = state.get("active_query")
+        if active_query:
+            user_query = active_query
+        else:
+            user_query = messages[-1].content if messages else ""
         tenant_id = state.get("tenant_id")
 
         span.set_inputs(

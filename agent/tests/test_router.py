@@ -1,7 +1,7 @@
 """Unit tests for router node and ambiguity detection."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agent_core.nodes.router import AMBIGUITY_TAXONOMY, router_node
@@ -64,6 +64,7 @@ class TestRouterNode:
 
         assert result.get("ambiguity_type") is None
         assert result.get("clarification_question") is None
+        assert result.get("active_query") == "Show me all customers"
 
     @pytest.mark.asyncio
     async def test_ambiguous_query_sets_clarification(self, base_state):
@@ -95,6 +96,7 @@ class TestRouterNode:
 
         assert result.get("ambiguity_type") == "UNCLEAR_SCHEMA_REFERENCE"
         assert result.get("clarification_question") is not None
+        assert result.get("active_query") == "Show sales by region"
 
     @pytest.mark.asyncio
     async def test_with_existing_clarification_clears_ambiguity(self, base_state):
@@ -106,6 +108,9 @@ class TestRouterNode:
 
         assert result.get("ambiguity_type") is None
         assert result.get("clarification_question") is None
+        # Should contain active_query
+        # (defaults to messages[-1] if clarification present and no contextualization mock)
+        assert result.get("active_query") == "Show me all customers"
 
     @pytest.mark.asyncio
     async def test_empty_query_returns_empty(self, base_state):
@@ -136,6 +141,38 @@ class TestRouterNode:
 
         # Should default to non-ambiguous on parse failure
         assert result.get("ambiguity_type") is None
+
+    @pytest.mark.asyncio
+    async def test_contextualizes_query_with_history(self, base_state):
+        """Test that query is contextualized when history exists."""
+        base_state["messages"] = [
+            HumanMessage(content="First question"),
+            HumanMessage(content="Follow up"),
+        ]
+
+        # First chain call (contextualize) returns reformulate query
+        mock_contextualize_response = MagicMock()
+        mock_contextualize_response.content = "Combined Query"
+
+        # Second chain call (ambiguity) returns JSON
+        mock_ambiguity_response = MagicMock()
+        mock_ambiguity_response.content = json.dumps({"is_ambiguous": False})
+
+        mock_chain = MagicMock()
+        # Side effect to return different mocks for different calls?
+        # ainvoke is for contextualize, invoke is for ambiguity
+        mock_chain.ainvoke = AsyncMock(return_value=mock_contextualize_response)
+        mock_chain.invoke = MagicMock(return_value=mock_ambiguity_response)
+
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
+        ):
+            mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
+
+            result = await router_node(base_state)
+
+        assert result.get("active_query") == "Combined Query"
 
 
 class TestAmbiguityTaxonomy:

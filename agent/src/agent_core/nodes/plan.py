@@ -102,12 +102,15 @@ async def plan_sql_node(state: AgentState) -> dict:
     ) as span:
         messages = state["messages"]
         schema_context = state.get("schema_context", "")
-        user_query = messages[-1].content if messages else ""
+        # Use active_query if available, otherwise fallback to last message + clarification
+        user_query = state.get("active_query")
+        if not user_query:
+            user_query = messages[-1].content if messages else ""
 
-        # Include any user clarification if available
-        user_clarification = state.get("user_clarification")
-        if user_clarification:
-            user_query = f"{user_query}\n\nUser Clarification: {user_clarification}"
+            # Include any user clarification if available
+            user_clarification = state.get("user_clarification")
+            if user_clarification:
+                user_query = f"{user_query}\n\nUser Clarification: {user_clarification}"
 
         span.set_inputs(
             {

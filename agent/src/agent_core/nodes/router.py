@@ -10,13 +10,20 @@ import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 load_dotenv()
 
 # Initialize LLM (temperature=0 for deterministic classification)
 llm = get_llm_client(temperature=0)
 
+
+CONTEXTUALIZE_SYSTEM_PROMPT = """You are a helpful assistant that reformulates follow-up questions.
+Given the conversation history and the latest user question, rephrase the latest question into a
+standalone question that can be understood without the chat history.
+DO NOT answer the question. JUST rephrase it.
+If the latest question is already standalone, return it as is.
+"""
 
 # Ambiguity taxonomy based on common enterprise data ambiguities
 AMBIGUITY_TAXONOMY = {
@@ -108,22 +115,61 @@ async def router_node(state: AgentState) -> dict:
         user_query = messages[-1].content if messages else ""
         schema_context = state.get("schema_context", "")
 
-        # Check if we already have clarification (resuming after interrupt)
+        # 1. Contextualize Query (if history exists)
+        # ---------------------------------------------------------------------
+        active_query = user_query
+
+        # Check if we have history (more than just the current user message)
+        # Note: messages typically alternates Human, AI, Human...
+        if len(messages) > 1:
+            try:
+                # Use history to reformulate
+                contextualize_prompt = ChatPromptTemplate.from_messages(
+                    [
+                        ("system", CONTEXTUALIZE_SYSTEM_PROMPT),
+                        MessagesPlaceholder(variable_name="chat_history"),
+                        ("human", "{question}"),
+                    ]
+                )
+                contextualize_chain = contextualize_prompt | llm
+
+                # Exclude the last message (current user query) from history
+                history_messages = messages[:-1]
+
+                reformulated = await contextualize_chain.ainvoke(
+                    {"chat_history": history_messages, "question": user_query}
+                )
+
+                active_query = reformulated.content
+                span.set_attribute("contextualized_query", active_query)
+                print(f"Contextualized Query: {active_query}")
+
+            except Exception as e:
+                print(f"Warning: Contextualization failed: {e}")
+
+        # Store active query in span for observability
+        span.set_inputs({"user_query": user_query, "active_query": active_query})
+
+        # 2. Check for existing clarification (Interrupt Resume)
+        # ---------------------------------------------------------------------
         user_clarification = state.get("user_clarification")
         if user_clarification:
             # Clear ambiguity and proceed
+            # Note: We keep active_query as is, or maybe we should have appended clarification?
+            # But Contextualization step likely handled it if history was present.
             span.set_outputs({"action": "proceed_with_clarification"})
             return {
                 "ambiguity_type": None,
                 "clarification_question": None,
+                "active_query": active_query,
             }
 
-        span.set_inputs({"user_query": user_query})
-
-        if not user_query:
+        if not active_query:
             span.set_outputs({"error": "No query to route"})
             return {}
 
+        # 3. Ambiguity Detection (on active_query)
+        # ---------------------------------------------------------------------
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", ROUTER_SYSTEM_PROMPT),
@@ -139,7 +185,7 @@ async def router_node(state: AgentState) -> dict:
         response = chain.invoke(
             {
                 "schema_context": schema_context,
-                "question": user_query,
+                "question": active_query,
             }
         )
 
@@ -181,6 +227,7 @@ async def router_node(state: AgentState) -> dict:
             return {
                 "ambiguity_type": ambiguity_type,
                 "clarification_question": clarification_question,
+                "active_query": active_query,
             }
 
         # Query is clear - proceed to retrieval
@@ -188,4 +235,5 @@ async def router_node(state: AgentState) -> dict:
         return {
             "ambiguity_type": None,
             "clarification_question": None,
+            "active_query": active_query,
         }

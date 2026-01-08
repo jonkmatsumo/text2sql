@@ -24,11 +24,13 @@ async def retrieve_context_node(state: AgentState) -> dict:
         name="retrieve_context",
         span_type=mlflow.entities.SpanType.RETRIEVER,
     ) as span:
-        # Extract the last user message
-        messages = state["messages"]
-        user_query = messages[-1].content if messages else ""
+        # Extract query: use active_query from state (set by router), or fallback
+        active_query = state.get("active_query")
+        if not active_query:
+            messages = state["messages"]
+            active_query = messages[-1].content if messages else ""
 
-        span.set_inputs({"user_query": user_query})
+        span.set_inputs({"user_query": active_query})
 
         context_str = ""
         table_names = []
@@ -40,7 +42,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
             if search_tool:
                 # Call the tool
                 # Output format: Markdown with "### {table_name} (similarity: ...)"
-                context_str = await search_tool.ainvoke({"user_query": user_query, "limit": 5})
+                context_str = await search_tool.ainvoke({"user_query": active_query, "limit": 5})
 
                 if isinstance(context_str, str):
                     # Parse table names

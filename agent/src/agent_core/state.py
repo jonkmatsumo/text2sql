@@ -18,6 +18,10 @@ class AgentState(TypedDict):
     # Uses add_messages reducer to handle history persistence
     messages: Annotated[List[BaseMessage], add_messages]
 
+    # The resolved/contextualized query to use for retrieval/generation
+    # If using history, this contains the synthesized standalone question
+    active_query: Optional[str]
+
     # Context retrieved from RAG (Schema DDLs + Semantic Definitions)
     schema_context: str
 
