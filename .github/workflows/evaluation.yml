@@ -8,6 +8,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+env:
+  # Test database credentials (ephemeral CI database, not production)
+  TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'ci_test_password_placeholder' }}
+
 jobs:
   evaluate:
     name: Run Golden Dataset Evaluation
@@ -18,7 +22,7 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: test_password
+          POSTGRES_PASSWORD: ${{ env.TEST_DB_PASSWORD }}
           POSTGRES_DB: pagila
         options: >-
           --health-cmd pg_isready
@@ -50,17 +54,18 @@ jobs:
           done
 
       - name: Initialize database
+        env:
+          PGPASSWORD: ${{ env.TEST_DB_PASSWORD }}
         run: |
           # Run database initialization scripts
-          # (Simplified - would need actual schema/data loading)
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/01-schema.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/02-data.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/03-permissions.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/04-vector-setup.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/05-multi-tenancy.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/06-few-shot.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/07-caching.sql || true
-          PGPASSWORD=test_password psql -h localhost -U postgres -d pagila -f database/init-scripts/09-golden-dataset.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/01-schema.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/02-data.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/03-permissions.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/04-vector-setup.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/05-multi-tenancy.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/06-few-shot.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/07-caching.sql || true
+          psql -h localhost -U postgres -d pagila -f database/init-scripts/09-golden-dataset.sql || true
 
       - name: Seed Golden Dataset
         env:
@@ -68,7 +73,7 @@ jobs:
           DB_PORT: 5432
           DB_NAME: pagila
           DB_USER: postgres
-          DB_PASS: test_password
+          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
           cd mcp-server
           python3 scripts/seed_golden_dataset.py
@@ -80,7 +85,7 @@ jobs:
           DB_PORT: 5432
           DB_NAME: pagila
           DB_USER: postgres
-          DB_PASS: test_password
+          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
           cd agent
           python3 scripts/run_evaluation.py --tenant-id 1
@@ -91,7 +96,7 @@ jobs:
           DB_PORT: 5432
           DB_NAME: pagila
           DB_USER: postgres
-          DB_PASS: test_password
+          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
           cd agent
           python3 scripts/evaluation_metrics.py --days 1 > evaluation_report.txt
