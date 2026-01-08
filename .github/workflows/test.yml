@@ -57,8 +57,8 @@ jobs:
           # For now, this is a placeholder for future test implementation
           echo "Database initialization would happen here"
 
-      - name: Run all tests
+      - name: Run tests (excluding LLM-dependent tests)
         run: |
           # Run tests from root with import-mode=importlib
-          # This is required when collecting tests from multiple directories
-          pytest --import-mode=importlib -v
+          # Exclude tests that require LLM API keys (test_correct, test_generate, test_graph, test_synthesize)
+          pytest --import-mode=importlib -v --ignore=agent/tests/test_correct.py --ignore=agent/tests/test_generate.py --ignore=agent/tests/test_graph.py --ignore=agent/tests/test_synthesize.py
