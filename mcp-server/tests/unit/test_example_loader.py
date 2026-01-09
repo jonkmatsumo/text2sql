@@ -10,19 +10,20 @@ class TestExampleLoader:
 
     @pytest.mark.asyncio
     async def test_load_examples(self):
-        """Test loading examples from DB and adding to index."""
-        mock_conn = AsyncMock()
-        mock_rows = [
-            {"id": 1, "question": "Q1", "sql_query": "SELECT 1", "embedding": "[0.1, 0.2]"},
-            {"id": 2, "question": "Q2", "sql_query": "SELECT 2", "embedding": "[0.3, 0.4]"},
+        """Test loading examples from store and adding to index."""
+        mock_store = AsyncMock()
+        mock_examples = [
+            MagicMock(id=1, question="Q1", sql_query="SELECT 1", embedding=[0.1, 0.2]),
+            MagicMock(id=2, question="Q2", sql_query="SELECT 2", embedding=[0.3, 0.4]),
         ]
-        mock_conn.fetch.return_value = mock_rows
+        mock_store.fetch_all_examples.return_value = mock_examples
 
         mock_index = MagicMock()
 
-        with patch("mcp_server.retrievers.example_loader.Database.get_connection") as mock_get_conn:
-            mock_get_conn.return_value.__aenter__.return_value = mock_conn
-
+        with patch(
+            "mcp_server.retrievers.example_loader.Database.get_example_store",
+            return_value=mock_store,
+        ):
             loader = ExampleLoader()
             await loader.load_examples(mock_index)
 
@@ -42,15 +43,16 @@ class TestExampleLoader:
 
     @pytest.mark.asyncio
     async def test_load_examples_empty(self):
-        """Test handling empty DB results."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch.return_value = []
+        """Test handling empty store results."""
+        mock_store = AsyncMock()
+        mock_store.fetch_all_examples.return_value = []
 
         mock_index = MagicMock()
 
-        with patch("mcp_server.retrievers.example_loader.Database.get_connection") as mock_get_conn:
-            mock_get_conn.return_value.__aenter__.return_value = mock_conn
-
+        with patch(
+            "mcp_server.retrievers.example_loader.Database.get_example_store",
+            return_value=mock_store,
+        ):
             loader = ExampleLoader()
             await loader.load_examples(mock_index)
 

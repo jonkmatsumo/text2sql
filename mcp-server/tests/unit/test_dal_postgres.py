@@ -75,3 +75,54 @@ class TestPgSemanticCache:
         mock_conn.execute.assert_called_once()
         args = mock_conn.execute.call_args[0]
         assert "INSERT INTO semantic_cache" in args[0]
+
+
+class TestPostgresExampleStore:
+    """Test suite for Postgres Example Store adapter."""
+
+    @pytest.fixture
+    def store(self):
+        """Fixture for PostgresExampleStore."""
+        from mcp_server.dal.postgres import PostgresExampleStore
+
+        return PostgresExampleStore()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Fixture to mock Database."""
+        with patch("mcp_server.dal.postgres.Database") as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_examples(self, store, mock_db):
+        """Test fetching examples maps to Example objects."""
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
+
+        mock_rows = [
+            {
+                "id": 1,
+                "question": "Q1",
+                "sql_query": "SELECT 1",
+                "embedding": "[0.1, 0.2]",
+            },
+            {
+                "id": 2,
+                "question": "Q2",
+                "sql_query": "SELECT 2",
+                "embedding": [0.3, 0.4],  # Test list input
+            },
+        ]
+        mock_conn.fetch.return_value = mock_rows
+
+        examples = await store.fetch_all_examples()
+
+        assert len(examples) == 2
+        assert examples[0].id == 1
+        assert examples[0].question == "Q1"
+        assert examples[0].embedding == [0.1, 0.2]
+
+        assert examples[1].id == 2
+        assert examples[1].embedding == [0.3, 0.4]
+
+        mock_conn.fetch.assert_called_once()

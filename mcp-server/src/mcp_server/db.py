@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import CacheStore, GraphStore
+from mcp_server.dal.interfaces import CacheStore, ExampleStore, GraphStore
 from mcp_server.dal.memgraph import MemgraphStore
 
 
@@ -13,6 +13,7 @@ class Database:
     _pool: Optional[asyncpg.Pool] = None
     _graph_store: Optional[GraphStore] = None
     _cache_store: Optional[CacheStore] = None
+    _example_store: Optional[ExampleStore] = None
 
     @classmethod
     async def init(cls):
@@ -46,12 +47,15 @@ class Database:
             cls._graph_store = MemgraphStore(graph_uri, graph_user, graph_pass)
             print(f"✓ Graph store connection established: {graph_uri}")
 
-            # 3. Init CacheStore (Postgres impl)
+            # 3. Init CacheStore & ExampleStore (Postgres impl)
             # Avoid circular import at top level
-            from mcp_server.dal.postgres import PgSemanticCache
+            from mcp_server.dal.postgres import PgSemanticCache, PostgresExampleStore
 
             cls._cache_store = PgSemanticCache()
             print("✓ Cache store initialized")
+
+            cls._example_store = PostgresExampleStore()
+            print("✓ Example store initialized")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
@@ -74,6 +78,7 @@ class Database:
         # it uses Database.get_connection, so no explicit close needed
         # but we clear reference
         cls._cache_store = None
+        cls._example_store = None
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -82,12 +87,16 @@ class Database:
             raise RuntimeError("Graph store not initialized. Call Database.init() first.")
         return cls._graph_store
 
-    @classmethod
-    def get_cache_store(cls) -> CacheStore:
-        """Get the initialized cache store instance."""
         if cls._cache_store is None:
             raise RuntimeError("Cache store not initialized. Call Database.init() first.")
         return cls._cache_store
+
+    @classmethod
+    def get_example_store(cls) -> ExampleStore:
+        """Get the initialized example store instance."""
+        if cls._example_store is None:
+            raise RuntimeError("Example store not initialized. Call Database.init() first.")
+        return cls._example_store
 
     @classmethod
     @asynccontextmanager

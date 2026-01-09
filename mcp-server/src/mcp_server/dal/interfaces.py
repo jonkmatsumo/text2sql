@@ -8,8 +8,25 @@ type safety.
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
-from mcp_server.dal.types import CacheLookupResult, Edge, FilterCriteria, GraphData, Node
+from mcp_server.dal.types import CacheLookupResult, Edge, Example, FilterCriteria, GraphData, Node
 from mcp_server.graph_ingestion.vector_indexes.protocol import SearchResult
+
+
+@runtime_checkable
+class ExampleStore(Protocol):
+    """Protocol for accessing few-shot learning examples.
+
+    This abstracts the source of examples (Postgres, CSV, API, etc.)
+    from the retrieval logic.
+    """
+
+    async def fetch_all_examples(self) -> List[Example]:
+        """Fetch all available examples.
+
+        Returns:
+            List of canonical Example objects.
+        """
+        ...
 
 
 @runtime_checkable

@@ -1,7 +1,7 @@
 from typing import List, Optional
 
-from mcp_server.dal.interfaces import CacheStore
-from mcp_server.dal.types import CacheLookupResult
+from mcp_server.dal.interfaces import CacheStore, ExampleStore
+from mcp_server.dal.types import CacheLookupResult, Example
 from mcp_server.db import Database
 from mcp_server.rag import format_vector_for_postgres
 
@@ -78,3 +78,43 @@ class PgSemanticCache(CacheStore):
         """
         async with Database.get_connection(tenant_id) as conn:
             await conn.execute(query, tenant_id, user_query, pg_vector, generated_sql)
+
+
+class PostgresExampleStore(ExampleStore):
+    """Postgres implementation of ExampleStore."""
+
+    async def fetch_all_examples(self) -> List[Example]:
+        """Fetch all examples from sql_examples table.
+
+        Returns:
+            List of canonical Example objects.
+        """
+        import json
+
+        query = """
+            SELECT id, question, sql_query, embedding
+            FROM sql_examples
+            WHERE embedding IS NOT NULL
+        """
+
+        async with Database.get_connection() as conn:
+            rows = await conn.fetch(query)
+
+        examples = []
+        for row in rows:
+            embedding_val = row["embedding"]
+            if isinstance(embedding_val, str):
+                vector = json.loads(embedding_val)
+            else:
+                vector = list(embedding_val)
+
+            examples.append(
+                Example(
+                    id=row["id"],
+                    question=row["question"],
+                    sql_query=row["sql_query"],
+                    embedding=vector,
+                )
+            )
+
+        return examples
