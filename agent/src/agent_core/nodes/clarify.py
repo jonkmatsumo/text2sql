@@ -75,10 +75,21 @@ async def clarify_node(state: AgentState) -> dict:
                 }
             )
 
+            # Append interaction to conversation history so context is preserved
+            from langchain_core.messages import AIMessage, HumanMessage
+
+            new_messages = []
+            if clarification_question:
+                new_messages.append(AIMessage(content=clarification_question))
+
+            if user_response:
+                new_messages.append(HumanMessage(content=str(user_response)))
+
             return {
                 "user_clarification": user_response,
                 "ambiguity_type": None,  # Clear after getting response
                 "clarification_question": None,
+                "messages": new_messages,
             }
         else:
             # Fallback: Log warning and proceed without clarification

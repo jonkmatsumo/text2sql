@@ -174,10 +174,12 @@ async def router_node(state: AgentState) -> dict:
             # Note: We keep active_query as is, or maybe we should have appended clarification?
             # But Contextualization step likely handled it if history was present.
             span.set_outputs({"action": "proceed_with_clarification"})
+            span.set_outputs({"action": "proceed_with_clarification"})
             return {
                 "ambiguity_type": None,
                 "clarification_question": None,
                 "active_query": active_query,
+                "user_clarification": None,  # Consumed and cleared
             }
 
         if not active_query:

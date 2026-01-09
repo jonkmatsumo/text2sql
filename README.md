@@ -71,18 +71,27 @@ flowchart TB
 
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
         MCPTools["MCP Tools<br/>mcp_server/tools/"]
-        SemanticTool["get_semantic_subgraph<br/>mcp_server/tools/semantic.py"]
+
+        subgraph DAL["🛡️ Data Abstraction Layer"]
+            I_Store["Protocols<br/>(GraphStore, MetadataStore)"]
+            Impl_PG["Postgres Adapter<br/>(pgvector, introspection)"]
+            Impl_MG["Memgraph Adapter<br/>(Cypher)"]
+
+            I_Store --> Impl_PG
+            I_Store --> Impl_MG
+        end
+
+        VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
         CacheModule["Cache Module<br/>mcp_server/cache.py"]
         SecurityCheck["SQL Security Checks<br/>AST validation"]
     end
 
     subgraph GraphDB["🔷 Memgraph (Graph DB)"]
-        VectorIndex["Vector Index (usearch)<br/>Semantic search"]
         SchemaGraph["Schema Graph<br/>Tables, Columns, FKs"]
     end
 
     subgraph Database["🗄️ PostgreSQL Database"]
-        PGVectorDB["pgvector Extension<br/>Few-shot examples"]
+        PGVectorDB["pgvector Extension<br/>Few-shot examples<br/>Schema Embeddings"]
         SemanticCache["semantic_cache Table<br/>Cached SQL queries"]
         PagilaDB["Pagila Database<br/>Sample data"]
     end
@@ -90,7 +99,11 @@ flowchart TB
     %% Initialization Flow
     SeedData --> SeederService
     SeederService -->|"Hydrate Graph"| SchemaGraph
-    SeederService -->|"Upsert Examples"| PGVectorDB
+    SeederService -->|"Upsert Vectors"| PGVectorDB
+
+    %% Index Hydration
+    PGVectorDB -.->|"Hydrate (Startup)"| VectorIndex
+    SchemaGraph -.->|"Hydrate (Startup)"| VectorIndex
 
     %% Agent Observability
     RouterNode -.->|"Trace"| MLflow
@@ -102,23 +115,21 @@ flowchart TB
     CorrectNode -.->|"Trace"| MLflow
     SynthesizeNode -.->|"Trace"| MLflow
 
-    %% Agent to MCP Server (Retrieval Phase - Now Graph-based)
-    RetrieveNode -->|"Call Tool: get_semantic_subgraph"| MCPTools
-    MCPTools --> SemanticTool
-    SemanticTool -->|"Vector Search"| VectorIndex
-    SemanticTool -->|"Graph Traversal"| SchemaGraph
-    SchemaGraph -->|"Return Schema Graph"| RetrieveNode
+    %% Agent to MCP Server via DAL
+    RetrieveNode -->|"Call Tool"| MCPTools
+    MCPTools -->|"Search/Query"| DAL
+    DAL -->|"Vector Search"| VectorIndex
 
-    %% Agent to MCP Server (Generation Phase - Simplified)
-    GenerateNode -->|"Call Tool: get_few_shot_examples"| MCPTools
-    MCPTools -->|"Fetch Examples"| PGVectorDB
+    Impl_PG --> PGVectorDB
+    Impl_PG --> SemanticCache
+    Impl_PG --> PagilaDB
 
-    %% Agent to MCP Server (Execution Phase)
-    ExecuteNode -->|"Call Tool: execute_sql_query"| MCPTools
-    MCPTools -->|"Validate SQL"| SecurityCheck
-    SecurityCheck -->|"Execute"| PagilaDB
-    PagilaDB -->|"Results"| MCPTools
-    MCPTools -->|"JSON response"| ExecuteNode
+    Impl_MG --> SchemaGraph
+
+    %% Execution
+    ExecuteNode -->|"Call Tool"| MCPTools
+    MCPTools -->|"Validate"| SecurityCheck
+    SecurityCheck -->|"Execute (via DAL)"| Impl_PG
 
     %% Agent to LLM
     RouterNode -->|"LLM call"| OpenAILLM["LLM Provider<br/>(OpenAI/Anthropic/Google)"]
@@ -131,15 +142,13 @@ flowchart TB
     SeederService -->|"Generate Descriptions"| OpenAILLM
     SeederService -->|"Generate Embeddings"| Embeddings["Embedding Model<br/>(text-embedding-3-small)"]
 
-    %% Semantic Search Embeddings
-    SemanticTool -->|"Embed Query"| Embeddings
-
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
     style GraphDB fill:#9C27B0
     style Init fill:#FFC107
     style Observability fill:#E1BEE7
+    style DAL fill:#FFCC80,stroke:#F57C00,stroke-width:2px
 ```
 
 
@@ -147,14 +156,29 @@ flowchart TB
 
 *   **Multi-Provider LLM Support**: Switch between OpenAI, Anthropic (Claude), and Google (Gemini) via UI or environment variables.
 *   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
+*   **Data Abstraction Layer (DAL)**: A strict interface layer that decouples business logic from backend storage, preventing implementation details (like Neo4j nodes or asyncpg records) from leaking into the agent.
+*   **High-Performance Vector Search**: Implements **Automatic Nearest Neighbors (ANN)** using `hnswlib` for millisecond-latency retrieval of relevant examples and schema context, hydrated from persistent storage.
 *   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
-*   **Graph-Based Schema Retrieval**: Uses Memgraph for semantic vector search and graph traversal, returning relevant tables, columns, and relationships in a single call.
-*   **Manual Seeding**: Dedicated seeder service hydrates the schema graph and initializes golden examples on demand, decoupling ingestion from startup.
+*   **Graph-Based Schema Retrieval**: Uses Memgraph for semantic relationships and `PostgresMetadataStore` for robust schema introspection.
+*   **Manual Seeding**: Dedicated seeder service hydrates the schema graph and initializes golden examples on demand.
 *   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
 *   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
 
 ## Advanced Architecture Features
+
+### Data Abstraction Layer (DAL)
+The system employs a robust DAL to ensure modularity and testability:
+- **Canonical Types**: Uses Pydantic models (`Node`, `Edge`, `TableDef`) for all internal data exchange.
+- **Protocols**: Defines strict interfaces (`GraphStore`, `MetadataStore`, `VectorIndex`) for all adapters.
+- **Adapters**: Backend-specific implementations for `Postgres` (asyncpg) and `Memgraph` (neo4j-driver).
+- **Context Safety**: Propagates tenant context (multi-tenancy) safely across async/sync boundaries using `contextvars`.
+
+### Scalable Vector Search (ANN)
+To handle large-scale schema and example retrieval efficienty:
+- **HNSW Index**: Uses Hierarchical Navigable Small Worlds (via `hnswlib`) for approximate nearest neighbor search.
+- **Hybrid Storage**: Embeddings are persisted in Postgres (`pgvector`) for durability but loaded into in-memory HNSW indices for high-performance runtime querying.
+- **Lazy Loading**: Indexes are hydrated on-demand to optimize startup time.
 
 ### AST Validation
 SQL queries are parsed and validated using `sqlglot` before execution:
@@ -178,7 +202,7 @@ Complex queries are decomposed into logical steps before SQL synthesis:
 Ambiguous queries trigger clarification via LangGraph interrupts:
 - **Ambiguity Detection**: Identifies unclear schema references, missing temporal constraints
 - **Interrupt Mechanism**: Pauses execution to collect user clarification
-- **State Persistence**: Uses checkpointer for conversation continuity
+- **History Awareness**: Clarification history is persisted to context for accurate follow-up generation.
 
 ## Project Structure
 
@@ -190,6 +214,9 @@ text2sql/
 │   └── tests_integration/      # Live integration tests
 ├── mcp-server/                 # Database access tools (FastMCP)
 │   ├── src/mcp_server/         # Server implementation
+│   │   ├── dal/                # Data Abstraction Layer (Interfaces & Adapters)
+│   │   ├── tools/              # MCP Tool definitions
+│   │   └── ...
 │   ├── tests/                  # Unit tests
 │   └── tests_integration/      # RLS & database integration tests
 ├── streamlit/                  # Web interface
