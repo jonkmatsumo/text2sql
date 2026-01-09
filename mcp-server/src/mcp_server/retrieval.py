@@ -1,9 +1,38 @@
 """Retrieval module for dynamic few-shot learning."""
 
+import json
+import logging
 from typing import Optional
 
-from mcp_server.db import Database
-from mcp_server.rag import RagEngine, format_vector_for_postgres
+import numpy as np
+from mcp_server.graph_ingestion.vector_indexes.factory import create_vector_index
+from mcp_server.graph_ingestion.vector_indexes.protocol import VectorIndex
+from mcp_server.rag import RagEngine
+from mcp_server.retrievers.example_loader import ExampleLoader
+
+logger = logging.getLogger(__name__)
+
+# BAAI/bge-small-en-v1.5 has 384 dimensions
+EMBEDDING_DIM = 384
+
+_index: Optional[VectorIndex] = None
+
+
+async def _get_index() -> VectorIndex:
+    """Lazy load and initialize the vector index with examples."""
+    global _index
+    if _index is None:
+        # Initialize in-memory HNSW index
+        logger.info("Initializing vector index for few-shot examples...")
+        index = create_vector_index(dim=EMBEDDING_DIM)
+
+        # Load examples from DB
+        loader = ExampleLoader()
+        await loader.load_examples(index)
+
+        _index = index
+
+    return _index
 
 
 async def get_relevant_examples(
@@ -14,52 +43,42 @@ async def get_relevant_examples(
     """
     Retrieve few-shot examples similar to the user's query.
 
-    Uses semantic similarity search on synthetic summaries to find relevant
-    Golden SQL examples. This bridges the semantic gap between natural language
-    questions and SQL code.
+    Uses in-memory HNSW vector index for search.
 
     Args:
         user_query: The user's natural language question
         limit: Maximum number of examples to retrieve (default: 3)
-        tenant_id: Optional tenant ID (examples are usually global, but can be tenant-specific)
+        tenant_id: Optional tenant ID (currently ignored as examples are global)
 
     Returns:
         Formatted string with examples, or empty string if none found
     """
     # 1. Embed the incoming question
     embedding = RagEngine.embed_text(user_query)
-    pg_vector = format_vector_for_postgres(embedding)
 
-    # 2. Search for similar examples using Cosine Distance (<=>)
-    # We select the question, SQL, and summary to show the LLM
-    query = """
-        SELECT question, sql_query,
-               (1 - (embedding <=> $1)) as similarity
-        FROM sql_examples
-        WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> $1
-        LIMIT $2
-    """
+    # 2. Get Index (lazy init)
+    index = await _get_index()
 
-    # Note: Few-shot examples are usually global (shared knowledge),
-    # so we might not need tenant_id here unless examples are tenant-specific.
-    # We use a generic connection without tenant context.
-    async with Database.get_connection() as conn:
-        rows = await conn.fetch(query, pg_vector, limit)
+    # 3. Search
+    # Ensure embedding is numpy array
+    embedding_np = np.array(embedding, dtype=np.float32)
 
-    if not rows:
+    results = index.search(embedding_np, k=limit)
+
+    if not results:
         return ""
 
-    import json
-
-    # 3. Format as a list of structured objects
-    examples = [
-        {
-            "question": row["question"],
-            "sql": row["sql_query"],
-            "similarity": float(row["similarity"]),
-        }
-        for row in rows
-    ]
+    # 4. Format results
+    # We fetch content from metadata stored in the index
+    examples = []
+    for res in results:
+        metadata = res.metadata or {}
+        examples.append(
+            {
+                "question": metadata.get("question", ""),
+                "sql": metadata.get("sql", ""),
+                "similarity": float(res.score),
+            }
+        )
 
     return json.dumps(examples, separators=(",", ":"))

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import GraphStore
+from mcp_server.dal.interfaces import CacheStore, GraphStore
 from mcp_server.dal.memgraph import MemgraphStore
 
 
@@ -12,6 +12,7 @@ class Database:
 
     _pool: Optional[asyncpg.Pool] = None
     _graph_store: Optional[GraphStore] = None
+    _cache_store: Optional[CacheStore] = None
 
     @classmethod
     async def init(cls):
@@ -45,6 +46,13 @@ class Database:
             cls._graph_store = MemgraphStore(graph_uri, graph_user, graph_pass)
             print(f"✓ Graph store connection established: {graph_uri}")
 
+            # 3. Init CacheStore (Postgres impl)
+            # Avoid circular import at top level
+            from mcp_server.dal.postgres import PgSemanticCache
+
+            cls._cache_store = PgSemanticCache()
+            print("✓ Cache store initialized")
+
         except Exception as e:
             await cls.close()  # Cleanup partials
             raise ConnectionError(f"Failed to initialize databases: {e}")
@@ -62,12 +70,24 @@ class Database:
             print("✓ Graph store connection closed")
             cls._graph_store = None
 
+        # Cache store (PgSemanticCache) doesn't hold its own connection,
+        # it uses Database.get_connection, so no explicit close needed
+        # but we clear reference
+        cls._cache_store = None
+
     @classmethod
     def get_graph_store(cls) -> GraphStore:
         """Get the initialized graph store instance."""
         if cls._graph_store is None:
             raise RuntimeError("Graph store not initialized. Call Database.init() first.")
         return cls._graph_store
+
+    @classmethod
+    def get_cache_store(cls) -> CacheStore:
+        """Get the initialized cache store instance."""
+        if cls._cache_store is None:
+            raise RuntimeError("Cache store not initialized. Call Database.init() first.")
+        return cls._cache_store
 
     @classmethod
     @asynccontextmanager

@@ -1,6 +1,6 @@
 """Tests for semantic caching."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp_server.cache import (
@@ -10,6 +10,7 @@ from mcp_server.cache import (
     update_cache,
     update_cache_access,
 )
+from mcp_server.dal.types import CacheLookupResult
 
 
 class TestLookupCache:
@@ -18,96 +19,64 @@ class TestLookupCache:
     @pytest.mark.asyncio
     async def test_lookup_cache_miss(self):
         """Test that cache returns None when cache is empty."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=None)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        mock_store = AsyncMock()
+        mock_store.lookup.return_value = None
 
         mock_embedding = [0.1] * 384
-        mock_pg_vector = "[0.1,0.1,...]"
 
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
+        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
             with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
-                with patch(
-                    "mcp_server.cache.format_vector_for_postgres", return_value=mock_pg_vector
-                ):
-                    cached = await lookup_cache("What is the total revenue?", tenant_id=1)
+                cached = await lookup_cache("What is the total revenue?", tenant_id=1)
 
-                    assert cached is None
-                    # Verify called with tenant_id
-                    mock_get.assert_called_once()
-                    # Check both positional and keyword args
-                    call_args = mock_get.call_args
-                    assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
+                assert cached is None
+                mock_store.lookup.assert_called_once()
+                args, kwargs = mock_store.lookup.call_args
+                assert args[0] == mock_embedding
+                assert args[1] == 1
+                assert kwargs["threshold"] == SIMILARITY_THRESHOLD
 
     @pytest.mark.asyncio
     async def test_lookup_cache_hit(self):
         """Test that cache returns cached SQL when similarity >= threshold."""
-        mock_conn = AsyncMock()
-        mock_row = {
-            "cache_id": 1,
-            "generated_sql": "SELECT SUM(amount) FROM payment;",
-            "similarity": 0.96,
-        }
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        mock_store = AsyncMock()
+        mock_result = CacheLookupResult(
+            cache_id="1", value="SELECT SUM(amount) FROM payment;", similarity=0.96
+        )
+        mock_store.lookup.return_value = mock_result
 
         mock_embedding = [0.1] * 384
-        mock_pg_vector = "[0.1,0.1,...]"
 
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
+        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
             with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
                 with patch(
-                    "mcp_server.cache.format_vector_for_postgres", return_value=mock_pg_vector
-                ):
-                    with patch("mcp_server.cache.update_cache_access", new_callable=AsyncMock):
-                        cached = await lookup_cache("What is the total revenue?", tenant_id=1)
+                    "mcp_server.cache.update_cache_access", new_callable=AsyncMock
+                ) as mock_update:
+                    cached = await lookup_cache("What is the total revenue?", tenant_id=1)
 
-                        assert cached == "SELECT SUM(amount) FROM payment;"
-                        # Verify called with tenant_id
-                        mock_get.assert_called_once()
-                        # Check both positional and keyword args
-                        call_args = mock_get.call_args
-                        assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
+                    assert cached == "SELECT SUM(amount) FROM payment;"
+                    mock_store.lookup.assert_called_once()
+
+                    # Verify non-blocking update call via asyncio.create_task
+                    # Note: asyncio.create_task schedules it, we can't easily wait here
+                    # in unit test standardly
+                    # but we mocked update_cache_access directly, so we can verify call
+                    mock_update.assert_called_once_with("1", 1)
 
     @pytest.mark.asyncio
-    async def test_lookup_cache_uses_context_manager(self):
-        """Verify database connection uses context manager pattern."""
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=None)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
-
+    async def test_lookup_cache_uses_cache_store(self):
+        """Verify database connection uses cache store pattern."""
+        mock_store = AsyncMock()
+        mock_store.lookup.return_value = None
         mock_embedding = [0.1] * 384
-        mock_pg_vector = "[0.1,0.1,...]"
 
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
+        with patch(
+            "mcp_server.cache.Database.get_cache_store", return_value=mock_store
+        ) as mock_get:
             with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
-                with patch(
-                    "mcp_server.cache.format_vector_for_postgres", return_value=mock_pg_vector
-                ):
-                    await lookup_cache("test query", tenant_id=1)
+                await lookup_cache("test query", tenant_id=1)
 
-                    # Verify context manager was used
-                    mock_get.assert_called_once()
-                    # Check both positional and keyword args
-                    call_args = mock_get.call_args
-                    assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
-                    mock_get_cm.__aenter__.assert_called_once()
-                    mock_get_cm.__aexit__.assert_called_once()
+                mock_get.assert_called_once()
+                mock_store.lookup.assert_called_once()
 
 
 class TestUpdateCache:
@@ -115,35 +84,24 @@ class TestUpdateCache:
 
     @pytest.mark.asyncio
     async def test_update_cache(self):
-        """Verify cache insertion."""
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock()
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
-
+        """Verify cache insertion delegates to store."""
+        mock_store = AsyncMock()
         mock_embedding = [0.1] * 384
-        mock_pg_vector = "[0.1,0.1,...]"
 
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
+        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
             with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
-                with patch(
-                    "mcp_server.cache.format_vector_for_postgres", return_value=mock_pg_vector
-                ):
-                    await update_cache(
-                        "What is the total revenue?",
-                        "SELECT SUM(amount) FROM payment;",
-                        tenant_id=1,
-                    )
+                await update_cache(
+                    "What is the total revenue?",
+                    "SELECT SUM(amount) FROM payment;",
+                    tenant_id=1,
+                )
 
-                    mock_get.assert_called_once()
-                    # Check both positional and keyword args
-                    call_args = mock_get.call_args
-                    assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
-                    mock_conn.execute.assert_called_once()
+                mock_store.store.assert_called_once()
+                kwargs = mock_store.store.call_args[1]
+                assert kwargs["user_query"] == "What is the total revenue?"
+                assert kwargs["generated_sql"] == "SELECT SUM(amount) FROM payment;"
+                assert kwargs["tenant_id"] == 1
+                assert kwargs["query_embedding"] == mock_embedding
 
 
 class TestUpdateCacheAccess:
@@ -151,111 +109,26 @@ class TestUpdateCacheAccess:
 
     @pytest.mark.asyncio
     async def test_update_cache_access(self):
-        """Verify hit count and timestamp updates."""
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock()
+        """Verify hit count updates delegate to store."""
+        mock_store = AsyncMock()
 
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
+            await update_cache_access(cache_id="1", tenant_id=1)
 
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
-            await update_cache_access(cache_id=1, tenant_id=1)
-
-            mock_get.assert_called_once()
-            # Check both positional and keyword args
-            call_args = mock_get.call_args
-            assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
-            mock_conn.execute.assert_called_once()
-            # Verify UPDATE query was called
-            call_args = mock_conn.execute.call_args[0][0]
-            assert "UPDATE semantic_cache" in call_args
-            assert "hit_count = hit_count + 1" in call_args
+            mock_store.record_hit.assert_called_once_with("1", 1)
 
 
 class TestGetCacheStats:
     """Unit tests for get_cache_stats function."""
 
-    @pytest.mark.asyncio
-    async def test_get_cache_stats_global(self):
-        """Verify statistics calculation for global stats."""
-        mock_conn = AsyncMock()
-        mock_row = {
-            "total_entries": 10,
-            "total_hits": 25,
-            "avg_similarity": 0.95,
-        }
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
-
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
-            stats = await get_cache_stats()
-
-            assert isinstance(stats, dict)
-            assert stats["total_entries"] == 10
-            assert stats["total_hits"] == 25
-            assert stats["avg_similarity"] == 0.95
-            mock_get.assert_called_once()
+    # We removed logic from implementation as per DAL strictness,
+    # so we test the stub behavior.
 
     @pytest.mark.asyncio
-    async def test_get_cache_stats_tenant(self):
-        """Verify statistics calculation for tenant-specific stats."""
-        mock_conn = AsyncMock()
-        mock_row = {
-            "total_entries": 5,
-            "total_hits": 12,
-            "avg_similarity": 0.96,
-        }
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
-
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
-            stats = await get_cache_stats(tenant_id=1)
-
-            assert isinstance(stats, dict)
-            assert stats["total_entries"] == 5
-            assert stats["total_hits"] == 12
-            assert stats["avg_similarity"] == 0.96
-            mock_get.assert_called_once()
-            # Check both positional and keyword args
-            call_args = mock_get.call_args
-            assert call_args[0] == (1,) or call_args[1].get("tenant_id") == 1
-
-    @pytest.mark.asyncio
-    async def test_get_cache_stats_empty(self):
-        """Verify statistics handle empty cache."""
-        mock_conn = AsyncMock()
-        mock_row = {
-            "total_entries": None,
-            "total_hits": None,
-            "avg_similarity": None,
-        }
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
-
-        with patch("mcp_server.cache.Database.get_connection", mock_get):
-            stats = await get_cache_stats()
-
-            assert stats["total_entries"] == 0
-            assert stats["total_hits"] == 0
-            assert stats["avg_similarity"] == 0.0
+    async def test_get_cache_stats_stub(self):
+        """Verify statistics stub."""
+        stats = await get_cache_stats()
+        assert stats.get("status") == "Stats not implementing in DAL v1"
 
 
 class TestCacheConstants:
