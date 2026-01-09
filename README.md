@@ -64,8 +64,8 @@ flowchart TB
         MLflow --> MinIO
     end
 
-    subgraph Init["🌱 Initialization"]
-        SeederService["Seeder Service (Ephemeral)<br/>mcp_server/seeding/cli.py"]
+    subgraph Ingestion["🛠️ Data Ingestion"]
+        SeederService["Seeder Service (Manual)<br/>text2sql_seeder"]
         SeedData["Seed Data (JSON)<br/>Tables & Examples"]
     end
 
@@ -127,6 +127,13 @@ flowchart TB
     CorrectNode -->|"LLM call"| OpenAILLM
     SynthesizeNode -->|"LLM call"| OpenAILLM
 
+    %% Seeder & Enrichment
+    SeederService -->|"Generate Descriptions"| OpenAILLM
+    SeederService -->|"Generate Embeddings"| Embeddings["Embedding Model<br/>(text-embedding-3-small)"]
+
+    %% Semantic Search Embeddings
+    SemanticTool -->|"Embed Query"| Embeddings
+
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
@@ -142,7 +149,7 @@ flowchart TB
 *   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
 *   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
 *   **Graph-Based Schema Retrieval**: Uses Memgraph for semantic vector search and graph traversal, returning relevant tables, columns, and relationships in a single call.
-*   **Dynamic Seeding**: Ephemeral seeder service hydrates the schema graph and initializes golden examples on startup.
+*   **Manual Seeding**: Dedicated seeder service hydrates the schema graph and initializes golden examples on demand, decoupling ingestion from startup.
 *   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
 *   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
