@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 import asyncpg
-from mcp_server.db import Database
+from mcp_server.config.database import Database
 from mcp_server.rag import RagEngine, search_similar_tables
 
 

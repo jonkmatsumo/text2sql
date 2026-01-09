@@ -4,7 +4,7 @@ Provides canonical types and protocols for backend-agnostic data access.
 """
 
 from mcp_server.dal.context import get_current_tenant, set_current_tenant
-from mcp_server.dal.types import CacheLookupResult, Edge, FilterCriteria, GraphData, Node
+from mcp_server.models.dal_types import CacheLookupResult, Edge, FilterCriteria, GraphData, Node
 
 __all__ = [
     # Types

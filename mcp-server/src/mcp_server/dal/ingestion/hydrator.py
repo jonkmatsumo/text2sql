@@ -3,10 +3,10 @@ import logging
 import re
 from typing import Set, Tuple
 
+from mcp_server.dal.ingestion.indexing import EmbeddingService
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.graph_ingestion.indexing import EmbeddingService
+from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
 from mcp_server.models.schema import ColumnMetadata, TableMetadata
-from mcp_server.retrievers.data_schema_retriever import DataSchemaRetriever
 
 logger = logging.getLogger(__name__)
 

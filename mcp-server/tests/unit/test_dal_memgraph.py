@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.types import Node
+from mcp_server.models.dal_types import Node
 
 
 class TestMemgraphStore:

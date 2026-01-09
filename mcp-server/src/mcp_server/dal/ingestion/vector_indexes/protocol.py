@@ -4,7 +4,7 @@ Defines the interface for vector similarity search backends.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Protocol
+from typing import List, Optional, Protocol
 
 import numpy as np
 
@@ -21,7 +21,7 @@ class SearchResult:
 
     id: int
     score: float
-    metadata: dict | None = field(default=None)
+    metadata: Optional[dict] = field(default=None)
 
 
 class VectorIndex(Protocol):

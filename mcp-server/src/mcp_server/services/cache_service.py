@@ -3,7 +3,7 @@
 import asyncio
 from typing import Optional
 
-from mcp_server.db import Database
+from mcp_server.config.database import Database
 from mcp_server.rag import RagEngine
 
 # Conservative threshold to prevent serving wrong SQL for nuanced queries

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
-from mcp_server.db import Database
+from mcp_server.config.database import Database
 
 
 class TestDatabase:
@@ -22,9 +22,14 @@ class TestDatabase:
         """Test successful pool initialization with default values."""
         mock_pool = AsyncMock(spec=asyncpg.Pool)
 
-        with patch("mcp_server.db.asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+        with patch(
+            "mcp_server.config.database.asyncpg.create_pool", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.return_value = mock_pool
-            with patch("mcp_server.db.os.getenv", side_effect=lambda key, default=None: default):
+            with patch(
+                "mcp_server.config.database.os.getenv",
+                side_effect=lambda key, default=None: default,
+            ):
                 await Database.init()
 
                 assert Database._pool == mock_pool
@@ -47,10 +52,12 @@ class TestDatabase:
             "DB_PASS": "test_pass",
         }
 
-        with patch("mcp_server.db.asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
+        with patch(
+            "mcp_server.config.database.asyncpg.create_pool", new_callable=AsyncMock
+        ) as mock_create:
             mock_create.return_value = mock_pool
             with patch(
-                "mcp_server.db.os.getenv",
+                "mcp_server.config.database.os.getenv",
                 side_effect=lambda key, default=None: env_vars.get(key, default),
             ):
                 await Database.init()
@@ -67,9 +74,14 @@ class TestDatabase:
     @pytest.mark.asyncio
     async def test_init_connection_error(self):
         """Test that ConnectionError is raised when pool creation fails."""
-        with patch("mcp_server.db.asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
-            mock_create.side_effect = Exception("Connection refused")
-            with patch("mcp_server.db.os.getenv", side_effect=lambda key, default=None: default):
+        with patch(
+            "mcp_server.config.database.asyncpg.create_pool", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.side_effect = Exception("Database connection failed")
+            with patch(
+                "mcp_server.config.database.os.getenv",
+                side_effect=lambda key, default=None: default,
+            ):
                 with pytest.raises(ConnectionError) as exc_info:
                     await Database.init()
 

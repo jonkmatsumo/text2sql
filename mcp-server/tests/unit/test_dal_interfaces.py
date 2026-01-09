@@ -6,9 +6,9 @@ Verifies that the protocols are structurally correct and can be implemented.
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from mcp_server.dal.ingestion.vector_indexes.protocol import SearchResult
 from mcp_server.dal.interfaces import CacheStore, ExtendedVectorIndex, GraphStore
-from mcp_server.dal.types import CacheLookupResult, Edge, GraphData, Node
-from mcp_server.graph_ingestion.vector_indexes.protocol import SearchResult
+from mcp_server.models.dal_types import CacheLookupResult, Edge, GraphData, Node
 
 
 class MockCacheStore:

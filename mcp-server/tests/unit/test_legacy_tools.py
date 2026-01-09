@@ -2,7 +2,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.dal.types import ColumnDef, TableDef
+from mcp_server.models.dal_types import ColumnDef, TableDef
 from mcp_server.tools.legacy import get_table_schema, list_tables, search_relevant_tables
 
 

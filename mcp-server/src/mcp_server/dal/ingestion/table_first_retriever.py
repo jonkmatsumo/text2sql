@@ -9,7 +9,7 @@ This reduces context window flooding and ensures focused prompt context.
 
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
@@ -28,7 +28,7 @@ DEFAULT_MAX_COLUMNS_PER_TABLE = 3
 DEFAULT_RERANK_EXPANSION = 10
 
 
-def format_table_text(table_name: str, description: str | None = None) -> str:
+def format_table_text(table_name: str, description: Optional[str] = None) -> str:
     """Format table for embedding search.
 
     Args:
@@ -47,8 +47,8 @@ def format_table_text(table_name: str, description: str | None = None) -> str:
 def format_column_text(
     table_name: str,
     column_name: str,
-    description: str | None = None,
-    data_type: str | None = None,
+    description: Optional[str] = None,
+    data_type: Optional[str] = None,
 ) -> str:
     """Format column for embedding search.
 
@@ -114,9 +114,9 @@ class TableFirstRetriever:
     def retrieve(
         self,
         query_vector: np.ndarray,
-        table_k: int | None = None,
-        column_k: int | None = None,
-        max_columns_per_table: int | None = None,
+        table_k: Optional[int] = None,
+        column_k: Optional[int] = None,
+        max_columns_per_table: Optional[int] = None,
     ) -> dict:
         """Execute table-first retrieval.
 

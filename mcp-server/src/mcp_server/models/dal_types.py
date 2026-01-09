@@ -5,7 +5,7 @@ preventing backend-specific objects (Neo4j Node, asyncpg Record, etc.)
 from leaking into business logic.
 """
 
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -72,7 +72,7 @@ class GraphData(BaseModel):
         """Return the number of edges."""
         return len(self.edges)
 
-    def get_node_by_id(self, node_id: str) -> Node | None:
+    def get_node_by_id(self, node_id: str) -> Optional[Node]:
         """Find a node by its ID.
 
         Args:

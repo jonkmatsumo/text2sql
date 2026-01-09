@@ -1,11 +1,11 @@
 from unittest.mock import MagicMock, patch
 
-from mcp_server.graph_ingestion.sync_engine import SyncEngine
+from mcp_server.dal.ingestion.sync_engine import SyncEngine
 from mcp_server.models.schema import ColumnMetadata, TableMetadata
 
 
-@patch("mcp_server.graph_ingestion.sync_engine.get_retriever")
-@patch("mcp_server.graph_ingestion.sync_engine.MemgraphStore")
+@patch("mcp_server.dal.ingestion.sync_engine.get_retriever")
+@patch("mcp_server.dal.ingestion.sync_engine.MemgraphStore")
 def test_sync_engine_init(mock_memgraph_store_cls, mock_get_retriever):
     """Test initialization."""
     SyncEngine()
@@ -13,8 +13,8 @@ def test_sync_engine_init(mock_memgraph_store_cls, mock_get_retriever):
     mock_memgraph_store_cls.assert_called_once()
 
 
-@patch("mcp_server.graph_ingestion.sync_engine.get_retriever")
-@patch("mcp_server.graph_ingestion.sync_engine.MemgraphStore")
+@patch("mcp_server.dal.ingestion.sync_engine.get_retriever")
+@patch("mcp_server.dal.ingestion.sync_engine.MemgraphStore")
 def test_get_live_schema(mock_memgraph_store_cls, mock_get_retriever):
     """Test get_live_schema uses retriever and formats correctly."""
     mock_retriever = MagicMock()

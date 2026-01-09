@@ -3,14 +3,14 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.cache import (
+from mcp_server.models.dal_types import CacheLookupResult
+from mcp_server.services.cache_service import (
     SIMILARITY_THRESHOLD,
     get_cache_stats,
     lookup_cache,
     update_cache,
     update_cache_access,
 )
-from mcp_server.dal.types import CacheLookupResult
 
 
 class TestLookupCache:
@@ -24,8 +24,13 @@ class TestLookupCache:
 
         mock_embedding = [0.1] * 384
 
-        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
-            with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
+        with patch(
+            "mcp_server.services.cache_service.Database.get_cache_store", return_value=mock_store
+        ):
+            with patch(
+                "mcp_server.services.cache_service.RagEngine.embed_text",
+                return_value=mock_embedding,
+            ):
                 cached = await lookup_cache("What is the total revenue?", tenant_id=1)
 
                 assert cached is None
@@ -46,10 +51,15 @@ class TestLookupCache:
 
         mock_embedding = [0.1] * 384
 
-        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
-            with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
+        with patch(
+            "mcp_server.services.cache_service.Database.get_cache_store", return_value=mock_store
+        ):
+            with patch(
+                "mcp_server.services.cache_service.RagEngine.embed_text",
+                return_value=mock_embedding,
+            ):
                 with patch(
-                    "mcp_server.cache.update_cache_access", new_callable=AsyncMock
+                    "mcp_server.services.cache_service.update_cache_access", new_callable=AsyncMock
                 ) as mock_update:
                     cached = await lookup_cache("What is the total revenue?", tenant_id=1)
 
@@ -70,9 +80,12 @@ class TestLookupCache:
         mock_embedding = [0.1] * 384
 
         with patch(
-            "mcp_server.cache.Database.get_cache_store", return_value=mock_store
+            "mcp_server.services.cache_service.Database.get_cache_store", return_value=mock_store
         ) as mock_get:
-            with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
+            with patch(
+                "mcp_server.services.cache_service.RagEngine.embed_text",
+                return_value=mock_embedding,
+            ):
                 await lookup_cache("test query", tenant_id=1)
 
                 mock_get.assert_called_once()
@@ -88,8 +101,13 @@ class TestUpdateCache:
         mock_store = AsyncMock()
         mock_embedding = [0.1] * 384
 
-        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
-            with patch("mcp_server.cache.RagEngine.embed_text", return_value=mock_embedding):
+        with patch(
+            "mcp_server.services.cache_service.Database.get_cache_store", return_value=mock_store
+        ):
+            with patch(
+                "mcp_server.services.cache_service.RagEngine.embed_text",
+                return_value=mock_embedding,
+            ):
                 await update_cache(
                     "What is the total revenue?",
                     "SELECT SUM(amount) FROM payment;",
@@ -112,7 +130,9 @@ class TestUpdateCacheAccess:
         """Verify hit count updates delegate to store."""
         mock_store = AsyncMock()
 
-        with patch("mcp_server.cache.Database.get_cache_store", return_value=mock_store):
+        with patch(
+            "mcp_server.services.cache_service.Database.get_cache_store", return_value=mock_store
+        ):
             await update_cache_access(cache_id="1", tenant_id=1)
 
             mock_store.record_hit.assert_called_once_with("1", 1)

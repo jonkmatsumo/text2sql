@@ -5,15 +5,15 @@ Currently only HNSW is supported, but env var is preserved for future backends.
 """
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .protocol import VectorIndex
 
 
 def create_vector_index(
-    backend: str | None = None,
-    dim: int | None = None,
+    backend: Optional[str] = None,
+    dim: Optional[int] = None,
     max_elements: int = 100_000,
     **kwargs,
 ) -> "VectorIndex":

@@ -9,7 +9,7 @@ Implements hybrid retrieval pattern to maximize Recall@K by:
 
 import logging
 import os
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
@@ -29,7 +29,7 @@ def search_with_rerank(
     query_vector: np.ndarray,
     k: int,
     expansion_factor: int = RERANK_EXPANSION_FACTOR,
-    brute_force_index: "VectorIndex | None" = None,
+    brute_force_index: "Optional[VectorIndex]" = None,
 ) -> List[SearchResult]:
     """Search with retrieve-and-rerank strategy.
 
@@ -103,7 +103,7 @@ def search_with_rerank(
 
 def _log_recall_loss(
     reranked_results: List[SearchResult],
-    brute_force_index: "VectorIndex | None",
+    brute_force_index: "Optional[VectorIndex]",
     query_vector: np.ndarray,
     k: int,
 ) -> None:

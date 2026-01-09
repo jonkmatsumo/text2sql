@@ -6,12 +6,13 @@ This module initializes the FastMCP server and registers all database tools.
 import json
 import os
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastmcp import Context, FastMCP
-from mcp_server.cache import lookup_cache, update_cache
-from mcp_server.db import Database
-from mcp_server.retrieval import get_relevant_examples
+from mcp_server.config.database import Database
+from mcp_server.services.cache_service import lookup_cache, update_cache
+from mcp_server.services.retrieval_service import get_relevant_examples
 from mcp_server.tools import (
     execute_sql_query,
     get_sample_data,
@@ -39,7 +40,7 @@ async def lifespan(app):
     # Check if schema_embeddings table is empty and try to index
     # This is optional - server should still work without it
     try:
-        from mcp_server.indexer import index_all_tables
+        from mcp_server.services.indexer_service import index_all_tables
 
         async with Database.get_connection() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
@@ -61,7 +62,7 @@ async def lifespan(app):
 mcp = FastMCP("Text 2 SQL Agent", lifespan=lifespan)
 
 
-def extract_tenant_id(ctx: Context) -> int | None:
+def extract_tenant_id(ctx: Context) -> Optional[int]:
     """Extract tenant_id from MCP request context.
 
     Priority:

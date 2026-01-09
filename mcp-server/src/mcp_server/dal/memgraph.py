@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 # we might only need it for validation. Let's keep it if we want to register it
 # or use it for type hints.
 from mcp_server.dal.interfaces import GraphStore
-from mcp_server.dal.types import Edge, GraphData, Node
+from mcp_server.models.dal_types import Edge, GraphData, Node
 from neo4j import Driver, GraphDatabase
 
 # from neo4j.graph import Node as Neo4jNode, Relationship as Neo4jRel

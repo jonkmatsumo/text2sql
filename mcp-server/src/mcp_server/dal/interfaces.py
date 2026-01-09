@@ -8,7 +8,8 @@ type safety.
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
-from mcp_server.dal.types import (
+from mcp_server.dal.ingestion.vector_indexes.protocol import SearchResult
+from mcp_server.models.dal_types import (
     CacheLookupResult,
     Edge,
     Example,
@@ -18,7 +19,6 @@ from mcp_server.dal.types import (
     SchemaEmbedding,
     TableDef,
 )
-from mcp_server.graph_ingestion.vector_indexes.protocol import SearchResult
 
 
 @runtime_checkable

@@ -57,30 +57,18 @@ class Database:
             cls._graph_store = MemgraphStore(graph_uri, graph_user, graph_pass)
             print(f"✓ Graph store connection established: {graph_uri}")
 
-            # 3. Init CacheStore & ExampleStore (Postgres impl)
-            # Avoid circular import at top level
-            from mcp_server.dal.postgres import (
-                PgSemanticCache,
-                PostgresExampleStore,
-                PostgresMetadataStore,
-                PostgresSchemaIntrospector,
-                PostgresSchemaStore,
-            )
+            # 3. Init Stores via Factory
+            from mcp_server.factory.dal_factory import DALFactory
 
-            cls._cache_store = PgSemanticCache()
-            print("✓ Cache store initialized")
+            (
+                cls._cache_store,
+                cls._example_store,
+                cls._schema_store,
+                cls._schema_introspector,
+                cls._metadata_store,
+            ) = DALFactory.create_stores()
 
-            cls._example_store = PostgresExampleStore()
-            print("✓ Example store initialized")
-
-            cls._schema_store = PostgresSchemaStore()
-            print("✓ Schema store initialized")
-
-            cls._schema_introspector = PostgresSchemaIntrospector()
-            print("✓ Schema introspector initialized")
-
-            cls._metadata_store = PostgresMetadataStore()
-            print("✓ Metadata store initialized")
+            print("✓ Stores initialized via DALFactory")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
@@ -115,6 +103,9 @@ class Database:
             raise RuntimeError("Graph store not initialized. Call Database.init() first.")
         return cls._graph_store
 
+    @classmethod
+    def get_cache_store(cls) -> CacheStore:
+        """Get the initialized cache store instance."""
         if cls._cache_store is None:
             raise RuntimeError("Cache store not initialized. Call Database.init() first.")
         return cls._cache_store

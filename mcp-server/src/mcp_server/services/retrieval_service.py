@@ -5,10 +5,10 @@ import logging
 from typing import Optional
 
 import numpy as np
-from mcp_server.graph_ingestion.vector_indexes.factory import create_vector_index
-from mcp_server.graph_ingestion.vector_indexes.protocol import VectorIndex
+from mcp_server.dal.ingestion.vector_indexes.factory import create_vector_index
+from mcp_server.dal.ingestion.vector_indexes.protocol import VectorIndex
+from mcp_server.dal.retrievers.example_loader import ExampleLoader
 from mcp_server.rag import RagEngine
-from mcp_server.retrievers.example_loader import ExampleLoader
 
 logger = logging.getLogger(__name__)
 

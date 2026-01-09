@@ -4,8 +4,8 @@ from typing import Optional
 
 import numpy as np
 from fastembed import TextEmbedding
-from mcp_server.graph_ingestion.vector_indexes.factory import create_vector_index
-from mcp_server.graph_ingestion.vector_indexes.protocol import VectorIndex
+from mcp_server.dal.ingestion.vector_indexes.factory import create_vector_index
+from mcp_server.dal.ingestion.vector_indexes.protocol import VectorIndex
 from mcp_server.rag.schema_loader import SchemaLoader
 
 
@@ -144,7 +144,7 @@ async def _get_schema_index() -> VectorIndex:
     if _schema_index is None:
         # Create persistent HNSW index (in-memory, backed by DB via loader)
         # Using 384 dimensions for BGE-small
-        _schema_index = create_vector_index(dimension=384)
+        _schema_index = create_vector_index(dim=384)
         print("✓ Initialized new Schema Vector Index")
 
         # Load examples from DB
@@ -153,6 +153,7 @@ async def _get_schema_index() -> VectorIndex:
             await loader.load_schema_embeddings(_schema_index)
         except Exception as e:
             print(f"Error loading schemas: {e}")
+            raise e
 
     return _schema_index
 

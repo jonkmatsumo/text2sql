@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from mcp_server.config.database import Database
 from mcp_server.dal.interfaces import (
     CacheStore,
     ExampleStore,
@@ -7,7 +8,7 @@ from mcp_server.dal.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
-from mcp_server.dal.types import (
+from mcp_server.models.dal_types import (
     CacheLookupResult,
     ColumnDef,
     Example,
@@ -15,8 +16,11 @@ from mcp_server.dal.types import (
     SchemaEmbedding,
     TableDef,
 )
-from mcp_server.db import Database
-from mcp_server.rag import format_vector_for_postgres
+
+
+def _format_vector(embedding: List[float]) -> str:
+    """Format Python list as PostgreSQL vector string."""
+    return "[" + ",".join(str(float(x)) for x in embedding) + "]"
 
 
 class PgSemanticCache(CacheStore):
@@ -29,7 +33,7 @@ class PgSemanticCache(CacheStore):
         threshold: float = 0.95,
     ) -> Optional[CacheLookupResult]:
         """Lookup a cached result by embedding similarity."""
-        pg_vector = format_vector_for_postgres(query_embedding)
+        pg_vector = _format_vector(query_embedding)
 
         # 1 - distance = similarity (cosine)
         query = """
@@ -82,7 +86,7 @@ class PgSemanticCache(CacheStore):
         tenant_id: int,
     ) -> None:
         """Store a new cache entry."""
-        pg_vector = format_vector_for_postgres(query_embedding)
+        pg_vector = _format_vector(query_embedding)
 
         query = """
             INSERT INTO semantic_cache (tenant_id, user_query, query_embedding, generated_sql)
@@ -177,7 +181,7 @@ class PostgresSchemaStore(SchemaStore):
         Args:
             embedding: The schema embedding to save.
         """
-        pg_vector = format_vector_for_postgres(embedding.embedding)
+        pg_vector = _format_vector(embedding.embedding)
 
         query = """
             INSERT INTO public.schema_embeddings (table_name, schema_text, embedding)

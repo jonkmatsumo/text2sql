@@ -2,8 +2,8 @@ import os
 import tempfile
 import unittest
 
-from mcp_server.graph_ingestion.enrichment.loader import replay_wal
-from mcp_server.graph_ingestion.enrichment.wal import WALManager
+from mcp_server.dal.ingestion.enrichment.loader import replay_wal
+from mcp_server.dal.ingestion.enrichment.wal import WALManager
 
 
 class TestWAL(unittest.TestCase):

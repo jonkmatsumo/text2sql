@@ -1,11 +1,11 @@
 from unittest.mock import MagicMock, patch
 
-from mcp_server.graph_ingestion.hydrator import GraphHydrator, should_skip_column_embedding
+from mcp_server.dal.ingestion.hydrator import GraphHydrator, should_skip_column_embedding
 from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
 
 
-@patch("mcp_server.graph_ingestion.hydrator.MemgraphStore")
-@patch("mcp_server.graph_ingestion.hydrator.EmbeddingService")
+@patch("mcp_server.dal.ingestion.hydrator.MemgraphStore")
+@patch("mcp_server.dal.ingestion.hydrator.EmbeddingService")
 def test_hydrate_schema(mock_embedding_service, mock_memgraph_store_cls):
     """Test hydrate_schema logic with DAL."""
     # Setup mock store instance

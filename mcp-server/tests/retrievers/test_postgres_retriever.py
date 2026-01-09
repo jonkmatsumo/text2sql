@@ -1,17 +1,17 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp_server.dal.retrievers.postgres_retriever import PostgresRetriever
 from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
-from mcp_server.retrievers.postgres_retriever import PostgresRetriever
 
 
 @pytest.fixture
 def mock_engine_and_inspector():
     """Mock SQLAlchemy engine and inspector."""
     with patch(
-        "mcp_server.retrievers.postgres_retriever.create_engine"
+        "mcp_server.dal.retrievers.postgres_retriever.create_engine"
     ) as mock_create_engine, patch(
-        "mcp_server.retrievers.postgres_retriever.inspect"
+        "mcp_server.dal.retrievers.postgres_retriever.inspect"
     ) as mock_inspect:
 
         mock_engine = MagicMock()

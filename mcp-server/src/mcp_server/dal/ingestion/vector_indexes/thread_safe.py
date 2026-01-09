@@ -7,7 +7,7 @@ import gc
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Callable, List
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 import numpy as np
 
@@ -56,7 +56,7 @@ class ThreadSafeIndex:
     @classmethod
     def create(
         cls,
-        dim: int | None = None,
+        dim: Optional[int] = None,
         **kwargs,
     ) -> "ThreadSafeIndex":
         """Create ThreadSafeIndex with HNSW backend.
@@ -92,7 +92,7 @@ class ThreadSafeIndex:
         self,
         vectors: np.ndarray,
         ids: List[int],
-        metadata: dict[int, dict] | None = None,
+        metadata: Optional[dict[int, dict]] = None,
     ) -> None:
         """Add items to active index (NOT thread-safe for writes).
 
@@ -150,7 +150,7 @@ class ThreadSafeIndex:
             True if swap succeeded, False if build failed.
         """
         old_index = self._active_index
-        new_index: "VectorIndex | None" = None
+        new_index: "Optional[VectorIndex]" = None
 
         try:
             # 1. Shadow Build: Build new index without touching live index

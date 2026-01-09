@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from mcp_server.graph_ingestion.indexing import (
+from mcp_server.dal.ingestion.indexing import (
     EmbeddingService,
     VectorIndexer,
     apply_adaptive_threshold,
@@ -18,7 +18,7 @@ ZERO_VECTOR = [0.0] * 1536
 @pytest.fixture
 def mock_openai():
     """Mock OpenAI client."""
-    with patch("mcp_server.graph_ingestion.indexing.OpenAI") as mock:
+    with patch("mcp_server.dal.ingestion.indexing.OpenAI") as mock:
         client_instance = mock.return_value
         response_mock = Mock()
         data_item = Mock()
@@ -32,7 +32,7 @@ def mock_openai():
 @pytest.fixture
 def mock_store_cls():
     """Mock MemgraphStore class."""
-    with patch("mcp_server.graph_ingestion.indexing.MemgraphStore") as mock:
+    with patch("mcp_server.dal.ingestion.indexing.MemgraphStore") as mock:
         yield mock
 
 

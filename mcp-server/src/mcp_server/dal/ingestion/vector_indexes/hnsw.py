@@ -5,7 +5,7 @@ High-performance approximate nearest neighbor search optimized for millions of v
 
 import pickle
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -37,7 +37,7 @@ class HNSWIndex:
 
     def __init__(
         self,
-        dim: int | None = None,
+        dim: Optional[int] = None,
         max_elements: int = 100_000,
         m: int = DEFAULT_M,
         ef_construction: int = DEFAULT_EF_CONSTRUCTION,
@@ -66,12 +66,12 @@ class HNSWIndex:
         self._ef_construction = ef_construction
         self._ef_search = ef_search
 
-        self._index: hnswlib.Index | None = None
+        self._index: Optional[hnswlib.Index] = None
         self._ids: List[int] = []
         self._id_to_idx: dict[int, int] = {}  # Maps external id -> internal index
         self._metadata: dict[int, dict] = {}
         # Store normalized vectors for reranking (hnswlib doesn't expose them)
-        self._vectors_normalized: np.ndarray | None = None
+        self._vectors_normalized: Optional[np.ndarray] = None
 
         # Initialize index if dimension is known
         if dim is not None:
@@ -155,7 +155,7 @@ class HNSWIndex:
         self,
         vectors: np.ndarray,
         ids: List[int],
-        metadata: dict[int, dict] | None = None,
+        metadata: Optional[dict[int, dict]] = None,
     ) -> None:
         """Add items to the index with L2 normalization.
 
@@ -287,7 +287,7 @@ class HNSWIndex:
         """Return number of items in the index."""
         return len(self._ids)
 
-    def get_vectors_by_ids(self, ids: List[int]) -> np.ndarray | None:
+    def get_vectors_by_ids(self, ids: List[int]) -> Optional[np.ndarray]:
         """Retrieve normalized vectors for given IDs.
 
         Args:
@@ -309,7 +309,7 @@ class HNSWIndex:
 
         return self._vectors_normalized[indices].copy()
 
-    def get_all_vectors(self) -> tuple[np.ndarray | None, List[int]]:
+    def get_all_vectors(self) -> tuple[Optional[np.ndarray], List[int]]:
         """Retrieve all normalized vectors and their IDs.
 
         Returns:
