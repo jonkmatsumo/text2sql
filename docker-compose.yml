@@ -31,11 +31,13 @@ services:
       - "3000:3000"
     networks:
       - text2sql_net
+    volumes:
+      - memgraph_data:/var/lib/memgraph
 
   seeder:
     image: text2sql-mcp-server:latest
     container_name: text2sql_seeder
-    command: python -m mcp_server.seeding.cli
+    command: sleep infinity
     build: ./mcp-server
     depends_on:
       postgres-db:
@@ -62,8 +64,6 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
-      seeder:
-        condition: service_completed_successfully
     environment:
       DB_HOST: postgres-db
       DB_PORT: 5432
@@ -138,8 +138,8 @@ services:
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
 
   minio:
@@ -158,13 +158,14 @@ services:
       - text2sql_net
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pg_data:
   mlflow_artifacts:
+  memgraph_data:
 
 
 networks:
