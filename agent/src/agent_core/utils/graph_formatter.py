@@ -1,33 +1,40 @@
-"""Graph formatter utility for converting semantic subgraph to Markdown.
+"""Graph formatter utility for converting semantic subgraph to compact Markdown.
 
-Includes budget enforcement to prevent schema context explosion in LLM prompts.
+Includes strict budget enforcement and prioritization to prevent schema context explosion.
 """
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Set
 
 logger = logging.getLogger(__name__)
 
-# Hard limit on schema context size (~2000 tokens at 4 chars/token)
+# Hard caps for compact format
+MAX_TABLES = 8
+MAX_COLS_PER_TABLE = 10
 SCHEMA_CONTEXT_MAX_CHARS = 8000
-
-# Maximum columns to show per table before truncating
-MAX_COLUMNS_PER_TABLE = 10
 
 
 def format_graph_to_markdown(
     graph_data: Dict,
     max_chars: int = SCHEMA_CONTEXT_MAX_CHARS,
-    max_cols_per_table: int = MAX_COLUMNS_PER_TABLE,
+    max_tables: int = MAX_TABLES,
+    max_cols_per_table: int = MAX_COLS_PER_TABLE,
 ) -> str:
-    """Convert graph JSON from get_semantic_subgraph to LLM-readable Markdown.
+    """Convert graph JSON to compact LLM-readable Markdown.
 
-    Enforces a character budget to prevent prompt explosion.
-    Tables and columns are dropped progressively if budget is exceeded.
+    Format:
+    # Schema Context
+    ## Tables
+    - **TableA** (col1 `pk`, col2 `fk`, col3)
+    - **TableB** (col1 `pk`, col4)
+
+    ## Joins
+    - **TableA** JOIN **TableB** ON col2
 
     Args:
         graph_data: Dictionary with "nodes" and "relationships" keys.
         max_chars: Maximum allowed characters in output.
+        max_tables: Maximum number of tables to include.
         max_cols_per_table: Maximum columns to show per table.
 
     Returns:
@@ -39,15 +46,25 @@ def format_graph_to_markdown(
     if not nodes:
         return "No relevant tables found."
 
-    # Index nodes by ID for quick lookup
+    # Index nodes by ID
     node_map = {n.get("id"): n for n in nodes}
 
     # Separate tables and columns
     tables = [n for n in nodes if n.get("type") == "Table"]
 
-    # Build column-to-table mapping from HAS_COLUMN relationships
-    table_columns: Dict[str, List[Dict]] = {t.get("id"): [] for t in tables}
+    # Filter tables: Sort by score desc, take top max_tables
+    tables.sort(key=lambda t: t.get("score", t.get("similarity", 0.5)), reverse=True)
+
+    dropped_table_count = max(0, len(tables) - max_tables)
+    tables = tables[:max_tables]
+    table_ids = {t.get("id") for t in tables}
+
+    # Map columns to tables and track FKs
+    table_columns: Dict[str, List[Dict]] = {t_id: [] for t_id in table_ids}
     foreign_keys: List[Dict] = []
+
+    # Columns involved in joins (to prioritize them)
+    join_column_ids: Set[str] = set()
 
     for rel in relationships:
         rel_type = rel.get("type")
@@ -55,129 +72,104 @@ def format_graph_to_markdown(
         target_id = rel.get("target")
 
         if rel_type == "HAS_COLUMN":
-            if source_id in table_columns:
-                col_node = node_map.get(target_id, {})
-                table_columns[source_id].append(col_node)
+            if source_id in table_ids:
+                col_node = node_map.get(target_id)
+                if col_node:
+                    table_columns[source_id].append(col_node)
         elif rel_type == "FOREIGN_KEY_TO":
             foreign_keys.append(rel)
+            join_column_ids.add(source_id)
+            join_column_ids.add(target_id)
 
-    # Sort tables by score (if available) descending - drop lowest scores first
-    tables_with_scores = []
-    for t in tables:
-        score = t.get("score", t.get("similarity", 0.5))
-        tables_with_scores.append((t, score))
-    tables_with_scores.sort(key=lambda x: x[1], reverse=True)
+    # Helper to calculate column priority
+    def get_column_priority(col: Dict) -> int:
+        # Lower is higher priority
+        if col.get("is_primary_key"):
+            return 0
+        if col.get("id") in join_column_ids:
+            return 1
 
-    # Try formatting with progressively fewer tables until under budget
-    result = _format_with_budget(
-        tables_with_scores,
-        table_columns,
-        foreign_keys,
-        node_map,
-        max_chars,
-        max_cols_per_table,
-    )
+        # Semantic columns (names matching query or text types)
+        # We don't have query terms here, but we can prioritize text types
+        dtype = col.get("data_type", col.get("type", "")).lower()
+        if "char" in dtype or "text" in dtype or "string" in dtype:
+            return 2
 
-    return result
+        return 3
 
+    # Format Output
+    output_parts = ["# Schema Context", "", "## Tables"]
 
-def _format_with_budget(
-    tables_with_scores: List[tuple],
-    table_columns: Dict[str, List[Dict]],
-    foreign_keys: List[Dict],
-    node_map: Dict,
-    max_chars: int,
-    max_cols_per_table: int,
-) -> str:
-    """Format tables with budget enforcement.
+    for table in tables:
+        t_id = table.get("id")
+        t_name = table.get("name")
 
-    Progressively drops tables and reduces columns until under budget.
-    """
-    num_tables = len(tables_with_scores)
+        cols = table_columns.get(t_id, [])
+        # Prioritize columns
+        cols.sort(key=get_column_priority)
 
-    # Try with all tables first, then reduce
-    for attempt_tables in range(num_tables, 0, -1):
-        # Try with full columns, then reduce
-        for attempt_cols in [max_cols_per_table, 5, 3]:
-            output = _render_tables(
-                tables_with_scores[:attempt_tables],
-                table_columns,
-                foreign_keys,
-                node_map,
-                attempt_cols,
-            )
+        # Take top N
+        display_cols = cols[:max_cols_per_table]
 
-            if len(output) <= max_chars:
-                if attempt_tables < num_tables or attempt_cols < max_cols_per_table:
+        col_strings = []
+        for col in display_cols:
+            c_name = col.get("name")
+            flags = []
+            if col.get("is_primary_key"):
+                flags.append("`pk`")
+            # We can't easily know if *this specific column* is an FK without
+            # checking relationships again efficiently. But we tracked join_column_ids.
+            if col.get("id") in join_column_ids and not col.get("is_primary_key"):
+                flags.append("`fk`")
 
-                    dropped_tables = num_tables - attempt_tables
-                    logger.warning(
-                        f"Schema context truncated: {dropped_tables} tables dropped, "
-                        f"{attempt_cols} cols/table. Final size: {len(output)} chars"
-                    )
-                    # Add truncation marker
-                    output += f"\n\n_...truncated ({dropped_tables} tables omitted)_"
-                return output
+            flag_str = f" {' '.join(flags)}" if flags else ""
+            col_strings.append(f"{c_name}{flag_str}")
 
-    # Still over budget after all reductions - hard truncate
-    output = _render_tables(
-        tables_with_scores[:1],
-        table_columns,
-        foreign_keys,
-        node_map,
-        3,
-    )
-    logger.warning(f"Schema context hard-truncated to 1 table. Original: {num_tables} tables")
-    return output[: max_chars - 50] + "\n\n_...truncated (schema too large)_"
+        cols_str = ", ".join(col_strings)
+        if len(cols) > max_cols_per_table:
+            cols_str += ", ..."
 
+        output_parts.append(f"- **{t_name}** ({cols_str})")
 
-def _render_tables(
-    tables_with_scores: List[tuple],
-    table_columns: Dict[str, List[Dict]],
-    foreign_keys: List[Dict],
-    node_map: Dict,
-    max_cols: int,
-) -> str:
-    """Render tables to markdown with column limit."""
-    output_parts = []
+    if dropped_table_count > 0:
+        output_parts.append(f"_...{dropped_table_count} more tables omitted_")
 
-    for table, score in tables_with_scores:
-        table_id = table.get("id")
-        table_name = table.get("name", "Unknown")
-        table_desc = table.get("description", "")
-
-        output_parts.append(f"## Table: {table_name}")
-        if table_desc:
-            output_parts.append(f"_{table_desc}_")
-        output_parts.append("")
-
-        # List columns (limited)
-        cols = table_columns.get(table_id, [])
-        col_count = len(cols)
-
-        for i, col in enumerate(cols[:max_cols]):
-            col_name = col.get("name", "unknown")
-            col_type = col.get("data_type", col.get("type", "unknown"))
-            output_parts.append(f"- **{col_name}** ({col_type})")
-
-        if col_count > max_cols:
-            output_parts.append(f"- _...and {col_count - max_cols} more columns_")
-
-        output_parts.append("")
-
-    # Add FK connections (compact format)
+    # Format Joins (Table-Level)
     if foreign_keys:
-        output_parts.append("### Joins")
+        output_parts.extend(["", "## Joins"])
         seen_joins = set()
+
         for fk in foreign_keys:
-            source_col = node_map.get(fk.get("source"), {})
-            target_col = node_map.get(fk.get("target"), {})
-            source_table = source_col.get("table", "?")
-            target_table = target_col.get("table", "?")
-            join_key = f"{source_table}->{target_table}"
+            src_col = node_map.get(fk.get("source"))
+            tgt_col = node_map.get(fk.get("target"))
+
+            if not src_col or not tgt_col:
+                continue
+
+            src_table_name = src_col.get("table")
+            tgt_table_name = tgt_col.get("table")
+
+            # Ensure we only show joins involving our kept tables
+            # (Though our query already filters this largely, verify to be safe)
+            # Actually, `foreign_keys` includes all FKs from graph_data.
+            # We should only show if at least one side is in our `tables` list?
+            # Or if both? Usually both for context.
+            # Let's show if at least Source or Target table is in our list.
+
+            # Simple deduplication key
+            join_key = f"{src_table_name} JOIN {tgt_table_name} ON {src_col.get('name')}"
+
             if join_key not in seen_joins:
                 seen_joins.add(join_key)
-                output_parts.append(f"- {source_table} → {target_table}")
-        output_parts.append("")
+                # Output: TableA JOIN TableB ON col
+                output_parts.append(
+                    f"- **{src_table_name}** JOIN **{tgt_table_name}** " f"ON {src_col.get('name')}"
+                )
 
-    return "\n".join(output_parts)
+    final_output = "\n".join(output_parts)
+
+    # Final hard truncation if somehow still massive (unlikely with caps)
+    if len(final_output) > max_chars:
+        return final_output[: max_chars - 50] + "\n\n_...truncated_"
+
+    return final_output
