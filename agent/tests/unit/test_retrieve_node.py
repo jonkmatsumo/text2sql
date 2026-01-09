@@ -12,7 +12,7 @@ class TestRetrieveContextNode:
 
     @pytest.fixture
     def sample_graph_data(self):
-        """Sample graph data mimicking get_semantic_subgraph output."""
+        """Sample graph data mimicking get_semantic_subgraph_tool output."""
         return {
             "nodes": [
                 {
@@ -84,9 +84,9 @@ class TestRetrieveContextNode:
                 assert "schema_context" in result
                 assert "table_names" in result
 
-                # Verify schema_context contains Markdown headers
-                assert "## Table: Users" in result["schema_context"]
-                assert "## Table: Orders" in result["schema_context"]
+                # Verify schema_context contains compact table format
+                assert "**Users**" in result["schema_context"]
+                assert "**Orders**" in result["schema_context"]
 
                 # Verify table_names contains expected tables
                 assert isinstance(result["table_names"], list)

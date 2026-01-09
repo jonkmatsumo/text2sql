@@ -35,7 +35,7 @@ def create_vector_index(
         ImportError: If hnswlib is not installed for HNSW backend.
     """
     if backend is None:
-        backend = os.getenv("INDEX_BACKEND", "brute_force")
+        backend = os.getenv("INDEX_BACKEND", "hnsw")
 
     backend = backend.lower().strip()
 

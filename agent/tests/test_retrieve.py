@@ -1,5 +1,6 @@
 """Unit tests for context retrieval node."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +18,34 @@ class TestRetrieveContextNode:
         mock_start_span.return_value.__exit__ = MagicMock(return_value=False)
         return mock_span
 
+    def _make_graph_data(self, tables, columns=None, relationships=None):
+        """Build graph data structure matching get_semantic_subgraph_tool output."""
+        nodes = []
+        for i, table in enumerate(tables):
+            nodes.append(
+                {
+                    "id": f"t{i}",
+                    "name": table["name"],
+                    "type": "Table",
+                    "description": table.get("description", ""),
+                }
+            )
+        if columns:
+            for i, col in enumerate(columns):
+                nodes.append(
+                    {
+                        "id": f"c{i}",
+                        "name": col["name"],
+                        "type": "Column",
+                        "data_type": col.get("type", "text"),
+                        "table": col.get("table", ""),
+                    }
+                )
+        return {
+            "nodes": nodes,
+            "relationships": relationships or [],
+        }
+
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
@@ -24,32 +53,29 @@ class TestRetrieveContextNode:
         """Test successful context retrieval."""
         self._mock_mlflow_span(mock_start_span)
 
-        # Create mock tool
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
+        # Create mock tool matching get_semantic_subgraph_tool
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
 
-        import json
+        graph_data = self._make_graph_data(
+            tables=[
+                {"name": "customer", "description": "Customer table"},
+                {"name": "payment", "description": "Payment table"},
+            ],
+            columns=[
+                {"name": "id", "type": "integer", "table": "customer"},
+                {"name": "name", "type": "text", "table": "customer"},
+                {"name": "amount", "type": "numeric", "table": "payment"},
+            ],
+            relationships=[
+                {"source": "t0", "target": "c0", "type": "HAS_COLUMN"},
+                {"source": "t0", "target": "c1", "type": "HAS_COLUMN"},
+                {"source": "t1", "target": "c2", "type": "HAS_COLUMN"},
+            ],
+        )
 
-        mock_response = [
-            {
-                "table_name": "customer",
-                "description": "Customer table",
-                "columns": [
-                    {"name": "id", "type": "integer", "required": True},
-                    {"name": "name", "type": "text", "required": True},
-                ],
-            },
-            {
-                "table_name": "payment",
-                "description": "Payment table",
-                "columns": [
-                    {"name": "amount", "type": "numeric", "required": True},
-                    {"name": "customer_id", "type": "integer", "required": True},
-                ],
-            },
-        ]
-        mock_search_tool.ainvoke = AsyncMock(return_value=json.dumps(mock_response))
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(graph_data))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         # Create test state
         from langchain_core.messages import HumanMessage
@@ -68,17 +94,13 @@ class TestRetrieveContextNode:
         # Verify MCP tools were called
         mock_get_mcp_tools.assert_called_once()
 
-        # Verify search tool was invoked with correct query and limit
-        mock_search_tool.ainvoke.assert_called_once_with(
-            {"user_query": "Show me customer payments", "limit": 5}
-        )
+        # Verify subgraph tool was invoked with query
+        mock_subgraph_tool.ainvoke.assert_called_once_with({"query": "Show me customer payments"})
 
-        # Verify context was returned correctly
+        # Verify context was returned (uses compact markdown format)
         assert "schema_context" in result
-        # Check for new format: "Table: customer... Description: Customer table... Columns:..."
-        assert "Table: customer" in result["schema_context"]
-        assert "Description: Customer table" in result["schema_context"]
-        assert "- id (integer, REQUIRED)" in result["schema_context"]
+        assert "customer" in result["schema_context"]
+        assert "payment" in result["schema_context"]
 
         assert "table_names" in result
         assert "customer" in result["table_names"]
@@ -91,10 +113,12 @@ class TestRetrieveContextNode:
         """Test that query is extracted from last message."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value="")
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"nodes": [], "relationships": []})
+        )
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import HumanMessage
 
@@ -110,36 +134,8 @@ class TestRetrieveContextNode:
 
         await retrieve_context_node(state)
 
-        # Verify search tool was called with the extracted query
-        mock_search_tool.ainvoke.assert_called_once_with({"user_query": test_query, "limit": 5})
-
-    @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
-    @patch("agent_core.nodes.retrieve.get_mcp_tools")
-    async def test_retrieve_context_node_top_k(self, mock_get_mcp_tools, mock_start_span):
-        """Test that limit=5 is used for similarity search."""
-        self._mock_mlflow_span(mock_start_span)
-
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value="")
-        mock_get_mcp_tools.return_value = [mock_search_tool]
-
-        from langchain_core.messages import HumanMessage
-
-        state = AgentState(
-            messages=[HumanMessage(content="test query")],
-            schema_context="",
-            current_sql=None,
-            query_result=None,
-            error=None,
-            retry_count=0,
-        )
-
-        await retrieve_context_node(state)
-
-        # Verify limit=5 was used
-        mock_search_tool.ainvoke.assert_called_once_with({"user_query": "test query", "limit": 5})
+        # Verify subgraph tool was called with the extracted query
+        mock_subgraph_tool.ainvoke.assert_called_once_with({"query": test_query})
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
@@ -148,17 +144,19 @@ class TestRetrieveContextNode:
         """Test context string formatting."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
 
-        mock_data = [
-            {"table_name": "table1", "description": "Schema 1", "columns": []},
-            {"table_name": "table2", "description": "Schema 2", "columns": []},
-            {"table_name": "table3", "description": "Schema 3", "columns": []},
-        ]
+        graph_data = self._make_graph_data(
+            tables=[
+                {"name": "table1", "description": "Schema 1"},
+                {"name": "table2", "description": "Schema 2"},
+                {"name": "table3", "description": "Schema 3"},
+            ]
+        )
 
-        mock_search_tool.ainvoke = AsyncMock(return_value=mock_data)
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(graph_data))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import HumanMessage
 
@@ -173,10 +171,10 @@ class TestRetrieveContextNode:
 
         result = await retrieve_context_node(state)
 
-        # Verify schema context matches the response
-        assert "Table: table1" in result["schema_context"]
-        assert "Table: table2" in result["schema_context"]
-        assert "Table: table3" in result["schema_context"]
+        # Verify schema context uses compact format with **table**
+        assert "**table1**" in result["schema_context"]
+        assert "**table2**" in result["schema_context"]
+        assert "**table3**" in result["schema_context"]
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
@@ -185,10 +183,12 @@ class TestRetrieveContextNode:
         """Test handling of empty search results."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value=[])
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"nodes": [], "relationships": []})
+        )
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import HumanMessage
 
@@ -216,10 +216,12 @@ class TestRetrieveContextNode:
         """Test that query is extracted from the last message when multiple messages exist."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-        mock_search_tool.ainvoke = AsyncMock(return_value="")
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"nodes": [], "relationships": []})
+        )
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import AIMessage, HumanMessage
 
@@ -240,7 +242,7 @@ class TestRetrieveContextNode:
         await retrieve_context_node(state)
 
         # Verify last message content was used
-        mock_search_tool.ainvoke.assert_called_once_with({"user_query": "Second query", "limit": 5})
+        mock_subgraph_tool.ainvoke.assert_called_once_with({"query": "Second query"})
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
@@ -273,24 +275,15 @@ class TestRetrieveContextNode:
         """Test context retrieval with a single result."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-
-        # Test unwrapping nested message-like structure (User scenario)
-        class MockMessage:
-            def __init__(self, text):
-                self.text = text
-
-        json_payload = (
-            '[{"table_name": "single_table", "description": "Single schema", "columns": []}]'
+        graph_data = self._make_graph_data(
+            tables=[{"name": "single_table", "description": "Single schema"}]
         )
-        mock_response = [MockMessage(text=json_payload)]
 
-        mock_search_tool.ainvoke = AsyncMock(return_value=mock_response)
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(graph_data))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import HumanMessage
 
@@ -306,26 +299,25 @@ class TestRetrieveContextNode:
         result = await retrieve_context_node(state)
 
         # Verify single result is returned
-        assert "Single schema" in result["schema_context"]
+        assert "single_table" in result["schema_context"]
         assert "single_table" in result["table_names"]
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_max_results(self, mock_get_mcp_tools, mock_start_span):
-        """Test that limit=5 is passed to search tool."""
+        """Test retrieval with multiple tables."""
         self._mock_mlflow_span(mock_start_span)
 
-        mock_search_tool = MagicMock()
-        mock_search_tool.name = "search_relevant_tables_tool"
-        # Create 5 mock table results
-        import json
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
 
-        mock_rows = [
-            {"table_name": f"table{i+1}", "description": f"Schema {i+1}"} for i in range(5)
-        ]
-        mock_search_tool.ainvoke = AsyncMock(return_value=json.dumps(mock_rows))
-        mock_get_mcp_tools.return_value = [mock_search_tool]
+        # Create 5 tables
+        tables = [{"name": f"table{i+1}", "description": f"Schema {i+1}"} for i in range(5)]
+        graph_data = self._make_graph_data(tables=tables)
+
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(graph_data))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
 
         from langchain_core.messages import HumanMessage
 
@@ -342,17 +334,17 @@ class TestRetrieveContextNode:
 
         # Verify all 5 results are included
         for i in range(5):
-            assert f"Schema {i + 1}" in result["schema_context"]
+            assert f"table{i + 1}" in result["schema_context"]
             assert f"table{i + 1}" in result["table_names"]
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.retrieve.mlflow.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_tool_not_found(self, mock_get_mcp_tools, mock_start_span):
-        """Test handling when search tool is not found."""
+        """Test handling when subgraph tool is not found."""
         self._mock_mlflow_span(mock_start_span)
 
-        # Return tools without the search tool
+        # Return tools without the subgraph tool
         mock_other_tool = MagicMock()
         mock_other_tool.name = "other_tool"
         mock_get_mcp_tools.return_value = [mock_other_tool]
@@ -370,6 +362,6 @@ class TestRetrieveContextNode:
 
         result = await retrieve_context_node(state)
 
-        # Verify empty context is returned when tool not found
-        assert result["schema_context"] == ""
+        # Verify error message when tool not found
+        assert "not available" in result["schema_context"]
         assert result["table_names"] == []
