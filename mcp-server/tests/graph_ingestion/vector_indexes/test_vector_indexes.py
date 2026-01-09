@@ -225,10 +225,15 @@ class TestFactory:
             index = create_vector_index()
             assert isinstance(index, BruteForceIndex)
 
-    def test_hnsw_not_implemented(self):
-        """HNSW should raise NotImplementedError."""
-        with pytest.raises(NotImplementedError, match="HNSW"):
-            create_vector_index(backend="hnsw")
+    def test_hnsw_backend_available(self):
+        """HNSW backend should work when hnswlib is installed."""
+        from mcp_server.graph_ingestion.vector_indexes import HNSWIndex
+
+        if HNSWIndex is None:
+            pytest.skip("hnswlib not installed")
+
+        index = create_vector_index(backend="hnsw", dim=64)
+        assert isinstance(index, HNSWIndex)
 
     def test_unknown_backend_error(self):
         """Unknown backend should raise ValueError."""

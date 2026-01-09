@@ -20,11 +20,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+hnsw = [
+    "hnswlib>=0.8.0",  # High-perf ANN for vector search
+]
 test = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.11.0",
     "pytest-cov>=4.1.0",
+    "hnswlib>=0.8.0",  # Needed for HNSWIndex tests
 ]
 
 [build-system]

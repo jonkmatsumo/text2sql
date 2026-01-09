@@ -12,19 +12,27 @@ if TYPE_CHECKING:
     from .protocol import VectorIndex
 
 
-def create_vector_index(backend: str | None = None) -> "VectorIndex":
+def create_vector_index(
+    backend: str | None = None,
+    dim: int | None = None,
+    max_elements: int = 100_000,
+    **kwargs,
+) -> "VectorIndex":
     """Create a VectorIndex based on backend selection.
 
     Args:
         backend: Backend type. If None, reads from INDEX_BACKEND env var.
-                 Supported values: "brute_force", "hnsw" (future).
+                 Supported values: "brute_force", "hnsw".
+        dim: Vector dimension (required for HNSW if not loading from disk).
+        max_elements: Maximum number of elements (HNSW only).
+        **kwargs: Additional backend-specific arguments.
 
     Returns:
         A VectorIndex implementation.
 
     Raises:
         ValueError: If backend is unknown.
-        NotImplementedError: If backend is not yet implemented.
+        ImportError: If hnswlib is not installed for HNSW backend.
     """
     if backend is None:
         backend = os.getenv("INDEX_BACKEND", "brute_force")
@@ -34,9 +42,9 @@ def create_vector_index(backend: str | None = None) -> "VectorIndex":
     if backend == "brute_force":
         return BruteForceIndex()
     elif backend == "hnsw":
-        raise NotImplementedError(
-            "HNSW backend not yet implemented. " "Install hnswlib and implement HNSWIndex class."
-        )
+        from .hnsw import HNSWIndex
+
+        return HNSWIndex(dim=dim, max_elements=max_elements, **kwargs)
     else:
         raise ValueError(
             f"Unknown INDEX_BACKEND: '{backend}'. " f"Supported values: 'brute_force', 'hnsw'."
