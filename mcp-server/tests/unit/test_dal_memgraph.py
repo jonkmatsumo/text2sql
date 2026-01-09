@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.types import Node
+from mcp_server.models import Node
 
 
 class TestMemgraphStore:
@@ -11,7 +11,7 @@ class TestMemgraphStore:
     @pytest.fixture
     def mock_driver(self):
         """Mock Neo4j Driver."""
-        with patch("mcp_server.dal.memgraph.GraphDatabase.driver") as mock_d:
+        with patch("mcp_server.dal.memgraph.graph_store.GraphDatabase.driver") as mock_d:
             driver_instance = MagicMock()
             mock_d.return_value = driver_instance
             yield driver_instance

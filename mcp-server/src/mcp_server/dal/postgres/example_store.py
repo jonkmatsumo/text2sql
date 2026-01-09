@@ -1,0 +1,44 @@
+import json
+from typing import List
+
+from mcp_server.config.database import Database
+from mcp_server.dal.interfaces.example_store import ExampleStore
+from mcp_server.models import Example
+
+
+class PostgresExampleStore(ExampleStore):
+    """Postgres implementation of ExampleStore."""
+
+    async def fetch_all_examples(self) -> List[Example]:
+        """Fetch all examples from sql_examples table.
+
+        Returns:
+            List of canonical Example objects.
+        """
+        query = """
+            SELECT id, question, sql_query, embedding
+            FROM sql_examples
+            WHERE embedding IS NOT NULL
+        """
+
+        async with Database.get_connection() as conn:
+            rows = await conn.fetch(query)
+
+        examples = []
+        for row in rows:
+            embedding_val = row["embedding"]
+            if isinstance(embedding_val, str):
+                vector = json.loads(embedding_val)
+            else:
+                vector = list(embedding_val)
+
+            examples.append(
+                Example(
+                    id=row["id"],
+                    question=row["question"],
+                    sql_query=row["sql_query"],
+                    embedding=vector,
+                )
+            )
+
+        return examples

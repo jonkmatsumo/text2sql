@@ -1,9 +1,19 @@
-"""Models package for MCP server."""
+"""Data models for the MCP Server."""
 
-from .schema import ColumnMetadata, ForeignKey, TableMetadata
+from .cache import CacheLookupResult
+from .database import ColumnDef, ForeignKeyDef, TableDef
+from .graph import Edge, GraphData, Node
+from .rag import Example, FilterCriteria, SchemaEmbedding
 
 __all__ = [
-    "ColumnMetadata",
-    "ForeignKey",
-    "TableMetadata",
+    "CacheLookupResult",
+    "ColumnDef",
+    "ForeignKeyDef",
+    "TableDef",
+    "Edge",
+    "GraphData",
+    "Node",
+    "Example",
+    "FilterCriteria",
+    "SchemaEmbedding",
 ]

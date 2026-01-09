@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 from mcp_server.tools.schema import get_sample_data, get_table_schema, list_tables
 
 
@@ -10,7 +10,7 @@ def test_list_tables(mock_get_retriever):
     """Test list_tables tool."""
     mock_retriever = MagicMock()
     mock_retriever.list_tables.return_value = [
-        TableMetadata(name="t1", description="desc", sample_data=[])
+        TableDef(name="t1", description="desc", sample_data=[])
     ]
     mock_get_retriever.return_value = mock_retriever
 
@@ -28,10 +28,10 @@ def test_get_table_schema(mock_get_retriever):
     """Test get_table_schema tool."""
     mock_retriever = MagicMock()
     mock_retriever.get_columns.return_value = [
-        ColumnMetadata(name="c1", type="int", is_primary_key=True)
+        ColumnDef(name="c1", data_type="int", is_nullable=True, is_primary_key=True)
     ]
     mock_retriever.get_foreign_keys.return_value = [
-        ForeignKey(source_col="c1", target_table="t2", target_col="c2")
+        ForeignKeyDef(column_name="c1", foreign_table_name="t2", foreign_column_name="c2")
     ]
     mock_get_retriever.return_value = mock_retriever
 
@@ -45,7 +45,7 @@ def test_get_table_schema(mock_get_retriever):
     assert len(table_schema["columns"]) == 1
     assert table_schema["columns"][0]["name"] == "c1"
     assert len(table_schema["foreign_keys"]) == 1
-    assert table_schema["foreign_keys"][0]["target_table"] == "t2"
+    assert table_schema["foreign_keys"][0]["foreign_table_name"] == "t2"
 
     mock_retriever.get_columns.assert_called_with("t1")
     mock_retriever.get_foreign_keys.assert_called_with("t1")

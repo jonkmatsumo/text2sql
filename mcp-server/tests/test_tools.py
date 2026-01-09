@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
+from mcp_server.models import ColumnDef
 from mcp_server.tools import execute_sql_query, get_semantic_definitions, search_relevant_tables
 
 
@@ -667,7 +668,14 @@ class TestSearchRelevantTables:
         with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
                 "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
-            ) as mock_search:
+            ) as mock_search, patch(
+                "mcp_server.config.database.Database.get_schema_introspector"
+            ) as mock_intro:
+                mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
+                mock_table_def = MagicMock()
+                mock_table_def.columns = [mock_col]
+                mock_table_def.foreign_keys = []
+                mock_intro.return_value.get_table_def = AsyncMock(return_value=mock_table_def)
                 with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
                     mock_search.return_value = mock_results
 
@@ -705,7 +713,11 @@ class TestSearchRelevantTables:
         with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
                 "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
-            ) as mock_search:
+            ) as mock_search, patch(
+                "mcp_server.config.database.Database.get_schema_introspector"
+            ) as mock_intro:
+                mock_intro.return_value.get_table_def.return_value.columns = []
+                mock_intro.return_value.get_table_def.return_value.foreign_keys = []
                 with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
                     mock_search.return_value = []
 
@@ -734,7 +746,14 @@ class TestSearchRelevantTables:
         with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
                 "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
-            ) as mock_search:
+            ) as mock_search, patch(
+                "mcp_server.config.database.Database.get_schema_introspector"
+            ) as mock_intro:
+                mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
+                mock_table_def = MagicMock()
+                mock_table_def.columns = [mock_col]
+                mock_table_def.foreign_keys = []
+                mock_intro.return_value.get_table_def = AsyncMock(return_value=mock_table_def)
                 with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
                     mock_search.return_value = mock_results
 
@@ -772,7 +791,14 @@ class TestSearchRelevantTables:
         with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
                 "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
-            ) as mock_search:
+            ) as mock_search, patch(
+                "mcp_server.config.database.Database.get_schema_introspector"
+            ) as mock_intro:
+                mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
+                mock_table_def = MagicMock()
+                mock_table_def.columns = [mock_col]
+                mock_table_def.foreign_keys = []
+                mock_intro.return_value.get_table_def = AsyncMock(return_value=mock_table_def)
                 with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
                     mock_search.return_value = mock_results
 
@@ -805,7 +831,14 @@ class TestSearchRelevantTables:
         with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1] * 384):
             with patch(
                 "mcp_server.tools.legacy.search_similar_tables", new_callable=AsyncMock
-            ) as mock_search:
+            ) as mock_search, patch(
+                "mcp_server.config.database.Database.get_schema_introspector"
+            ) as mock_intro:
+                mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
+                mock_table_def = MagicMock()
+                mock_table_def.columns = [mock_col]
+                mock_table_def.foreign_keys = []
+                mock_intro.return_value.get_table_def = AsyncMock(return_value=mock_table_def)
                 with patch("mcp_server.tools.legacy.Database.get_connection", mock_get):
                     mock_search.return_value = mock_results
 

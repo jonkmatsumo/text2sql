@@ -10,10 +10,10 @@ import asyncio
 import json
 import logging
 
+from mcp_server.config.database import Database
 from mcp_server.dal.executor import ContextAwareExecutor
+from mcp_server.dal.ingestion.indexing import VectorIndexer
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.db import Database
-from mcp_server.graph_ingestion.indexing import VectorIndexer
 
 logger = logging.getLogger(__name__)
 

@@ -1,17 +1,17 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
-from mcp_server.retrievers.postgres_retriever import PostgresRetriever
+from mcp_server.dal.retrievers.postgres_retriever import PostgresRetriever
+from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 
 
 @pytest.fixture
 def mock_engine_and_inspector():
     """Mock SQLAlchemy engine and inspector."""
     with patch(
-        "mcp_server.retrievers.postgres_retriever.create_engine"
+        "mcp_server.dal.retrievers.postgres_retriever.create_engine"
     ) as mock_create_engine, patch(
-        "mcp_server.retrievers.postgres_retriever.inspect"
+        "mcp_server.dal.retrievers.postgres_retriever.inspect"
     ) as mock_inspect:
 
         mock_engine = MagicMock()
@@ -50,7 +50,7 @@ class TestPostgresRetriever:
         tables = retriever.list_tables()
 
         assert len(tables) == 1
-        assert isinstance(tables[0], TableMetadata)
+        assert isinstance(tables[0], TableDef)
         assert tables[0].name == "table1"
         assert tables[0].description == "Table description"
         assert tables[0].sample_data == [{"col1": "val1"}]
@@ -72,15 +72,15 @@ class TestPostgresRetriever:
         assert len(columns) == 2
 
         # Check first column (PK)
-        assert isinstance(columns[0], ColumnMetadata)
+        assert isinstance(columns[0], ColumnDef)
         assert columns[0].name == "id"
-        assert columns[0].type == "INTEGER"
+        assert columns[0].data_type == "INTEGER"
         assert columns[0].is_primary_key is True
         assert columns[0].description == "Primary Key"
 
         # Check second column
         assert columns[1].name == "name"
-        assert columns[1].type == "VARCHAR"
+        assert columns[1].data_type == "VARCHAR"
         assert columns[1].is_primary_key is False
         assert columns[1].description is None
 
@@ -101,10 +101,10 @@ class TestPostgresRetriever:
         fks = retriever.get_foreign_keys("table1")
 
         assert len(fks) == 1
-        assert isinstance(fks[0], ForeignKey)
-        assert fks[0].source_col == "fk_col"
-        assert fks[0].target_table == "other_table"
-        assert fks[0].target_col == "id"
+        assert isinstance(fks[0], ForeignKeyDef)
+        assert fks[0].column_name == "fk_col"
+        assert fks[0].foreign_table_name == "other_table"
+        assert fks[0].foreign_column_name == "id"
 
     def test_get_sample_rows(self, mock_engine_and_inspector):
         """Test fetching sample rows."""

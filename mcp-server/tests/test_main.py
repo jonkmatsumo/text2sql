@@ -71,7 +71,7 @@ class TestMain:
     async def test_init_database_triggers_indexing_when_empty(self):
         """Test that indexing is triggered when schema_embeddings table is empty."""
         # Import Database here to use patch.object for correct module resolution
-        from mcp_server.db import Database
+        from mcp_server.config.database import Database
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=0)  # Empty table
@@ -85,7 +85,7 @@ class TestMain:
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
             with patch.object(Database, "get_connection", mock_get):
                 with patch(
-                    "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
+                    "mcp_server.services.indexer_service.index_all_tables", new_callable=AsyncMock
                 ) as mock_index:
                     # Replicate init_database logic
                     await mock_init()
@@ -111,7 +111,7 @@ class TestMain:
     async def test_init_database_skips_indexing_when_populated(self):
         """Test that indexing is skipped when schema_embeddings table has data."""
         # Import Database here to use patch.object for correct module resolution
-        from mcp_server.db import Database
+        from mcp_server.config.database import Database
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=15)  # 15 tables already indexed
@@ -125,7 +125,7 @@ class TestMain:
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
             with patch.object(Database, "get_connection", mock_get):
                 with patch(
-                    "mcp_server.indexer.index_all_tables", new_callable=AsyncMock
+                    "mcp_server.services.indexer_service.index_all_tables", new_callable=AsyncMock
                 ) as mock_index:
                     # Replicate init_database logic
                     await mock_init()
