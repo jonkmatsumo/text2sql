@@ -9,16 +9,14 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
 from mcp_server.dal.ingestion.vector_indexes.protocol import SearchResult
-from mcp_server.models.dal_types import (
-    CacheLookupResult,
-    Edge,
-    Example,
-    FilterCriteria,
-    GraphData,
-    Node,
-    SchemaEmbedding,
-    TableDef,
-)
+from mcp_server.models.cache.lookup_result import CacheLookupResult
+from mcp_server.models.database.table_def import TableDef
+from mcp_server.models.graph.data import GraphData
+from mcp_server.models.graph.edge import Edge
+from mcp_server.models.graph.node import Node
+from mcp_server.models.rag.embedding import SchemaEmbedding
+from mcp_server.models.rag.example import Example
+from mcp_server.models.rag.filters import FilterCriteria
 
 
 @runtime_checkable

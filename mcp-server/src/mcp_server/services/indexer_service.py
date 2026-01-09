@@ -2,7 +2,7 @@
 
 import mcp_server.rag
 from mcp_server.config.database import Database
-from mcp_server.models.dal_types import SchemaEmbedding
+from mcp_server.models.rag.embedding import SchemaEmbedding
 from mcp_server.rag import RagEngine, generate_schema_document
 
 

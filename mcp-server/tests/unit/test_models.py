@@ -1,7 +1,10 @@
 """Unit tests for DAL canonical types."""
 
 import pytest
-from mcp_server.models.dal_types import CacheLookupResult, Edge, GraphData, Node
+from mcp_server.models.cache.lookup_result import CacheLookupResult
+from mcp_server.models.graph.data import GraphData
+from mcp_server.models.graph.edge import Edge
+from mcp_server.models.graph.node import Node
 
 
 class TestNode:

@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 from mcp_server.dal.ingestion.sync_engine import SyncEngine
-from mcp_server.models.schema import ColumnMetadata, TableMetadata
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.table_def import TableDef
 
 
 @patch("mcp_server.dal.ingestion.sync_engine.get_retriever")
@@ -20,11 +21,11 @@ def test_get_live_schema(mock_memgraph_store_cls, mock_get_retriever):
     mock_retriever = MagicMock()
 
     # Mock tables
-    t1 = TableMetadata(name="t1", description="desc")
+    t1 = TableDef(name="t1", description="desc")
     mock_retriever.list_tables.return_value = [t1]
 
     # Mock columns
-    c1 = ColumnMetadata(name="c1", type="INTEGER", is_primary_key=True)
+    c1 = ColumnDef(name="c1", data_type="INTEGER", is_primary_key=True, is_nullable=False)
     mock_retriever.get_columns.return_value = [c1]
 
     mock_get_retriever.return_value = mock_retriever

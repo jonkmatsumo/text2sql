@@ -8,14 +8,12 @@ from mcp_server.dal.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
-from mcp_server.models.dal_types import (
-    CacheLookupResult,
-    ColumnDef,
-    Example,
-    ForeignKeyDef,
-    SchemaEmbedding,
-    TableDef,
-)
+from mcp_server.models.cache.lookup_result import CacheLookupResult
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.foreign_key_def import ForeignKeyDef
+from mcp_server.models.database.table_def import TableDef
+from mcp_server.models.rag.embedding import SchemaEmbedding
+from mcp_server.models.rag.example import Example
 
 
 def _format_vector(embedding: List[float]) -> str:

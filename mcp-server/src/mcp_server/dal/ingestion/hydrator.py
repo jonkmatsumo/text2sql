@@ -6,7 +6,8 @@ from typing import Set, Tuple
 from mcp_server.dal.ingestion.indexing import EmbeddingService
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
-from mcp_server.models.schema import ColumnMetadata, TableMetadata
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.table_def import TableDef
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ ID_COLUMN_PATTERN = re.compile(r".*_id$", re.IGNORECASE)
 
 
 def should_skip_column_embedding(
-    col: ColumnMetadata,
+    col: ColumnDef,
     is_fk: bool = False,
 ) -> bool:
     """
@@ -97,7 +98,7 @@ class GraphHydrator:
                 fks = retriever.get_foreign_keys(table.name)
                 all_fks[table.name] = fks
                 for fk in fks:
-                    fk_columns.add((table.name, fk.source_col))
+                    fk_columns.add((table.name, fk.column_name))
             except Exception as e:
                 logger.error(f"Error fetching FKs for table {table.name}: {e}")
                 all_fks[table.name] = []
@@ -127,7 +128,7 @@ class GraphHydrator:
 
         logger.info("Graph hydration complete.")
 
-    def _create_table_node(self, table: TableMetadata):
+    def _create_table_node(self, table: TableDef):
         """Create or update a Table node."""
         # Generate embedding for the table
         # We embed the name and description for semantic search
@@ -149,7 +150,7 @@ class GraphHydrator:
         )
 
     def _create_column_nodes(
-        self, table_name: str, columns: list[ColumnMetadata], fk_columns: set
+        self, table_name: str, columns: list[ColumnDef], fk_columns: set
     ) -> int:
         """Create Column nodes and connect to Table.
 
@@ -169,7 +170,7 @@ class GraphHydrator:
                 embedding_text = (
                     f"Column: {col.name}\n"
                     f"Table: {table_name}\n"
-                    f"Type: {col.type}\n"
+                    f"Type: {col.data_type}\n"
                     f"Description: {col.description or ''}"
                 )
                 embedding = self.embedding_service.embed_text(embedding_text)
@@ -184,7 +185,7 @@ class GraphHydrator:
                 properties={
                     "name": col.name,
                     "table": table_name,
-                    "type": col.type,
+                    "type": col.data_type,
                     "is_primary_key": col.is_primary_key,
                     "description": col.description or "",
                     "embedding": embedding,
@@ -203,8 +204,8 @@ class GraphHydrator:
     def _create_fk_relationships(self, table_name: str, fks: list):
         """Create FOREIGN_KEY_TO relationships between columns."""
         for fk in fks:
-            src_col_id = f"{table_name}.{fk.source_col}"
-            tgt_col_id = f"{fk.target_table}.{fk.target_col}"
+            src_col_id = f"{table_name}.{fk.column_name}"
+            tgt_col_id = f"{fk.foreign_table_name}.{fk.foreign_column_name}"
 
             self.store.upsert_edge(
                 source_id=src_col_id, target_id=tgt_col_id, edge_type="FOREIGN_KEY_TO"

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp_server.dal.postgres import PgSemanticCache
-from mcp_server.models.dal_types import CacheLookupResult
+from mcp_server.models.cache.lookup_result import CacheLookupResult
 
 MOCK_EMBEDDING = [0.1, 0.2, 0.3]
 

@@ -1,7 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 from mcp_server.dal.ingestion.hydrator import GraphHydrator, should_skip_column_embedding
-from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.foreign_key_def import ForeignKeyDef
+from mcp_server.models.database.table_def import TableDef
 
 
 @patch("mcp_server.dal.ingestion.hydrator.MemgraphStore")
@@ -15,13 +17,13 @@ def test_hydrate_schema(mock_embedding_service, mock_memgraph_store_cls):
 
     # Mock Retriever
     mock_retriever = MagicMock()
-    t1 = TableMetadata(name="t1", description="desc", sample_data=[{"a": 1}])
+    t1 = TableDef(name="t1", description="desc", sample_data=[{"a": 1}])
     mock_retriever.list_tables.return_value = [t1]
 
-    c1 = ColumnMetadata(name="c1", type="INTEGER", is_primary_key=True)
+    c1 = ColumnDef(name="c1", data_type="INTEGER", is_primary_key=True, is_nullable=False)
     mock_retriever.get_columns.return_value = [c1]
 
-    fk1 = ForeignKey(source_col="c1", target_table="t2", target_col="c2")
+    fk1 = ForeignKeyDef(column_name="c1", foreign_table_name="t2", foreign_column_name="c2")
     mock_retriever.get_foreign_keys.return_value = [fk1]
 
     hydrator = GraphHydrator()
@@ -49,30 +51,42 @@ class TestShouldSkipColumnEmbedding:
 
     def test_skip_last_update(self):
         """Low-signal timestamp columns should skip embedding."""
-        col = ColumnMetadata(name="last_update", type="timestamp", is_primary_key=False)
+        col = ColumnDef(
+            name="last_update", data_type="timestamp", is_primary_key=False, is_nullable=True
+        )
         assert should_skip_column_embedding(col, is_fk=False) is True
 
     def test_skip_created_at(self):
         """Audit columns should skip embedding."""
-        col = ColumnMetadata(name="created_at", type="timestamp", is_primary_key=False)
+        col = ColumnDef(
+            name="created_at", data_type="timestamp", is_primary_key=False, is_nullable=True
+        )
         assert should_skip_column_embedding(col, is_fk=False) is True
 
     def test_skip_generic_id(self):
         """Generic *_id columns (not PK/FK) should skip embedding."""
-        col = ColumnMetadata(name="legacy_id", type="integer", is_primary_key=False)
+        col = ColumnDef(
+            name="legacy_id", data_type="integer", is_primary_key=False, is_nullable=True
+        )
         assert should_skip_column_embedding(col, is_fk=False) is True
 
     def test_keep_pk_id(self):
         """Primary key ID columns should keep embedding."""
-        col = ColumnMetadata(name="customer_id", type="integer", is_primary_key=True)
+        col = ColumnDef(
+            name="customer_id", data_type="integer", is_primary_key=True, is_nullable=False
+        )
         assert should_skip_column_embedding(col, is_fk=False) is False
 
     def test_keep_fk_id(self):
         """Foreign key ID columns should keep embedding."""
-        col = ColumnMetadata(name="customer_id", type="integer", is_primary_key=False)
+        col = ColumnDef(
+            name="customer_id", data_type="integer", is_primary_key=False, is_nullable=True
+        )
         assert should_skip_column_embedding(col, is_fk=True) is False
 
     def test_keep_regular_column(self):
         """Regular columns should keep embedding."""
-        col = ColumnMetadata(name="first_name", type="varchar", is_primary_key=False)
+        col = ColumnDef(
+            name="first_name", data_type="varchar", is_primary_key=False, is_nullable=True
+        )
         assert should_skip_column_embedding(col, is_fk=False) is False

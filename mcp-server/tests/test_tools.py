@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
-from mcp_server.models.dal_types import ColumnDef
+from mcp_server.models.database.column_def import ColumnDef
 from mcp_server.tools import execute_sql_query, get_semantic_definitions, search_relevant_tables
 
 

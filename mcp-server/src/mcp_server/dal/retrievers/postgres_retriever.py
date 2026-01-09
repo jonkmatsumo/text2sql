@@ -4,7 +4,9 @@ import re
 from typing import Dict, List
 
 from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
-from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.foreign_key_def import ForeignKeyDef
+from mcp_server.models.database.table_def import TableDef
 from sqlalchemy import create_engine, inspect, text
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ class PostgresRetriever(DataSchemaRetriever):
         self.engine = create_engine(connection_string)
         self.inspector = inspect(self.engine)
 
-    def list_tables(self) -> List[TableMetadata]:
+    def list_tables(self) -> List[TableDef]:
         """List all tables in the public schema, filtering out partitions and system tables."""
         table_names = self.inspector.get_table_names(schema="public")
 
@@ -76,10 +78,10 @@ class PostgresRetriever(DataSchemaRetriever):
             # Get sample rows
             samples = self.get_sample_rows(name, limit=3)
 
-            tables.append(TableMetadata(name=name, description=description, sample_data=samples))
+            tables.append(TableDef(name=name, description=description, sample_data=samples))
         return tables
 
-    def get_columns(self, table_name: str) -> List[ColumnMetadata]:
+    def get_columns(self, table_name: str) -> List[ColumnDef]:
         """Get column details using inspector."""
         columns_info = self.inspector.get_columns(table_name, schema="public")
         pk_constraint = self.inspector.get_pk_constraint(table_name, schema="public")
@@ -93,14 +95,19 @@ class PostgresRetriever(DataSchemaRetriever):
             description = col.get("comment")
             is_pk = name in pk_columns
 
+            is_nullable = col.get("nullable", True)
             columns.append(
-                ColumnMetadata(
-                    name=name, type=col_type, is_primary_key=is_pk, description=description
+                ColumnDef(
+                    name=name,
+                    data_type=col_type,
+                    is_nullable=is_nullable,
+                    is_primary_key=is_pk,
+                    description=description,
                 )
             )
         return columns
 
-    def get_foreign_keys(self, table_name: str) -> List[ForeignKey]:
+    def get_foreign_keys(self, table_name: str) -> List[ForeignKeyDef]:
         """Get foreign keys using inspector."""
         fks_info = self.inspector.get_foreign_keys(table_name, schema="public")
         fks = []
@@ -116,7 +123,11 @@ class PostgresRetriever(DataSchemaRetriever):
             referred_columns = fk["referred_columns"]
 
             for src, ref in zip(constrained_columns, referred_columns):
-                fks.append(ForeignKey(source_col=src, target_table=target_table, target_col=ref))
+                fks.append(
+                    ForeignKeyDef(
+                        column_name=src, foreign_table_name=target_table, foreign_column_name=ref
+                    )
+                )
         return fks
 
     def get_sample_rows(self, table_name: str, limit: int = 3) -> List[Dict]:
@@ -150,12 +161,12 @@ if __name__ == "__main__":
             cols = retriever.get_columns(first_table)
             print(f"Columns: {len(cols)}")
             for c in cols:
-                print(f" - {c.name} ({c.type}) PK={c.is_primary_key}")
+                print(f" - {c.name} ({c.data_type}) PK={c.is_primary_key}")
 
             fks = retriever.get_foreign_keys(first_table)
             print(f"Foreign Keys: {len(fks)}")
             for k in fks:
-                print(f" - {k.source_col} -> {k.target_table}.{k.target_col}")
+                print(f" - {k.column_name} -> {k.foreign_table_name}.{k.foreign_column_name}")
 
             print(f"Sample Data: {len(tables[0].sample_data)} rows")
 

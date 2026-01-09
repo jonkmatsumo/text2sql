@@ -39,7 +39,7 @@ class SyncEngine:
             col_dict = {}
             for col in columns:
                 col_dict[col.name] = {
-                    "type": col.type,
+                    "type": col.data_type,
                     "nullable": True,  # Retriever doesn't expose nullable yet, defaulting
                     "primary_key": col.is_primary_key,
                 }

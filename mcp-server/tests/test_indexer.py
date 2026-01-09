@@ -3,7 +3,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.models.dal_types import ColumnDef, ForeignKeyDef, TableDef
+from mcp_server.models.database.column_def import ColumnDef
+from mcp_server.models.database.foreign_key_def import ForeignKeyDef
+from mcp_server.models.database.table_def import TableDef
 from mcp_server.services.indexer_service import index_all_tables
 
 # ... (skipping lines 4-101)
