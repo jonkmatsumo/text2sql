@@ -1,0 +1,39 @@
+name: Semantic Enrichment Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (no DB commit/LLM cost)"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f mcp-server/requirements.txt ]; then pip install -r mcp-server/requirements.txt; fi
+
+      - name: Run Enrichment Pipeline
+        env:
+          PYTHONPATH: mcp-server/src
+          ENABLE_LLM_ENRICHMENT: ${{ inputs.dry_run == false && 'true' || 'false' }}
+          # Pass other necessary secrets here, e.g., OPENAI_API_KEY, MEMGRAPH credentials
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MEMGRAPH_URI: ${{ secrets.MEMGRAPH_URI }}
+          MEMGRAPH_USER: ${{ secrets.MEMGRAPH_USER }}
+          MEMGRAPH_PASSWORD: ${{ secrets.MEMGRAPH_PASSWORD }}
+        run: |
+          python mcp-server/src/mcp_server/graph_ingestion/enrichment/main.py
