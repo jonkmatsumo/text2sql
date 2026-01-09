@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import CacheStore, ExampleStore, GraphStore
+from mcp_server.dal.interfaces import CacheStore, ExampleStore, GraphStore, SchemaStore
 from mcp_server.dal.memgraph import MemgraphStore
 
 
@@ -14,6 +14,7 @@ class Database:
     _graph_store: Optional[GraphStore] = None
     _cache_store: Optional[CacheStore] = None
     _example_store: Optional[ExampleStore] = None
+    _schema_store: Optional[SchemaStore] = None
 
     @classmethod
     async def init(cls):
@@ -49,13 +50,20 @@ class Database:
 
             # 3. Init CacheStore & ExampleStore (Postgres impl)
             # Avoid circular import at top level
-            from mcp_server.dal.postgres import PgSemanticCache, PostgresExampleStore
+            from mcp_server.dal.postgres import (
+                PgSemanticCache,
+                PostgresExampleStore,
+                PostgresSchemaStore,
+            )
 
             cls._cache_store = PgSemanticCache()
             print("✓ Cache store initialized")
 
             cls._example_store = PostgresExampleStore()
             print("✓ Example store initialized")
+
+            cls._schema_store = PostgresSchemaStore()
+            print("✓ Schema store initialized")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
@@ -79,6 +87,7 @@ class Database:
         # but we clear reference
         cls._cache_store = None
         cls._example_store = None
+        cls._schema_store = None
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -97,6 +106,13 @@ class Database:
         if cls._example_store is None:
             raise RuntimeError("Example store not initialized. Call Database.init() first.")
         return cls._example_store
+
+    @classmethod
+    def get_schema_store(cls) -> SchemaStore:
+        """Get the initialized schema store instance."""
+        if cls._schema_store is None:
+            raise RuntimeError("Schema store not initialized. Call Database.init() first.")
+        return cls._schema_store
 
     @classmethod
     @asynccontextmanager

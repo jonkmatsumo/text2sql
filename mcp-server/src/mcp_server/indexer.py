@@ -1,5 +1,6 @@
 """Schema indexing service for RAG."""
 
+import mcp_server.rag
 from mcp_server.db import Database
 from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
 
@@ -83,3 +84,7 @@ async def index_all_tables():
             print(f"  ✓ Indexed: {table_name}")
 
         print(f"✓ Schema indexing complete: {len(tables)} tables indexed")
+
+        # Reload the in-memory vector index to reflect changes
+        await mcp_server.rag.reload_schema_index()
+        print("✓ Schema index reloaded")

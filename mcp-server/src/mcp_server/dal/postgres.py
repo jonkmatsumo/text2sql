@@ -1,7 +1,7 @@
 from typing import List, Optional
 
-from mcp_server.dal.interfaces import CacheStore, ExampleStore
-from mcp_server.dal.types import CacheLookupResult, Example
+from mcp_server.dal.interfaces import CacheStore, ExampleStore, SchemaStore
+from mcp_server.dal.types import CacheLookupResult, Example, SchemaEmbedding
 from mcp_server.db import Database
 from mcp_server.rag import format_vector_for_postgres
 
@@ -118,3 +118,42 @@ class PostgresExampleStore(ExampleStore):
             )
 
         return examples
+
+
+class PostgresSchemaStore(SchemaStore):
+    """Postgres implementation of SchemaStore."""
+
+    async def fetch_schema_embeddings(self) -> List[SchemaEmbedding]:
+        """Fetch all schema embeddings from schema_embeddings table.
+
+        Returns:
+            List of canonical SchemaEmbedding objects.
+        """
+        import json
+
+        query = """
+            SELECT table_name, schema_text, embedding
+            FROM public.schema_embeddings
+            WHERE embedding IS NOT NULL
+        """
+
+        async with Database.get_connection() as conn:
+            rows = await conn.fetch(query)
+
+        results = []
+        for row in rows:
+            embedding_val = row["embedding"]
+            if isinstance(embedding_val, str):
+                vector = json.loads(embedding_val)
+            else:
+                vector = list(embedding_val)
+
+            results.append(
+                SchemaEmbedding(
+                    table_name=row["table_name"],
+                    schema_text=row["schema_text"],
+                    embedding=vector,
+                )
+            )
+
+        return results

@@ -8,8 +8,32 @@ type safety.
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
-from mcp_server.dal.types import CacheLookupResult, Edge, Example, FilterCriteria, GraphData, Node
+from mcp_server.dal.types import (
+    CacheLookupResult,
+    Edge,
+    Example,
+    FilterCriteria,
+    GraphData,
+    Node,
+    SchemaEmbedding,
+)
 from mcp_server.graph_ingestion.vector_indexes.protocol import SearchResult
+
+
+@runtime_checkable
+class SchemaStore(Protocol):
+    """Protocol for accessing table schema embeddings.
+
+    Abstracts the storage of schema embeddings (Postgres, localized file, etc.).
+    """
+
+    async def fetch_schema_embeddings(self) -> List[SchemaEmbedding]:
+        """Fetch all schema embeddings.
+
+        Returns:
+            List of canonical SchemaEmbedding objects.
+        """
+        ...
 
 
 @runtime_checkable

@@ -126,3 +126,52 @@ class TestPostgresExampleStore:
         assert examples[1].embedding == [0.3, 0.4]
 
         mock_conn.fetch.assert_called_once()
+
+
+class TestPostgresSchemaStore:
+    """Test suite for Postgres Schema Store adapter."""
+
+    @pytest.fixture
+    def store(self):
+        """Fixture for PostgresSchemaStore."""
+        from mcp_server.dal.postgres import PostgresSchemaStore
+
+        return PostgresSchemaStore()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Fixture to mock Database."""
+        with patch("mcp_server.dal.postgres.Database") as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_fetch_schema_embeddings(self, store, mock_db):
+        """Test fetching schemas maps to SchemaEmbedding objects."""
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
+
+        mock_rows = [
+            {
+                "table_name": "t1",
+                "schema_text": "schema1",
+                "embedding": "[0.1, 0.2]",
+            },
+            {
+                "table_name": "t2",
+                "schema_text": "schema2",
+                "embedding": [0.3, 0.4],
+            },
+        ]
+        mock_conn.fetch.return_value = mock_rows
+
+        schemas = await store.fetch_schema_embeddings()
+
+        assert len(schemas) == 2
+        assert schemas[0].table_name == "t1"
+        assert schemas[0].schema_text == "schema1"
+        assert schemas[0].embedding == [0.1, 0.2]
+
+        assert schemas[1].table_name == "t2"
+        assert schemas[1].embedding == [0.3, 0.4]
+
+        mock_conn.fetch.assert_called_once()
