@@ -101,7 +101,7 @@ async def get_few_shot_examples(user_query: str) -> str:
         formatted = []
         for ex in examples:
             if isinstance(ex, dict):
-                formatted.append(f"Question: {ex.get('question')}\nSQL: {ex.get('sql')}")
+                formatted.append(f"- Question: {ex.get('question')}\n  SQL: {ex.get('sql')}")
 
         return "\n\n".join(formatted)
 
@@ -190,7 +190,9 @@ async def generate_sql_node(state: AgentState) -> dict:
             few_shot_examples.replace("{", "{{").replace("}", "}}") if few_shot_examples else ""
         )
         examples_section = (
-            f"\n\n{escaped_examples}" if escaped_examples else "\n\nNo examples available."
+            f"\n\n### Reference Examples\n{escaped_examples}"
+            if escaped_examples
+            else "\n\n### Reference Examples\nNo examples available."
         )
 
         # Include procedural plan if available (from SQL-of-Thought planner)
@@ -230,18 +232,18 @@ USER CLARIFICATION:
 """
 
         system_prompt = f"""You are a PostgreSQL expert.
-Using the provided SCHEMA CONTEXT, PROCEDURAL PLAN, and EXAMPLES, synthesize a SQL query.
+Using the provided SCHEMA CONTEXT, PROCEDURAL PLAN, and REFERENCE EXAMPLES, synthesize a SQL query.
 The SCHEMA CONTEXT below is a Relationship Graph showing tables, columns, and foreign keys.
 
 Rules:
 - Return ONLY the SQL query. No markdown, no explanations.
 - Always limit results to 1000 rows unless the user specifies otherwise.
 - Use proper SQL syntax for PostgreSQL.
-- Only use tables and columns explicitly defined in the SCHEMA CONTEXT.
+- Only use tables and columns explicitly defined in the Relationship Graph.
+- Refer to the **Reference Examples** section below to understand the preferred query style
+  and column naming conventions.
 - FOLLOW THE PROCEDURAL PLAN if provided - it contains the logical steps.
-- Learn from the EXAMPLES provided to understand similar query patterns.
 {plan_section}{clarification_section}
-Schema Context (Relationship Graph):
 {{schema_context}}
 {examples_section}
 """
