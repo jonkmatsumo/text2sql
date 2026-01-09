@@ -146,7 +146,7 @@ flowchart TB
     style MCPServer fill:#FF9800
     style Database fill:#4CAF50
     style GraphDB fill:#9C27B0
-    style Init fill:#FFC107
+    style Ingestion fill:#FFC107
     style Observability fill:#E1BEE7
     style DAL fill:#FFCC80,stroke:#F57C00,stroke-width:2px
 ```
