@@ -58,17 +58,21 @@ class Database:
             print(f"✓ Graph store connection established: {graph_uri}")
 
             # 3. Init Stores via Factory
-            from mcp_server.factory.dal_factory import DALFactory
+            from mcp_server.dal.factory import (
+                get_cache_store,
+                get_example_store,
+                get_metadata_store,
+                get_schema_introspector,
+                get_schema_store,
+            )
 
-            (
-                cls._cache_store,
-                cls._example_store,
-                cls._schema_store,
-                cls._schema_introspector,
-                cls._metadata_store,
-            ) = DALFactory.create_stores()
+            cls._cache_store = get_cache_store()
+            cls._example_store = get_example_store()
+            cls._schema_store = get_schema_store()
+            cls._schema_introspector = get_schema_introspector()
+            cls._metadata_store = get_metadata_store()
 
-            print("✓ Stores initialized via DALFactory")
+            print("✓ Stores initialized via DAL factory")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
