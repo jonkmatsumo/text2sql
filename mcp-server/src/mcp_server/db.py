@@ -7,6 +7,7 @@ from mcp_server.dal.interfaces import (
     CacheStore,
     ExampleStore,
     GraphStore,
+    MetadataStore,
     SchemaIntrospector,
     SchemaStore,
 )
@@ -22,6 +23,7 @@ class Database:
     _example_store: Optional[ExampleStore] = None
     _schema_store: Optional[SchemaStore] = None
     _schema_introspector: Optional[SchemaIntrospector] = None
+    _metadata_store: Optional[MetadataStore] = None
 
     @classmethod
     async def init(cls):
@@ -60,6 +62,7 @@ class Database:
             from mcp_server.dal.postgres import (
                 PgSemanticCache,
                 PostgresExampleStore,
+                PostgresMetadataStore,
                 PostgresSchemaIntrospector,
                 PostgresSchemaStore,
             )
@@ -75,6 +78,9 @@ class Database:
 
             cls._schema_introspector = PostgresSchemaIntrospector()
             print("✓ Schema introspector initialized")
+
+            cls._metadata_store = PostgresMetadataStore()
+            print("✓ Metadata store initialized")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
@@ -100,6 +106,7 @@ class Database:
         cls._example_store = None
         cls._schema_store = None
         cls._schema_introspector = None
+        cls._metadata_store = None
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -132,6 +139,13 @@ class Database:
         if cls._schema_introspector is None:
             raise RuntimeError("Schema introspector not initialized. Call Database.init() first.")
         return cls._schema_introspector
+
+    @classmethod
+    def get_metadata_store(cls) -> MetadataStore:
+        """Get the initialized metadata store instance."""
+        if cls._metadata_store is None:
+            raise RuntimeError("Metadata store not initialized. Call Database.init() first.")
+        return cls._metadata_store
 
     @classmethod
     @asynccontextmanager

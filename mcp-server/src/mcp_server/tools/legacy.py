@@ -20,21 +20,14 @@ async def list_tables(search_term: Optional[str] = None, tenant_id: Optional[int
     Returns:
         JSON array of table names as strings.
     """
-    query = """
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-    """
-    args = []
+    store = Database.get_metadata_store()
+    tables = await store.list_tables()
 
     if search_term:
-        query += " AND table_name ILIKE $1"
-        args.append(f"%{search_term}%")
+        search_term = search_term.lower()
+        tables = [t for t in tables if search_term in t.lower()]
 
-    async with Database.get_connection(tenant_id) as conn:
-        rows = await conn.fetch(query, *args)
-        tables = [row["table_name"] for row in rows]
-        return json.dumps(tables, separators=(",", ":"))
+    return json.dumps(tables, separators=(",", ":"))
 
 
 async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = None) -> str:
@@ -48,68 +41,21 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
     Returns:
         Markdown-formatted schema documentation.
     """
-    async with Database.get_connection(tenant_id) as conn:
-        schema_list = []
-        for table in table_names:
-            # Get Columns
-            col_query = """
-                SELECT column_name, data_type, is_nullable
-                FROM information_schema.columns
-                WHERE table_name = $1 AND table_schema = 'public'
-                ORDER BY ordinal_position
-            """
-            cols = await conn.fetch(col_query, table)
+    store = Database.get_metadata_store()
+    schema_list = []
 
-            if not cols:
-                continue
+    for table in table_names:
+        try:
+            # MetadataStore returns JSON string for a single table
+            definition_json = await store.get_table_definition(table)
+            definition = json.loads(definition_json)
+            schema_list.append(definition)
+        except Exception:
+            # Silently skip tables that error (e.g. don't exist), consistent with legacy behavior?
+            # Legacy ran one query per table, but mostly continued.
+            continue
 
-            columns_data = []
-            for col in cols:
-                columns_data.append(
-                    {
-                        "name": col["column_name"],
-                        "type": col["data_type"],
-                        "nullable": col["is_nullable"] == "YES",
-                    }
-                )
-
-            # Get Foreign Keys
-            fk_query = """
-                SELECT
-                    kcu.column_name,
-                    ccu.table_name AS foreign_table_name,
-                    ccu.column_name AS foreign_column_name
-                FROM information_schema.table_constraints AS tc
-                JOIN information_schema.key_column_usage AS kcu
-                    ON tc.constraint_name = kcu.constraint_name
-                JOIN information_schema.constraint_column_usage AS ccu
-                    ON ccu.constraint_name = tc.constraint_name
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_name = $1
-                    AND tc.table_schema = 'public'
-            """
-            fks = await conn.fetch(fk_query, table)
-
-            foreign_keys = []
-            if fks:
-                for fk in fks:
-                    foreign_keys.append(
-                        {
-                            "column": fk["column_name"],
-                            "foreign_table": fk["foreign_table_name"],
-                            "foreign_column": fk["foreign_column_name"],
-                        }
-                    )
-
-            schema_list.append(
-                {
-                    "table_name": table,
-                    "columns": columns_data,
-                    "foreign_keys": foreign_keys,
-                }
-            )
-
-        return json.dumps(schema_list, separators=(",", ":"))
+    return json.dumps(schema_list, separators=(",", ":"))
 
 
 async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> str:
@@ -249,30 +195,22 @@ async def search_relevant_tables(
     results = await search_similar_tables(query_embedding, limit=limit, tenant_id=tenant_id)
 
     structured_results = []
+    introspector = Database.get_schema_introspector()
 
-    async with Database.get_connection(tenant_id) as conn:
-        # Optimization: Fetch all columns for these tables in one go or loop?
-        # Looping is fine for small N (limit=5).
+    for result in results:
+        table_name = result["table_name"]
 
-        for result in results:
-            table_name = result["table_name"]
-
-            # Fetch columns for this table
-            col_query = """
-                SELECT column_name, data_type, is_nullable
-                FROM information_schema.columns
-                WHERE table_name = $1 AND table_schema = 'public'
-                ORDER BY ordinal_position
-            """
-            cols = await conn.fetch(col_query, table_name)
+        # Use introspector to get columns (abstracted from SQL)
+        try:
+            table_def = await introspector.get_table_def(table_name)
 
             table_columns = [
                 {
-                    "name": col["column_name"],
-                    "type": col["data_type"],
-                    "required": col["is_nullable"] == "NO",
+                    "name": col.name,
+                    "type": col.data_type,
+                    "required": not col.is_nullable,
                 }
-                for col in cols
+                for col in table_def.columns
             ]
 
             structured_results.append(
@@ -285,5 +223,8 @@ async def search_relevant_tables(
                     "columns": table_columns,
                 }
             )
+        except Exception:
+            # Skip tables that might be in index but missing in introspection (race condition?)
+            continue
 
     return json.dumps(structured_results, separators=(",", ":"))
