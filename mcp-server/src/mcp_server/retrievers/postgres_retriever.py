@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from typing import Dict, List
 
 from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
@@ -7,6 +8,21 @@ from mcp_server.retrievers.data_schema_retriever import DataSchemaRetriever
 from sqlalchemy import create_engine, inspect, text
 
 logger = logging.getLogger(__name__)
+
+# Pattern for Postgres partition tables (e.g., payment_p2022_01)
+PARTITION_TABLE_PATTERN = re.compile(r".*_p\d{4}_\d{2}$")
+
+# Technical/system tables to exclude
+EXCLUDED_TABLES = frozenset(
+    {
+        "schema_migrations",
+        "flyway_schema_history",
+        "alembic_version",
+        "django_migrations",
+        "ar_internal_metadata",
+        "__diesel_schema_migrations",
+    }
+)
 
 
 class PostgresRetriever(DataSchemaRetriever):
@@ -30,10 +46,28 @@ class PostgresRetriever(DataSchemaRetriever):
         self.inspector = inspect(self.engine)
 
     def list_tables(self) -> List[TableMetadata]:
-        """List all tables in the public schema."""
+        """List all tables in the public schema, filtering out partitions and system tables."""
         table_names = self.inspector.get_table_names(schema="public")
-        tables = []
+
+        # Filter out partition tables and technical tables
+        filtered_names = []
+        excluded_count = 0
         for name in table_names:
+            if PARTITION_TABLE_PATTERN.match(name):
+                excluded_count += 1
+                continue
+            if name.lower() in EXCLUDED_TABLES:
+                excluded_count += 1
+                continue
+            filtered_names.append(name)
+
+        if excluded_count > 0:
+            logger.info(
+                f"Excluded {excluded_count} partition/system tables from {len(table_names)} total"
+            )
+
+        tables = []
+        for name in filtered_names:
             # SQLAlchemy doesn't always easily get table comments depending on dialect version
             # But we can try inspector.get_table_comment(name, schema='public')
             comment_info = self.inspector.get_table_comment(name, schema="public")
