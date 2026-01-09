@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.foreign_key_def import ForeignKeyDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 
 
 class DataSchemaRetriever(ABC):

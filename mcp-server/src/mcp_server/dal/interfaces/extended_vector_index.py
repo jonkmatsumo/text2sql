@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
 from mcp_server.dal.ingestion.vector_indexes.protocol import SearchResult
-from mcp_server.models.rag.filters import FilterCriteria
+from mcp_server.models import FilterCriteria
 
 
 @runtime_checkable

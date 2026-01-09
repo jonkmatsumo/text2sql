@@ -1,9 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.foreign_key_def import ForeignKeyDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 from mcp_server.tools.schema import get_sample_data, get_table_schema, list_tables
 
 

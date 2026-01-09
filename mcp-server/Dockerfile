@@ -6,6 +6,11 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src/ ./src/
 
+# Install build dependencies for hnswlib
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 

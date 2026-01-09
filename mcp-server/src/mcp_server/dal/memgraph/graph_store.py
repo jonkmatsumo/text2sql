@@ -2,9 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from mcp_server.dal.interfaces.graph_store import GraphStore
-from mcp_server.models.graph.data import GraphData
-from mcp_server.models.graph.edge import Edge
-from mcp_server.models.graph.node import Node
+from mcp_server.models import Edge, GraphData, Node
 from neo4j import Driver, GraphDatabase
 
 logger = logging.getLogger(__name__)

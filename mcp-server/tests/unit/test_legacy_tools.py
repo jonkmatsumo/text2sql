@@ -2,8 +2,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, TableDef
 from mcp_server.tools.legacy import get_table_schema, list_tables, search_relevant_tables
 
 

@@ -1,6 +1,6 @@
 from typing import List, Protocol, runtime_checkable
 
-from mcp_server.models.rag.embedding import SchemaEmbedding
+from mcp_server.models import SchemaEmbedding
 
 
 @runtime_checkable

@@ -3,7 +3,7 @@ from typing import List
 
 from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.example_store import ExampleStore
-from mcp_server.models.rag.example import Example
+from mcp_server.models import Example
 
 
 class PostgresExampleStore(ExampleStore):

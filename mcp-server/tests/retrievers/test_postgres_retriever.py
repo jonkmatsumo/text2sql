@@ -2,9 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from mcp_server.dal.retrievers.postgres_retriever import PostgresRetriever
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.foreign_key_def import ForeignKeyDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 
 
 @pytest.fixture

@@ -6,8 +6,7 @@ from typing import Set, Tuple
 from mcp_server.dal.ingestion.indexing import EmbeddingService
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, TableDef
 
 logger = logging.getLogger(__name__)
 

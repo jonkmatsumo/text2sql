@@ -3,7 +3,7 @@ from typing import List, Optional
 from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.cache_store import CacheStore
 from mcp_server.dal.postgres.common import _format_vector
-from mcp_server.models.cache.lookup_result import CacheLookupResult
+from mcp_server.models import CacheLookupResult
 
 
 class PgSemanticCache(CacheStore):

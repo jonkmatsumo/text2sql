@@ -1,8 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from mcp_server.dal.ingestion.sync_engine import SyncEngine
-from mcp_server.models.database.column_def import ColumnDef
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import ColumnDef, TableDef
 
 
 @patch("mcp_server.dal.ingestion.sync_engine.get_retriever")

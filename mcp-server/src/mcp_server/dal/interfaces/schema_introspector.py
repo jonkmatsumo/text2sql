@@ -1,6 +1,6 @@
 from typing import List, Protocol, runtime_checkable
 
-from mcp_server.models.database.table_def import TableDef
+from mcp_server.models import TableDef
 
 
 @runtime_checkable
