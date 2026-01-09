@@ -16,8 +16,22 @@ from mcp_server.dal.types import (
     GraphData,
     Node,
     SchemaEmbedding,
+    TableDef,
 )
 from mcp_server.graph_ingestion.vector_indexes.protocol import SearchResult
+
+
+@runtime_checkable
+class SchemaIntrospector(Protocol):
+    """Protocol for introspecting database schema (tables, columns, constraints)."""
+
+    async def list_table_names(self, schema: str = "public") -> List[str]:
+        """List all table names in the specified schema."""
+        ...
+
+    async def get_table_def(self, table_name: str, schema: str = "public") -> TableDef:
+        """Get the full definition of a table (columns, FKs)."""
+        ...
 
 
 @runtime_checkable
@@ -32,6 +46,14 @@ class SchemaStore(Protocol):
 
         Returns:
             List of canonical SchemaEmbedding objects.
+        """
+        ...
+
+    async def save_schema_embedding(self, embedding: SchemaEmbedding) -> None:
+        """Save (upsert) a schema embedding.
+
+        Args:
+            embedding: The schema embedding to save.
         """
         ...
 

@@ -163,3 +163,33 @@ class SchemaEmbedding(BaseModel):
     embedding: List[float]
 
     model_config = {"frozen": False}
+
+
+class ColumnDef(BaseModel):
+    """Canonical representation of a database column definition."""
+
+    name: str
+    data_type: str
+    is_nullable: bool
+
+    model_config = {"frozen": False}
+
+
+class ForeignKeyDef(BaseModel):
+    """Canonical representation of a foreign key constraint."""
+
+    column_name: str
+    foreign_table_name: str
+    foreign_column_name: str
+
+    model_config = {"frozen": False}
+
+
+class TableDef(BaseModel):
+    """Canonical representation of a database table definition."""
+
+    name: str
+    columns: List[ColumnDef] = Field(default_factory=list)
+    foreign_keys: List[ForeignKeyDef] = Field(default_factory=list)
+
+    model_config = {"frozen": False}

@@ -3,7 +3,13 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import CacheStore, ExampleStore, GraphStore, SchemaStore
+from mcp_server.dal.interfaces import (
+    CacheStore,
+    ExampleStore,
+    GraphStore,
+    SchemaIntrospector,
+    SchemaStore,
+)
 from mcp_server.dal.memgraph import MemgraphStore
 
 
@@ -15,6 +21,7 @@ class Database:
     _cache_store: Optional[CacheStore] = None
     _example_store: Optional[ExampleStore] = None
     _schema_store: Optional[SchemaStore] = None
+    _schema_introspector: Optional[SchemaIntrospector] = None
 
     @classmethod
     async def init(cls):
@@ -53,6 +60,7 @@ class Database:
             from mcp_server.dal.postgres import (
                 PgSemanticCache,
                 PostgresExampleStore,
+                PostgresSchemaIntrospector,
                 PostgresSchemaStore,
             )
 
@@ -64,6 +72,9 @@ class Database:
 
             cls._schema_store = PostgresSchemaStore()
             print("✓ Schema store initialized")
+
+            cls._schema_introspector = PostgresSchemaIntrospector()
+            print("✓ Schema introspector initialized")
 
         except Exception as e:
             await cls.close()  # Cleanup partials
@@ -88,6 +99,7 @@ class Database:
         cls._cache_store = None
         cls._example_store = None
         cls._schema_store = None
+        cls._schema_introspector = None
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -113,6 +125,13 @@ class Database:
         if cls._schema_store is None:
             raise RuntimeError("Schema store not initialized. Call Database.init() first.")
         return cls._schema_store
+
+    @classmethod
+    def get_schema_introspector(cls) -> SchemaIntrospector:
+        """Get the initialized schema introspector instance."""
+        if cls._schema_introspector is None:
+            raise RuntimeError("Schema introspector not initialized. Call Database.init() first.")
+        return cls._schema_introspector
 
     @classmethod
     @asynccontextmanager

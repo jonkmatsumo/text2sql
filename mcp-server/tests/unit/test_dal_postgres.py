@@ -175,3 +175,77 @@ class TestPostgresSchemaStore:
         assert schemas[1].embedding == [0.3, 0.4]
 
         mock_conn.fetch.assert_called_once()
+
+
+class TestPostgresSchemaIntrospector:
+    """Test suite for Postgres Schema Introspector adapter."""
+
+    @pytest.fixture
+    def introspector(self):
+        """Fixture for PostgresSchemaIntrospector."""
+        from mcp_server.dal.postgres import PostgresSchemaIntrospector
+
+        return PostgresSchemaIntrospector()
+
+    @pytest.fixture
+    def mock_db(self):
+        """Fixture to mock Database."""
+        with patch("mcp_server.dal.postgres.Database") as mock:
+            yield mock
+
+    @pytest.mark.asyncio
+    async def test_list_table_names(self, introspector, mock_db):
+        """Test listing tables."""
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
+
+        mock_rows = [{"table_name": "t1"}, {"table_name": "t2"}]
+        mock_conn.fetch.return_value = mock_rows
+
+        tables = await introspector.list_table_names()
+
+        assert tables == ["t1", "t2"]
+        mock_conn.fetch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_table_def(self, introspector, mock_db):
+        """Test getting full table definition."""
+        mock_conn = AsyncMock()
+        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
+
+        # Mock columns
+        mock_cols = [
+            {"column_name": "id", "data_type": "int", "is_nullable": "NO", "ordinal_position": 1},
+            {
+                "column_name": "name",
+                "data_type": "text",
+                "is_nullable": "YES",
+                "ordinal_position": 2,
+            },
+        ]
+
+        # Mock FKs
+        mock_fks = [
+            {"column_name": "role_id", "foreign_table_name": "roles", "foreign_column_name": "id"}
+        ]
+
+        # Use side_effect to return different results for consecutive fetch calls
+        # 1. columns query
+        # 2. fks query
+        mock_conn.fetch.side_effect = [mock_cols, mock_fks]
+
+        table_def = await introspector.get_table_def("users")
+
+        assert table_def.name == "users"
+
+        # Check columns
+        assert len(table_def.columns) == 2
+        assert table_def.columns[0].name == "id"
+        assert not table_def.columns[0].is_nullable
+        assert table_def.columns[1].name == "name"
+        assert table_def.columns[1].is_nullable
+
+        # Check FKs
+        assert len(table_def.foreign_keys) == 1
+        assert table_def.foreign_keys[0].column_name == "role_id"
+        assert table_def.foreign_keys[0].foreign_table_name == "roles"
