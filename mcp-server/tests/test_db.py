@@ -73,7 +73,7 @@ class TestDatabase:
                 with pytest.raises(ConnectionError) as exc_info:
                     await Database.init()
 
-                assert "Failed to create connection pool" in str(exc_info.value)
+                assert "Failed to initialize databases" in str(exc_info.value)
                 assert Database._pool is None
 
     @pytest.mark.asyncio

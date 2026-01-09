@@ -9,9 +9,10 @@ Uses deterministic "Mini-Schema" expansion:
 import asyncio
 import json
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor
 
+from mcp_server.dal.executor import ContextAwareExecutor
+from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.db import Database
 from mcp_server.graph_ingestion.indexing import VectorIndexer
 
 logger = logging.getLogger(__name__)
@@ -21,17 +22,18 @@ TABLES_K = 5  # Number of tables to retrieve
 COLUMNS_K = 3  # Number of columns to retrieve (fallback only)
 
 
-def _get_mini_graph(query_text: str) -> dict:
+def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
     """Retrieve subgraph synchronously using deterministic mini-schema expansion.
+
+    Args:
+        query_text: User query.
+        store: MemgraphStore instance.
 
     Returns:
         Dict with 'nodes' and 'relationships' keys
     """
-    uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
-    user = os.getenv("MEMGRAPH_USER", "")
-    password = os.getenv("MEMGRAPH_PASSWORD", "")
-
-    indexer = VectorIndexer(uri=uri, user=user, password=password)
+    # Reuse existing store connection
+    indexer = VectorIndexer(store=store)
 
     try:
         # 1. Seed Selection (Tables-First)
@@ -72,7 +74,8 @@ def _get_mini_graph(query_text: str) -> dict:
                 nodes_map[nid] = props
             return nid
 
-        with indexer.driver.session() as session:
+        # Use the store's driver session
+        with store.driver.session() as session:
             # Step 1: Fetch Seed Tables and their Columns
             # We fetch all columns but will rely on formatter to truncate if too many.
             query_step1 = """
@@ -147,8 +150,6 @@ def _get_mini_graph(query_text: str) -> dict:
     except Exception as e:
         logger.error(f"Error in get_semantic_subgraph: {e}")
         return {"error": str(e)}
-    finally:
-        indexer.close()
 
 
 async def get_semantic_subgraph(query: str) -> str:
@@ -160,8 +161,15 @@ async def get_semantic_subgraph(query: str) -> str:
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
+    try:
+        store = Database.get_graph_store()
+    except Exception as e:
+        logger.error(f"Failed to get graph store: {e}")
+        return json.dumps({"error": "Graph store not authorized or initialized."})
+
     loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor() as pool:
-        result = await loop.run_in_executor(pool, _get_mini_graph, query)
+    # Use ContextAwareExecutor to ensure contextvars (e.g. tenant_id) propagate
+    with ContextAwareExecutor() as pool:
+        result = await loop.run_in_executor(pool, _get_mini_graph, query, store)
 
     return json.dumps(result, separators=(",", ":"))

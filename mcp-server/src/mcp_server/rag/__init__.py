@@ -2,8 +2,11 @@
 
 from typing import Optional
 
+import numpy as np
 from fastembed import TextEmbedding
-from mcp_server.db import Database
+from mcp_server.graph_ingestion.vector_indexes.factory import create_vector_index
+from mcp_server.graph_ingestion.vector_indexes.protocol import VectorIndex
+from mcp_server.rag.schema_loader import SchemaLoader
 
 
 class RagEngine:
@@ -50,19 +53,6 @@ class RagEngine:
         model = cls._get_model()
         embeddings = list(model.embed(texts))
         return [emb.tolist() for emb in embeddings]
-
-
-def format_vector_for_postgres(embedding: list[float]) -> str:
-    """
-    Format Python list as PostgreSQL vector string.
-
-    Args:
-        embedding: List of float values.
-
-    Returns:
-        String in format '[1.0, 2.0, 3.0]' for PostgreSQL.
-    """
-    return "[" + ",".join(str(float(x)) for x in embedding) + "]"
 
 
 def generate_schema_document(
@@ -127,13 +117,60 @@ def generate_schema_document(
     return ". ".join(doc_parts) + "."
 
 
+def format_vector_for_postgres(embedding: list[float]) -> str:
+    """
+    Format Python list as PostgreSQL vector string.
+
+    Args:
+        embedding: List of float values.
+
+    Returns:
+        String in format '[1.0, 2.0, 3.0]' for PostgreSQL.
+    """
+    return "[" + ",".join(str(float(x)) for x in embedding) + "]"
+
+
+_schema_index: Optional[VectorIndex] = None
+
+
+async def _get_schema_index() -> VectorIndex:
+    """
+    Get or create the schema vector index.
+
+    Implements lazy loading to avoid blocking server startup.
+    The index is populated from the database using SchemaLoader.
+    """
+    global _schema_index
+    if _schema_index is None:
+        # Create persistent HNSW index (in-memory, backed by DB via loader)
+        # Using 384 dimensions for BGE-small
+        _schema_index = create_vector_index(dimension=384)
+        print("✓ Initialized new Schema Vector Index")
+
+        # Load examples from DB
+        try:
+            loader = SchemaLoader()
+            await loader.load_schema_embeddings(_schema_index)
+        except Exception as e:
+            print(f"Error loading schemas: {e}")
+
+    return _schema_index
+
+
+async def reload_schema_index() -> None:
+    """Force reload the schema index from the database."""
+    global _schema_index
+    _schema_index = None
+    await _get_schema_index()
+
+
 async def search_similar_tables(
     query_embedding: list[float],
     limit: int = 5,
     tenant_id: Optional[int] = None,
 ) -> list[dict]:
     """
-    Search for similar tables using cosine distance.
+    Search for similar tables using in-memory VectorIndex.
 
     Args:
         query_embedding: Embedding vector of the user query.
@@ -143,28 +180,23 @@ async def search_similar_tables(
     Returns:
         List of dicts with 'table_name', 'schema_text', 'distance'.
     """
-    # Format embedding for PostgreSQL
-    pg_vector = format_vector_for_postgres(query_embedding)
+    index = await _get_schema_index()
 
-    # Use cosine distance operator (<=>)
-    # Lower distance = more similar
-    query = """
-        SELECT
-            table_name,
-            schema_text,
-            (embedding <=> $1::vector) as distance
-        FROM public.schema_embeddings
-        ORDER BY distance ASC
-        LIMIT $2
-    """
+    query_vector = np.array(query_embedding, dtype=np.float32)
+    results = index.search(query_vector, k=limit)
 
-    async with Database.get_connection(tenant_id) as conn:
-        rows = await conn.fetch(query, pg_vector, limit)
-        return [
+    structured_results = []
+
+    for res in results:
+        # SchemaLoader stores metadata with table_name and schema_text
+        metadata = res.metadata or {}
+
+        structured_results.append(
             {
-                "table_name": row["table_name"],
-                "schema_text": row["schema_text"],
-                "distance": float(row["distance"]),
+                "table_name": str(res.id),  # We used table_name as ID
+                "schema_text": metadata.get("schema_text", ""),
+                "distance": 1.0 - res.score,  # Convert similarity back to distance for compat
             }
-            for row in rows
-        ]
+        )
+
+    return structured_results

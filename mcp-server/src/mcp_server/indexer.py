@@ -1,7 +1,9 @@
 """Schema indexing service for RAG."""
 
+import mcp_server.rag
+from mcp_server.dal.types import SchemaEmbedding
 from mcp_server.db import Database
-from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
+from mcp_server.rag import RagEngine, generate_schema_document
 
 
 async def index_all_tables():
@@ -9,77 +11,53 @@ async def index_all_tables():
     Scan database schema and create embeddings for all tables.
 
     This function:
-    1. Queries information_schema for all tables
-    2. For each table, retrieves columns and foreign keys
-    3. Generates enriched schema documents
-    4. Creates embeddings
-    5. Inserts/updates schema_embeddings table
+    1. Introspects database using SchemaIntrospector
+    2. Generates enriched schema documents
+    3. Creates embeddings
+    4. Saves to SchemaStore
     """
-    # Schema indexing is global (not tenant-scoped), so no tenant_id needed
-    async with Database.get_connection() as conn:
-        # Get all tables in public schema
-        tables_query = """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-        """
-        tables = await conn.fetch(tables_query)
+    introspector = Database.get_schema_introspector()
+    store = Database.get_schema_store()
 
-        print(f"Indexing {len(tables)} tables...")
+    table_names = await introspector.list_table_names()
+    print(f"Indexing {len(table_names)} tables...")
 
-        for table_row in tables:
-            table_name = table_row["table_name"]
+    for table_name in table_names:
+        # Get full definition
+        table_def = await introspector.get_table_def(table_name)
 
-            # Get columns
-            cols_query = """
-                SELECT column_name, data_type, is_nullable
-                FROM information_schema.columns
-                WHERE table_name = $1 AND table_schema = 'public'
-                ORDER BY ordinal_position
-            """
-            columns = await conn.fetch(cols_query, table_name)
+        # Convert canonical types to dicts for RagEngine
+        # (RagEngine code stays as is, accepting generic dicts for flexibility)
+        columns = [
+            {
+                "column_name": col.name,
+                "data_type": col.data_type,
+                "is_nullable": "YES" if col.is_nullable else "NO",
+            }
+            for col in table_def.columns
+        ]
 
-            # Get foreign keys
-            fk_query = """
-                SELECT
-                    kcu.column_name,
-                    ccu.table_name AS foreign_table_name,
-                    ccu.column_name AS foreign_column_name
-                FROM information_schema.table_constraints AS tc
-                JOIN information_schema.key_column_usage AS kcu
-                    ON tc.constraint_name = kcu.constraint_name
-                JOIN information_schema.constraint_column_usage AS ccu
-                    ON ccu.constraint_name = tc.constraint_name
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_name = $1
-                    AND tc.table_schema = 'public'
-            """
-            foreign_keys = await conn.fetch(fk_query, table_name)
+        foreign_keys = [
+            {"column_name": fk.column_name, "foreign_table_name": fk.foreign_table_name}
+            for fk in table_def.foreign_keys
+        ]
 
-            # Generate schema document
-            schema_text = generate_schema_document(
-                table_name,
-                [dict(col) for col in columns],
-                [dict(fk) for fk in foreign_keys] if foreign_keys else None,
-            )
+        # Generate schema document
+        schema_text = generate_schema_document(table_name, columns, foreign_keys)
 
-            # Generate embedding
-            embedding = RagEngine.embed_text(schema_text)
-            pg_vector = format_vector_for_postgres(embedding)
+        # Generate embedding
+        embedding_vector = RagEngine.embed_text(schema_text)
 
-            # Insert or update
-            upsert_query = """
-                INSERT INTO public.schema_embeddings (table_name, schema_text, embedding)
-                VALUES ($1, $2, $3::vector)
-                ON CONFLICT (table_name)
-                DO UPDATE SET
-                    schema_text = EXCLUDED.schema_text,
-                    embedding = EXCLUDED.embedding,
-                    updated_at = CURRENT_TIMESTAMP
-            """
-            await conn.execute(upsert_query, table_name, schema_text, pg_vector)
-            print(f"  ✓ Indexed: {table_name}")
+        # Save to store
+        schema_embedding = SchemaEmbedding(
+            table_name=table_name, schema_text=schema_text, embedding=embedding_vector
+        )
 
-        print(f"✓ Schema indexing complete: {len(tables)} tables indexed")
+        await store.save_schema_embedding(schema_embedding)
+        print(f"  ✓ Indexed: {table_name}")
+
+    print(f"✓ Schema indexing complete: {len(table_names)} tables indexed")
+
+    # Reload the in-memory vector index to reflect changes
+    await mcp_server.rag.reload_schema_index()
+    print("✓ Schema index reloaded")

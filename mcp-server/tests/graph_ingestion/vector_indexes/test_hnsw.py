@@ -266,6 +266,13 @@ class TestHNSWFactory:
             index = create_vector_index(dim=64)
             assert isinstance(index, HNSWIndex)
 
+    def test_default_backend(self):
+        """Default backend should be HNSWIndex."""
+        with pytest.MonkeyPatch.context() as mp:
+            mp.delenv("INDEX_BACKEND", raising=False)
+            index = create_vector_index(dim=64)
+            assert isinstance(index, HNSWIndex)
+
 
 class TestHNSWProtocolCompliance:
     """Verify HNSWIndex satisfies VectorIndex protocol."""
