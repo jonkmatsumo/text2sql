@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Dict, List
 
+from mcp_server.dal.factory import get_retriever
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.factory.retriever import get_retriever
 
 logger = logging.getLogger(__name__)
 

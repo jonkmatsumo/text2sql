@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 from mcp_server.config.database import Database
+from mcp_server.dal.factory import get_retriever
 from mcp_server.dal.ingestion.hydrator import GraphHydrator
-from mcp_server.factory.retriever import get_retriever
 from mcp_server.rag import RagEngine, format_vector_for_postgres
 from mcp_server.seeding.loader import load_from_directory
 
