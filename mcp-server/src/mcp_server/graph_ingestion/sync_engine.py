@@ -1,14 +1,14 @@
 import logging
 from typing import Any, Dict, List
 
+from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.factory.retriever import get_retriever
-from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
 
 
 class SyncEngine:
-    """Synchronizes live PostgreSQL schema with Memgraph."""
+    """Synchronizes live PostgreSQL schema with Memgraph using DAL."""
 
     def __init__(self, graph_uri: str = "bolt://localhost:7687", graph_auth: tuple = None):
         """
@@ -19,13 +19,13 @@ class SyncEngine:
             graph_auth: Tuple of (user, password) for Memgraph.
         """
         self.retriever = get_retriever()
-        self.graph_driver = GraphDatabase.driver(graph_uri, auth=graph_auth)
+        user = graph_auth[0] if graph_auth else ""
+        password = graph_auth[1] if graph_auth else ""
+        self.store = MemgraphStore(graph_uri, user, password)
 
     def close(self):
         """Close connections."""
-        # Retriever singleton doesn't adhere to close semantics here usually,
-        # or we could add close to it, but for now just close graph driver.
-        self.graph_driver.close()
+        self.store.close()
 
     def get_live_schema(self) -> Dict[str, Any]:
         """Fetch current tables and columns from PostgreSQL using Retriever."""
@@ -48,28 +48,27 @@ class SyncEngine:
         return schema_info
 
     def get_graph_state(self) -> Dict[str, Any]:
-        """Fetch current Tables and Columns from Memgraph."""
+        """Fetch current Tables and Columns from Memgraph via DAL."""
         graph_state = {"tables": {}}
 
-        with self.graph_driver.session() as session:
-            # Fetch all tables and their columns
-            query = """
-            MATCH (t:Table)
-            OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-            RETURN t.name as table, c.name as column, c.type as type
-            """
-            result = session.run(query)
+        # 1. Fetch all Tables
+        tables = self.store.get_nodes("Table")
+        for t in tables:
+            # We used 'name' as stored property (and ID)
+            t_name = t.properties.get("name")
+            if t_name:
+                graph_state["tables"][t_name] = {}
 
-            for record in result:
-                table = record["table"]
-                column = record["column"]
-                col_type = record["type"]
+        # 2. Fetch all Columns
+        # Column nodes have 'table' property and 'name' property
+        columns = self.store.get_nodes("Column")
+        for c in columns:
+            t_name = c.properties.get("table")
+            c_name = c.properties.get("name")
+            c_type = c.properties.get("type")
 
-                if table not in graph_state["tables"]:
-                    graph_state["tables"][table] = {}
-
-                if column:  # Might be None if table has no columns (unlikely but possible)
-                    graph_state["tables"][table][column] = {"type": col_type}
+            if t_name and c_name and t_name in graph_state["tables"]:
+                graph_state["tables"][t_name][c_name] = {"type": c_type}
 
         return graph_state
 
@@ -101,11 +100,7 @@ class SyncEngine:
                 logger.info(f"Pruning columns from {table}: {cols_to_remove}")
                 self._prune_columns(table, list(cols_to_remove))
 
-            # Add/Update columns (simplified: relying on Hydrator or subsequent logic to add)
-            # This sync engine primarily focuses on pruning and property updates.
-            # Adding new things is often handled by the Hydrator running on the parsed schema.
-            # But we can verify type changes here.
-
+            # Update types
             common_cols = live_cols.intersection(graph_cols)
             for col in common_cols:
                 live_type = live_schema["tables"][table][col]["type"]
@@ -119,44 +114,22 @@ class SyncEngine:
         logger.info("Reconciliation complete.")
 
     def _prune_tables(self, table_names: List[str]):
-        """Delete tables and their connected nodes."""
-        with self.graph_driver.session() as session:
-            query = """
-            MATCH (t:Table)
-            WHERE t.name IN $names
-            DETACH DELETE t
-            """
-            session.run(query, names=table_names)
-
-            # Also cleanup orphaned columns?
-            # Columns are usually connected to tables.
-            # If table is deleted, we should delete columns too.
-            # The query above only deletes Table nodes.
-            # Columns might remain if they are separate nodes.
-            # Better approach:
-            query_cascade = """
-            MATCH (t:Table)
-            WHERE t.name IN $names
-            OPTIONAL MATCH (t)-[:HAS_COLUMN]->(c:Column)
-            DETACH DELETE t, c
-            """
-            session.run(query_cascade, names=table_names)
+        """Delete tables and their connected nodes (columns)."""
+        for t_name in table_names:
+            # Table ID is just the table name in our Hydrator logic
+            self.store.delete_subgraph(t_name)
 
     def _prune_columns(self, table_name: str, column_names: List[str]):
         """Delete specific columns from a table."""
-        with self.graph_driver.session() as session:
-            query = """
-            MATCH (t:Table {name: $table})-[:HAS_COLUMN]->(c:Column)
-            WHERE c.name IN $cols
-            DETACH DELETE c
-            """
-            session.run(query, table=table_name, cols=column_names)
+        for c_name in column_names:
+            # Column ID is "TableName.ColumnName"
+            col_id = f"{table_name}.{c_name}"
+            self.store.delete_subgraph(col_id)
 
     def _update_column_type(self, table_name: str, col_name: str, new_type: str):
         """Update column type property."""
-        with self.graph_driver.session() as session:
-            query = """
-            MATCH (t:Table {name: $table})-[:HAS_COLUMN]->(c:Column {name: $col})
-            SET c.type = $new_type
-            """
-            session.run(query, table=table_name, col=col_name, new_type=new_type)
+        col_id = f"{table_name}.{col_name}"
+        # Upsert merges properties.
+        # Note: We need to pass label (Column) and properties.
+        # We don't change structural edges here, just properties.
+        self.store.upsert_node(label="Column", node_id=col_id, properties={"type": new_type})

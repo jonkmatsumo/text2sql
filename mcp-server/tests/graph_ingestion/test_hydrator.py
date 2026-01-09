@@ -4,17 +4,12 @@ from mcp_server.graph_ingestion.hydrator import GraphHydrator, should_skip_colum
 from mcp_server.models.schema import ColumnMetadata, ForeignKey, TableMetadata
 
 
-@patch("mcp_server.graph_ingestion.hydrator.GraphDatabase")
+@patch("mcp_server.graph_ingestion.hydrator.MemgraphStore")
 @patch("mcp_server.graph_ingestion.hydrator.EmbeddingService")
-def test_hydrate_schema(mock_embedding_service, mock_graph_db):
-    """Test hydrate_schema logic."""
-    mock_driver = MagicMock()
-    mock_graph_db.driver.return_value = mock_driver
-    mock_session = MagicMock()
-    mock_driver.session.return_value.__enter__.return_value = mock_session
-
-    # Mock execute_write to return 0 for column skipped count
-    mock_session.execute_write.return_value = 0
+def test_hydrate_schema(mock_embedding_service, mock_memgraph_store_cls):
+    """Test hydrate_schema logic with DAL."""
+    # Setup mock store instance
+    mock_store = mock_memgraph_store_cls.return_value
 
     mock_embedding_service.return_value.embed_text.return_value = [0.1, 0.2]
 
@@ -32,12 +27,16 @@ def test_hydrate_schema(mock_embedding_service, mock_graph_db):
     hydrator = GraphHydrator()
     hydrator.hydrate_schema(mock_retriever)
 
-    # Verify driver calls
-    mock_graph_db.driver.assert_called_once()
-    mock_driver.session.assert_called_once()
+    # Verify Store Intialization
+    mock_memgraph_store_cls.assert_called_once()
 
-    # Verify session execution calls (3 phases: table, columns, fks)
-    assert mock_session.execute_write.call_count == 3
+    # Verify UPSERT calls
+    # 1. Table upsert
+    assert mock_store.upsert_node.called
+
+    # 2. Column upsert (should be called for c1)
+    # 3. Edge upsert (HAS_COLUMN and FOREIGN_KEY_TO)
+    assert mock_store.upsert_edge.called
 
     # Verify retriever calls
     mock_retriever.list_tables.assert_called_once()

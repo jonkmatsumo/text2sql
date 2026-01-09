@@ -5,13 +5,10 @@ Includes adaptive thresholding to filter low-quality vector matches.
 
 import logging
 import math
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
-from neo4j import GraphDatabase
+from mcp_server.dal.memgraph import MemgraphStore
 from openai import OpenAI
-
-if TYPE_CHECKING:
-    from mcp_server.graph_ingestion.vector_indexes import VectorIndex
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +101,6 @@ class VectorIndexer:
 
     Uses brute-force cosine similarity (usearch not available in base Memgraph).
     Includes adaptive thresholding to filter low-quality matches.
-
-    Optionally accepts VectorIndex instances for table and column searches,
-    enabling runtime switching between brute-force and ANN backends.
     """
 
     def __init__(
@@ -114,27 +108,34 @@ class VectorIndexer:
         uri: str = "bolt://localhost:7687",
         user: str = "",
         password: str = "",
-        table_index: Optional["VectorIndex"] = None,
-        column_index: Optional["VectorIndex"] = None,
+        store: Optional[MemgraphStore] = None,
     ):
-        """Initialize Neo4j/Memgraph driver.
+        """Initialize Memgraph store.
 
         Args:
             uri: Bolt URI for Memgraph connection.
             user: Username for authentication.
             password: Password for authentication.
-            table_index: Optional VectorIndex for table searches.
-            column_index: Optional VectorIndex for column searches.
+            store: Optional existing MemgraphStore instance.
         """
-        auth = (user, password) if user and password else None
-        self.driver = GraphDatabase.driver(uri, auth=auth)
+        if store:
+            self.store = store
+            self.owns_store = False
+        else:
+            self.store = MemgraphStore(uri, user, password)
+            self.owns_store = True
+
         self.embedding_service = EmbeddingService()
-        self.table_index = table_index
-        self.column_index = column_index
 
     def close(self):
-        """Close driver."""
-        self.driver.close()
+        """Close store if owned."""
+        if self.owns_store:
+            self.store.close()
+
+    @property
+    def driver(self):
+        """Access underlying driver for legacy support."""
+        return self.store.driver
 
     def create_indexes(self):
         """Create property indexes to speed up node retrieval.

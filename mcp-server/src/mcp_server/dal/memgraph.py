@@ -217,6 +217,28 @@ class MemgraphStore(GraphStore):
 
             return GraphData()
 
+    def get_nodes(self, label: str) -> List[Node]:
+        """Retrieve all nodes with a specific label."""
+        query = f"MATCH (n:`{label}`) RETURN n"
+
+        with self.driver.session() as session:
+            result = session.run(query)
+            nodes = []
+            for record in result:
+                neo4j_node = record["n"]
+                props = dict(neo4j_node)
+                # Ensure 'id' is present
+                if "id" not in props and hasattr(neo4j_node, "element_id"):
+                    # Fallback if property is missing, though our upsert guarantees it.
+                    # We prefer the property 'id'.
+                    props["id"] = neo4j_node.element_id
+
+                # If props still has no id (unlikely with our upsert), generic fallback?
+                # For strictness we might filter or error, but let's be robust.
+                if "id" in props:
+                    nodes.append(Node(id=str(props["id"]), label=label, properties=props))
+            return nodes
+
     def delete_subgraph(self, root_id: str) -> List[str]:
         """Delete subgraph and return deleted IDs."""
         query = """

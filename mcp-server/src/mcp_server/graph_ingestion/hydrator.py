@@ -1,11 +1,12 @@
 import json
 import logging
 import re
+from typing import Set, Tuple
 
+from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.graph_ingestion.indexing import EmbeddingService
 from mcp_server.models.schema import ColumnMetadata, TableMetadata
 from mcp_server.retrievers.data_schema_retriever import DataSchemaRetriever
-from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,16 @@ def should_skip_column_embedding(
 
 
 class GraphHydrator:
-    """Hydrates Memgraph/Neo4j with schema information."""
+    """Hydrates Memgraph/Neo4j with schema information using DAL."""
 
     def __init__(self, uri: str = "bolt://localhost:7687", user: str = "", password: str = ""):
         """Initialize the Graph Hydrator."""
-        auth = (user, password) if user and password else None
-        self.driver = GraphDatabase.driver(uri, auth=auth)
+        self.store = MemgraphStore(uri, user, password)
         self.embedding_service = EmbeddingService()
 
     def close(self):
-        """Close the driver connection."""
-        self.driver.close()
+        """Close the connection."""
+        self.store.close()
 
     def hydrate_schema(self, retriever: DataSchemaRetriever):
         """
@@ -90,7 +90,7 @@ class GraphHydrator:
         logger.info(f"Found {len(tables)} tables to hydrate.")
 
         # Build FK lookup for all tables (to know which columns are FKs)
-        fk_columns = set()
+        fk_columns: Set[Tuple[str, str]] = set()
         all_fks = {}
         for table in tables:
             try:
@@ -102,35 +102,32 @@ class GraphHydrator:
                 logger.error(f"Error fetching FKs for table {table.name}: {e}")
                 all_fks[table.name] = []
 
-        with self.driver.session() as session:
-            # 1. Create Tables and Properties
-            for table in tables:
-                session.execute_write(self._create_table_node, table)
+        # 1. Create Tables and Properties
+        for table in tables:
+            self._create_table_node(table)
 
-            # 2. Create Columns and HAS_COLUMN relationships
-            skipped_embeddings = 0
-            for table in tables:
-                try:
-                    columns = retriever.get_columns(table.name)
-                    skipped = session.execute_write(
-                        self._create_column_nodes, table.name, columns, fk_columns
-                    )
-                    skipped_embeddings += skipped
-                except Exception as e:
-                    logger.error(f"Error fetching columns for table {table.name}: {e}")
+        # 2. Create Columns and HAS_COLUMN relationships
+        skipped_embeddings = 0
+        for table in tables:
+            try:
+                columns = retriever.get_columns(table.name)
+                skipped = self._create_column_nodes(table.name, columns, fk_columns)
+                skipped_embeddings += skipped
+            except Exception as e:
+                logger.error(f"Error fetching columns for table {table.name}: {e}")
 
-            if skipped_embeddings > 0:
-                logger.info(f"Skipped embeddings for {skipped_embeddings} low-signal columns")
+        if skipped_embeddings > 0:
+            logger.info(f"Skipped embeddings for {skipped_embeddings} low-signal columns")
 
-            # 3. Create Foreign Key relationships
-            for table in tables:
-                fks = all_fks.get(table.name, [])
-                if fks:
-                    session.execute_write(self._create_fk_relationships, table.name, fks)
+        # 3. Create Foreign Key relationships
+        for table in tables:
+            fks = all_fks.get(table.name, [])
+            if fks:
+                self._create_fk_relationships(table.name, fks)
 
         logger.info("Graph hydration complete.")
 
-    def _create_table_node(self, tx, table: TableMetadata):
+    def _create_table_node(self, table: TableMetadata):
         """Create or update a Table node."""
         # Generate embedding for the table
         # We embed the name and description for semantic search
@@ -140,22 +137,19 @@ class GraphHydrator:
         # Serialize sample data (handle datetime objects)
         sample_data_json = json.dumps(table.sample_data, default=str) if table.sample_data else "[]"
 
-        query = """
-        MERGE (t:Table {name: $name})
-        SET t.description = $description,
-            t.sample_data = $sample_data,
-            t.embedding = $embedding
-        """
-        tx.run(
-            query,
-            name=table.name,
-            description=table.description or "",
-            sample_data=sample_data_json,
-            embedding=embedding,
+        self.store.upsert_node(
+            label="Table",
+            node_id=table.name,  # Using name as ID for Tables
+            properties={
+                "name": table.name,
+                "description": table.description or "",
+                "sample_data": sample_data_json,
+                "embedding": embedding,
+            },
         )
 
     def _create_column_nodes(
-        self, tx, table_name: str, columns: list[ColumnMetadata], fk_columns: set
+        self, table_name: str, columns: list[ColumnMetadata], fk_columns: set
     ) -> int:
         """Create Column nodes and connect to Table.
 
@@ -180,40 +174,38 @@ class GraphHydrator:
                 )
                 embedding = self.embedding_service.embed_text(embedding_text)
 
-            # Create node with or without embedding
-            query = """
-            MATCH (t:Table {name: $table_name})
-            MERGE (c:Column {name: $col_name, table: $table_name})
-            SET c.type = $type,
-                c.is_primary_key = $pk,
-                c.description = $description,
-                c.embedding = $embedding
-            MERGE (t)-[:HAS_COLUMN]->(c)
-            """
-            tx.run(
-                query,
-                table_name=table_name,
-                col_name=col.name,
-                type=col.type,
-                pk=col.is_primary_key,
-                description=col.description or "",
-                embedding=embedding,
+            # Node ID: "TableName.ColumnName" to be unique
+            col_node_id = f"{table_name}.{col.name}"
+
+            # 1. Upsert Column Node
+            self.store.upsert_node(
+                label="Column",
+                node_id=col_node_id,
+                properties={
+                    "name": col.name,
+                    "table": table_name,
+                    "type": col.type,
+                    "is_primary_key": col.is_primary_key,
+                    "description": col.description or "",
+                    "embedding": embedding,
+                },
+            )
+
+            # 2. Upsert HAS_COLUMN edge (Table -> Column)
+            self.store.upsert_edge(
+                source_id=table_name,  # Table ID
+                target_id=col_node_id,  # Column ID
+                edge_type="HAS_COLUMN",
             )
 
         return skipped_count
 
-    def _create_fk_relationships(self, tx, table_name: str, fks: list):
+    def _create_fk_relationships(self, table_name: str, fks: list):
         """Create FOREIGN_KEY_TO relationships between columns."""
         for fk in fks:
-            query = """
-            MATCH (sc:Column {name: $src_col, table: $src_table})
-            MATCH (tc:Column {name: $tgt_col, table: $tgt_table})
-            MERGE (sc)-[:FOREIGN_KEY_TO]->(tc)
-            """
-            tx.run(
-                query,
-                src_col=fk.source_col,
-                src_table=table_name,
-                tgt_col=fk.target_col,
-                tgt_table=fk.target_table,
+            src_col_id = f"{table_name}.{fk.source_col}"
+            tgt_col_id = f"{fk.target_table}.{fk.target_col}"
+
+            self.store.upsert_edge(
+                source_id=src_col_id, target_id=tgt_col_id, edge_type="FOREIGN_KEY_TO"
             )

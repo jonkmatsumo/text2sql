@@ -30,9 +30,9 @@ def mock_openai():
 
 
 @pytest.fixture
-def mock_neo4j():
-    """Mock Neo4j database."""
-    with patch("mcp_server.graph_ingestion.indexing.GraphDatabase") as mock:
+def mock_store_cls():
+    """Mock MemgraphStore class."""
+    with patch("mcp_server.graph_ingestion.indexing.MemgraphStore") as mock:
         yield mock
 
 
@@ -138,9 +138,11 @@ class TestAdaptiveThreshold:
 class TestVectorIndexer:
     """Test suite for VectorIndexer."""
 
-    def test_create_indexes(self, mock_neo4j, mock_openai):
+    def test_create_indexes(self, mock_store_cls, mock_openai):
         """Test index creation creates property indexes."""
-        driver_mock = mock_neo4j.driver.return_value
+        # Setup mock driver via store
+        mock_store_instance = mock_store_cls.return_value
+        driver_mock = mock_store_instance.driver
         session_mock = driver_mock.session.return_value
         session_mock.__enter__.return_value = session_mock
 
@@ -153,9 +155,11 @@ class TestVectorIndexer:
         assert any("Table" in c for c in calls)
         assert any("Column" in c for c in calls)
 
-    def test_search_nodes(self, mock_neo4j, mock_openai):
+    def test_search_nodes(self, mock_store_cls, mock_openai):
         """Test search logic with brute-force similarity."""
-        driver_mock = mock_neo4j.driver.return_value
+        # Setup mock driver via store
+        mock_store_instance = mock_store_cls.return_value
+        driver_mock = mock_store_instance.driver
         session_mock = driver_mock.session.return_value
         session_mock.__enter__.return_value = session_mock
 
@@ -163,7 +167,16 @@ class TestVectorIndexer:
         mock_node = MagicMock()
         mock_node.__iter__ = Mock(return_value=iter([("name", "TestTable")]))
         mock_node.keys = Mock(return_value=["name", "embedding"])
-        mock_node.__getitem__ = lambda s, k: "TestTable" if k == "name" else MOCK_EMBEDDING
+
+        # Handle dict(node) conversion
+        def get_item(key):
+            if key == "name":
+                return "TestTable"
+            if key == "embedding":
+                return MOCK_EMBEDDING
+            raise KeyError(key)
+
+        mock_node.__getitem__ = Mock(side_effect=get_item)
 
         mock_record = {"n": mock_node, "embedding": MOCK_EMBEDDING}
         session_mock.run.return_value = [mock_record]

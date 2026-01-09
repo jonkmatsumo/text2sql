@@ -3,16 +3,20 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
+from mcp_server.dal.interfaces import GraphStore
+from mcp_server.dal.memgraph import MemgraphStore
 
 
 class Database:
-    """Manages asyncpg connection pool for PostgreSQL with tenant context."""
+    """Manages connection pools for PostgreSQL and Memgraph."""
 
     _pool: Optional[asyncpg.Pool] = None
+    _graph_store: Optional[GraphStore] = None
 
     @classmethod
     async def init(cls):
-        """Initialize the connection pool with optimal settings for asyncpg."""
+        """Initialize connection pools."""
+        # Postgres Config
         db_host = os.getenv("DB_HOST", "localhost")
         db_port = int(os.getenv("DB_PORT", "5432"))
         db_name = os.getenv("DB_NAME", "pagila")
@@ -21,30 +25,54 @@ class Database:
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
+        # Memgraph Config
+        graph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
+        graph_user = os.getenv("MEMGRAPH_USER", "")
+        graph_pass = os.getenv("MEMGRAPH_PASSWORD", "")
+
         try:
+            # 1. Init Postgres
             cls._pool = await asyncpg.create_pool(
                 dsn,
                 min_size=5,
                 max_size=20,
                 command_timeout=60,
-                # Ensure we don't accidentally share state if a connection dies dirty
                 server_settings={"application_name": "bi_agent_mcp"},
             )
             print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
+
+            # 2. Init Memgraph
+            cls._graph_store = MemgraphStore(graph_uri, graph_user, graph_pass)
+            print(f"✓ Graph store connection established: {graph_uri}")
+
         except Exception as e:
-            raise ConnectionError(f"Failed to create connection pool: {e}")
+            await cls.close()  # Cleanup partials
+            raise ConnectionError(f"Failed to initialize databases: {e}")
 
     @classmethod
     async def close(cls):
-        """Close the connection pool."""
+        """Close connection pools."""
         if cls._pool:
             await cls._pool.close()
             print("✓ Database connection pool closed")
+            cls._pool = None
+
+        if cls._graph_store:
+            cls._graph_store.close()
+            print("✓ Graph store connection closed")
+            cls._graph_store = None
+
+    @classmethod
+    def get_graph_store(cls) -> GraphStore:
+        """Get the initialized graph store instance."""
+        if cls._graph_store is None:
+            raise RuntimeError("Graph store not initialized. Call Database.init() first.")
+        return cls._graph_store
 
     @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None):
-        """Yield a connection with the tenant context securely set.
+        """Yield a Postgres connection with the tenant context securely set.
 
         Guarantees cleanup via transaction scoping.
 
