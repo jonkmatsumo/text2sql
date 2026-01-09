@@ -27,6 +27,7 @@ import logging
 import os
 from typing import Dict, Optional, Type
 
+from mcp_server.dal.env import get_provider_env
 from mcp_server.dal.interfaces import (
     CacheStore,
     ExampleStore,
@@ -45,7 +46,6 @@ from mcp_server.dal.postgres import (
 )
 from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
 from mcp_server.dal.retrievers.postgres_retriever import PostgresRetriever
-from mcp_server.factory.providers import get_provider_env
 
 logger = logging.getLogger(__name__)
 

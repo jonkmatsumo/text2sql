@@ -4,7 +4,7 @@ import os
 from unittest.mock import patch
 
 import pytest
-from mcp_server.factory.providers import PROVIDER_ALIASES, get_provider_env, normalize_provider
+from mcp_server.dal.env import PROVIDER_ALIASES, get_provider_env, normalize_provider
 
 
 class TestNormalizeProvider:
