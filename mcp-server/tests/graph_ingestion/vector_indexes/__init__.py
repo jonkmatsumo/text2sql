@@ -1,0 +1,1 @@
+"""Vector indexes test module."""
