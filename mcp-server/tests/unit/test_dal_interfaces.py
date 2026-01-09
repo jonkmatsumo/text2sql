@@ -7,7 +7,9 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from mcp_server.dal.ingestion.vector_indexes.protocol import SearchResult
-from mcp_server.dal.interfaces import CacheStore, ExtendedVectorIndex, GraphStore
+from mcp_server.dal.interfaces.cache_store import CacheStore
+from mcp_server.dal.interfaces.extended_vector_index import ExtendedVectorIndex
+from mcp_server.dal.interfaces.graph_store import GraphStore
 from mcp_server.models.cache.lookup_result import CacheLookupResult
 from mcp_server.models.graph.data import GraphData
 from mcp_server.models.graph.edge import Edge

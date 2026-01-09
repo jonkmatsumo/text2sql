@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.dal.postgres import PgSemanticCache
+from mcp_server.dal.postgres.semantic_cache import PgSemanticCache
 from mcp_server.models.cache.lookup_result import CacheLookupResult
 
 MOCK_EMBEDDING = [0.1, 0.2, 0.3]
@@ -18,7 +18,7 @@ class TestPgSemanticCache:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.Database") as mock:
+        with patch("mcp_server.dal.postgres.semantic_cache.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -83,14 +83,14 @@ class TestPostgresExampleStore:
     @pytest.fixture
     def store(self):
         """Fixture for PostgresExampleStore."""
-        from mcp_server.dal.postgres import PostgresExampleStore
+        from mcp_server.dal.postgres.example_store import PostgresExampleStore
 
         return PostgresExampleStore()
 
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.Database") as mock:
+        with patch("mcp_server.dal.postgres.example_store.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -134,14 +134,14 @@ class TestPostgresSchemaStore:
     @pytest.fixture
     def store(self):
         """Fixture for PostgresSchemaStore."""
-        from mcp_server.dal.postgres import PostgresSchemaStore
+        from mcp_server.dal.postgres.schema_store import PostgresSchemaStore
 
         return PostgresSchemaStore()
 
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.Database") as mock:
+        with patch("mcp_server.dal.postgres.schema_store.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -183,14 +183,14 @@ class TestPostgresSchemaIntrospector:
     @pytest.fixture
     def introspector(self):
         """Fixture for PostgresSchemaIntrospector."""
-        from mcp_server.dal.postgres import PostgresSchemaIntrospector
+        from mcp_server.dal.postgres.schema_introspector import PostgresSchemaIntrospector
 
         return PostgresSchemaIntrospector()
 
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.Database") as mock:
+        with patch("mcp_server.dal.postgres.schema_introspector.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio

@@ -1,21 +1,17 @@
 from typing import Tuple
 
-from mcp_server.dal.interfaces import (
-    CacheStore,
-    ExampleStore,
-    GraphStore,
-    MetadataStore,
-    SchemaIntrospector,
-    SchemaStore,
-)
-from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.postgres import (
-    PgSemanticCache,
-    PostgresExampleStore,
-    PostgresMetadataStore,
-    PostgresSchemaIntrospector,
-    PostgresSchemaStore,
-)
+from mcp_server.dal.interfaces.cache_store import CacheStore
+from mcp_server.dal.interfaces.example_store import ExampleStore
+from mcp_server.dal.interfaces.graph_store import GraphStore
+from mcp_server.dal.interfaces.metadata_store import MetadataStore
+from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
+from mcp_server.dal.interfaces.schema_store import SchemaStore
+from mcp_server.dal.memgraph.graph_store import MemgraphStore
+from mcp_server.dal.postgres.example_store import PostgresExampleStore
+from mcp_server.dal.postgres.metadata_store import PostgresMetadataStore
+from mcp_server.dal.postgres.schema_introspector import PostgresSchemaIntrospector
+from mcp_server.dal.postgres.schema_store import PostgresSchemaStore
+from mcp_server.dal.postgres.semantic_cache import PgSemanticCache
 
 
 class DALFactory:

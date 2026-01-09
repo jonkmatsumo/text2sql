@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from mcp_server.dal.postgres import PostgresSchemaStore
+from mcp_server.dal.postgres.schema_store import PostgresSchemaStore
 from mcp_server.rag import (
     RagEngine,
     format_vector_for_postgres,

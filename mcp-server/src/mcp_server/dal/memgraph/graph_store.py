@@ -1,25 +1,11 @@
-"""Memgraph/Neo4j adapter for GraphStore.
-
-This module implements the GraphStore protocol using the official Neo4j driver.
-It strictly converts all driver-specific results (Nodes, Relationships, Paths)
-into the canonical DAL types (Node, Edge, GraphData), preventing leakage
-of backend-specific objects.
-"""
-
 import logging
 from typing import Any, Dict, List, Optional
 
-# GraphStore is used for typing compliance check if needed, but if not used in runtime code
-# we might only need it for validation. Let's keep it if we want to register it
-# or use it for type hints.
-from mcp_server.dal.interfaces import GraphStore
+from mcp_server.dal.interfaces.graph_store import GraphStore
 from mcp_server.models.graph.data import GraphData
 from mcp_server.models.graph.edge import Edge
 from mcp_server.models.graph.node import Node
 from neo4j import Driver, GraphDatabase
-
-# from neo4j.graph import Node as Neo4jNode, Relationship as Neo4jRel
-
 
 logger = logging.getLogger(__name__)
 
