@@ -14,7 +14,6 @@ import numpy as np
 if TYPE_CHECKING:
     from .protocol import VectorIndex
 
-from .brute_force import BruteForceIndex
 from .protocol import SearchResult
 
 logger = logging.getLogger(__name__)
@@ -27,10 +26,10 @@ class ThreadSafeIndex:
     1. Shadow Index: Builds new index in background without touching live index
     2. Hot Swap: Uses lock only for pointer swap (minimal contention)
     3. Garbage Collection: Properly disposes old index after swap
-    4. Error Handling: Falls back to BruteForceIndex on load failures
+    4. Error Handling: Logs errors but continues with existing index
 
     Usage:
-        index = ThreadSafeIndex.create(backend="hnsw", dim=1536)
+        index = ThreadSafeIndex.create(dim=1536)
         results = index.search(query, k=5)
 
         # Background update (non-blocking)
@@ -43,51 +42,36 @@ class ThreadSafeIndex:
     def __init__(
         self,
         initial_index: "VectorIndex",
-        fallback_index: "VectorIndex | None" = None,
     ) -> None:
         """Initialize thread-safe index wrapper.
 
         Args:
             initial_index: The active VectorIndex to wrap.
-            fallback_index: Optional fallback (typically BruteForce) for error recovery.
         """
         self._active_index: "VectorIndex" = initial_index
-        self._fallback_index: "VectorIndex | None" = fallback_index
         self._swap_lock = threading.Lock()
         self._update_lock = threading.Lock()  # Prevent concurrent updates
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-update")
-        self._is_using_fallback = False
 
     @classmethod
     def create(
         cls,
-        backend: str = "brute_force",
         dim: int | None = None,
-        fallback_enabled: bool = True,
         **kwargs,
     ) -> "ThreadSafeIndex":
-        """Create ThreadSafeIndex with optional fallback.
+        """Create ThreadSafeIndex with HNSW backend.
 
         Args:
-            backend: Backend type ("brute_force" or "hnsw").
-            dim: Vector dimension (required for HNSW).
-            fallback_enabled: Whether to create BruteForce fallback.
+            dim: Vector dimension.
             **kwargs: Additional backend-specific arguments.
 
         Returns:
-            ThreadSafeIndex with configured backends.
+            ThreadSafeIndex with HNSW backend.
         """
         from .factory import create_vector_index
 
-        try:
-            primary = create_vector_index(backend=backend, dim=dim, **kwargs)
-        except ImportError as e:
-            logger.warning(f"Failed to create {backend} index: {e}. Falling back to brute_force.")
-            primary = BruteForceIndex()
-            fallback_enabled = False  # Primary is already fallback
-
-        fallback = BruteForceIndex() if fallback_enabled else None
-        return cls(primary, fallback)
+        primary = create_vector_index(backend="hnsw", dim=dim, **kwargs)
+        return cls(primary)
 
     def search(self, query_vector: np.ndarray, k: int) -> List[SearchResult]:
         """Thread-safe search using active index.
@@ -122,10 +106,6 @@ class ThreadSafeIndex:
         # Direct write to active index - caller must ensure no concurrent updates
         self._active_index.add_items(vectors, ids, metadata)
 
-        # Also update fallback if enabled
-        if self._fallback_index is not None:
-            self._fallback_index.add_items(vectors, ids, metadata)
-
     def update(self, build_func: Callable[[], "VectorIndex"]) -> bool:
         """Build new index synchronously and hot-swap.
 
@@ -133,7 +113,7 @@ class ThreadSafeIndex:
             build_func: Callable that returns a new VectorIndex.
 
         Returns:
-            True if swap succeeded, False if build failed (fallback activated).
+            True if swap succeeded, False if build failed.
         """
         # Prevent concurrent updates
         with self._update_lock:
@@ -181,7 +161,6 @@ class ThreadSafeIndex:
             # 2. Hot Swap: Acquire lock only for pointer swap
             with self._swap_lock:
                 self._active_index = new_index
-                self._is_using_fallback = False
 
             logger.info("Index hot-swapped successfully")
 
@@ -196,13 +175,6 @@ class ThreadSafeIndex:
         except Exception as e:
             logger.error(f"Index update failed: {e}")
 
-            # 4. Error Handling: Fall back to BruteForceIndex
-            if self._fallback_index is not None and not self._is_using_fallback:
-                logger.warning("Activating fallback BruteForceIndex")
-                with self._swap_lock:
-                    self._active_index = self._fallback_index
-                    self._is_using_fallback = True
-
             # Clean up failed new index
             if new_index is not None:
                 del new_index
@@ -210,21 +182,20 @@ class ThreadSafeIndex:
 
             return False
 
-    def load(self, path: str, index_type: str = "hnsw") -> bool:
-        """Load index from disk with error handling and fallback.
+    def load(self, path: str) -> bool:
+        """Load index from disk with error handling.
 
         Args:
             path: Path to the saved index.
-            index_type: Type of index to load ("hnsw" or "brute_force").
 
         Returns:
-            True if load succeeded, False if failed (fallback activated).
+            True if load succeeded, False if failed.
         """
 
         def load_func() -> "VectorIndex":
             from .factory import create_vector_index
 
-            new_index = create_vector_index(backend=index_type)
+            new_index = create_vector_index(backend="hnsw")
             new_index.load(path)
             return new_index
 
@@ -237,11 +208,6 @@ class ThreadSafeIndex:
             path: Path to save the index.
         """
         self._active_index.save(path)
-
-    @property
-    def is_using_fallback(self) -> bool:
-        """Check if currently using fallback index."""
-        return self._is_using_fallback
 
     @property
     def active_backend(self) -> str:

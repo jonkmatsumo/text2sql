@@ -6,8 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-import pytest
-from mcp_server.graph_ingestion.vector_indexes import BruteForceIndex, HNSWIndex, ThreadSafeIndex
+from mcp_server.graph_ingestion.vector_indexes import HNSWIndex, ThreadSafeIndex
 
 
 class TestThreadSafeIndex:
@@ -15,7 +14,7 @@ class TestThreadSafeIndex:
 
     def test_basic_search(self):
         """Verify basic search through wrapper."""
-        inner = BruteForceIndex()
+        inner = HNSWIndex(dim=2)
         vectors = np.array([[1.0, 0.0], [0.0, 1.0]])
         ids = [1, 2]
         inner.add_items(vectors, ids)
@@ -28,21 +27,15 @@ class TestThreadSafeIndex:
 
     def test_add_items(self):
         """Verify add_items passes through to active index."""
-        safe = ThreadSafeIndex(BruteForceIndex())
+        safe = ThreadSafeIndex(HNSWIndex(dim=2))
         vectors = np.array([[1.0, 0.0]])
         safe.add_items(vectors, [1])
 
         assert len(safe) == 1
 
-    def test_create_factory_brute_force(self):
-        """Verify factory creates BruteForce index."""
-        safe = ThreadSafeIndex.create(backend="brute_force")
-        assert safe.active_backend == "BruteForceIndex"
-
-    @pytest.mark.skipif(HNSWIndex is None, reason="hnswlib not installed")
-    def test_create_factory_hnsw(self):
+    def test_create_factory(self):
         """Verify factory creates HNSW index."""
-        safe = ThreadSafeIndex.create(backend="hnsw", dim=3)
+        safe = ThreadSafeIndex.create(dim=3)
         assert safe.active_backend == "HNSWIndex"
 
 
@@ -51,14 +44,14 @@ class TestHotSwap:
 
     def test_synchronous_update(self):
         """Verify synchronous update swaps index."""
-        old_index = BruteForceIndex()
+        old_index = HNSWIndex(dim=2)
         old_index.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(old_index)
         assert len(safe) == 1
 
         def build_new():
-            new = BruteForceIndex()
+            new = HNSWIndex(dim=2)
             new.add_items(np.array([[1.0, 0.0], [0.0, 1.0]]), [10, 20])
             return new
 
@@ -71,14 +64,14 @@ class TestHotSwap:
 
     def test_async_update(self):
         """Verify async update eventually swaps index."""
-        old_index = BruteForceIndex()
+        old_index = HNSWIndex(dim=2)
         old_index.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(old_index)
 
         def build_new():
             time.sleep(0.1)  # Simulate build time
-            new = BruteForceIndex()
+            new = HNSWIndex(dim=2)
             new.add_items(np.array([[1.0, 0.0], [0.0, 1.0]]), [10, 20])
             return new
 
@@ -95,7 +88,7 @@ class TestHotSwap:
 
     def test_concurrent_reads_during_swap(self):
         """Verify reads continue during swap without errors."""
-        index = BruteForceIndex()
+        index = HNSWIndex(dim=2)
         index.add_items(np.array([[1.0, 0.0]]), [1])
         safe = ThreadSafeIndex(index)
 
@@ -116,7 +109,7 @@ class TestHotSwap:
             time.sleep(0.05)  # Let reads start
 
             def build():
-                new = BruteForceIndex()
+                new = HNSWIndex(dim=2)
                 new.add_items(np.array([[1.0, 0.0]]), [2])
                 return new
 
@@ -131,19 +124,15 @@ class TestHotSwap:
         assert read_count[0] > 0
 
 
-class TestFallback:
-    """Tests for error handling and fallback."""
+class TestErrorHandling:
+    """Tests for error handling."""
 
-    def test_fallback_on_build_error(self):
-        """Verify fallback activates when build fails."""
-        primary = BruteForceIndex()
+    def test_continues_with_original_on_build_error(self):
+        """Verify original index kept when build fails."""
+        primary = HNSWIndex(dim=2)
         primary.add_items(np.array([[1.0, 0.0]]), [1])
 
-        fallback = BruteForceIndex()
-        fallback.add_items(np.array([[0.0, 1.0]]), [999])
-
-        safe = ThreadSafeIndex(primary, fallback)
-        assert not safe.is_using_fallback
+        safe = ThreadSafeIndex(primary)
 
         def bad_build():
             raise RuntimeError("Build failed!")
@@ -151,34 +140,10 @@ class TestFallback:
         success = safe.update(bad_build)
 
         assert success is False
-        assert safe.is_using_fallback is True
-        assert safe.active_backend == "BruteForceIndex"
-
-        # Should use fallback
-        results = safe.search(np.array([0.0, 1.0]), k=1)
-        assert results[0].id == 999
-
-    def test_no_fallback_when_disabled(self):
-        """Verify no fallback when not configured."""
-        primary = BruteForceIndex()
-        primary.add_items(np.array([[1.0, 0.0]]), [1])
-
-        safe = ThreadSafeIndex(primary, fallback_index=None)
-
-        def bad_build():
-            raise RuntimeError("Build failed!")
-
-        success = safe.update(bad_build)
-
-        assert success is False
-        assert safe.is_using_fallback is False
         # Should still have original index
         assert len(safe) == 1
-
-    def test_create_with_fallback(self):
-        """Verify factory creates fallback by default."""
-        safe = ThreadSafeIndex.create(backend="brute_force", fallback_enabled=True)
-        assert safe._fallback_index is not None
+        results = safe.search(np.array([1.0, 0.0]), k=1)
+        assert results[0].id == 1
 
 
 class TestPersistence:
@@ -186,20 +151,20 @@ class TestPersistence:
 
     def test_save_and_load(self):
         """Verify save/load through thread-safe wrapper."""
-        original = BruteForceIndex()
+        original = HNSWIndex(dim=2)
         original.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(original)
 
-        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".hnsw", delete=False) as f:
             path = f.name
 
         try:
             safe.save(path)
 
             # Load into new wrapper
-            safe2 = ThreadSafeIndex.create(backend="brute_force")
-            success = safe2.load(path, index_type="brute_force")
+            safe2 = ThreadSafeIndex.create(dim=2)
+            success = safe2.load(path)
 
             assert success is True
             assert len(safe2) == 1
@@ -207,6 +172,9 @@ class TestPersistence:
             import os
 
             os.unlink(path)
+            meta_path = path + ".meta"
+            if os.path.exists(meta_path):
+                os.unlink(meta_path)
 
 
 class TestConcurrencyStress:
@@ -214,7 +182,7 @@ class TestConcurrencyStress:
 
     def test_many_concurrent_reads(self):
         """Stress test with many concurrent reads."""
-        index = BruteForceIndex()
+        index = HNSWIndex(dim=10)
         vectors = np.random.rand(100, 10).astype(np.float32)
         ids = list(range(100))
         index.add_items(vectors, ids)

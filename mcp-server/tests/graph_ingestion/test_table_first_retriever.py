@@ -8,7 +8,7 @@ from mcp_server.graph_ingestion.table_first_retriever import (
     format_column_text,
     format_table_text,
 )
-from mcp_server.graph_ingestion.vector_indexes import BruteForceIndex
+from mcp_server.graph_ingestion.vector_indexes import HNSWIndex
 
 
 class TestFormatFunctions:
@@ -48,7 +48,7 @@ class TestTableFirstRetriever:
     def sample_indexes(self):
         """Create sample table and column indexes."""
         # Table index
-        table_index = BruteForceIndex()
+        table_index = HNSWIndex(dim=3)
         table_vectors = np.array(
             [
                 [1.0, 0.0, 0.0],  # users
@@ -65,7 +65,7 @@ class TestTableFirstRetriever:
         table_index.add_items(table_vectors, table_ids, table_metadata)
 
         # Column index
-        column_index = BruteForceIndex()
+        column_index = HNSWIndex(dim=3)
         column_vectors = np.array(
             [
                 [0.9, 0.1, 0.0],  # users.email
@@ -161,8 +161,8 @@ class TestTableFirstRetriever:
 
     def test_empty_tables_returns_empty_columns(self):
         """Verify empty table results returns empty columns."""
-        empty_table_index = BruteForceIndex()
-        column_index = BruteForceIndex()
+        empty_table_index = HNSWIndex(dim=2)
+        column_index = HNSWIndex(dim=2)
         column_index.add_items(
             np.array([[1.0, 0.0]]),
             [1],
@@ -201,12 +201,6 @@ class TestTableFirstWithRerank:
     @pytest.fixture
     def sample_indexes(self):
         """Create indexes for rerank tests."""
-        from mcp_server.graph_ingestion.vector_indexes import HNSWIndex
-
-        # Skip if hnswlib not available
-        if HNSWIndex is None:
-            pytest.skip("hnswlib not installed")
-
         table_index = HNSWIndex(dim=3)
         table_vectors = np.array(
             [
