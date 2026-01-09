@@ -70,6 +70,8 @@ class HNSWIndex:
         self._ids: List[int] = []
         self._id_to_idx: dict[int, int] = {}  # Maps external id -> internal index
         self._metadata: dict[int, dict] = {}
+        # Store normalized vectors for reranking (hnswlib doesn't expose them)
+        self._vectors_normalized: np.ndarray | None = None
 
         # Initialize index if dimension is known
         if dim is not None:
@@ -194,6 +196,12 @@ class HNSWIndex:
         # Add to index
         self._index.add_items(vectors_normalized, internal_ids)
 
+        # Store normalized vectors for reranking
+        if self._vectors_normalized is None:
+            self._vectors_normalized = vectors_normalized.copy()
+        else:
+            self._vectors_normalized = np.vstack([self._vectors_normalized, vectors_normalized])
+
         # Track mappings
         for i, ext_id in enumerate(ids):
             self._ids.append(ext_id)
@@ -229,6 +237,7 @@ class HNSWIndex:
             "ids": self._ids,
             "id_to_idx": self._id_to_idx,
             "metadata": self._metadata,
+            "vectors_normalized": self._vectors_normalized,
         }
         with open(meta_path, "wb") as f:
             pickle.dump(state, f)
@@ -255,6 +264,7 @@ class HNSWIndex:
         self._ids = state["ids"]
         self._id_to_idx = state["id_to_idx"]
         self._metadata = state["metadata"]
+        self._vectors_normalized = state.get("vectors_normalized")
 
         # Initialize and load hnswlib index
         self._index = hnswlib.Index(space="ip", dim=self._dim)
@@ -276,3 +286,35 @@ class HNSWIndex:
     def __len__(self) -> int:
         """Return number of items in the index."""
         return len(self._ids)
+
+    def get_vectors_by_ids(self, ids: List[int]) -> np.ndarray | None:
+        """Retrieve normalized vectors for given IDs.
+
+        Args:
+            ids: List of external IDs to retrieve.
+
+        Returns:
+            2D numpy array of shape (len(ids), dim), or None if unavailable.
+        """
+        if self._vectors_normalized is None or not ids:
+            return None
+
+        indices = []
+        for ext_id in ids:
+            if ext_id in self._id_to_idx:
+                indices.append(self._id_to_idx[ext_id])
+
+        if not indices:
+            return None
+
+        return self._vectors_normalized[indices].copy()
+
+    def get_all_vectors(self) -> tuple[np.ndarray | None, List[int]]:
+        """Retrieve all normalized vectors and their IDs.
+
+        Returns:
+            Tuple of (vectors array, list of IDs), or (None, []) if empty.
+        """
+        if self._vectors_normalized is None:
+            return None, []
+        return self._vectors_normalized.copy(), self._ids.copy()

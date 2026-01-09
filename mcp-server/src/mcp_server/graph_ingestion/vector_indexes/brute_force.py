@@ -138,3 +138,39 @@ class BruteForceIndex:
     def __len__(self) -> int:
         """Return number of items in the index."""
         return len(self._ids)
+
+    def get_vectors_by_ids(self, ids: List[int]) -> np.ndarray | None:
+        """Retrieve vectors for given IDs.
+
+        Args:
+            ids: List of external IDs to retrieve.
+
+        Returns:
+            2D numpy array of shape (len(ids), dim), or None if vectors unavailable.
+        """
+        if self._vectors is None or not ids:
+            return None
+
+        indices = []
+        for ext_id in ids:
+            try:
+                idx = self._ids.index(ext_id)
+                indices.append(idx)
+            except ValueError:
+                # ID not found, skip
+                pass
+
+        if not indices:
+            return None
+
+        return self._vectors[indices].copy()
+
+    def get_all_vectors(self) -> tuple[np.ndarray | None, List[int]]:
+        """Retrieve all vectors and their IDs.
+
+        Returns:
+            Tuple of (vectors array, list of IDs), or (None, []) if empty.
+        """
+        if self._vectors is None:
+            return None, []
+        return self._vectors.copy(), self._ids.copy()
