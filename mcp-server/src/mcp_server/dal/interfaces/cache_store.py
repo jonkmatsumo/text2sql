@@ -38,6 +38,24 @@ class CacheStore(Protocol):
         """
         ...
 
+    async def lookup_by_fingerprint(
+        self,
+        fingerprint_key: str,
+        tenant_id: int,
+        cache_type: str = "sql",
+    ) -> Optional[CacheLookupResult]:
+        """Lookup a cached result by exact fingerprint key (O(1)).
+
+        Args:
+            fingerprint_key: SHA256 hash of the semantic fingerprint.
+            tenant_id: Tenant identifier for isolation.
+            cache_type: Type of cache entry.
+
+        Returns:
+            CacheLookupResult if exact match found, None otherwise.
+        """
+        ...
+
     async def record_hit(self, cache_id: str, tenant_id: int) -> None:
         """Record a cache hit for statistics.
 
@@ -57,6 +75,7 @@ class CacheStore(Protocol):
         query_embedding: List[float],
         tenant_id: int,
         cache_type: str = "sql",
+        signature_key: Optional[str] = None,
     ) -> None:
         """Store a new cache entry.
 
@@ -65,6 +84,7 @@ class CacheStore(Protocol):
             generated_sql: The generated SQL to cache.
             query_embedding: The embedding vector of the query.
             tenant_id: Tenant identifier for isolation.
+            signature_key: Optional SHA256 fingerprint key for exact matching.
         """
         ...
 
@@ -82,5 +102,31 @@ class CacheStore(Protocol):
 
         Returns:
             Number of deleted rows.
+        """
+        ...
+
+    async def tombstone_entry(self, cache_id: str, tenant_id: int, reason: str) -> bool:
+        """Mark a cache entry as tombstoned (invalid).
+
+        Tombstoned entries are excluded from lookup but retained for audit.
+
+        Args:
+            cache_id: The cache entry ID to tombstone.
+            tenant_id: Tenant scope for security.
+            reason: Reason for tombstoning.
+
+        Returns:
+            True if entry was tombstoned, False if not found.
+        """
+        ...
+
+    async def prune_tombstoned_entries(self, older_than_days: int = 30) -> int:
+        """Prune tombstoned entries older than specified days.
+
+        Args:
+            older_than_days: Delete tombstoned entries older than this many days.
+
+        Returns:
+            Number of entries deleted.
         """
         ...

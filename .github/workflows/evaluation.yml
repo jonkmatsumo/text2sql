@@ -1,12 +1,7 @@
 name: Golden Dataset Evaluation
 
 on:
-  schedule:
-    # Run daily at 2 AM UTC
-    - cron: "0 2 * * *"
   workflow_dispatch:
-  pull_request:
-    branches: [main, develop]
 
 env:
   # Test database credentials (ephemeral CI database, not production)

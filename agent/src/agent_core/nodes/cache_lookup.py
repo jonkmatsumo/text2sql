@@ -1,9 +1,9 @@
-"""Cache lookup and validation node."""
+"""Cache lookup and validation node with deterministic constraint guardrails."""
 
 import logging
 
 import mlflow
-from agent_core.llm_client import get_llm_client
+from agent_core.cache import extract_constraints, validate_sql_constraints
 from agent_core.state import AgentState
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
@@ -16,8 +16,9 @@ async def cache_lookup_node(state: AgentState) -> dict:
     Node: CacheLookup (Entry Point).
 
     1. Checks semantic cache for similar queries.
-    2. If hit, uses lightweight LLM to validate semantic equivalence.
-    3. Returns cached SQL if valid, or rejected context if invalid.
+    2. Extracts hard constraints from user query (rating, limit, etc.).
+    3. Validates cached SQL against constraints using AST parsing (deterministic).
+    4. Returns cached SQL if valid, or rejected context if invalid.
     """
     with mlflow.start_span(
         name="cache_lookup",
@@ -27,13 +28,19 @@ async def cache_lookup_node(state: AgentState) -> dict:
         user_query = messages[-1].content if messages else ""
         span.set_inputs({"user_query": user_query})
 
-        # 1. Lookup Cache
+        # 1. Extract constraints from user query (deterministic, no LLM)
+        constraints = extract_constraints(user_query)
+        span.set_attribute("extracted_constraints", constraints.to_json())
+        span.set_attribute("extraction_confidence", constraints.confidence)
+
+        # 2. Lookup Cache
         tools = await get_mcp_tools()
         cache_tool = next((t for t in tools if t.name == "lookup_cache_tool"), None)
 
         if not cache_tool:
             logger.warning("lookup_cache_tool not found")
-            return {"cached_sql": None}
+            span.set_attribute("lookup_mode", "error")
+            return {"cached_sql": None, "from_cache": False}
 
         try:
             cache_json = await cache_tool.ainvoke({"user_query": user_query})
@@ -41,51 +48,70 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
             if cache_data is None:
                 logger.info("Cache lookup returned None (Cache Miss)")
+                span.set_attribute("lookup_mode", "miss")
                 span.set_outputs({"hit": False})
-                return {"cached_sql": None}
+                return {"cached_sql": None, "from_cache": False}
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
                 cache_data = cache_data[0]
 
             if not isinstance(cache_data, dict) or not cache_data.get("sql"):
-                # Cache Miss
                 logger.info(f"Cache miss or empty data. Data type: {type(cache_data)}")
+                span.set_attribute("lookup_mode", "miss")
                 span.set_outputs({"hit": False})
-                return {"cached_sql": None}
+                return {"cached_sql": None, "from_cache": False}
 
             # Cache Hit - Prepare for Validation
             cached_sql = cache_data.get("sql")
+            cache_id = cache_data.get("cache_id")
+            similarity = cache_data.get("similarity", 0.0)
             metadata = cache_data.get("metadata", {})
             original_query = (
                 metadata.get("user_query") or cache_data.get("original_query") or "Unknown"
             )
 
+            span.set_attribute("lookup_mode", "semantic_hit")
             span.set_attribute("potential_hit", True)
+            span.set_attribute("cache_id", str(cache_id))
+            span.set_attribute("similarity_score", similarity)
             span.set_attribute("original_query", original_query)
 
-            # 2. Validate with Light LLM
-            is_valid, validation_reason = await _validate_cache_hit(
-                user_query, cached_sql, original_query
-            )
+            # 3. Validate with Deterministic Constraint Guardrail (no LLM)
+            validation = validate_sql_constraints(cached_sql, constraints)
+            span.set_attribute("guardrail_verdict", "pass" if validation.is_valid else "fail")
 
-            if is_valid:
+            if validation.mismatches:
+                mismatch_details = [m.to_dict() for m in validation.mismatches]
+                span.set_attribute("mismatch_details", str(mismatch_details))
+
+            if validation.is_valid:
+                logger.info(f"Cache hit validated. ID: {cache_id}, Similarity: {similarity:.4f}")
                 span.set_attribute("validation_status", "valid")
                 span.set_outputs({"hit": True, "sql": cached_sql})
                 return {
                     "current_sql": cached_sql,
                     "from_cache": True,
-                    "cached_sql": cached_sql,  # For consistency
+                    "cached_sql": cached_sql,
                 }
             else:
+                # Guardrail failed - treat as cache miss
+                rejection_reasons = "; ".join(m.message for m in validation.mismatches)
+                logger.warning(
+                    f"Cache hit rejected by guardrail. ID: {cache_id}, "
+                    f"Reason: {rejection_reasons}"
+                )
                 span.set_attribute("validation_status", "invalid")
-                span.set_attribute("rejection_reason", validation_reason)
+                span.set_attribute("rejection_reason", rejection_reasons)
 
-                # Create rejection context for GenerateNode
+                # Create rejection context for GenerateNode (can use as template)
                 rejected_context = {
                     "sql": cached_sql,
                     "original_query": original_query,
-                    "reason": validation_reason,
+                    "reason": rejection_reasons,
+                    "mismatches": [m.to_dict() for m in validation.mismatches],
                 }
+
+                span.set_outputs({"hit": False, "guardrail_rejected": True})
                 return {
                     "cached_sql": None,
                     "from_cache": False,
@@ -94,54 +120,6 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
         except Exception as e:
             logger.error(f"Cache lookup failed: {e}")
-            return {"cached_sql": None}
-
-
-async def _validate_cache_hit(
-    new_query: str, cached_sql: str, original_query: str
-) -> tuple[bool, str]:
-    """Use lightweight LLM to validate cache hit."""
-    try:
-        # Use lightweight model for speed/cost
-        client = get_llm_client(use_light_model=True)
-
-        system_prompt = """You are a SQL Semantic Validator.
-Compare the New Query with the Cached SQL (and its Original Query).
-Determine if the Cached SQL is 100% valid for the New Query.
-
-Rules:
-1. Ignore trivial differences (case, whitespace, synonyms like "movies" vs "films").
-2. Focus on ENTITIES (IDs, exact names, ratings).
-3. "Top 10 actors in PG films" != "Top 10 actors in NC-17 films" -> INVALID.
-4. "Sales in 2023" != "Sales in 2024" -> INVALID.
-
-Return ONLY JSON:
-{"valid": boolean, "reason": "concise explanation"}
-"""
-
-        user_prompt = f"""
-New Query: {new_query}
-Original Query: {original_query}
-Cached SQL: {cached_sql}
-"""
-        messages = [
-            ("system", system_prompt),
-            ("user", user_prompt),
-        ]
-
-        response = await client.ainvoke(messages)
-        content = response.content.strip()
-
-        # Parse JSON output
-        import json
-
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("\n", 1)[0]
-
-        result = json.loads(content)
-        return result.get("valid", False), result.get("reason", "Unknown reason")
-
-    except Exception as e:
-        logger.error(f"Cache validation failed: {e}")
-        # Fail safe - treat as invalid to trigger generation
-        return False, f"Validation error: {e}"
+            span.set_attribute("lookup_mode", "error")
+            span.set_attribute("error", str(e))
+            return {"cached_sql": None, "from_cache": False}

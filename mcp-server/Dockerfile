@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y \
 # Install Python dependencies
 RUN pip install --no-cache-dir -e .
 
+# Download SpaCy model for linguistic canonicalization
+RUN python -m spacy download en_core_web_sm
+
 # Expose SSE port
 EXPOSE 8000
 

@@ -33,10 +33,17 @@ def synthesize_insight_node(state: AgentState) -> dict:
     ) as span:
         query_result = state["query_result"]
 
-        # Get the original question from the first user message
+        # Get the original question from the LAST user message (not first)
+        # This is important because checkpointer accumulates messages across turns
         original_question = ""
         if state["messages"]:
-            original_question = state["messages"][0].content
+            from langchain_core.messages import HumanMessage
+
+            # Find the last HumanMessage (the current question)
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, HumanMessage):
+                    original_question = msg.content
+                    break
 
         span.set_inputs(
             {
