@@ -197,3 +197,139 @@ class TestAmbiguityTaxonomy:
             assert "description" in category
             assert "example" in category
             assert "question_template" in category
+
+
+class TestHardRefusalLogic:
+    """Tests for FAIL-FAST hard refusal when data is missing."""
+
+    @pytest.mark.asyncio
+    async def test_hard_refusal_when_missing_data(self, base_state):
+        """Test that missing data triggers hard refusal."""
+        base_state["messages"] = [HumanMessage(content="Show runtime for Director's Cut movies")]
+        base_state[
+            "schema_context"
+        ] = """## Tables
+### film
+| Column | Type |
+|--------|------|
+| film_id | integer |
+| runtime | integer |
+| title | varchar |
+"""  # Note: No 'version' or 'edition' column exists
+
+        response_json = json.dumps(
+            {
+                "is_ambiguous": False,
+                "confidence": 0.9,
+                "missing_data": "version/edition information (Director's Cut)",
+                "hard_refusal_message": (
+                    "I cannot filter by 'Director's Cut' because the database "
+                    "does not contain version or edition information. "
+                    "I can calculate the average runtime for ALL movies. "
+                    "Would you like that instead?"
+                ),
+            }
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = response_json
+
+        mock_chain = MagicMock()
+        mock_chain.invoke = MagicMock(return_value=mock_response)
+
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
+        ):
+            mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
+
+            result = await router_node(base_state)
+
+        # Should return MISSING_DATA ambiguity type with refusal message
+        assert result.get("ambiguity_type") == "MISSING_DATA"
+        assert "Director's Cut" in result.get("clarification_question", "")
+        assert "cannot filter" in result.get("clarification_question", "")
+
+    @pytest.mark.asyncio
+    async def test_silent_resolution_single_column(self, base_state):
+        """Test that single column match proceeds without clarification."""
+        base_state["messages"] = [HumanMessage(content="What is the average runtime?")]
+        base_state[
+            "schema_context"
+        ] = """## Tables
+### film
+| Column | Type |
+|--------|------|
+| runtime | integer |
+"""
+
+        response_json = json.dumps(
+            {
+                "is_ambiguous": False,
+                "confidence": 0.95,
+                "assumptions": ["'runtime' resolved to film.runtime (only match)"],
+            }
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = response_json
+
+        mock_chain = MagicMock()
+        mock_chain.invoke = MagicMock(return_value=mock_response)
+
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
+        ):
+            mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
+
+            result = await router_node(base_state)
+
+        # Should NOT clarify - proceed silently
+        assert result.get("ambiguity_type") is None
+        assert result.get("clarification_question") is None
+
+    @pytest.mark.asyncio
+    async def test_genuine_ambiguity_multiple_columns(self, base_state):
+        """Test that genuine multi-column ambiguity triggers clarification."""
+        base_state["messages"] = [HumanMessage(content="Group sales by region")]
+        base_state[
+            "schema_context"
+        ] = """## Tables
+### customer
+| Column | Type |
+|--------|------|
+| region | varchar |
+
+### store
+| Column | Type |
+|--------|------|
+| region | varchar |
+"""
+
+        response_json = json.dumps(
+            {
+                "is_ambiguous": True,
+                "ambiguity_type": "UNCLEAR_SCHEMA_REFERENCE",
+                "clarification_question": "Do you mean region from customers or stores?",
+                "confidence": 0.5,
+            }
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = response_json
+
+        mock_chain = MagicMock()
+        mock_chain.invoke = MagicMock(return_value=mock_response)
+
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
+        ):
+            mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
+
+            result = await router_node(base_state)
+
+        # Should trigger clarification for genuine ambiguity
+        assert result.get("ambiguity_type") == "UNCLEAR_SCHEMA_REFERENCE"
+        assert "region" in result.get("clarification_question", "").lower()
