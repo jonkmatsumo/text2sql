@@ -44,7 +44,12 @@ class PgSemanticCache(CacheStore):
 
         async with Database.get_connection(tenant_id) as conn:
             row = await conn.fetchrow(
-                query, pg_vector, tenant_id, threshold, self.CURRENT_SCHEMA_VERSION
+                query,
+                pg_vector,
+                tenant_id,
+                threshold,
+                self.CURRENT_SCHEMA_VERSION,
+                cache_type,
             )
 
         if row:
