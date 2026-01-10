@@ -47,6 +47,7 @@ flowchart TB
 
         ExecuteNode -->|"Success"| SynthesizeNode
         ExecuteNode -->|"Error"| CorrectNode
+        ExecuteNode -->|"Success (Write-Through)"| MCPTools
 
         CorrectNode -->|"Retry (Loop)"| ValidateNode
         SynthesizeNode --> Response
