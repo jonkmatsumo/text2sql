@@ -53,12 +53,49 @@ RATING_PATTERNS = [
     (r"\bR\b", "R"),
 ]
 
+# Spelled-out number mappings
+SPELLED_NUMBERS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+
+# Build regex pattern for spelled numbers
+SPELLED_NUM_PATTERN = "|".join(SPELLED_NUMBERS.keys())
+
+
+def _parse_spelled_number(m) -> int:
+    """Parse a spelled-out number from regex match."""
+    word = m.group(1).lower()
+    return SPELLED_NUMBERS.get(word, 0)
+
+
 # Limit patterns
 LIMIT_PATTERNS = [
     (r"\btop\s+(\d+)\b", lambda m: int(m.group(1))),
     (r"\b(\d+)\s+(?:best|top|highest|most)\b", lambda m: int(m.group(1))),
     (r"\blimit\s+(\d+)\b", lambda m: int(m.group(1))),
     (r"\bfirst\s+(\d+)\b", lambda m: int(m.group(1))),
+    # Spelled-out numbers: "top ten", "top five", etc.
+    (rf"\btop\s+({SPELLED_NUM_PATTERN})\b", _parse_spelled_number),
+    (rf"\b({SPELLED_NUM_PATTERN})\s+(?:best|top|highest|most)\b", _parse_spelled_number),
 ]
 
 # Ties patterns
