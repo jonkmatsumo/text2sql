@@ -20,11 +20,61 @@ class MemgraphStore(GraphStore):
             password: Database password
         """
         auth = (user, password) if user and password else None
-        self.driver: Driver = GraphDatabase.driver(uri, auth=auth)
+        self._uri = uri
+        self._auth = auth
+        self._driver: Optional[Driver] = None
+        self._connect()
+
+    def _connect(self):
+        """Establish the driver connection."""
+        if self._driver:
+            self._driver.close()
+        self._driver = GraphDatabase.driver(self._uri, auth=self._auth)
+
+    @property
+    def driver(self) -> Driver:
+        """Get the driver, ensuring it is connected."""
+        if not self._driver:
+            self._connect()
+
+        # lightweight connectivity check logic could go here,
+        # but verification on every access might be slow.
+        # However, for "defunct" errors, we usually only find out when we try to use it.
+        # To strictly fix the user's issue, we can verify_connectivity() here
+        # or rely on a retry wrapper.
+        # User error was "Failed to read...".
+        # Let's verify once.
+        try:
+            self._driver.verify_connectivity()
+        except Exception:
+            logger.warning("Memgraph driver disconnected. Reconnecting...")
+            self._connect()
+
+        return self._driver
 
     def close(self):
         """Close the driver connection."""
-        self.driver.close()
+
+    def verify_connectivity(self) -> bool:
+        """Verify connection is alive."""
+        try:
+            self.driver.verify_connectivity()
+            return True
+        except Exception as e:
+            logger.warning(f"Memgraph connection check failed: {e}")
+            return False
+
+    def _get_session(self):
+        """Get a session with retry logic for stale connections."""
+        if not self.verify_connectivity():
+            logger.warning("Connection defunct, attempting reconnect...")
+            # Re-init driver (requires storing auth params)
+            # Ideally we'd close old and create new, but auth is local.
+            # For now, let's just properly raise so caller can handle or Factory can recreate.
+            # Actually, best is to let Neo4j driver handle it? It usually does.
+            # "Defunct" usually means pool is bad.
+            pass
+        return self.driver.session()
 
     def upsert_node(
         self,

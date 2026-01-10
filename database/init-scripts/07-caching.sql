@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS public.semantic_cache (
     user_query TEXT NOT NULL,
     query_embedding vector(384),       -- Embedding of user_query (bge-small)
     generated_sql TEXT NOT NULL,       -- We cache the SQL logic (not results)
+    schema_version VARCHAR(10) DEFAULT 'v1', -- Cache invalidation versioning
+    cache_type VARCHAR(20) DEFAULT 'sql',
     similarity_score FLOAT,            -- Store similarity for analysis
     hit_count INT DEFAULT 0,           -- Track cache usage
     created_at TIMESTAMP DEFAULT NOW(),
@@ -27,7 +29,7 @@ USING hnsw (query_embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_cache_created_at ON public.semantic_cache(created_at);
 
 -- Grant access to agent user
-GRANT SELECT, INSERT, UPDATE ON public.semantic_cache TO text2sql_ro;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.semantic_cache TO text2sql_ro;
 GRANT USAGE ON SEQUENCE public.semantic_cache_cache_id_seq TO text2sql_ro;
 
 -- Add comment for documentation

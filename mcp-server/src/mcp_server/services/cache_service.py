@@ -8,7 +8,7 @@ from mcp_server.rag import RagEngine
 
 # Conservative threshold to prevent serving wrong SQL for nuanced queries
 # Research suggests 0.92-0.95 for BI applications where accuracy is paramount
-SIMILARITY_THRESHOLD = 0.95
+SIMILARITY_THRESHOLD = 0.90
 
 
 async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:
@@ -28,7 +28,9 @@ async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:
     embedding = RagEngine.embed_text(user_query)
 
     store = Database.get_cache_store()
-    result = await store.lookup(embedding, tenant_id, threshold=SIMILARITY_THRESHOLD)
+    result = await store.lookup(
+        embedding, tenant_id, threshold=SIMILARITY_THRESHOLD, cache_type="sql"
+    )
 
     if result:
         print(f"✓ Cache Hit! Similarity: {result.similarity:.4f}, Cache ID: {result.cache_id}")
@@ -63,7 +65,11 @@ async def update_cache(user_query: str, sql: str, tenant_id: int):
 
     store = Database.get_cache_store()
     await store.store(
-        user_query=user_query, generated_sql=sql, query_embedding=embedding, tenant_id=tenant_id
+        user_query=user_query,
+        generated_sql=sql,
+        query_embedding=embedding,
+        tenant_id=tenant_id,
+        cache_type="sql",
     )
 
     print(f"✓ Cached SQL for tenant {tenant_id}")
@@ -87,3 +93,9 @@ async def get_cache_stats(tenant_id: Optional[int] = None) -> dict:
 
     # If stats are needed, they should be added to the interface.
     return {"status": "Stats not implementing in DAL v1"}
+
+
+async def prune_legacy_entries() -> int:
+    """Prune legacy cache entries on startup."""
+    store = Database.get_cache_store()
+    return await store.prune_legacy_entries()

@@ -108,7 +108,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if not error and query_result and sql_query and tenant_id and not from_cache:
                 try:
                     # Get cache update tool
-                    cache_tool = next((t for t in tools if t.name == "update_cache"), None)
+                    cache_tool = next((t for t in tools if t.name == "update_cache_tool"), None)
                     if cache_tool:
                         # Extract user query from first message
                         user_query = state["messages"][0].content if state["messages"] else ""

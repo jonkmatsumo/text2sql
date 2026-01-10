@@ -14,6 +14,7 @@ from mcp_server.config.database import Database
 from mcp_server.dal.executor import ContextAwareExecutor
 from mcp_server.dal.ingestion.indexing import VectorIndexer
 from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.rag import RagEngine
 
 logger = logging.getLogger(__name__)
 
@@ -235,15 +236,33 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         return {"error": str(e)}
 
 
-async def get_semantic_subgraph(query: str) -> str:
+async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
     """Retrieve relevant subgraph of tables and columns based on a natural language query.
 
     Args:
         query: The natural language query to search for.
+        tenant_id: Optional tenant ID for semantic caching.
 
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
+    # --- Cache Read (The Sandwich Top) ---
+    embedding = None
+    if tenant_id:
+        try:
+            cache = Database.get_cache_store()
+            # Calculate embedding for lookup and later storage
+            embedding = RagEngine.embed_text(query)
+
+            # Using 0.90 threshold as recommended in audit
+            cached = await cache.lookup(embedding, tenant_id, threshold=0.90, cache_type="subgraph")
+            if cached:
+                logger.info(f"✓ Cache Hit for semantic subgraph: {query[:50]}...")
+                return cached.value
+        except Exception as e:
+            logger.warning(f"Cache lookup failed: {e}")
+
+    # --- The Work (Existing Logic) ---
     try:
         store = Database.get_graph_store()
     except Exception as e:
@@ -251,8 +270,25 @@ async def get_semantic_subgraph(query: str) -> str:
         return json.dumps({"error": "Graph store not authorized or initialized."})
 
     loop = asyncio.get_running_loop()
-    # Use ContextAwareExecutor to ensure contextvars (e.g. tenant_id) propagate
     with ContextAwareExecutor() as pool:
         result = await loop.run_in_executor(pool, _get_mini_graph, query, store)
 
-    return json.dumps(result, separators=(",", ":"))
+    json_result = json.dumps(result, separators=(",", ":"))
+
+    # --- Cache Write (The Sandwich Bottom) ---
+    if tenant_id and embedding and not result.get("error"):
+        try:
+            cache = Database.get_cache_store()
+            # Store the JSON result in the 'generated_sql' column (repurposed for tool output)
+            await cache.store(
+                user_query=query,
+                generated_sql=json_result,
+                query_embedding=embedding,
+                tenant_id=tenant_id,
+                cache_type="subgraph",
+            )
+            logger.info(f"✓ Cached semantic subgraph for tenant {tenant_id}")
+        except Exception as e:
+            logger.warning(f"Cache store failed: {e}")
+
+    return json_result

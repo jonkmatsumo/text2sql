@@ -21,6 +21,7 @@ class CacheStore(Protocol):
         query_embedding: List[float],
         tenant_id: int,
         threshold: float = 0.95,
+        cache_type: str = "sql",
     ) -> Optional[CacheLookupResult]:
         """Lookup a cached result by embedding similarity.
 
@@ -55,6 +56,7 @@ class CacheStore(Protocol):
         generated_sql: str,
         query_embedding: List[float],
         tenant_id: int,
+        cache_type: str = "sql",
     ) -> None:
         """Store a new cache entry.
 
@@ -63,5 +65,22 @@ class CacheStore(Protocol):
             generated_sql: The generated SQL to cache.
             query_embedding: The embedding vector of the query.
             tenant_id: Tenant identifier for isolation.
+        """
+        ...
+
+    async def delete_entry(self, user_query: str, tenant_id: int) -> None:
+        """Delete a cache entry (for cleanup/testing).
+
+        Args:
+            user_query: The user query string to match.
+            tenant_id: Tenant identifier.
+        """
+        ...
+
+    async def prune_legacy_entries(self) -> int:
+        """Prune cache entries dependent on obsolete schema versions.
+
+        Returns:
+            Number of deleted rows.
         """
         ...
