@@ -255,7 +255,7 @@ async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
             embedding = RagEngine.embed_text(query)
 
             # Using 0.90 threshold as recommended in audit
-            cached = await cache.lookup(embedding, tenant_id, threshold=0.90)
+            cached = await cache.lookup(embedding, tenant_id, threshold=0.90, cache_type="subgraph")
             if cached:
                 logger.info(f"✓ Cache Hit for semantic subgraph: {query[:50]}...")
                 return cached.value
@@ -285,6 +285,7 @@ async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
                 generated_sql=json_result,
                 query_embedding=embedding,
                 tenant_id=tenant_id,
+                cache_type="subgraph",
             )
             logger.info(f"✓ Cached semantic subgraph for tenant {tenant_id}")
         except Exception as e:

@@ -67,42 +67,49 @@ def correct_sql_node(state: AgentState) -> dict:
             schema_context=schema_context,
         )
 
-        # Build enhanced system prompt with taxonomy guidance
-        system_prompt = f"""You are a PostgreSQL expert specializing in error correction.
-
-{correction_strategy}
-
+        # Prepare context variables for the prompt
+        taxonomy_context = f"""
 Additional Context:
 - Error Category: {category_info.name}
 - Correction Strategy: {category_info.strategy}
 """
 
-        # Include procedural plan if available (for context preservation)
+        plan_context = ""
         if procedural_plan:
-            system_prompt += f"""
+            plan_context = f"""
 Original Query Plan:
 {procedural_plan}
 
 Ensure your correction follows the original plan's intent.
 """
 
-        # Include AST validation feedback if available
+        ast_context = ""
         if ast_validation_result and not ast_validation_result.get("is_valid"):
             violations = ast_validation_result.get("violations", [])
             if violations:
                 violation_details = "\n".join(
                     f"- [{v.get('violation_type')}] {v.get('message')}" for v in violations
                 )
-                system_prompt += f"""
+                ast_context = f"""
 AST Validation Violations:
 {violation_details}
 
 Address these specific violations in your correction.
 """
 
+        # Define system template with named placeholders
+        system_template = """You are a PostgreSQL expert specializing in error correction.
+
+{correction_strategy}
+
+{taxonomy_context}
+{plan_context}
+{ast_context}
+"""
+
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", system_prompt),
+                ("system", system_template),
                 (
                     "user",
                     """Schema Context:
@@ -123,6 +130,10 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
 
         response = chain.invoke(
             {
+                "correction_strategy": correction_strategy,
+                "taxonomy_context": taxonomy_context,
+                "plan_context": plan_context,
+                "ast_context": ast_context,
                 "schema_context": schema_context,
                 "bad_query": current_sql,
                 "error_msg": error,

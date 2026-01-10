@@ -28,7 +28,9 @@ async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:
     embedding = RagEngine.embed_text(user_query)
 
     store = Database.get_cache_store()
-    result = await store.lookup(embedding, tenant_id, threshold=SIMILARITY_THRESHOLD)
+    result = await store.lookup(
+        embedding, tenant_id, threshold=SIMILARITY_THRESHOLD, cache_type="sql"
+    )
 
     if result:
         print(f"✓ Cache Hit! Similarity: {result.similarity:.4f}, Cache ID: {result.cache_id}")
@@ -63,7 +65,11 @@ async def update_cache(user_query: str, sql: str, tenant_id: int):
 
     store = Database.get_cache_store()
     await store.store(
-        user_query=user_query, generated_sql=sql, query_embedding=embedding, tenant_id=tenant_id
+        user_query=user_query,
+        generated_sql=sql,
+        query_embedding=embedding,
+        tenant_id=tenant_id,
+        cache_type="sql",
     )
 
     print(f"✓ Cached SQL for tenant {tenant_id}")

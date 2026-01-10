@@ -86,9 +86,9 @@ async def test_cache_pruning():
 
         insert_sql = """
             INSERT INTO semantic_cache (
-                tenant_id, user_query, query_embedding, generated_sql, schema_version
+                tenant_id, user_query, query_embedding, generated_sql, schema_version, cache_type
             )
-            VALUES ($1, $2, $3, $4, 'v0_legacy')
+            VALUES ($1, $2, $3, $4, 'v0_legacy', 'sql')
         """
         async with Database.get_connection(TENANT_ID) as conn:
             await conn.execute(insert_sql, TENANT_ID, legacy_query, pg_vector, "{}")

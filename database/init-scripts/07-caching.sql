@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS public.semantic_cache (
     query_embedding vector(384),       -- Embedding of user_query (bge-small)
     generated_sql TEXT NOT NULL,       -- We cache the SQL logic (not results)
     schema_version VARCHAR(10) DEFAULT 'v1', -- Cache invalidation versioning
+    cache_type VARCHAR(20) DEFAULT 'sql',
     similarity_score FLOAT,            -- Store similarity for analysis
     hit_count INT DEFAULT 0,           -- Track cache usage
     created_at TIMESTAMP DEFAULT NOW(),

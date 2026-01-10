@@ -21,6 +21,7 @@ class CacheStore(Protocol):
         query_embedding: List[float],
         tenant_id: int,
         threshold: float = 0.95,
+        cache_type: str = "sql",
     ) -> Optional[CacheLookupResult]:
         """Lookup a cached result by embedding similarity.
 
@@ -55,6 +56,7 @@ class CacheStore(Protocol):
         generated_sql: str,
         query_embedding: List[float],
         tenant_id: int,
+        cache_type: str = "sql",
     ) -> None:
         """Store a new cache entry.
 

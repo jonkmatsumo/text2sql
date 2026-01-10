@@ -21,6 +21,7 @@ class PgSemanticCache(CacheStore):
         query_embedding: List[float],
         tenant_id: int,
         threshold: float = 0.95,
+        cache_type: str = "sql",
     ) -> Optional[CacheLookupResult]:
         """Lookup a cached result by embedding similarity."""
         pg_vector = _format_vector(query_embedding)
@@ -34,6 +35,7 @@ class PgSemanticCache(CacheStore):
             FROM semantic_cache
             WHERE tenant_id = $2
             AND schema_version = $4
+            AND cache_type = $6
             AND query_embedding IS NOT NULL
             AND (1 - (query_embedding <=> $1)) >= $3
             ORDER BY similarity DESC
@@ -77,15 +79,16 @@ class PgSemanticCache(CacheStore):
         generated_sql: str,
         query_embedding: List[float],
         tenant_id: int,
+        cache_type: str = "sql",
     ) -> None:
         """Store a new cache entry."""
         pg_vector = _format_vector(query_embedding)
 
         query = """
             INSERT INTO semantic_cache (
-                tenant_id, user_query, query_embedding, generated_sql, schema_version
+                tenant_id, user_query, query_embedding, generated_sql, schema_version, cache_type
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT DO NOTHING
         """
         async with Database.get_connection(tenant_id) as conn:
@@ -96,6 +99,7 @@ class PgSemanticCache(CacheStore):
                 pg_vector,
                 generated_sql,
                 self.CURRENT_SCHEMA_VERSION,
+                cache_type,
             )
 
     async def delete_entry(self, user_query: str, tenant_id: int) -> None:
