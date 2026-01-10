@@ -3,6 +3,7 @@
 import os
 
 import mlflow
+from agent_core.nodes.cache_validate import cache_validate_node
 from agent_core.nodes.clarify import clarify_node
 from agent_core.nodes.correct import correct_sql_node
 from agent_core.nodes.execute import validate_and_execute_node
@@ -41,6 +42,8 @@ def route_after_router(state: AgentState) -> str:
     """
     if state.get("ambiguity_type"):
         return "clarify"
+    if state.get("cached_sql"):
+        return "cache_validate"
     return "plan"
 
 
@@ -65,6 +68,19 @@ def route_after_validation(state: AgentState) -> str:
     if state.get("error"):
         return "correct"
     return "execute"
+
+
+def route_after_cache_validate(state: AgentState) -> str:
+    """
+    Conditional edge logic after cache validation.
+
+    Routes based on validation result:
+    - If valid (from_cache=True): go to execute
+    - If invalid (from_cache=False): go to plan
+    """
+    if state.get("from_cache"):
+        return "execute"
+    return "plan"
 
 
 def route_after_execution(state: AgentState) -> str:
@@ -113,6 +129,7 @@ def create_workflow() -> StateGraph:
     workflow.add_node("validate", validate_sql_node)
     workflow.add_node("execute", validate_and_execute_node)
     workflow.add_node("correct", correct_sql_node)
+    workflow.add_node("cache_validate", cache_validate_node)
     workflow.add_node("synthesize", synthesize_insight_node)
 
     # Set entry point - retrieve runs first to populate schema_context
@@ -127,6 +144,7 @@ def create_workflow() -> StateGraph:
         route_after_router,
         {
             "clarify": "clarify",
+            "cache_validate": "cache_validate",
             "plan": "plan",
         },
     )
@@ -134,6 +152,16 @@ def create_workflow() -> StateGraph:
     # Clarify loops back to router (to re-evaluate with clarification)
     # Note: No need to re-retrieve since schema hasn't changed
     workflow.add_edge("clarify", "router")
+
+    # Cache Validation conditional edges
+    workflow.add_conditional_edges(
+        "cache_validate",
+        route_after_cache_validate,
+        {
+            "execute": "execute",
+            "plan": "plan",
+        },
+    )
 
     # Main flow edges
     workflow.add_edge("plan", "generate")

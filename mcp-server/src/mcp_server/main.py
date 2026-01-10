@@ -195,16 +195,25 @@ async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Conte
 
 @mcp.tool()
 async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
-    """Check semantic cache for similar query. Returns cached SQL if similarity >= 0.95."""
+    """Check semantic cache for similar query. Returns cached SQL if similarity >= 0.90."""
     tenant_id = extract_tenant_id(ctx) if ctx else None
     if not tenant_id:
         return json.dumps({"error": "Tenant ID required for cache lookup"})
-    cached = await lookup_cache(user_query, tenant_id)
-    return (
-        json.dumps({"sql": cached}, separators=(",", ":"))
-        if cached
-        else json.dumps({"sql": None}, separators=(",", ":"))
-    )
+
+    result = await lookup_cache(user_query, tenant_id)
+
+    if result:
+        return json.dumps(
+            {
+                "sql": result.value,
+                "original_query": result.metadata.get("user_query"),
+                "similarity": result.similarity,
+                "metadata": result.metadata,
+            },
+            separators=(",", ":"),
+        )
+
+    return json.dumps({"sql": None}, separators=(",", ":"))
 
 
 @mcp.tool()

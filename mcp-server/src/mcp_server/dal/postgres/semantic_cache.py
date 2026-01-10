@@ -31,6 +31,7 @@ class PgSemanticCache(CacheStore):
             SELECT
                 cache_id,
                 generated_sql,
+                user_query,
                 (1 - (query_embedding <=> $1)) as similarity
             FROM semantic_cache
             WHERE tenant_id = $2
@@ -57,6 +58,7 @@ class PgSemanticCache(CacheStore):
                 cache_id=str(row["cache_id"]),
                 value=row["generated_sql"],
                 similarity=row["similarity"],
+                metadata={"user_query": row["user_query"]},
             )
         return None
 

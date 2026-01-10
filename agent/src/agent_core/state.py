@@ -101,3 +101,13 @@ class AgentState(TypedDict):
 
     # Whether the current SQL was retrieved from cache
     from_cache: Optional[bool]
+
+    # Potentially valid SQL retrieved from cache (pending validation)
+    cached_sql: Optional[str]
+
+    # Metadata associated with the cached SQL (e.g. original user query)
+    cache_metadata: Optional[dict]
+
+    # Context about a rejected cache hit to guide generation (e.g. "similar query but wrong entity")
+    # Structure: {"sql": str, "original_query": str, "reason": str}
+    rejected_cache_context: Optional[dict]

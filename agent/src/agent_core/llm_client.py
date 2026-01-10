@@ -27,6 +27,7 @@ def get_llm_client(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 0,
+    use_light_model: bool = False,
 ) -> BaseChatModel:
     """Get an LLM client for the specified provider.
 
@@ -35,6 +36,7 @@ def get_llm_client(
                   Defaults to LLM_PROVIDER env var or 'openai'.
         model: Model name. Defaults to LLM_MODEL env var or provider default.
         temperature: Temperature for generation. Defaults to 0 (deterministic).
+        use_light_model: If True, uses LLM_MODEL_LIGHT env var if available.
 
     Returns:
         BaseChatModel: LangChain chat model instance.
@@ -54,7 +56,13 @@ def get_llm_client(
         )
 
     # Resolve model from env or default
-    resolved_model = model or os.getenv("LLM_MODEL", DEFAULT_MODEL)
+    if model:
+        resolved_model = model
+    elif use_light_model:
+        # Default for light model is gpt-4o-mini if not set
+        resolved_model = os.getenv("LLM_MODEL_LIGHT", "gpt-4o-mini")
+    else:
+        resolved_model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
 
     # Create client based on provider
     if resolved_provider == "openai":

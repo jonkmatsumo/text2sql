@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional
 
 from mcp_server.config.database import Database
+from mcp_server.models import CacheLookupResult
 from mcp_server.rag import RagEngine
 
 # Conservative threshold to prevent serving wrong SQL for nuanced queries
@@ -11,19 +12,19 @@ from mcp_server.rag import RagEngine
 SIMILARITY_THRESHOLD = 0.90
 
 
-async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:
+async def lookup_cache(user_query: str, tenant_id: int) -> Optional[CacheLookupResult]:
     """
     Check cache for a semantically equivalent query from the SAME tenant.
 
     Uses vector similarity search to find cached SQL that matches the user's intent.
-    Only returns cached SQL if similarity exceeds threshold (0.95).
+    Only returns cached SQL if similarity exceeds threshold (0.90).
 
     Args:
         user_query: The user's natural language question
         tenant_id: Tenant identifier (required for isolation)
 
     Returns:
-        Cached SQL query string if match found, None otherwise
+        CacheLookupResult object if match found, None otherwise
     """
     embedding = RagEngine.embed_text(user_query)
 
@@ -39,7 +40,7 @@ async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:
         # We don't await this to ensure low latency
         asyncio.create_task(update_cache_access(result.cache_id, tenant_id))
 
-        return result.value
+        return result
 
     return None
 
