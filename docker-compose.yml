@@ -22,6 +22,27 @@ services:
     networks:
       - text2sql_net
 
+  # Control-plane database for agent metadata, cache, and policies
+  agent-control-db:
+    image: pgvector/pgvector:pg16
+    container_name: agent_control_db
+    environment:
+      POSTGRES_USER: ${CONTROL_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CONTROL_DB_PASSWORD:-control_password}
+      POSTGRES_DB: agent_control
+    volumes:
+      - ./database/control-plane:/docker-entrypoint-initdb.d
+      - control_pg_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d agent_control" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - text2sql_net
+
   memgraph:
     image: memgraph/memgraph-platform:latest
     container_name: text2sql_memgraph
@@ -165,6 +186,7 @@ services:
 
 volumes:
   pg_data:
+  control_pg_data:
   mlflow_artifacts:
   memgraph_data:
 

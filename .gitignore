@@ -46,6 +46,9 @@ node_modules/
 *.log
 
 # Database initialization - large generated files
-# Keep: download_data.sh, 03-permissions.sql, 01-schema.sql (schema is source of truth)
-# Ignore: 02-data.sql (large generated data file, can be regenerated via download_data.sh)
+# Keep: *.example.sql (templates), download_data.sh
+# Ignore: actual schema and data files (can be regenerated)
 database/init-scripts/02-data.sql
+database/query-target/*
+!database/query-target/*.example.sql
+!database/query-target/README.md
