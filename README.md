@@ -83,7 +83,8 @@ flowchart TB
         end
 
         VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
-        CacheModule["Cache Module<br/>mcp_server/cache.py"]
+        Canonicalizer["Linguistic Canonicalization<br/>(SpaCy + EntityRuler)"]
+        TwoTierCache["Two-Tier Semantic Cache<br/>(Fingerprint + Vector)"]
         SecurityCheck["SQL Security Checks<br/>AST validation"]
         SchemaLinker["Schema Linker<br/>(Triple-Filter Strategy)<br/>mcp_server/services/schema_linker.py"]
     end
@@ -175,9 +176,16 @@ flowchart TB
 *   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`GraphStore`, `MetadataStore`), ensuring modularity and preventing implementation leakage.
 *   **AST Security Validation**: Validates SQL using `sqlglot` AST traversal to strictly block forbidden commands (`DROP`, `DELETE`, `INSERT`) and restricted tables (`credentials`, `payroll`).
 
+### 🚀 Multi-Tier Semantic Caching
+*   **Linguistic Canonicalization**: Uses **SpaCy** with custom `EntityRuler` and `DependencyMatcher` patterns to extract query intent (ratings, limits, entities) regardless of word order.
+*   **Tier 1: Fingerprint Match**: Generates a deterministic SHA-256 signature from canonical constraints for O(1) exact-match lookups with 100% precision.
+*   **Tier 2: Vector Fallback**: Falls back to high-threshold (0.90) vector similarity search if no fingerprint is found.
+*   **Deterministic Guardrails**: Every cache hit (even vector-based) is cross-verified using AST parsing to ensure the cached SQL's predicates perfectly match the user's intent.
+*   **Cache Hygiene**: Automatically "tombstones" invalid or stale cache entries to prevent recursive false positives.
+
 ### 📡 Observability & Performance
-*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps, tool calls, and performance.
-*   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
+*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps, tool calls, and cache decisions.
+*   **Unified Monitoring**: Captures fingerprint hits, misses, and guardrail rejections as structured metadata in the trace.
 
 ## Project Structure
 

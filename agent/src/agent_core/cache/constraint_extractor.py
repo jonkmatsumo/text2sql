@@ -1,8 +1,12 @@
-"""Constraint extraction from natural language queries.
+"""Constraint extraction from natural language queries (defense-in-depth).
 
 This module extracts hard constraints (rating, limit, ties, entity, metric)
 from user queries using deterministic regex patterns. These constraints are
 used to validate cached SQL before serving.
+
+Note: Primary constraint extraction and fingerprinting is now handled by
+the MCP server's CanonicalizationService (SpaCy-based). This agent-side
+extraction serves as a secondary validation layer for defense-in-depth.
 """
 
 import re
