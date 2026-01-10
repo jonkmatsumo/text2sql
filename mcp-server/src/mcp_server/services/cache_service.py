@@ -100,3 +100,33 @@ async def prune_legacy_entries() -> int:
     """Prune legacy cache entries on startup."""
     store = Database.get_cache_store()
     return await store.prune_legacy_entries()
+
+
+async def tombstone_cache_entry(cache_id: str, tenant_id: int, reason: str) -> bool:
+    """Mark a cache entry as tombstoned (invalid).
+
+    Tombstoned entries are excluded from lookup but retained for audit.
+
+    Args:
+        cache_id: The cache entry ID to tombstone.
+        tenant_id: Tenant scope for security.
+        reason: Reason for tombstoning (e.g., "rating_mismatch: expected PG, found G").
+
+    Returns:
+        True if entry was tombstoned, False if not found.
+    """
+    store = Database.get_cache_store()
+    return await store.tombstone_entry(cache_id, tenant_id, reason)
+
+
+async def prune_tombstoned_entries(older_than_days: int = 30) -> int:
+    """Prune tombstoned cache entries older than specified days.
+
+    Args:
+        older_than_days: Delete tombstoned entries older than this many days.
+
+    Returns:
+        Number of entries deleted.
+    """
+    store = Database.get_cache_store()
+    return await store.prune_tombstoned_entries(older_than_days)

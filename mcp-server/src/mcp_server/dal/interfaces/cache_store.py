@@ -84,3 +84,29 @@ class CacheStore(Protocol):
             Number of deleted rows.
         """
         ...
+
+    async def tombstone_entry(self, cache_id: str, tenant_id: int, reason: str) -> bool:
+        """Mark a cache entry as tombstoned (invalid).
+
+        Tombstoned entries are excluded from lookup but retained for audit.
+
+        Args:
+            cache_id: The cache entry ID to tombstone.
+            tenant_id: Tenant scope for security.
+            reason: Reason for tombstoning.
+
+        Returns:
+            True if entry was tombstoned, False if not found.
+        """
+        ...
+
+    async def prune_tombstoned_entries(self, older_than_days: int = 30) -> int:
+        """Prune tombstoned entries older than specified days.
+
+        Args:
+            older_than_days: Delete tombstoned entries older than this many days.
+
+        Returns:
+            Number of entries deleted.
+        """
+        ...
