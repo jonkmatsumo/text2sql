@@ -65,7 +65,7 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
     1. Calculate best_score from top hit
     2. Compute threshold = max(MIN_SCORE_ABSOLUTE, best_score - SCORE_DROP_TOLERANCE)
     3. Keep only hits above threshold
-    4. Fallback: if empty, return top 1 hit
+    4. Fallback: if empty, return top 3 hits (to ensure broader context)
 
     Args:
         hits: List of dicts with 'score' key, sorted by score descending
@@ -81,13 +81,14 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
 
     filtered = [h for h in hits if h["score"] >= threshold]
 
-    # Fallback: always return at least top 1
+    # Fallback: return top 3 when all below threshold (ensures broader context)
     if not filtered and hits:
+        fallback_count = min(3, len(hits))
         logger.warning(
-            f"All hits below threshold {threshold:.3f}, returning top-1 fallback "
+            f"All hits below threshold {threshold:.3f}, returning top-{fallback_count} fallback "
             f"(best_score={best_score:.3f})"
         )
-        return [hits[0]]
+        return hits[:fallback_count]
 
     if len(filtered) < len(hits):
         logger.info(

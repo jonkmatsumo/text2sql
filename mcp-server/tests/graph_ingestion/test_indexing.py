@@ -120,15 +120,16 @@ class TestAdaptiveThreshold:
         assert len(result) == 1
         assert result[0]["score"] == 0.5
 
-    def test_fallback_to_top1(self):
-        """If all filtered, return top 1."""
+    def test_fallback_to_top_k(self):
+        """If all filtered, return top 3 (or all if fewer)."""
         hits = [
             {"score": 0.3},  # Below 0.45
             {"score": 0.2},
         ]
         result = apply_adaptive_threshold(hits)
-        assert len(result) == 1
+        assert len(result) == 2  # Returns all because len=2 < 3
         assert result[0]["score"] == 0.3
+        assert result[1]["score"] == 0.2
 
     def test_empty_input(self):
         """Empty input should return empty."""

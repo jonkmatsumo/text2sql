@@ -102,24 +102,28 @@ class GraphHydrator:
                 logger.error(f"Error fetching FKs for table {table.name}: {e}")
                 all_fks[table.name] = []
 
-        # 1. Create Tables and Properties
-        for table in tables:
-            self._create_table_node(table)
-
-        # 2. Create Columns and HAS_COLUMN relationships
         skipped_embeddings = 0
+
+        # Process each table completely (Table Node + Columns)
         for table in tables:
             try:
+                # Fetch columns first
                 columns = retriever.get_columns(table.name)
+
+                # 1. Create Table Node (Enriched with column names)
+                self._create_table_node(table, columns)
+
+                # 2. Create Column Nodes
                 skipped = self._create_column_nodes(table.name, columns, fk_columns)
                 skipped_embeddings += skipped
+
             except Exception as e:
-                logger.error(f"Error fetching columns for table {table.name}: {e}")
+                logger.error(f"Error hydrating table {table.name}: {e}")
 
         if skipped_embeddings > 0:
             logger.info(f"Skipped embeddings for {skipped_embeddings} low-signal columns")
 
-        # 3. Create Foreign Key relationships
+        # 3. Create Foreign Key relationships (done after all nodes exist)
         for table in tables:
             fks = all_fks.get(table.name, [])
             if fks:
@@ -127,11 +131,17 @@ class GraphHydrator:
 
         logger.info("Graph hydration complete.")
 
-    def _create_table_node(self, table: TableDef):
+    def _create_table_node(self, table: TableDef, columns: list[ColumnDef]):
         """Create or update a Table node."""
         # Generate embedding for the table
-        # We embed the name and description for semantic search
-        embedding_text = f"Table: {table.name}\nDescription: {table.description or ''}"
+        # We embed name, description, AND column names for better semantic search
+        # "PG movies" -> matches column "rating" or "description"
+        col_names = ", ".join([c.name for c in columns])
+        embedding_text = (
+            f"Table: {table.name}\n"
+            f"Columns: {col_names}\n"
+            f"Description: {table.description or ''}"
+        )
         embedding = self.embedding_service.embed_text(embedding_text)
 
         # Serialize sample data (handle datetime objects)
