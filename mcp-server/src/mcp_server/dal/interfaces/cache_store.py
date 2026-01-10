@@ -75,6 +75,7 @@ class CacheStore(Protocol):
         query_embedding: List[float],
         tenant_id: int,
         cache_type: str = "sql",
+        signature_key: Optional[str] = None,
     ) -> None:
         """Store a new cache entry.
 
@@ -83,6 +84,7 @@ class CacheStore(Protocol):
             generated_sql: The generated SQL to cache.
             query_embedding: The embedding vector of the query.
             tenant_id: Tenant identifier for isolation.
+            signature_key: Optional SHA256 fingerprint key for exact matching.
         """
         ...
 

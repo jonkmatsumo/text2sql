@@ -190,15 +190,26 @@ class PgSemanticCache(CacheStore):
         query_embedding: List[float],
         tenant_id: int,
         cache_type: str = "sql",
+        signature_key: Optional[str] = None,
     ) -> None:
-        """Store a new cache entry."""
+        """Store a new cache entry.
+
+        Args:
+            user_query: The user's natural language query.
+            generated_sql: The generated SQL.
+            query_embedding: The embedding vector.
+            tenant_id: Tenant identifier.
+            cache_type: Type of cache entry.
+            signature_key: Optional SHA256 fingerprint key for exact matching.
+        """
         pg_vector = _format_vector(query_embedding)
 
         query = """
             INSERT INTO semantic_cache (
-                tenant_id, user_query, query_embedding, generated_sql, schema_version, cache_type
+                tenant_id, user_query, query_embedding, generated_sql,
+                schema_version, cache_type, signature_key
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING
         """
         async with Database.get_connection(tenant_id) as conn:
@@ -210,6 +221,7 @@ class PgSemanticCache(CacheStore):
                 generated_sql,
                 self.CURRENT_SCHEMA_VERSION,
                 cache_type,
+                signature_key,
             )
 
     async def tombstone_entry(self, cache_id: str, tenant_id: int, reason: str) -> bool:

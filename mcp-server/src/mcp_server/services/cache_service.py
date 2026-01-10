@@ -68,10 +68,9 @@ async def update_cache_access(cache_id: str, tenant_id: int):
 
 
 async def update_cache(user_query: str, sql: str, tenant_id: int):
-    """
-    Write a new confirmed SQL generation to the cache.
+    """Write a new confirmed SQL generation to the cache.
 
-    Only caches successful SQL queries (those that executed without errors).
+    Computes a semantic fingerprint for exact-match lookups.
 
     Args:
         user_query: The user's natural language question
@@ -80,6 +79,13 @@ async def update_cache(user_query: str, sql: str, tenant_id: int):
     """
     embedding = RagEngine.embed_text(user_query)
 
+    # Compute fingerprint for exact-match lookups
+    signature_key = None
+    canonicalizer = CanonicalizationService.get_instance()
+    if canonicalizer.is_available():
+        _, _, signature_key = canonicalizer.process_query(user_query)
+        logger.debug(f"Generated signature_key: {signature_key[:16]}...")
+
     store = Database.get_cache_store()
     await store.store(
         user_query=user_query,
@@ -87,9 +93,10 @@ async def update_cache(user_query: str, sql: str, tenant_id: int):
         query_embedding=embedding,
         tenant_id=tenant_id,
         cache_type="sql",
+        signature_key=signature_key,
     )
 
-    print(f"✓ Cached SQL for tenant {tenant_id}")
+    logger.info(f"✓ Cached SQL for tenant {tenant_id}")
 
 
 async def get_cache_stats(tenant_id: Optional[int] = None) -> dict:

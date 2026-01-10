@@ -73,6 +73,7 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SPACY_ENABLED: "true"
     ports:
       - "8000:8000"
     networks:
