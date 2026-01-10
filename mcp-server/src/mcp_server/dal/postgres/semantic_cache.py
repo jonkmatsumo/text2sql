@@ -35,7 +35,7 @@ class PgSemanticCache(CacheStore):
             FROM semantic_cache
             WHERE tenant_id = $2
             AND schema_version = $4
-            AND cache_type = $6
+            AND cache_type = $5
             AND query_embedding IS NOT NULL
             AND (1 - (query_embedding <=> $1)) >= $3
             ORDER BY similarity DESC
