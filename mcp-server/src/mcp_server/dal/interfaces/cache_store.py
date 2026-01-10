@@ -74,3 +74,11 @@ class CacheStore(Protocol):
             tenant_id: Tenant identifier.
         """
         ...
+
+    async def prune_legacy_entries(self) -> int:
+        """Prune cache entries dependent on obsolete schema versions.
+
+        Returns:
+            Number of deleted rows.
+        """
+        ...

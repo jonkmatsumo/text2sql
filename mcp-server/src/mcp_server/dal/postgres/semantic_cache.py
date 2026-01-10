@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from mcp_server.config.database import Database
@@ -5,9 +6,15 @@ from mcp_server.dal.interfaces.cache_store import CacheStore
 from mcp_server.dal.postgres.common import _format_vector
 from mcp_server.models import CacheLookupResult
 
+logger = logging.getLogger(__name__)
+
 
 class PgSemanticCache(CacheStore):
     """PostgreSQL implementation of Semantic Cache using pgvector."""
+
+    # Schema Versioning: Increment this when changing embedding model or retrieval algorithm.
+    # Obsolete entries will be ignored by lookup() and pruned by prune_legacy_entries().
+    CURRENT_SCHEMA_VERSION = "v1"
 
     async def lookup(
         self,
@@ -26,6 +33,7 @@ class PgSemanticCache(CacheStore):
                 (1 - (query_embedding <=> $1)) as similarity
             FROM semantic_cache
             WHERE tenant_id = $2
+            AND schema_version = $4
             AND query_embedding IS NOT NULL
             AND (1 - (query_embedding <=> $1)) >= $3
             ORDER BY similarity DESC
@@ -33,7 +41,9 @@ class PgSemanticCache(CacheStore):
         """
 
         async with Database.get_connection(tenant_id) as conn:
-            row = await conn.fetchrow(query, pg_vector, tenant_id, threshold)
+            row = await conn.fetchrow(
+                query, pg_vector, tenant_id, threshold, self.CURRENT_SCHEMA_VERSION
+            )
 
         if row:
             return CacheLookupResult(
@@ -72,15 +82,42 @@ class PgSemanticCache(CacheStore):
         pg_vector = _format_vector(query_embedding)
 
         query = """
-            INSERT INTO semantic_cache (tenant_id, user_query, query_embedding, generated_sql)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO semantic_cache (
+                tenant_id, user_query, query_embedding, generated_sql, schema_version
+            )
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT DO NOTHING
         """
         async with Database.get_connection(tenant_id) as conn:
-            await conn.execute(query, tenant_id, user_query, pg_vector, generated_sql)
+            await conn.execute(
+                query,
+                tenant_id,
+                user_query,
+                pg_vector,
+                generated_sql,
+                self.CURRENT_SCHEMA_VERSION,
+            )
 
     async def delete_entry(self, user_query: str, tenant_id: int) -> None:
         """Delete a cache entry (for cleanup/testing)."""
         query = "DELETE FROM semantic_cache WHERE user_query = $1 AND tenant_id = $2"
         async with Database.get_connection(tenant_id) as conn:
             await conn.execute(query, user_query, tenant_id)
+
+    async def prune_legacy_entries(self) -> int:
+        """Prune cache entries dependent on obsolete schema versions."""
+        query = "DELETE FROM semantic_cache WHERE schema_version != $1"
+        try:
+            async with Database.get_connection() as conn:
+                result = await conn.execute(query, self.CURRENT_SCHEMA_VERSION)
+                # asyncpg execute returns "DELETE <count>" string
+                count = int(result.split(" ")[-1])
+                if count > 0:
+                    logger.warning(
+                        f"🧹 Pruned {count} obsolete cache entries "
+                        f"(Version != {self.CURRENT_SCHEMA_VERSION})"
+                    )
+                return count
+        except Exception as e:
+            logger.error(f"Failed to prune legacy entries: {e}")
+            return 0
