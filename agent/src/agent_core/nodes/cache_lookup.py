@@ -40,7 +40,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
         if not cache_tool:
             logger.warning("lookup_cache_tool not found")
             span.set_attribute("lookup_mode", "error")
-            return {"cached_sql": None}
+            return {"cached_sql": None, "from_cache": False}
 
         try:
             cache_json = await cache_tool.ainvoke({"user_query": user_query})
@@ -50,7 +50,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 logger.info("Cache lookup returned None (Cache Miss)")
                 span.set_attribute("lookup_mode", "miss")
                 span.set_outputs({"hit": False})
-                return {"cached_sql": None}
+                return {"cached_sql": None, "from_cache": False}
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
                 cache_data = cache_data[0]
@@ -59,7 +59,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 logger.info(f"Cache miss or empty data. Data type: {type(cache_data)}")
                 span.set_attribute("lookup_mode", "miss")
                 span.set_outputs({"hit": False})
-                return {"cached_sql": None}
+                return {"cached_sql": None, "from_cache": False}
 
             # Cache Hit - Prepare for Validation
             cached_sql = cache_data.get("sql")
@@ -122,4 +122,4 @@ async def cache_lookup_node(state: AgentState) -> dict:
             logger.error(f"Cache lookup failed: {e}")
             span.set_attribute("lookup_mode", "error")
             span.set_attribute("error", str(e))
-            return {"cached_sql": None}
+            return {"cached_sql": None, "from_cache": False}
