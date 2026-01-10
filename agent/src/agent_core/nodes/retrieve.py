@@ -38,42 +38,44 @@ async def retrieve_context_node(state: AgentState) -> dict:
             subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph_tool"), None)
 
             if subgraph_tool:
-                # Call the semantic subgraph tool
-                # Output format: JSON with 'nodes' and 'relationships'
-                graph_json = await subgraph_tool.ainvoke({"query": active_query})
+                # Execute subgraph retrieval
+                subgraph_json = await subgraph_tool.ainvoke({"query": active_query})
 
-                try:
-                    from agent_core.utils.parsing import parse_tool_output
+                if subgraph_json:
+                    try:
+                        from agent_core.utils.parsing import parse_tool_output
 
-                    graph_data = parse_tool_output(graph_json)
+                        graph_data = parse_tool_output(subgraph_json)
 
-                    # Handle case where graph_data is a list with single dict
-                    if isinstance(graph_data, list) and len(graph_data) > 0:
-                        graph_data = graph_data[0]
+                        # Handle case where graph_data is a list with single dict
+                        if isinstance(graph_data, list) and len(graph_data) > 0:
+                            graph_data = graph_data[0]
 
-                    if isinstance(graph_data, dict):
-                        # Extract table names from nodes
-                        nodes = graph_data.get("nodes", [])
-                        for node in nodes:
-                            if node.get("type") == "Table":
-                                t_name = node.get("name")
-                                if t_name and t_name not in table_names:
-                                    table_names.append(t_name)
+                        if isinstance(graph_data, dict):
+                            # Extract table names from nodes
+                            nodes = graph_data.get("nodes", [])
+                            for node in nodes:
+                                if node.get("type") == "Table":
+                                    t_name = node.get("name")
+                                    if t_name and t_name not in table_names:
+                                        table_names.append(t_name)
 
-                        # Format graph to Markdown for LLM consumption
-                        context_str = format_graph_to_markdown(graph_data)
+                            # Format graph to Markdown for LLM consumption
+                            context_str = format_graph_to_markdown(graph_data)
 
-                        if not context_str.strip():
+                            if not context_str.strip():
+                                context_str = "No relevant tables found."
+                        else:
                             context_str = "No relevant tables found."
-                    else:
-                        context_str = "No relevant tables found."
 
-                except Exception as e:
-                    print(
-                        f"Error parsing subgraph tool output: {e}, "
-                        f"Content: {str(graph_json)[:100]}..."
-                    )
-                    context_str = f"Error retrieving context: {e}"
+                    except Exception as e:
+                        print(
+                            f"Error parsing subgraph tool output: {e}, "
+                            f"Content: {str(subgraph_json)[:100]}..."
+                        )
+                        context_str = f"Error retrieving context: {e}"
+                else:
+                    context_str = "No relevant tables found."
             else:
                 print("Warning: get_semantic_subgraph_tool not found.")
                 context_str = "Schema retrieval tool not available."
@@ -90,4 +92,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
             }
         )
 
-        return {"schema_context": context_str, "table_names": table_names}
+        return {
+            "schema_context": context_str,
+            "table_names": table_names,
+        }

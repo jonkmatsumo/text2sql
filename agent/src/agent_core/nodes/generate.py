@@ -1,7 +1,5 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
-from typing import Optional
-
 import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
@@ -12,53 +10,6 @@ load_dotenv()
 
 # Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
 llm = get_llm_client(temperature=0)
-
-
-async def check_cache(user_query: str, tenant_id: Optional[int] = None) -> Optional[str]:
-    """
-    Check semantic cache for similar query.
-
-    Args:
-        user_query: The user's natural language question
-        tenant_id: Optional tenant ID (required for cache lookup)
-
-    Returns:
-        Cached SQL if found, None otherwise
-    """
-    if not tenant_id:
-        return None
-
-    try:
-
-        from agent_core.tools import get_mcp_tools
-
-        tools = await get_mcp_tools()
-        if not tools:
-            return None
-
-        # Find the lookup_cache_tool
-        cache_tool = None
-        for tool in tools:
-            if tool.name == "lookup_cache_tool":
-                cache_tool = tool
-                break
-
-        if not cache_tool:
-            return None
-
-        # Call the tool
-        result = await cache_tool.ainvoke({"user_query": user_query})
-
-        from agent_core.utils.parsing import parse_tool_output
-
-        parsed = parse_tool_output(result)
-
-        if parsed and isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
-            return parsed[0].get("sql")
-        return None
-    except Exception as e:
-        print(f"Warning: Cache lookup failed: {e}")
-        return None
 
 
 async def get_few_shot_examples(user_query: str) -> str:
@@ -146,28 +97,6 @@ async def generate_sql_node(state: AgentState) -> dict:
             }
         )
 
-        # Check cache first (before generating SQL)
-        cached_sql = None
-        if tenant_id:
-            try:
-                cached_sql = await check_cache(user_query, tenant_id)
-            except Exception as e:
-                print(f"Warning: Cache check failed: {e}")
-
-        if cached_sql:
-            span.set_attribute("cache_hit", "true")
-            span.set_outputs(
-                {
-                    "sql": cached_sql,
-                    "from_cache": True,
-                }
-            )
-            print("✓ Using cached SQL")
-            return {
-                "current_sql": cached_sql,
-                "from_cache": True,
-            }
-
         span.set_attribute("cache_hit", "false")
 
         # Cache miss - proceed with normal generation
@@ -231,6 +160,32 @@ USER CLARIFICATION:
 {escaped_clarification}
 """
 
+        rejected_cache = state.get("rejected_cache_context")
+        rejected_cache_section = ""
+        if rejected_cache and isinstance(rejected_cache, dict):
+            rejected_sql = rejected_cache.get("sql")
+            rejected_query = rejected_cache.get("original_query", "Unknown")
+            rejection_reason = rejected_cache.get("reason", "Structural mismatch")
+
+            rejected_sql = (
+                rejected_sql.replace("{", "{{").replace("}", "}}") if rejected_sql else ""
+            )
+            rejected_query = (
+                rejected_query.replace("{", "{{").replace("}", "}}") if rejected_query else ""
+            )
+            rejection_reason = (
+                rejection_reason.replace("{", "{{").replace("}", "}}") if rejection_reason else ""
+            )
+
+            rejected_cache_section = f"""
+[HINT FROM REJECTED CACHE]
+The following SQL was generated for a similar question ("{rejected_query}") but was rejected.
+Rejected SQL: {rejected_sql}
+Rejection Reason: {rejection_reason}
+Insight: The rejected SQL might be structurally correct but uses wrong entities.
+Use it as a template but correct the entities.
+"""
+
         system_prompt = f"""You are a PostgreSQL expert.
 Using the provided SCHEMA CONTEXT, PROCEDURAL PLAN, and REFERENCE EXAMPLES, synthesize a SQL query.
 The SCHEMA CONTEXT below is a Relationship Graph showing tables, columns, and foreign keys.
@@ -243,7 +198,7 @@ Rules:
 - Refer to the **Reference Examples** section below to understand the preferred query style
   and column naming conventions.
 - FOLLOW THE PROCEDURAL PLAN if provided - it contains the logical steps.
-{plan_section}{clarification_section}
+{plan_section}{clarification_section}{rejected_cache_section}
 {{schema_context}}
 {examples_section}
 """

@@ -3,6 +3,7 @@
 import os
 
 import mlflow
+from agent_core.nodes.cache_lookup import cache_lookup_node
 from agent_core.nodes.clarify import clarify_node
 from agent_core.nodes.correct import correct_sql_node
 from agent_core.nodes.execute import validate_and_execute_node
@@ -42,6 +43,19 @@ def route_after_router(state: AgentState) -> str:
     if state.get("ambiguity_type"):
         return "clarify"
     return "plan"
+
+
+def route_after_cache_lookup(state: AgentState) -> str:
+    """
+    Conditional edge logic after cache lookup.
+
+    Routes based on cache status:
+    - If hit and valid (from_cache=True): go to AST validation (then execute)
+    - If miss or invalid (from_cache=False): go to retrieve (schema lookup)
+    """
+    if state.get("from_cache"):
+        return "validate"
+    return "retrieve"
 
 
 def route_after_validation(state: AgentState) -> str:
@@ -94,10 +108,10 @@ def create_workflow() -> StateGraph:
     Create and configure the LangGraph workflow.
 
     Flow (schema-aware clarification):
-    retrieve → router → [clarify →] plan → generate → validate → execute → [correct →] synthesize
+    cache_lookup → [validate → execute]
+    OR [retrieve → router → plan → generate → validate → execute]
 
-    The key insight: retrieve runs FIRST to populate schema_context,
-    so the router can make schema-aware ambiguity decisions.
+    The key insight: explicit cache lookup node acts as entry point to optimize latency.
 
     Returns:
         StateGraph: Configured workflow graph (not compiled)
@@ -105,6 +119,7 @@ def create_workflow() -> StateGraph:
     workflow = StateGraph(AgentState)
 
     # Add all nodes
+    workflow.add_node("cache_lookup", cache_lookup_node)
     workflow.add_node("router", router_node)
     workflow.add_node("clarify", clarify_node)
     workflow.add_node("retrieve", retrieve_context_node)
@@ -115,8 +130,18 @@ def create_workflow() -> StateGraph:
     workflow.add_node("correct", correct_sql_node)
     workflow.add_node("synthesize", synthesize_insight_node)
 
-    # Set entry point - retrieve runs first to populate schema_context
-    workflow.set_entry_point("retrieve")
+    # Set entry point - Cache Lookup first
+    workflow.set_entry_point("cache_lookup")
+
+    # Routing from Cache Lookup
+    workflow.add_conditional_edges(
+        "cache_lookup",
+        route_after_cache_lookup,
+        {
+            "validate": "validate",
+            "retrieve": "retrieve",
+        },
+    )
 
     # Retrieve feeds into router (router now has schema context)
     workflow.add_edge("retrieve", "router")
@@ -213,7 +238,14 @@ async def run_agent_with_tracing(
         "query_result": None,
         "error": None,
         "retry_count": 0,
+        # Reset state fields that shouldn't persist across turns
+        "active_query": None,
+        "procedural_plan": None,
+        "rejected_cache_context": None,
+        "user_clarification": None,
+        "clause_map": None,
         "tenant_id": tenant_id,
+        "from_cache": False,
     }
 
     # Generate thread_id if not provided (required for checkpointer)
