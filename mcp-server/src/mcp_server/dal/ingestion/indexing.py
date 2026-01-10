@@ -13,8 +13,9 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 # Adaptive thresholding constants
-MIN_SCORE_ABSOLUTE = 0.55  # Absolute minimum similarity threshold
-SCORE_DROP_TOLERANCE = 0.08  # Max drop from best score allowed
+# Relaxed thresholds to ensure dimension tables (e.g., language) are included
+MIN_SCORE_ABSOLUTE = 0.45  # Lowered from 0.55 to catch indirect semantic matches
+SCORE_DROP_TOLERANCE = 0.15  # Increased from 0.08 to allow more score variance
 
 
 class EmbeddingService:
