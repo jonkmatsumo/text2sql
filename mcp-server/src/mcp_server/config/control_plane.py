@@ -28,15 +28,22 @@ class ControlPlaneDatabase:
     @classmethod
     async def init(cls):
         """Initialize control-plane connection pool."""
-        # Check feature flag
+        # Check feature flag for READ routing
         cls._isolation_enabled = os.getenv("DB_ISOLATION_ENABLED", "false").lower() == "true"
 
-        if not cls._isolation_enabled:
-            print("⚠ DB_ISOLATION_ENABLED=false, control-plane pool disabled")
+        # Always attempt to connect to control-plane if configured (for dual-write)
+        db_host = os.getenv("CONTROL_DB_HOST")
+
+        if not db_host:
+            if cls._isolation_enabled:
+                print(
+                    "⚠ DB_ISOLATION_ENABLED=true but CONTROL_DB_HOST not set. "
+                    "Falling back to disabled."
+                )
+                cls._isolation_enabled = False
             return
 
         # Control-plane Postgres Config
-        db_host = os.getenv("CONTROL_DB_HOST", "agent-control-db")
         db_port = int(os.getenv("CONTROL_DB_PORT", "5432"))
         db_name = os.getenv("CONTROL_DB_NAME", "agent_control")
         db_user = os.getenv("CONTROL_DB_USER", "postgres")
@@ -54,8 +61,12 @@ class ControlPlaneDatabase:
             )
             print(f"✓ Control-plane pool established: {db_user}@{db_host}/{db_name}")
         except Exception as e:
-            print(f"✗ Failed to connect to control-plane DB: {e}")
-            raise ConnectionError(f"Control-plane DB connection failed: {e}")
+            msg = f"✗ Failed to connect to control-plane DB: {e}"
+            print(msg)
+            # If isolation is mandatory, raise error. If just dual-write, maybe soft fail?
+            # For now, we raise if isolation is enabled, otherwise log warning.
+            if cls._isolation_enabled:
+                raise ConnectionError(f"Control-plane DB connection failed: {e}")
 
     @classmethod
     async def close(cls):
@@ -66,15 +77,17 @@ class ControlPlaneDatabase:
             cls._pool = None
 
     @classmethod
+    def is_configured(cls) -> bool:
+        """Check if control-plane pool is active."""
+        return cls._pool is not None
+
+    @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None):
-        """Yield a control-plane connection with optional tenant context.
+        """Yield a connection based on isolation strategy (Read Path).
 
-        Args:
-            tenant_id: Optional tenant identifier for RLS on control-plane tables.
-
-        Yields:
-            asyncpg.Connection: A connection to the control-plane database.
+        If isolation enabled: returns Control Plane connection.
+        If disabled: returns Main Database connection.
         """
         if not cls._isolation_enabled:
             # Fallback: import and use main Database pool
@@ -84,6 +97,13 @@ class ControlPlaneDatabase:
                 yield conn
             return
 
+        async with cls.get_direct_connection(tenant_id) as conn:
+            yield conn
+
+    @classmethod
+    @asynccontextmanager
+    async def get_direct_connection(cls, tenant_id: Optional[int] = None):
+        """Yield a direct connection to control-plane (Write Path)."""
         if cls._pool is None:
             raise RuntimeError(
                 "Control-plane pool not initialized. Call ControlPlaneDatabase.init() first."
