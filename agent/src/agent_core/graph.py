@@ -238,7 +238,14 @@ async def run_agent_with_tracing(
         "query_result": None,
         "error": None,
         "retry_count": 0,
+        # Reset state fields that shouldn't persist across turns
+        "active_query": None,
+        "procedural_plan": None,
+        "rejected_cache_context": None,
+        "user_clarification": None,
+        "clause_map": None,
         "tenant_id": tenant_id,
+        "from_cache": False,
     }
 
     # Generate thread_id if not provided (required for checkpointer)

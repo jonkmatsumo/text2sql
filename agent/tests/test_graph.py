@@ -207,9 +207,10 @@ class TestCreateWorkflow:
         # Verify StateGraph was created with AgentState
         mock_state_graph_class.assert_called_once_with(AgentState)
 
-        # Verify nodes were added (now 9 nodes)
-        assert mock_workflow.add_node.call_count == 9
+        # Verify nodes were added (now 10 nodes)
+        assert mock_workflow.add_node.call_count == 10
         node_calls = [call_args[0][0] for call_args in mock_workflow.add_node.call_args_list]
+        assert "cache_lookup" in node_calls
         assert "router" in node_calls
         assert "clarify" in node_calls
         assert "retrieve" in node_calls
@@ -220,21 +221,22 @@ class TestCreateWorkflow:
         assert "correct" in node_calls
         assert "synthesize" in node_calls
 
-        # Verify entry point was set to retrieve (schema-aware clarification)
-        mock_workflow.set_entry_point.assert_called_once_with("retrieve")
+        # Verify entry point was set to cache_lookup
+        mock_workflow.set_entry_point.assert_called_once_with("cache_lookup")
 
         # Verify edges were added (6 edges after reorder)
         assert mock_workflow.add_edge.call_count == 6
         edge_calls = [call_args[0] for call_args in mock_workflow.add_edge.call_args_list]
         assert ("retrieve", "router") in edge_calls  # New: retrieve feeds router
+
         assert ("clarify", "router") in edge_calls
         assert ("plan", "generate") in edge_calls
         assert ("generate", "validate") in edge_calls
         assert ("correct", "validate") in edge_calls
         assert ("synthesize", END) in edge_calls
 
-        # Verify conditional edges were added (now 3)
-        assert mock_workflow.add_conditional_edges.call_count == 3
+        # Verify conditional edges were added (now 4)
+        assert mock_workflow.add_conditional_edges.call_count == 4
 
     def test_workflow_compiles(self):
         """Test that the workflow can be compiled without errors."""

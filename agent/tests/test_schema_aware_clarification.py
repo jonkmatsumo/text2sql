@@ -12,16 +12,16 @@ from agent_core.graph import create_workflow, route_after_router
 class TestSchemaAwareClarification:
     """Tests verifying schema context is available to router/clarify nodes."""
 
-    def test_workflow_entry_point_is_retrieve(self):
-        """Verify workflow starts with retrieve to populate schema context."""
+    def test_workflow_entry_point_is_cache_lookup(self):
+        """Verify workflow starts with cache_lookup."""
         with patch("agent_core.graph.StateGraph") as mock_sg:
             mock_workflow = MagicMock()
             mock_sg.return_value = mock_workflow
 
             create_workflow()
 
-            # Entry point should be retrieve, not router
-            mock_workflow.set_entry_point.assert_called_once_with("retrieve")
+            # Entry point should be cache_lookup
+            mock_workflow.set_entry_point.assert_called_once_with("cache_lookup")
 
     def test_retrieve_feeds_router(self):
         """Verify retrieve node output flows to router node."""

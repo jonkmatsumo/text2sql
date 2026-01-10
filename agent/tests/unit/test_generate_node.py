@@ -1,6 +1,5 @@
 """Unit tests for generate_sql_node."""
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,27 +61,3 @@ class TestGenerateSqlNode:
 
                     # CRUCIAL: Verify get_table_schema_tool was NEVER called
                     mock_schema_tool.ainvoke.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_generate_sql_node_cache_hit(self, mock_state):
-        """Test that cached SQL is returned without LLM call."""
-        from agent_core.nodes.generate import generate_sql_node
-
-        mock_cache_tool = MagicMock()
-        mock_cache_tool.name = "lookup_cache_tool"
-        mock_cache_tool.ainvoke = AsyncMock(
-            return_value=json.dumps([{"sql": "SELECT * FROM cached_orders"}])
-        )
-
-        with patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            with patch("agent_core.nodes.generate.mlflow") as mock_mlflow:
-                mock_span = MagicMock()
-                mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
-                mock_mlflow.entities.SpanType.CHAT_MODEL = "CHAT_MODEL"
-
-                mock_get_tools.return_value = [mock_cache_tool]
-
-                result = await generate_sql_node(mock_state)
-
-                assert result["current_sql"] == "SELECT * FROM cached_orders"
-                assert result["from_cache"] is True
