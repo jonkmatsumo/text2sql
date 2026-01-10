@@ -58,7 +58,9 @@ async def get_table_schema(table_names: list[str], tenant_id: Optional[int] = No
     return json.dumps(schema_list, separators=(",", ":"))
 
 
-async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> str:
+async def execute_sql_query(
+    sql_query: str, tenant_id: Optional[int] = None, params: Optional[list] = None
+) -> str:
     """
     Execute a valid SQL SELECT statement and return the result as JSON.
 
@@ -68,6 +70,7 @@ async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> 
     Args:
         sql_query: A SQL SELECT query string.
         tenant_id: Required tenant identifier for RLS enforcement.
+        params: Optional list of bind parameters (e.g. for rewritten queries).
 
     Returns:
         JSON array of result rows, or error message as string.
@@ -104,7 +107,10 @@ async def execute_sql_query(sql_query: str, tenant_id: Optional[int] = None) -> 
     async with Database.get_connection(tenant_id) as conn:
         try:
             # 2. Execution
-            rows = await conn.fetch(sql_query)
+            if params:
+                rows = await conn.fetch(sql_query, *params)
+            else:
+                rows = await conn.fetch(sql_query)
 
             # 3. Serialization
             # Convert Record objects to dicts, handling non-serializable types
