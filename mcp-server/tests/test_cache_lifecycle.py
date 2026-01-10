@@ -63,3 +63,56 @@ async def test_cache_write_through():
         except Exception:
             pass
         await Database.close()
+
+
+@pytest.mark.asyncio
+async def test_cache_pruning():
+    """Verify pruning of legacy entries."""
+    # Initialize DB (if not already init by previous test, but pytest async scope usually
+    # requires re-init per function or fixture. We call init here safely.)
+    try:
+        await Database.init()
+    except Exception:
+        pass  # Already initialized potentially
+
+    try:
+        # 1. Insert a legacy row (v0_legacy)
+        legacy_query = "Legacy Query Integration Test"
+        # We need to construct a dummy embedding
+        dummy_embedding = [0.1] * 384
+        from mcp_server.dal.postgres.common import _format_vector
+
+        pg_vector = _format_vector(dummy_embedding)
+
+        insert_sql = """
+            INSERT INTO semantic_cache (
+                tenant_id, user_query, query_embedding, generated_sql, schema_version
+            )
+            VALUES ($1, $2, $3, $4, 'v0_legacy')
+        """
+        async with Database.get_connection(TENANT_ID) as conn:
+            await conn.execute(insert_sql, TENANT_ID, legacy_query, pg_vector, "{}")
+
+        # Verify insertion
+        check_sql = "SELECT count(*) FROM semantic_cache WHERE schema_version = 'v0_legacy'"
+        async with Database.get_connection(TENANT_ID) as conn:
+            count_before = await conn.fetchval(check_sql)
+
+        assert count_before >= 1, "Failed to insert legacy test row"
+        print(f"Inserted {count_before} legacy rows.")
+
+        # 2. Call Prune
+        from mcp_server.services.cache_service import prune_legacy_entries
+
+        deleted_count = await prune_legacy_entries()
+
+        # 3. Assert gone
+        async with Database.get_connection(TENANT_ID) as conn:
+            count_after = await conn.fetchval(check_sql)
+
+        assert count_after == 0, "Legacy rows still exist after pruning"
+        assert deleted_count >= 1, "Prune function reported 0 deletions"
+        print(f"✓ Pruning verification passed. Deleted {deleted_count} entries.")
+
+    finally:
+        await Database.close()

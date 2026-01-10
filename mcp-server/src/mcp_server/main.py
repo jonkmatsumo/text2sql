@@ -37,6 +37,16 @@ async def lifespan(app):
     # Startup: Initialize database connection pool
     await Database.init()
 
+    # Maintenance: Prune legacy cache entries
+    try:
+        from mcp_server.services.cache_service import prune_legacy_entries
+
+        count = await prune_legacy_entries()
+        if count > 0:
+            print(f"🧹 Pruned {count} legacy cache entries on startup")
+    except Exception as e:
+        print(f"Warning: Cache pruning failed: {e}")
+
     # Check if schema_embeddings table is empty and try to index
     # This is optional - server should still work without it
     try:

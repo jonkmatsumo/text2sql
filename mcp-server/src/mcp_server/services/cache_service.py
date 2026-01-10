@@ -87,3 +87,9 @@ async def get_cache_stats(tenant_id: Optional[int] = None) -> dict:
 
     # If stats are needed, they should be added to the interface.
     return {"status": "Stats not implementing in DAL v1"}
+
+
+async def prune_legacy_entries() -> int:
+    """Prune legacy cache entries on startup."""
+    store = Database.get_cache_store()
+    return await store.prune_legacy_entries()
