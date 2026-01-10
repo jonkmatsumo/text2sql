@@ -74,6 +74,11 @@ class Database:
 
             print("✓ Stores initialized via DAL factory")
 
+            # 4. Init Control-Plane Database (if enabled)
+            from mcp_server.config.control_plane import ControlPlaneDatabase
+
+            await ControlPlaneDatabase.init()
+
         except Exception as e:
             await cls.close()  # Cleanup partials
             raise ConnectionError(f"Failed to initialize databases: {e}")
@@ -90,6 +95,11 @@ class Database:
             cls._graph_store.close()
             print("✓ Graph store connection closed")
             cls._graph_store = None
+
+        # Close control-plane pool
+        from mcp_server.config.control_plane import ControlPlaneDatabase
+
+        await ControlPlaneDatabase.close()
 
         # Cache store (PgSemanticCache) doesn't hold its own connection,
         # it uses Database.get_connection, so no explicit close needed

@@ -91,6 +91,12 @@ services:
       DB_NAME: pagila
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}

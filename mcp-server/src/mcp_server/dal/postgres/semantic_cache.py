@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from mcp_server.config.database import Database
@@ -15,6 +16,19 @@ class PgSemanticCache(CacheStore):
     # Schema Versioning: Increment this when changing embedding model or retrieval algorithm.
     # Obsolete entries will be ignored by lookup() and pruned by prune_legacy_entries().
     CURRENT_SCHEMA_VERSION = "v1"
+
+    @staticmethod
+    @asynccontextmanager
+    async def _get_connection(tenant_id: Optional[int] = None):
+        """Get connection from control-plane pool if enabled, else main pool."""
+        from mcp_server.config.control_plane import ControlPlaneDatabase
+
+        if ControlPlaneDatabase.is_enabled():
+            async with ControlPlaneDatabase.get_connection(tenant_id) as conn:
+                yield conn
+        else:
+            async with Database.get_connection(tenant_id) as conn:
+                yield conn
 
     async def lookup(
         self,
@@ -45,7 +59,7 @@ class PgSemanticCache(CacheStore):
             LIMIT 1
         """
 
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             row = await conn.fetchrow(
                 query,
                 pg_vector,
@@ -90,7 +104,7 @@ class PgSemanticCache(CacheStore):
             LIMIT 1
         """
 
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             row = await conn.fetchrow(query, tenant_id, fingerprint_key, cache_type)
 
         if row:
@@ -144,7 +158,7 @@ class PgSemanticCache(CacheStore):
             LIMIT $4
         """
 
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             rows = await conn.fetch(
                 query,
                 pg_vector,
@@ -180,7 +194,7 @@ class PgSemanticCache(CacheStore):
                 last_accessed_at = NOW()
             WHERE cache_id = $1 AND tenant_id = $2
         """
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             await conn.execute(query, id_val, tenant_id)
 
     async def store(
@@ -212,7 +226,7 @@ class PgSemanticCache(CacheStore):
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT DO NOTHING
         """
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             await conn.execute(
                 query,
                 tenant_id,
@@ -250,7 +264,7 @@ class PgSemanticCache(CacheStore):
                 tombstoned_at = NOW()
             WHERE cache_id = $1 AND tenant_id = $2
         """
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             result = await conn.execute(query, id_val, tenant_id, reason)
             # asyncpg execute returns "UPDATE <count>" string
             count = int(result.split(" ")[-1])
@@ -262,7 +276,7 @@ class PgSemanticCache(CacheStore):
     async def delete_entry(self, user_query: str, tenant_id: int) -> None:
         """Delete a cache entry (for cleanup/testing)."""
         query = "DELETE FROM semantic_cache WHERE user_query = $1 AND tenant_id = $2"
-        async with Database.get_connection(tenant_id) as conn:
+        async with self._get_connection(tenant_id) as conn:
             await conn.execute(query, user_query, tenant_id)
 
     async def prune_legacy_entries(self) -> int:
