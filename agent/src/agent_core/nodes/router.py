@@ -57,56 +57,62 @@ AMBIGUITY_TAXONOMY = {
 }
 
 
-ROUTER_SYSTEM_PROMPT = """You are a Text-to-SQL query intent analyzer.
-Your job is to determine if the user's query requires clarification or if it can be unequivocally
-resolved using safe defaults.
+ROUTER_SYSTEM_PROMPT = """You are a Schema-Grounded Clarification Engine for Text-to-SQL.
+You will be provided with a User Query and a "Schema Context" (retrieved tables and columns).
 
-### 1. Analysis Rules
-Analyze the query for specific ambiguities.
-- **UNCLEAR_SCHEMA_REFERENCE**: Entity could map to multiple different tables
-  (e.g. "Customer" vs "Store").
-- **UNCLEAR_VALUE_REFERENCE**: A value has multiple valid interpretations in the schema.
-- **MISSING_TEMPORAL_CONSTRAINT**: Metric implies a time window, but none is specified.
-- **LOGICAL_METRIC_CONFLICT**: Terms like "top", "best" have multiple valid definitions.
-- **MISSING_FILTER_CRITERIA**: Scope is too broad without specific filters.
+Your Goal: Determine if the query is ambiguous *strictly with respect to the Schema Context*.
 
-### 2. Decision Logic
-**Do NOT ask clarification questions if:**
-- The ambiguity can be resolved by a **Safe Default** (common business assumption, synonym,
-  casing). Record this in `assumptions`.
-- The question is about formatting, normalization, or style.
-- The user has already provided an answer to a similar clarification (Loop Prevention).
-- You are >80% confident (confidence > 0.8) in a specific interpretation.
+## CRITICAL RULES (Priority Order)
 
-**Only ask clarification questions if:**
-- The answer materially changes the SQL structure (joins, grouping, aggregation, metric logic,
-  required filters).
+### Rule 1: NO HALLUCINATION
+NEVER ask about columns, tables, filters, or data types that are NOT in the Schema Context.
+- BAD: "Do you mean the Director's Cut?" (if no 'version' or 'edition' column exists)
+- BAD: "Should I filter by customer segment?" (if no 'segment' column exists)
+- GOOD: "Do you mean runtime in minutes or hours?" (ONLY if BOTH columns exist)
 
-**Single-Shot Rule:**
-- You may ask **at most one** clarification question per analysis key.
-- If the user's response resolves the core ambiguity, mark `resolved_by_user_answer: true`
-  and proceed.
+### Rule 2: SILENT RESOLUTION
+If the user's term maps to EXACTLY ONE column/table in the Schema Context, DO NOT ask.
+- If user says "runtime" and Schema has only `film.runtime` → proceed silently.
+- If user says "customer" and Schema has only `customer` table → proceed silently.
+- Record your resolution in `assumptions`.
 
-### 3. Question Style
-- Use natural, non-technical language.
-- Discuss business concepts only. DO NOT mention table names, column names, or SQL logic.
-- Provide 2-3 concrete options max.
-- Do not stack hedges ("if possible... otherwise...").
+### Rule 3: FAIL-FAST (Hard Refusal)
+If the user's query implies a filter/constraint that CANNOT be applied (no backing column):
+- Set `missing_data` to describe what's unavailable.
+- Set `hard_refusal_message` with a cooperative explanation.
+- Example: "I cannot filter by 'Director's Cut' because the database does not contain
+  version or edition information. I can calculate the average runtime for ALL movies.
+  Would you like that instead?"
 
-### 4. Output Schema (JSON)
-Respond ONLY with this JSON structure:
+### Rule 4: GENUINE AMBIGUITY ONLY
+Only ask clarification questions when:
+- The Schema Context shows MULTIPLE valid interpretations.
+- The choice materially changes the SQL (different tables, joins, aggregations).
+- Examples: 'region' exists in BOTH 'customer' AND 'store' tables.
+
+## Schema Context
+{schema_context}
+
+## Output Schema (JSON)
 {{
-    "is_ambiguous": boolean,
-    "ambiguity_type": "TYPE_NAME" or null,
-    "ambiguity_reason": "Brief explanation",
+    \"is_ambiguous\": boolean,
+    \"ambiguity_type\": \"UNCLEAR_SCHEMA_REFERENCE\" | \"UNCLEAR_VALUE_REFERENCE\" |
+                      \"LOGICAL_METRIC_CONFLICT\" | null,
+    \"ambiguity_reason\": \"Brief explanation\" or null,
     "clarification_question": "Question string" or null,
-    "assumptions": ["List of safe defaults applied"],
-    "resolved_by_user_answer": boolean,
+    "assumptions": ["List of silent resolutions applied"],
+    "missing_data": "Description of unavailable filter/data" or null,
+    "hard_refusal_message": "Cooperative refusal message" or null,
     "confidence": 0.0 to 1.0
 }}
 
-### Schema Context
-{schema_context}
+## Decision Flow
+1. Parse user query for entities, filters, and constraints.
+2. For each term, check Schema Context:
+   - Maps to 1 column? → SILENT RESOLUTION
+   - Maps to 0 columns (filter implied)? → FAIL-FAST
+   - Maps to 2+ columns? → GENUINE AMBIGUITY
+3. If no ambiguity and no missing data → `is_ambiguous: false`, proceed.
 """
 
 
@@ -224,10 +230,29 @@ async def router_node(state: AgentState) -> dict:
 
         is_ambiguous = analysis.get("is_ambiguous", False)
         confidence = analysis.get("confidence", 1.0)
+        missing_data = analysis.get("missing_data")
+        hard_refusal_message = analysis.get("hard_refusal_message")
 
         span.set_attribute("is_ambiguous", str(is_ambiguous))
         span.set_attribute("confidence", str(confidence))
+        if missing_data:
+            span.set_attribute("missing_data", missing_data)
 
+        # FAIL-FAST: If data is missing, return hard refusal as clarification
+        if missing_data and hard_refusal_message:
+            span.set_outputs(
+                {
+                    "action": "hard_refusal",
+                    "missing_data": missing_data,
+                }
+            )
+            return {
+                "ambiguity_type": "MISSING_DATA",
+                "clarification_question": hard_refusal_message,
+                "active_query": active_query,
+            }
+
+        # GENUINE AMBIGUITY: Route to clarify
         if is_ambiguous and confidence < 0.8:
             ambiguity_type = analysis.get("ambiguity_type")
             clarification_question = analysis.get(
@@ -248,8 +273,8 @@ async def router_node(state: AgentState) -> dict:
                 "active_query": active_query,
             }
 
-        # Query is clear - proceed to retrieval
-        span.set_outputs({"action": "retrieve"})
+        # CLEAR QUERY: Proceed to plan (schema already retrieved)
+        span.set_outputs({"action": "plan"})
         return {
             "ambiguity_type": None,
             "clarification_question": None,

@@ -103,7 +103,7 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
 
             # Step 2: Join Discovery
             # Trace FKs from seed tables to *referenced* tables.
-            # Only include the referenced *columns*, not the full schema of referenced tables.
+            # Initially only include the referenced *columns* (PK).
             query_step2 = """
             MATCH (t:Table) WHERE t.name IN $seed_tables
             MATCH (t)-[:HAS_COLUMN]->(sc:Column)-[:FOREIGN_KEY_TO]->(tc:Column)
@@ -115,6 +115,9 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
             """
             result2 = session.run(query_step2, seed_tables=seed_table_names)
 
+            # Track newly discovered FK tables (dimension tables)
+            fk_table_names = set()
+
             for record in result2:
                 # source_table_name = record["source_table_name"] # Already processed in Step 1
                 source_col = record["source_col"]  # Already processed in Step 1
@@ -125,6 +128,9 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
 
                 # Add Referenced Table (rt)
                 rt_id = add_node(target_table, "Table")
+                rt_name = target_table.get("name") if target_table else None
+                if rt_name and rt_name not in seed_table_names:
+                    fk_table_names.add(rt_name)
 
                 # Add Referenced Column (tc) - this is the "Bridge" logic
                 tc_id = add_node(target_col, "Column")
@@ -136,6 +142,83 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 if rt_id and tc_id:
                     rels_list.append({"source": rt_id, "target": tc_id, "type": "HAS_COLUMN"})
 
+            # Step 2.5: Full Column Expansion for Dimension Tables
+            # Fetch ALL columns for FK-referenced tables (not just the PK).
+            # This ensures dimension table columns like `language.name` are available.
+            if fk_table_names:
+                logger.info(f"Expanding columns for dimension tables: {list(fk_table_names)}")
+                query_step2_5 = """
+                MATCH (t:Table)-[:HAS_COLUMN]->(c:Column)
+                WHERE t.name IN $fk_tables
+                RETURN t, c
+                """
+                result2_5 = session.run(query_step2_5, fk_tables=list(fk_table_names))
+
+                for record in result2_5:
+                    t = record["t"]
+                    c = record["c"]
+                    t_id = add_node(t, "Table")
+                    c_id = add_node(c, "Column")
+                    if t_id and c_id:
+                        rels_list.append({"source": t_id, "target": c_id, "type": "HAS_COLUMN"})
+
+        from mcp_server.services.schema_linker import SchemaLinker
+
+        # --- DENSE SCHEMA LINKING (Triple-Filter Pruning) ---
+        # 1. Regroup Nodes (Attach columns to tables)
+        # nodes_map values are dicts (properties). We can attach 'columns' list to them temporarily.
+        tables = []
+        col_id_to_node = {}
+        for nid, props in nodes_map.items():
+            if props.get("type") == "Table":
+                props["columns"] = []  # Initialize
+                tables.append(props)
+            elif props.get("type") == "Column":
+                col_id_to_node[nid] = props
+
+        # Populate 'columns' list in table props using HAS_COLUMN edges
+        for rel in rels_list:
+            if rel["type"] == "HAS_COLUMN":
+                t_id = rel["source"]
+                c_id = rel["target"]
+                if t_id in nodes_map and c_id in col_id_to_node:
+                    nodes_map[t_id]["columns"].append(col_id_to_node[c_id])
+
+        # 2. Run Schema Linker
+        # Modifies 'columns' list in-place to keep only relevant ones
+        SchemaLinker.rank_and_filter_columns(query_text, tables, target_cols_per_table=15)
+
+        # 3. Prune Graph (Rebuild nodes and edges)
+        kept_col_ids = set()
+        for t in tables:
+            for c in t["columns"]:
+                kept_col_ids.add(c["id"])
+            # Remove the temp 'columns' key to keep response clean
+            t.pop("columns", None)
+
+        # Filter Nodes
+        final_nodes = []
+        for nid, props in nodes_map.items():
+            if props.get("type") == "Table":
+                final_nodes.append(props)
+            elif props.get("type") == "Column":
+                if nid in kept_col_ids:
+                    final_nodes.append(props)
+            else:
+                final_nodes.append(props)  # Other types if any
+
+        # Filter Relationships
+        # Only keep edges where both source/target exist in final_nodes
+        final_node_ids = set(n["id"] for n in final_nodes)
+
+        kept_rels = []
+        for rel in rels_list:
+            if rel["source"] in final_node_ids and rel["target"] in final_node_ids:
+                kept_rels.append(rel)
+
+        rels_list = kept_rels
+        # --- END DENSE SCHEMA LINKING ---
+
         # Process relationships uniqueness
         seen_rels = set()
         unique_rels = []
@@ -145,7 +228,7 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 seen_rels.add(key)
                 unique_rels.append(rel)
 
-        return {"nodes": list(nodes_map.values()), "relationships": unique_rels}
+        return {"nodes": final_nodes, "relationships": unique_rels}
 
     except Exception as e:
         logger.error(f"Error in get_semantic_subgraph: {e}")

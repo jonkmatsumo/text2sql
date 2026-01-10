@@ -28,24 +28,25 @@ class TestRouteAfterRouter:
 
         assert result == "clarify"
 
-    def test_route_to_retrieve_when_clear(self):
-        """Test routing to retrieve when no ambiguity."""
+    def test_route_to_plan_when_clear(self):
+        """Test routing to plan when no ambiguity (schema already retrieved)."""
         state = {
             "messages": [],
             "ambiguity_type": None,
+            "schema_context": "Tables: film, customer",  # Schema available
         }
 
         result = route_after_router(state)
 
-        assert result == "retrieve"
+        assert result == "plan"
 
-    def test_route_to_retrieve_when_ambiguity_missing(self):
-        """Test routing to retrieve when ambiguity_type is missing."""
-        state = {"messages": []}
+    def test_route_to_plan_when_ambiguity_missing(self):
+        """Test routing to plan when ambiguity_type is missing."""
+        state = {"messages": [], "schema_context": "Tables: film"}
 
         result = route_after_router(state)
 
-        assert result == "retrieve"
+        assert result == "plan"
 
 
 class TestRouteAfterValidation:
@@ -219,14 +220,14 @@ class TestCreateWorkflow:
         assert "correct" in node_calls
         assert "synthesize" in node_calls
 
-        # Verify entry point was set to router
-        mock_workflow.set_entry_point.assert_called_once_with("router")
+        # Verify entry point was set to retrieve (schema-aware clarification)
+        mock_workflow.set_entry_point.assert_called_once_with("retrieve")
 
-        # Verify edges were added (now 6 edges)
+        # Verify edges were added (6 edges after reorder)
         assert mock_workflow.add_edge.call_count == 6
         edge_calls = [call_args[0] for call_args in mock_workflow.add_edge.call_args_list]
+        assert ("retrieve", "router") in edge_calls  # New: retrieve feeds router
         assert ("clarify", "router") in edge_calls
-        assert ("retrieve", "plan") in edge_calls
         assert ("plan", "generate") in edge_calls
         assert ("generate", "validate") in edge_calls
         assert ("correct", "validate") in edge_calls

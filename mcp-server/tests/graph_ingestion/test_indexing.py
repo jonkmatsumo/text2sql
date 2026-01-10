@@ -105,30 +105,31 @@ class TestAdaptiveThreshold:
         hits = [
             {"score": 0.9},
             {"score": 0.85},
-            {"score": 0.7},  # Below 0.9 - 0.08 = 0.82
+            {"score": 0.7},  # Below 0.9 - 0.15 = 0.75
         ]
         result = apply_adaptive_threshold(hits)
         assert len(result) == 2
 
     def test_respects_absolute_minimum(self):
-        """Hits below absolute minimum (0.55) should be filtered."""
+        """Hits below absolute minimum (0.45) should be filtered."""
         hits = [
-            {"score": 0.6},
-            {"score": 0.5},  # Below 0.55 absolute minimum
+            {"score": 0.5},
+            {"score": 0.4},  # Below 0.45 absolute minimum
         ]
         result = apply_adaptive_threshold(hits)
         assert len(result) == 1
-        assert result[0]["score"] == 0.6
+        assert result[0]["score"] == 0.5
 
-    def test_fallback_to_top1(self):
-        """If all filtered, return top 1."""
+    def test_fallback_to_top_k(self):
+        """If all filtered, return top 3 (or all if fewer)."""
         hits = [
-            {"score": 0.4},  # Below 0.55
-            {"score": 0.3},
+            {"score": 0.3},  # Below 0.45
+            {"score": 0.2},
         ]
         result = apply_adaptive_threshold(hits)
-        assert len(result) == 1
-        assert result[0]["score"] == 0.4
+        assert len(result) == 2  # Returns all because len=2 < 3
+        assert result[0]["score"] == 0.3
+        assert result[1]["score"] == 0.2
 
     def test_empty_input(self):
         """Empty input should return empty."""

@@ -51,10 +51,20 @@ class TestGetSemanticSubgraph:
 
         record2 = {"source_col": mock_sc, "target_table": mock_rt, "target_col": mock_tc}
 
-        # Setup side_effect for session.run to return different results for step 1 and 2
+        # Mock result for Step 2.5 (Dimension Table Column Expansion)
+        # This fetches all columns for FK-referenced tables (orders)
+        mock_order_col = MagicMock()
+        mock_order_col.element_id = "c3"
+        mock_order_col.get = lambda k, d=None: {"name": "order_date", "type": "date"}.get(k, d)
+        mock_order_col.__iter__ = lambda s: iter([("name", "order_date"), ("type", "date")])
+
+        record2_5 = {"t": mock_rt, "c": mock_order_col}
+
+        # Setup side_effect for session.run to return different results for steps 1, 2, 2.5
         mock_session.run.side_effect = [
             [record1],  # Step 1
             [record2],  # Step 2
+            [record2_5],  # Step 2.5 (new: dimension table expansion)
         ]
 
         mock_session.__enter__.return_value = mock_session

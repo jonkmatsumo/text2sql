@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Hard caps for compact format
 MAX_TABLES = 8
-MAX_COLS_PER_TABLE = 10
+MAX_COLS_PER_TABLE = 15  # Increased from 10 to show more columns per table
 SCHEMA_CONTEXT_MAX_CHARS = 8000
 
 
@@ -82,20 +82,16 @@ def format_graph_to_markdown(
             join_column_ids.add(target_id)
 
     # Helper to calculate column priority
+    # Helper to calculate column priority
     def get_column_priority(col: Dict) -> int:
         # Lower is higher priority
         if col.get("is_primary_key"):
             return 0
         if col.get("id") in join_column_ids:
             return 1
-
-        # Semantic columns (names matching query or text types)
-        # We don't have query terms here, but we can prioritize text types
-        dtype = col.get("data_type", col.get("type", "")).lower()
-        if "char" in dtype or "text" in dtype or "string" in dtype:
-            return 2
-
-        return 3
+        # All other columns are pre-filtered by MCP's Dense Schema Linking
+        # so they are considered equally relevant for the context.
+        return 2
 
     # Format Output
     output_parts = ["# Schema Context", "", "## Tables"]

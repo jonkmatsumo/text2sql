@@ -32,13 +32,13 @@ flowchart TB
 
         %% Flow
         UserQuery --> AgentState
-        AgentState --> RouterNode
+        AgentState --> RetrieveNode
+        RetrieveNode --> RouterNode
 
         RouterNode -->|"Ambiguous?"| ClarifyNode
-        ClarifyNode -->|"User feedback"| RouterNode
+        ClarifyNode -->|"User feedback"| RetrieveNode
 
-        RouterNode -->|"Clear"| RetrieveNode
-        RetrieveNode --> PlanNode
+        RouterNode -->|"Clear"| PlanNode
         PlanNode --> GenerateNode
         GenerateNode --> ValidateNode
 
@@ -84,6 +84,7 @@ flowchart TB
         VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
         CacheModule["Cache Module<br/>mcp_server/cache.py"]
         SecurityCheck["SQL Security Checks<br/>AST validation"]
+        SchemaLinker["Schema Linker<br/>(Triple-Filter Strategy)<br/>mcp_server/services/schema_linker.py"]
     end
 
     subgraph GraphDB["🔷 Memgraph (Graph DB)"]
@@ -118,6 +119,7 @@ flowchart TB
     %% Agent to MCP Server via DAL
     RetrieveNode -->|"Call Tool"| MCPTools
     MCPTools -->|"Search/Query"| DAL
+    MCPTools -->|"Prune Schema"| SchemaLinker
     DAL -->|"Vector Search"| VectorIndex
 
     Impl_PG --> PGVectorDB
@@ -152,57 +154,29 @@ flowchart TB
 ```
 
 
-## Core Features
+## Key Features & Architecture
 
-*   **Multi-Provider LLM Support**: Switch between OpenAI, Anthropic (Claude), and Google (Gemini) via UI or environment variables.
-*   **Intelligent Query Generation**: Uses a LangGraph-orchestrated reasoning loop (Retrieve → Generate → Execute → Correct → Synthesize) to ensure accuracy.
-*   **Data Abstraction Layer (DAL)**: A strict interface layer that decouples business logic from backend storage, preventing implementation details (like Neo4j nodes or asyncpg records) from leaking into the agent.
-*   **High-Performance Vector Search**: Implements **Automatic Nearest Neighbors (ANN)** using `hnswlib` for millisecond-latency retrieval of relevant examples and schema context, hydrated from persistent storage.
-*   **Secure Access**: Built on the Model Context Protocol (MCP) server, enforcing read-only permissions and SQL safety checks.
-*   **Graph-Based Schema Retrieval**: Uses Memgraph for semantic relationships and `PostgresMetadataStore` for robust schema introspection.
-*   **Manual Seeding**: Dedicated seeder service hydrates the schema graph and initializes golden examples on demand.
-*   **Self-Correction**: Automatically detects SQL errors and retries generation with error context up to 3 times.
+### 🧠 Intelligent Agent Core
+*   **Multi-Provider LLM Support**: Switch between OpenAI (GPT-5.2), Anthropic (Claude 3.5 Sonnet), and Google (Gemini 2.5 Flash) via native integration.
+*   **Reasoning Loop**: Uses LangGraph to orchestrate a sophisticated `Retrieve → Plan → Generate → Validate → Correct` workflow.
+*   **Self-Correction**: Automatically detects SQL errors (syntax, types, logic) and retries generation with error context (up to 3 times).
+*   **Human-in-the-Loop**: Ambiguous queries trigger an interrupt mechanism, asking the user for clarification before proceeding, preserving context state.
+
+### 🔍 Advanced Retrieval (RAG) & Schema Linking
+*   **Dense Schema Linking**: Replaces simple vector search with a **Triple-Filter Strategy** (Structural Backbone, Value Spy, Semantic Reranker) to intelligently prune relevant tables and columns, resolving "Context Starvation".
+*   **Adaptive Fallback**: Implements robust Top-K fallback logic to ensure dimension tables (e.g., `language`) are retrieved even with weak semantic signals.
+*   **Graph-Based Schema**: Uses Memgraph to model relationships (Foreign Keys) and `PostgresMetadataStore` for robust introspection.
+*   **Enriched Ingestion**: Generates high-fidelity embeddings by including column names and descriptions, ensuring accurate semantic matching.
+*   **Scalable Vector Search**: Uses **HNSW (Hierarchical Navigable Small Worlds)** via `hnswlib` for millisecond-latency approximate nearest neighbor search.
+
+### 🛡️ Secure Data Access (MCP)
+*   **Model Context Protocol (MCP)**: Exposes database tools via a secure, read-only server interface.
+*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`GraphStore`, `MetadataStore`), ensuring modularity and preventing implementation leakage.
+*   **AST Security Validation**: Validates SQL using `sqlglot` AST traversal to strictly block forbidden commands (`DROP`, `DELETE`, `INSERT`) and restricted tables (`credentials`, `payroll`).
+
+### 📡 Observability & Performance
+*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps, tool calls, and performance.
 *   **Performance Caching**: Semantic caching stores successful query patterns to reduce latency and API costs.
-*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps and performance metrics.
-
-## Advanced Architecture Features
-
-### Data Abstraction Layer (DAL)
-The system employs a robust DAL to ensure modularity and testability:
-- **Canonical Types**: Uses Pydantic models (`Node`, `Edge`, `TableDef`) for all internal data exchange.
-- **Protocols**: Defines strict interfaces (`GraphStore`, `MetadataStore`, `VectorIndex`) for all adapters.
-- **Adapters**: Backend-specific implementations for `Postgres` (asyncpg) and `Memgraph` (neo4j-driver).
-- **Context Safety**: Propagates tenant context (multi-tenancy) safely across async/sync boundaries using `contextvars`.
-
-### Scalable Vector Search (ANN)
-To handle large-scale schema and example retrieval efficienty:
-- **HNSW Index**: Uses Hierarchical Navigable Small Worlds (via `hnswlib`) for approximate nearest neighbor search.
-- **Hybrid Storage**: Embeddings are persisted in Postgres (`pgvector`) for durability but loaded into in-memory HNSW indices for high-performance runtime querying.
-- **Lazy Loading**: Indexes are hydrated on-demand to optimize startup time.
-
-### AST Validation
-SQL queries are parsed and validated using `sqlglot` before execution:
-- **Security Checks**: Blocks access to restricted tables (`payroll`, `credentials`, `pg_*`)
-- **Forbidden Commands**: Prevents `DROP`, `DELETE`, `INSERT`, `UPDATE` operations
-- **Metadata Extraction**: Captures table lineage, column usage, and join complexity
-
-### SQL-of-Thought Planner
-Complex queries are decomposed into logical steps before SQL synthesis:
-- **Schema Linking**: Identifies relevant tables and columns
-- **Clause Mapping**: Breaks down query into FROM, JOIN, WHERE, GROUP BY components
-- **Procedural Planning**: Generates numbered step-by-step execution plan
-
-### Error Taxonomy
-12 error categories with targeted correction strategies:
-- `AGGREGATION_MISUSE`, `MISSING_JOIN`, `TYPE_MISMATCH`, `AMBIGUOUS_COLUMN`
-- `SYNTAX_ERROR`, `NULL_HANDLING`, `SUBQUERY_ERROR`, `PERMISSION_DENIED`
-- `FUNCTION_ERROR`, `CONSTRAINT_VIOLATION`, `LIMIT_EXCEEDED`, `DATE_TIME_ERROR`
-
-### Human-in-the-Loop
-Ambiguous queries trigger clarification via LangGraph interrupts:
-- **Ambiguity Detection**: Identifies unclear schema references, missing temporal constraints
-- **Interrupt Mechanism**: Pauses execution to collect user clarification
-- **History Awareness**: Clarification history is persisted to context for accurate follow-up generation.
 
 ## Project Structure
 
