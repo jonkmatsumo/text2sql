@@ -30,7 +30,8 @@ def route_after_router(state: AgentState) -> str:
     """
     Conditional edge logic after router node.
 
-    Routes to clarify if ambiguity detected, otherwise to retrieve.
+    Routes to clarify if ambiguity detected, otherwise to plan.
+    Note: Retrieve has already run, so router has schema_context.
 
     Args:
         state: Current agent state
@@ -40,7 +41,7 @@ def route_after_router(state: AgentState) -> str:
     """
     if state.get("ambiguity_type"):
         return "clarify"
-    return "retrieve"
+    return "plan"
 
 
 def route_after_validation(state: AgentState) -> str:
@@ -92,8 +93,11 @@ def create_workflow() -> StateGraph:
     """
     Create and configure the LangGraph workflow.
 
-    New flow:
-    router → [clarify →] retrieve → plan → generate → validate → execute → [correct →] synthesize
+    Flow (schema-aware clarification):
+    retrieve → router → [clarify →] plan → generate → validate → execute → [correct →] synthesize
+
+    The key insight: retrieve runs FIRST to populate schema_context,
+    so the router can make schema-aware ambiguity decisions.
 
     Returns:
         StateGraph: Configured workflow graph (not compiled)
@@ -111,24 +115,27 @@ def create_workflow() -> StateGraph:
     workflow.add_node("correct", correct_sql_node)
     workflow.add_node("synthesize", synthesize_insight_node)
 
-    # Set entry point
-    workflow.set_entry_point("router")
+    # Set entry point - retrieve runs first to populate schema_context
+    workflow.set_entry_point("retrieve")
 
-    # Router conditional edges
+    # Retrieve feeds into router (router now has schema context)
+    workflow.add_edge("retrieve", "router")
+
+    # Router conditional edges (schema-aware ambiguity detection)
     workflow.add_conditional_edges(
         "router",
         route_after_router,
         {
             "clarify": "clarify",
-            "retrieve": "retrieve",
+            "plan": "plan",
         },
     )
 
     # Clarify loops back to router (to re-evaluate with clarification)
+    # Note: No need to re-retrieve since schema hasn't changed
     workflow.add_edge("clarify", "router")
 
     # Main flow edges
-    workflow.add_edge("retrieve", "plan")
     workflow.add_edge("plan", "generate")
     workflow.add_edge("generate", "validate")
 
