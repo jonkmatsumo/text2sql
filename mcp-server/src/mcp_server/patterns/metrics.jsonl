@@ -1,0 +1,25 @@
+{"label": "AGGREGATOR", "pattern": "average", "id": "AVG"}
+{"label": "AGGREGATOR", "pattern": "mean", "id": "AVG"}
+{"label": "AGGREGATOR", "pattern": "avg", "id": "AVG"}
+{"label": "AGGREGATOR", "pattern": "maximum", "id": "MAX"}
+{"label": "AGGREGATOR", "pattern": "highest", "id": "MAX"}
+{"label": "AGGREGATOR", "pattern": "max", "id": "MAX"}
+{"label": "AGGREGATOR", "pattern": "minimum", "id": "MIN"}
+{"label": "AGGREGATOR", "pattern": "lowest", "id": "MIN"}
+{"label": "AGGREGATOR", "pattern": "min", "id": "MIN"}
+{"label": "AGGREGATOR", "pattern": "total", "id": "SUM"}
+{"label": "AGGREGATOR", "pattern": "sum", "id": "SUM"}
+{"label": "AGGREGATOR", "pattern": "count", "id": "COUNT"}
+{"label": "AGGREGATOR", "pattern": "number of", "id": "COUNT"}
+{"label": "ENTITY", "pattern": "movie", "id": "FILM"}
+{"label": "ENTITY", "pattern": "movies", "id": "FILM"}
+{"label": "ENTITY", "pattern": "film", "id": "FILM"}
+{"label": "ENTITY", "pattern": "films", "id": "FILM"}
+{"label": "ENTITY", "pattern": "actor", "id": "ACTOR"}
+{"label": "ENTITY", "pattern": "actors", "id": "ACTOR"}
+{"label": "ENTITY", "pattern": "actress", "id": "ACTOR"}
+{"label": "ENTITY", "pattern": "actresses", "id": "ACTOR"}
+{"label": "ENTITY", "pattern": "customer", "id": "CUSTOMER"}
+{"label": "ENTITY", "pattern": "customers", "id": "CUSTOMER"}
+{"label": "ENTITY", "pattern": "rental", "id": "RENTAL"}
+{"label": "ENTITY", "pattern": "rentals", "id": "RENTAL"}

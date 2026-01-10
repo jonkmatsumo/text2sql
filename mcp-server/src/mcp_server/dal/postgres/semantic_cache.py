@@ -64,6 +64,44 @@ class PgSemanticCache(CacheStore):
             )
         return None
 
+    async def lookup_by_fingerprint(
+        self,
+        fingerprint_key: str,
+        tenant_id: int,
+        cache_type: str = "sql",
+    ) -> Optional[CacheLookupResult]:
+        """Lookup a cached result by exact fingerprint key (O(1)).
+
+        Args:
+            fingerprint_key: SHA256 hash of the semantic fingerprint.
+            tenant_id: Tenant identifier for isolation.
+            cache_type: Type of cache entry.
+
+        Returns:
+            CacheLookupResult if exact match found, None otherwise.
+        """
+        query = """
+            SELECT cache_id, generated_sql, user_query
+            FROM semantic_cache
+            WHERE tenant_id = $1
+            AND signature_key = $2
+            AND cache_type = $3
+            AND (is_tombstoned IS NULL OR is_tombstoned = FALSE)
+            LIMIT 1
+        """
+
+        async with Database.get_connection(tenant_id) as conn:
+            row = await conn.fetchrow(query, tenant_id, fingerprint_key, cache_type)
+
+        if row:
+            return CacheLookupResult(
+                cache_id=str(row["cache_id"]),
+                value=row["generated_sql"],
+                similarity=1.0,  # Exact match
+                metadata={"user_query": row["user_query"], "match_type": "fingerprint"},
+            )
+        return None
+
     async def lookup_candidates(
         self,
         query_embedding: List[float],

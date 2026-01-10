@@ -1,11 +1,15 @@
 """Semantic caching module for SQL query results."""
 
 import asyncio
+import logging
 from typing import Optional
 
 from mcp_server.config.database import Database
 from mcp_server.models import CacheLookupResult
 from mcp_server.rag import RagEngine
+from mcp_server.services.canonicalization import CanonicalizationService
+
+logger = logging.getLogger(__name__)
 
 # Conservative threshold to prevent serving wrong SQL for nuanced queries
 # Research suggests 0.92-0.95 for BI applications where accuracy is paramount
@@ -13,11 +17,10 @@ SIMILARITY_THRESHOLD = 0.90
 
 
 async def lookup_cache(user_query: str, tenant_id: int) -> Optional[CacheLookupResult]:
-    """
-    Check cache for a semantically equivalent query from the SAME tenant.
+    """Check cache with two-tier lookup strategy.
 
-    Uses vector similarity search to find cached SQL that matches the user's intent.
-    Only returns cached SQL if similarity exceeds threshold (0.90).
+    Tier 1: Fingerprint exact match (O(1), 100% precision)
+    Tier 2: Vector similarity with constraint validation (fallback)
 
     Args:
         user_query: The user's natural language question
@@ -26,20 +29,33 @@ async def lookup_cache(user_query: str, tenant_id: int) -> Optional[CacheLookupR
     Returns:
         CacheLookupResult object if match found, None otherwise
     """
-    embedding = RagEngine.embed_text(user_query)
-
     store = Database.get_cache_store()
+    canonicalizer = CanonicalizationService.get_instance()
+
+    # === Tier 1: SpaCy Canonicalization (exact fingerprint match) ===
+    if canonicalizer.is_available():
+        constraints, fingerprint, fingerprint_key = canonicalizer.process_query(user_query)
+
+        if fingerprint:  # Non-empty fingerprint
+            result = await store.lookup_by_fingerprint(fingerprint_key, tenant_id)
+            if result:
+                logger.info(f"✓ Fingerprint hit: {fingerprint} (key={fingerprint_key[:16]}...)")
+                asyncio.create_task(update_cache_access(result.cache_id, tenant_id))
+                return result
+            else:
+                logger.debug(f"Fingerprint miss: {fingerprint}")
+
+    # === Tier 2: Vector Similarity Fallback ===
+    embedding = RagEngine.embed_text(user_query)
     result = await store.lookup(
         embedding, tenant_id, threshold=SIMILARITY_THRESHOLD, cache_type="sql"
     )
 
     if result:
-        print(f"✓ Cache Hit! Similarity: {result.similarity:.4f}, Cache ID: {result.cache_id}")
-
-        # Update hit count and last accessed timestamp (fire-and-forget)
-        # We don't await this to ensure low latency
+        logger.info(
+            f"✓ Vector hit: similarity={result.similarity:.4f}, " f"cache_id={result.cache_id}"
+        )
         asyncio.create_task(update_cache_access(result.cache_id, tenant_id))
-
         return result
 
     return None

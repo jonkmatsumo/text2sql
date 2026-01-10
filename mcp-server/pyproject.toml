@@ -18,6 +18,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "openai>=1.0.0",
     "hnswlib>=0.8.0",  # High-perf ANN for vector search
+    "spacy>=3.7.0",    # NLP for linguistic canonicalization
 ]
 
 [project.optional-dependencies]

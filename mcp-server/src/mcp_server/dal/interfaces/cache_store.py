@@ -38,6 +38,24 @@ class CacheStore(Protocol):
         """
         ...
 
+    async def lookup_by_fingerprint(
+        self,
+        fingerprint_key: str,
+        tenant_id: int,
+        cache_type: str = "sql",
+    ) -> Optional[CacheLookupResult]:
+        """Lookup a cached result by exact fingerprint key (O(1)).
+
+        Args:
+            fingerprint_key: SHA256 hash of the semantic fingerprint.
+            tenant_id: Tenant identifier for isolation.
+            cache_type: Type of cache entry.
+
+        Returns:
+            CacheLookupResult if exact match found, None otherwise.
+        """
+        ...
+
     async def record_hit(self, cache_id: str, tenant_id: int) -> None:
         """Record a cache hit for statistics.
 
