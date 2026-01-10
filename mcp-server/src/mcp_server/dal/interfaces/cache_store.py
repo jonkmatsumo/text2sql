@@ -65,3 +65,12 @@ class CacheStore(Protocol):
             tenant_id: Tenant identifier for isolation.
         """
         ...
+
+    async def delete_entry(self, user_query: str, tenant_id: int) -> None:
+        """Delete a cache entry (for cleanup/testing).
+
+        Args:
+            user_query: The user query string to match.
+            tenant_id: Tenant identifier.
+        """
+        ...

@@ -8,7 +8,7 @@ from mcp_server.rag import RagEngine
 
 # Conservative threshold to prevent serving wrong SQL for nuanced queries
 # Research suggests 0.92-0.95 for BI applications where accuracy is paramount
-SIMILARITY_THRESHOLD = 0.95
+SIMILARITY_THRESHOLD = 0.90
 
 
 async def lookup_cache(user_query: str, tenant_id: int) -> Optional[str]:

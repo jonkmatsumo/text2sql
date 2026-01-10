@@ -213,7 +213,8 @@ async def get_semantic_subgraph_tool(query: str, ctx: Context = None) -> str:
 
     Use this to understand database structure.
     """
-    return await get_semantic_subgraph(query)
+    tenant_id = extract_tenant_id(ctx) if ctx else None
+    return await get_semantic_subgraph(query, tenant_id)
 
 
 if __name__ == "__main__":

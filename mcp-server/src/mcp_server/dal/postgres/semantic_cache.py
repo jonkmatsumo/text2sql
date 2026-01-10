@@ -78,3 +78,9 @@ class PgSemanticCache(CacheStore):
         """
         async with Database.get_connection(tenant_id) as conn:
             await conn.execute(query, tenant_id, user_query, pg_vector, generated_sql)
+
+    async def delete_entry(self, user_query: str, tenant_id: int) -> None:
+        """Delete a cache entry (for cleanup/testing)."""
+        query = "DELETE FROM semantic_cache WHERE user_query = $1 AND tenant_id = $2"
+        async with Database.get_connection(tenant_id) as conn:
+            await conn.execute(query, user_query, tenant_id)

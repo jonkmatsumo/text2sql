@@ -27,7 +27,7 @@ USING hnsw (query_embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_cache_created_at ON public.semantic_cache(created_at);
 
 -- Grant access to agent user
-GRANT SELECT, INSERT, UPDATE ON public.semantic_cache TO text2sql_ro;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.semantic_cache TO text2sql_ro;
 GRANT USAGE ON SEQUENCE public.semantic_cache_cache_id_seq TO text2sql_ro;
 
 -- Add comment for documentation
