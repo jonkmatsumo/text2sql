@@ -21,12 +21,7 @@ nest_asyncio.apply()
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
 
-from app_logic import (  # noqa: E402
-    format_conversation_entry,
-    run_agent,
-    submit_feedback,
-    validate_tenant_id,
-)
+from service.agent_service import AgentService  # noqa: E402
 
 load_dotenv()
 
@@ -122,7 +117,7 @@ def main():
             value=st.session_state.tenant_id,
             help="Tenant identifier for multi-tenant scenarios",
         )
-        st.session_state.tenant_id = validate_tenant_id(tenant_id)
+        st.session_state.tenant_id = AgentService.validate_tenant_id(tenant_id)
 
         st.markdown("---")
         st.markdown("### System Status")
@@ -169,7 +164,7 @@ def main():
                         cols = st.columns([0.1, 0.1, 0.8])
                         with cols[0]:
                             if st.button("👍", key=f"up_{interaction_id}"):
-                                asyncio.run(submit_feedback(interaction_id, "UP"))
+                                asyncio.run(AgentService.submit_feedback(interaction_id, "UP"))
                                 st.session_state[f"feedback_done_{interaction_id}"] = True
                                 st.rerun()
                         with cols[1]:
@@ -180,7 +175,11 @@ def main():
                             with st.expander("Provide more details"):
                                 f_comment = st.text_area("Comment", key=f"txt_{interaction_id}")
                                 if st.button("Submit Feedback", key=f"btn_{interaction_id}"):
-                                    asyncio.run(submit_feedback(interaction_id, "DOWN", f_comment))
+                                    asyncio.run(
+                                        AgentService.submit_feedback(
+                                            interaction_id, "DOWN", f_comment
+                                        )
+                                    )
                                     st.session_state[f"feedback_done_{interaction_id}"] = True
                                     st.session_state[f"show_fm_{interaction_id}"] = False
                                     st.rerun()
@@ -197,7 +196,7 @@ def main():
                 try:
                     # Call tested business logic
                     results = asyncio.run(
-                        run_agent(
+                        AgentService.run_agent(
                             question,
                             st.session_state.tenant_id,
                             st.session_state.thread_id,
@@ -205,7 +204,7 @@ def main():
                     )
 
                     # Format and store entry
-                    entry = format_conversation_entry(question, results)
+                    entry = AgentService.format_conversation_entry(question, results)
                     st.session_state.conversation_history.append(entry)
 
                     # Display results
