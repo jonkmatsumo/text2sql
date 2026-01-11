@@ -84,7 +84,22 @@ class CanonicalizationService:
         ruler = self.nlp.add_pipe("entity_ruler", before="ner")
 
         # Load patterns from files
-        patterns_dir = Path(__file__).parent.parent.parent / "patterns"
+        # Load patterns from files
+        # Priority: Env Var -> /app/patterns (Docker) -> Package (Local Dev)
+        env_path = os.getenv("PATTERNS_DIR")
+        docker_path = Path("/app/patterns")
+        package_path = Path(__file__).parent.parent.parent / "patterns"
+
+        if env_path and Path(env_path).exists():
+            patterns_dir = Path(env_path)
+            logger.info(f"Loading patterns from env path: {patterns_dir}")
+        elif docker_path.exists():
+            patterns_dir = docker_path
+            logger.info(f"Loading patterns from Docker path: {patterns_dir}")
+        else:
+            patterns_dir = package_path
+            logger.info(f"Loading patterns from package path: {patterns_dir}")
+
         if patterns_dir.exists():
             for pattern_file in patterns_dir.glob("*.jsonl"):
                 try:
@@ -92,6 +107,8 @@ class CanonicalizationService:
                     logger.info(f"Loaded patterns from {pattern_file.name}")
                 except Exception as e:
                     logger.warning(f"Failed to load {pattern_file}: {e}")
+        else:
+            logger.warning(f"Patterns directory not found at {patterns_dir}")
 
     def _setup_dependency_matcher(self) -> None:
         """Register structural patterns for constraint extraction."""

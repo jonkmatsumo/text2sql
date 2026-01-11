@@ -1,6 +1,5 @@
-"""Cache lookup and validation node with deterministic constraint guardrails."""
-
 import logging
+import re
 
 import mlflow
 from agent_core.cache import extract_constraints, validate_sql_constraints
@@ -9,6 +8,10 @@ from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
 
 logger = logging.getLogger(__name__)
+
+# Regex to detect potentially leaking tenant filters (e.g. store_id = 1)
+# Adjust regex based on your known tenant columns
+TENANT_LEAK_PATTERN = re.compile(r"(?i)\b(store_id|tenant_id)\s*=\s*['\"]?(\d+)['\"]?")
 
 
 async def cache_lookup_node(state: AgentState) -> dict:
@@ -43,7 +46,10 @@ async def cache_lookup_node(state: AgentState) -> dict:
             return {"cached_sql": None, "from_cache": False}
 
         try:
-            cache_json = await cache_tool.ainvoke({"user_query": user_query})
+            tenant_id = state.get("tenant_id")
+            cache_json = await cache_tool.ainvoke(
+                {"user_query": user_query, "tenant_id": tenant_id}
+            )
             cache_data = parse_tool_output(cache_json)
 
             if cache_data is None:
@@ -76,7 +82,21 @@ async def cache_lookup_node(state: AgentState) -> dict:
             span.set_attribute("similarity_score", similarity)
             span.set_attribute("original_query", original_query)
 
-            # 3. Validate with Deterministic Constraint Guardrail (no LLM)
+            # 3. Validate for Cross-Tenant Leaks (Safety Guardrail)
+            # Ensure cached SQL doesn't contain hardcoded tenant IDs that differ from current
+            if cached_sql and tenant_id:
+                matches = TENANT_LEAK_PATTERN.findall(cached_sql)
+                for col, val in matches:
+                    if int(val) != int(tenant_id):
+                        logger.warning(
+                            f"Cache hit rejected due to tenant leak. Found {col}={val}, expected "
+                            f"{tenant_id}. SQL: {cached_sql}"
+                        )
+                        span.set_attribute("lookup_mode", "leak_rejected")
+                        span.set_attribute("rejection_reason", f"Tenant Leak: {col}={val}")
+                        return {"cached_sql": None, "from_cache": False}
+
+            # 4. Validate with Deterministic Constraint Guardrail (no LLM)
             validation = validate_sql_constraints(cached_sql, constraints)
             span.set_attribute("guardrail_verdict", "pass" if validation.is_valid else "fail")
 

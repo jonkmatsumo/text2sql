@@ -110,7 +110,67 @@ async def _process_seed_data(conn: any, base_path: Path):
         await _upsert_golden_record(conn, item)
 
 
-async def _seed_table_summaries(conn: any, base_path: Path):
+async def main():
+    """Run the seeding process."""
+    print("Starting Seeder Service...")
+
+    from mcp_server.config.control_plane import ControlPlaneDatabase
+
+    # Reuse the MCP Server's DB logic (inits both if configured)
+    await Database.init()
+
+    try:
+        # We need two connections:
+        # 1. Main DB (Pagila) for reading schema info
+        # 2. Control DB for writing embeddings/examples
+
+        # Primary/Main Connection
+        async with Database.get_connection() as conn_main:
+            print(
+                f"✓ Main DB connection established: "
+                f"{os.getenv('POSTGRES_USER')}@{os.getenv('DB_HOST')}/{os.getenv('POSTGRES_DB')}"
+            )
+
+            # Control Connection (Direct Write)
+            # If Control Plane is maintained by Database.init(), we can request it.
+            # If valid, use it. Else fallback to main (legacy/single-db).
+            if ControlPlaneDatabase.is_configured():
+                ctx = ControlPlaneDatabase.get_direct_connection()
+            else:
+                print("⚠ Control Plane not configured. Using Main DB for control tables.")
+                # Reuse main pool (but we need a new context manager or just use conn_main)
+                # Since we need async context manager, we need a helper or
+                # just Database.get_connection() again.
+                ctx = Database.get_connection()
+
+            async with ctx as conn_control:
+                print("✓ Control DB connection established.")
+
+                # 1. Seed Few-Shot Examples & Golden Dataset (Write to Control)
+                await _process_seed_data(conn_control, Path("/app/queries"))
+
+                # 2. Seed Table Summaries (Read Main, Write Control)
+                await _seed_table_summaries(conn_main, conn_control, Path("/app/queries"))
+
+                # 3. Graph Ingestion (Schema Parsing from Main -> Memgraph)
+                # Uses DAL factory which uses Database/PostgresSchemaStore.
+                # PostgresSchemaStore handles routing internally now.
+                await _ingest_graph_schema()
+
+            print("✓ Successfully processed all seed operations.")
+
+    except Exception as e:
+        print(f"Error during seeding: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        await Database.close()
+        print("✓ Database connection pools closed")
+
+
+async def _seed_table_summaries(conn_read: any, conn_write: any, base_path: Path):
     """Load and index table summaries."""
     from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
     from mcp_server.seeding.loader import load_table_summaries
@@ -127,25 +187,20 @@ async def _seed_table_summaries(conn: any, base_path: Path):
         if not table_name:
             continue
 
-        # Fetch authoritative columns from DB
+        # Fetch authoritative columns from DB (Read Main)
         cols_query = """
             SELECT column_name, data_type, is_nullable
             FROM information_schema.columns
             WHERE table_name = $1 AND table_schema = 'public'
             ORDER BY ordinal_position
         """
-        columns = await conn.fetch(cols_query, table_name)
+        columns = await conn_read.fetch(cols_query, table_name)
 
-        # If columns not found, skipping might be safer, but maybe the table is in another schema?
-        # Assuming public schema for now as per Pagila.
+        # If columns not found, skip or warn
         if not columns:
-            # Just index the summary if table doesn't exist? No, better to skip or warn.
-            # But for 'Identification' phase, we might want it even if table missing?
-            # No, if table missing, we can't query it.
-            # However, we should fetch FKs too.
-            pass
+            continue
 
-        # Get foreign keys
+        # Get foreign keys (Read Main)
         fk_query = """
             SELECT
                 kcu.column_name,
@@ -159,10 +214,9 @@ async def _seed_table_summaries(conn: any, base_path: Path):
                 AND tc.table_name = $1
                 AND tc.table_schema = 'public'
         """
-        foreign_keys = await conn.fetch(fk_query, table_name)
+        foreign_keys = await conn_read.fetch(fk_query, table_name)
 
         # Generate enriched schema document
-        # We pass the summary as 'table_comment' to be embedded
         schema_text = generate_schema_document(
             table_name,
             [dict(col) for col in columns],
@@ -174,7 +228,7 @@ async def _seed_table_summaries(conn: any, base_path: Path):
         embedding = RagEngine.embed_text(schema_text)
         pg_vector = format_vector_for_postgres(embedding)
 
-        # Upsert
+        # Upsert (Write Control)
         upsert_query = """
             INSERT INTO public.schema_embeddings (table_name, schema_text, embedding)
             VALUES ($1, $2, $3::vector)
@@ -184,45 +238,8 @@ async def _seed_table_summaries(conn: any, base_path: Path):
                 embedding = EXCLUDED.embedding,
                 updated_at = CURRENT_TIMESTAMP
         """
-        await conn.execute(upsert_query, table_name, schema_text, pg_vector)
+        await conn_write.execute(upsert_query, table_name, schema_text, pg_vector)
         print(f"  ✓ Indexed Summary: {table_name}")
-
-
-async def main():
-    """Run the seeding process."""
-    print("Starting Seeder Service...")
-
-    # Reuse the MCP Server's DB logic
-    await Database.init()
-
-    try:
-        async with Database.get_connection() as conn:
-            print(
-                f"✓ Database connection pool established: "
-                f"{os.getenv('POSTGRES_USER')}@{os.getenv('DB_HOST')}/{os.getenv('POSTGRES_DB')}"
-            )
-
-            # 1. Seed Few-Shot Examples & Golden Dataset
-            await _process_seed_data(conn, Path("/app/queries"))
-
-            # 2. Seed Table Summaries (Schema Context)
-            await _seed_table_summaries(conn, Path("/app/queries"))
-
-            # 3. Graph Ingestion (Schema Parsing)
-            await _ingest_graph_schema()
-
-            print("✓ Successfully processed all seed operations.")
-
-    except Exception as e:
-        print(f"Error during seeding: {e}")
-        import traceback
-
-        traceback.print_exc()
-        # Non-zero exit code to restart container or signal failure
-        sys.exit(1)
-    finally:
-        await Database.close()
-        print("✓ Database connection pool closed")
 
 
 if __name__ == "__main__":

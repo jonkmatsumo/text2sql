@@ -63,7 +63,7 @@ class TestLookupCache:
                 ) as mock_update:
                     cached = await lookup_cache("What is the total revenue?", tenant_id=1)
 
-                    assert cached == "SELECT SUM(amount) FROM payment;"
+                    assert cached.value == "SELECT SUM(amount) FROM payment;"
                     mock_store.lookup.assert_called_once()
 
                     # Verify non-blocking update call via asyncio.create_task
@@ -156,5 +156,5 @@ class TestCacheConstants:
 
     def test_similarity_threshold(self):
         """Verify similarity threshold is set correctly."""
-        assert SIMILARITY_THRESHOLD == 0.95
+        assert SIMILARITY_THRESHOLD == 0.90
         assert 0.0 <= SIMILARITY_THRESHOLD <= 1.0

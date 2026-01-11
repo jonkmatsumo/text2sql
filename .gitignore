@@ -48,7 +48,25 @@ node_modules/
 # Database initialization - large generated files
 # Keep: *.example.sql (templates), download_data.sh
 # Ignore: actual schema and data files (can be regenerated)
+# Ignore schema/data in old location
 database/init-scripts/02-data.sql
+
+# Query Target (Dataset Agnostic)
 database/query-target/*
-!database/query-target/*.example.sql
+
+# Allow Directories
+!database/query-target/queries/
+!database/query-target/patterns/
+!database/query-target/corpus/
+
+# Ignore contents but allow examples
+database/query-target/queries/*
+!database/query-target/queries/example.json
+
+database/query-target/patterns/*
+!database/query-target/patterns/example.jsonl
+
+database/query-target/corpus/*
+# (Optional: Add example for corpus if needed, currently just ignoring all actual corpus data)
+
 !database/query-target/README.md

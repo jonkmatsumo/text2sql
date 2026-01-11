@@ -242,7 +242,6 @@ async def run_agent_with_tracing(
         "active_query": None,
         "procedural_plan": None,
         "rejected_cache_context": None,
-        "user_clarification": None,
         "clause_map": None,
         "tenant_id": tenant_id,
         "from_cache": False,

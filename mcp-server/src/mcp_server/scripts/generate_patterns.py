@@ -65,7 +65,27 @@ async def main() -> None:
     patterns = await generate_entity_patterns()
 
     # Write to JSONL file
-    output_path = Path(__file__).parent.parent / "patterns" / "entities.jsonl"
+    # Write to JSONL file
+    import os
+
+    env_path = os.getenv("PATTERNS_DIR")
+    if env_path:
+        output_dir = Path(env_path)
+    elif Path("/app/patterns").exists():
+        output_dir = Path("/app/patterns")
+    else:
+        # Fallback for local run: ../../../database/query-target/patterns
+        # Script is at mcp-server/src/mcp_server/scripts/generate_patterns.py
+        # root is 5 levels up?
+        # mcp-server (3 up) -> text2sql (4 up)
+        output_dir = (
+            Path(__file__).parent.parent.parent.parent.parent
+            / "database"
+            / "query-target"
+            / "patterns"
+        )
+
+    output_path = output_dir / "entities.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:

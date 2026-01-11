@@ -67,7 +67,6 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "event": "runtime_policy_enforcement",
                 },
             )
-            span.set_collapsed(False)  # Ensure trace visibility
             span.set_inputs({"rewritten_sql": rewritten_sql})
 
         except Exception as e:
@@ -89,12 +88,15 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
 
             # Execute via MCP Tool
-            # We pass the rewritten SQL and the tenant_id as a bind parameter
+            # Pass params only if the rewritten SQL contains placeholders (e.g. $1)
+            # This prevents "server expects 0 arguments" errors for queries on public tables
+            execute_params = [tenant_id] if (tenant_id and "$1" in rewritten_sql) else []
+
             result = await executor_tool.ainvoke(
                 {
                     "sql_query": rewritten_sql,
                     "tenant_id": tenant_id,
-                    "params": [tenant_id] if tenant_id else [],
+                    "params": execute_params,
                 }
             )
 
@@ -143,8 +145,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
+            # We cache even if result is empty, as long as execution was successful (no error)
             from_cache = state.get("from_cache", False)
-            if not error and query_result and original_sql and tenant_id and not from_cache:
+            if not error and original_sql and tenant_id and not from_cache:
                 try:
                     # Get cache update tool
                     cache_tool = next((t for t in tools if t.name == "update_cache_tool"), None)
@@ -156,6 +159,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                 {
                                     "user_query": user_query,
                                     "sql": original_sql,
+                                    "tenant_id": tenant_id,
                                 }
                             )
                 except Exception as e:

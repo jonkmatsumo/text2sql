@@ -21,11 +21,11 @@ def get_vector_store():
     """
     # Connection string to the postgres-db container from Phase 1/2
     # Ensure pgvector extension is enabled on the target DB
-    # Use bi_agent_ro user (read-only) for security
+    # Use text2sql_ro user (read-only) for security
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = os.getenv("DB_PORT", "5432")
     db_name = os.getenv("DB_NAME", "pagila")
-    db_user = os.getenv("DB_USER", "bi_agent_ro")
+    db_user = os.getenv("DB_USER", "text2sql_ro")
     db_password = os.getenv("DB_PASS", os.getenv("DB_PASSWORD", "secure_agent_pass"))
 
     connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"

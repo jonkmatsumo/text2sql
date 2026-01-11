@@ -31,6 +31,4 @@ CREATE INDEX IF NOT EXISTS schema_embeddings_embedding_idx
     USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 
--- Grant access to the read-only user
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.schema_embeddings TO text2sql_ro;
-GRANT USAGE ON SEQUENCE public.schema_embeddings_id_seq TO text2sql_ro;
+-- Grants removed as we connect as superuser/rw user in control plane for now

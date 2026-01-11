@@ -107,7 +107,7 @@ class TestGetVectorStore:
 
         # Verify defaults were used
         call_kwargs = mock_pgvector.call_args[1]
-        expected_connection = "postgresql://bi_agent_ro:secure_agent_pass@localhost:5432/pagila"
+        expected_connection = "postgresql://text2sql_ro:secure_agent_pass@localhost:5432/pagila"
         assert call_kwargs["connection"] == expected_connection
 
     @patch("agent_core.retriever.PGVector")
@@ -187,5 +187,5 @@ class TestGetVectorStore:
         assert "custom_host" in connection
         assert "custom_db" in connection
         assert "5432" in connection  # default port
-        assert "bi_agent_ro" in connection  # default user
+        assert "text2sql_ro" in connection  # default user
         assert "secure_agent_pass" in connection  # default password
