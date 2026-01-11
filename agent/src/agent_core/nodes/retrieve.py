@@ -52,6 +52,13 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
                         graph_data = parse_tool_output(subgraph_json)
 
+                        print(f"DEBUG: subgraph_json type: {type(subgraph_json)}")
+                        print(f"DEBUG: parse_tool_output result type: {type(graph_data)}")
+                        if isinstance(graph_data, list):
+                            print(f"DEBUG: graph_data list len: {len(graph_data)}")
+                            if len(graph_data) > 0:
+                                print(f"DEBUG: graph_data[0] type: {type(graph_data[0])}")
+
                         # Handle case where graph_data is a list with single dict
                         if isinstance(graph_data, list) and len(graph_data) > 0:
                             graph_data = graph_data[0]

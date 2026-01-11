@@ -32,14 +32,6 @@ class SchemaLoader:
 
         for schema in schemas:
             vectors.append(schema.embedding)
-            # Use table_name as the ID (string) if index supports it,
-            # but VectorIndex protocol mainly uses int IDs or list of str?
-            # Creating unique string IDs is safer.
-            # However, for simplicity and back-compat, we might need a mapping or use hash.
-            # Let's use string IDs as they are supported by ExtendedVectorIndex/HNSW.
-            # But the base VectorIndex.add_items arguments are (vectors, ids).
-            # HNSW implementation handles string IDs by hashing or direct usage if extended.
-            # Let's use table_name as ID.
             ids.append(schema.table_name)
 
             metadata[schema.table_name] = {

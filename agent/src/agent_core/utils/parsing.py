@@ -80,7 +80,10 @@ def parse_tool_output(tool_output):
                 aggregated_results.append(parsed_chunk)
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse tool output chunk: {str(e)[:100]}...")
+            logger.warning(
+                f"Failed to parse tool output chunk: {str(e)[:100]}... "
+                f"Raw Payload Start: {str(raw_payload)[:100]}"
+            )
             continue
 
     return aggregated_results

@@ -186,7 +186,12 @@ class CandidateBinder:
                         id=f"{table['name']}.{col['name']}",
                         label=col.get("description", col["name"]),
                         scores={"lexical": final_lexical, "relational": 0.5},
-                        metadata={"table": table["name"], "column": col["name"]},
+                        metadata={
+                            "table": table["name"],
+                            "column": col["name"],
+                            "is_primary_key": col.get("is_primary_key", False),
+                            "is_foreign_key": col.get("is_foreign_key", False),
+                        },
                     )
                 )
 
@@ -252,9 +257,9 @@ class CandidateBinder:
         if m_clean == t_clean:
             return 1.0
 
-        # Check containment
-        if m_clean in t_clean or t_clean in m_clean:
-            return 0.9
+        # Check containment - Removed hardcoded 0.9 to rely on word overlap/fuzzy matching
+        # if m_clean in t_clean or t_clean in m_clean:
+        #    return 0.9
 
         # Word overlap (Jaccard-ish)
         m_words = set(m_clean.split())

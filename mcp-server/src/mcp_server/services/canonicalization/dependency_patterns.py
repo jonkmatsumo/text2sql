@@ -4,37 +4,69 @@ These patterns use SpaCy's DependencyMatcher to identify constraints
 based on grammatical relationships, not string adjacency.
 """
 
-# Pattern 1: Adjectival modification - "PG movies", "R-rated films"
-# Matches when a RATING entity modifies a film/movie noun
-RATING_AMOD_PATTERN = [
+# Pattern 1a: Adjectival modification - Entity based
+RATING_AMOD_PATTERN_ENT = [
     {"RIGHT_ID": "target", "RIGHT_ATTRS": {"LEMMA": {"IN": ["movie", "film", "content", "show"]}}},
     {
         "LEFT_ID": "target",
-        "REL_OP": "<",  # target is governed by rating
+        "REL_OP": "<",
         "RIGHT_ID": "rating",
         "RIGHT_ATTRS": {"ENT_TYPE": "RATING"},
     },
 ]
 
-# Pattern 2: Explicit predicate - "movies rated PG", "films with rating R"
-RATING_EXPLICIT_PATTERN = [
+# Pattern 1b: Adjectival modification - Literal based
+RATING_AMOD_PATTERN_LIT = [
+    {"RIGHT_ID": "target", "RIGHT_ATTRS": {"LEMMA": {"IN": ["movie", "film", "content", "show"]}}},
+    {
+        "LEFT_ID": "target",
+        "REL_OP": "<",
+        "RIGHT_ID": "rating",
+        "RIGHT_ATTRS": {"TEXT": {"IN": ["G", "PG", "PG-13", "R", "NC-17", "NC17", "g", "pg", "r"]}},
+    },
+]
+
+# Pattern 2a: Explicit predicate - Entity based
+RATING_EXPLICIT_PATTERN_ENT = [
     {"RIGHT_ID": "target", "RIGHT_ATTRS": {"LEMMA": {"IN": ["movie", "film"]}}},
     {
         "LEFT_ID": "target",
-        "REL_OP": ">",  # target governs modifier
+        "REL_OP": ">",
         "RIGHT_ID": "modifier",
         "RIGHT_ATTRS": {"LEMMA": {"IN": ["rate", "rating", "rated"]}},
     },
     {
         "LEFT_ID": "modifier",
-        "REL_OP": ">>",  # modifier is ancestor of value (handles intervening words)
+        "REL_OP": ">>",
         "RIGHT_ID": "value",
         "RIGHT_ATTRS": {"ENT_TYPE": "RATING"},
     },
 ]
 
+# Pattern 2b: Explicit predicate - Literal based
+RATING_EXPLICIT_PATTERN_LIT = [
+    {"RIGHT_ID": "target", "RIGHT_ATTRS": {"LEMMA": {"IN": ["movie", "film"]}}},
+    {
+        "LEFT_ID": "target",
+        "REL_OP": ">",
+        "RIGHT_ID": "modifier",
+        "RIGHT_ATTRS": {"LEMMA": {"IN": ["rate", "rating", "rated"]}},
+    },
+    {
+        "LEFT_ID": "modifier",
+        "REL_OP": ">>",
+        "RIGHT_ID": "value",
+        "RIGHT_ATTRS": {"TEXT": {"IN": ["G", "PG", "PG-13", "R", "NC-17", "NC17", "g", "pg", "r"]}},
+    },
+]
+
 # Combined rating patterns
-RATING_PATTERNS = [RATING_AMOD_PATTERN, RATING_EXPLICIT_PATTERN]
+RATING_PATTERNS = [
+    RATING_AMOD_PATTERN_ENT,
+    RATING_AMOD_PATTERN_LIT,
+    RATING_EXPLICIT_PATTERN_ENT,
+    RATING_EXPLICIT_PATTERN_LIT,
+]
 
 # Pattern: "top 10", "first 5", "best 20"
 # Uses sibling operator to handle adjacent ordinal + number
