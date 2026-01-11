@@ -6,11 +6,15 @@ These tests verify the tools use the expected DAL/store implementations.
 import json
 from unittest.mock import AsyncMock, patch
 
+import mcp_server.tools.get_table_schema as get_table_schema_mod
+import mcp_server.tools.list_tables as list_tables_mod
+import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
 import pytest
 from mcp_server.models import ColumnDef, TableDef
-from mcp_server.tools.get_table_schema import handler as get_table_schema
-from mcp_server.tools.list_tables import handler as list_tables
-from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
+
+get_table_schema = get_table_schema_mod.handler
+list_tables = list_tables_mod.handler
+search_relevant_tables = search_relevant_tables_mod.handler
 
 
 class TestLegacyTools:
@@ -22,9 +26,7 @@ class TestLegacyTools:
         mock_store = AsyncMock()
         mock_store.list_tables.return_value = ["users", "orders"]
 
-        with patch(
-            "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
-        ):
+        with patch.object(list_tables_mod.Database, "get_metadata_store", return_value=mock_store):
             result = await list_tables(search_term="order")
 
             mock_store.list_tables.assert_called_once()
@@ -39,8 +41,8 @@ class TestLegacyTools:
             {"table_name": "t1", "columns": []}
         )
 
-        with patch(
-            "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
+        with patch.object(
+            get_table_schema_mod.Database, "get_metadata_store", return_value=mock_store
         ):
             result = await get_table_schema(["t1"])
 
@@ -61,13 +63,16 @@ class TestLegacyTools:
 
         mock_search = [{"table_name": "t1", "schema_text": "text", "distance": 0.1}]
 
-        with patch(
-            "mcp_server.tools.search_relevant_tables.RagEngine.embed_text", return_value=[0.1]
-        ), patch(
-            "mcp_server.tools.search_relevant_tables.search_similar_tables",
+        with patch.object(
+            search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1]
+        ), patch.object(
+            search_relevant_tables_mod,
+            "search_similar_tables",
+            new_callable=AsyncMock,
             return_value=mock_search,
-        ), patch(
-            "mcp_server.tools.search_relevant_tables.Database.get_schema_introspector",
+        ), patch.object(
+            search_relevant_tables_mod.Database,
+            "get_schema_introspector",
             return_value=mock_introspector,
         ):
 

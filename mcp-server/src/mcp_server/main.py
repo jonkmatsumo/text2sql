@@ -27,7 +27,7 @@ async def lifespan(app):
 
     # Maintenance: Prune legacy cache entries
     try:
-        from mcp_server.services.cache_service import prune_legacy_entries
+        from mcp_server.services.cache.service import prune_legacy_entries
 
         count = await prune_legacy_entries()
         if count > 0:
@@ -38,7 +38,7 @@ async def lifespan(app):
     # Check if schema_embeddings table is empty and try to index
     # This is optional - server should still work without it
     try:
-        from mcp_server.services.indexer_service import index_all_tables
+        from mcp_server.services.rag import index_all_tables
 
         async with Database.get_connection() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")

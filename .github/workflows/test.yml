@@ -14,11 +14,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: pagila
+          POSTGRES_DB: control_plane
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -53,9 +53,12 @@ jobs:
 
       - name: Run database initialization
         run: |
-          # In a real scenario, you'd load the Pagila data
-          # For now, this is a placeholder for future test implementation
-          echo "Database initialization would happen here"
+          # Apply control-plane scripts in order
+          for file in database/control-plane/*.sql; do
+            echo "Applying $file..."
+            PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -f "$file" || exit 1
+          done
+          echo "✓ Control-plane database initialized"
 
       - name: Run tests (excluding LLM-dependent tests)
         run: |

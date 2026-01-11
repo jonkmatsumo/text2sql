@@ -40,6 +40,17 @@ def main():
         "View", ["Recent Interactions", "Pending Publication", "Approved Examples"]
     )
 
+    # Optional Filters for Recent Interactions
+    thumb_filter = "All"
+    status_filter = "All"
+    if view == "Recent Interactions":
+        st.sidebar.divider()
+        st.sidebar.subheader("Filters")
+        thumb_filter = st.sidebar.selectbox("Feedback", ["All", "UP", "DOWN", "None"])
+        status_filter = st.sidebar.selectbox(
+            "Review Status", ["All", "PENDING", "APPROVED", "REJECTED"]
+        )
+
     if view == "Recent Interactions":
         st.header("Recent Interactions")
 
@@ -53,6 +64,17 @@ def main():
                 # Format for display
                 df["created_at"] = pd.to_datetime(df["created_at"])
                 df = df.sort_values("created_at", ascending=False)
+
+                # Apply Filters
+                if thumb_filter == "UP":
+                    df = df[df["thumb"] == "UP"]
+                elif thumb_filter == "DOWN":
+                    df = df[df["thumb"] == "DOWN"]
+                elif thumb_filter == "None":
+                    df = df[df["thumb"].isna() | (df["thumb"] == "-") | (df["thumb"] == "")]
+
+                if status_filter != "All":
+                    df = df[df["execution_status"] == status_filter]
 
                 # Show list
                 cols = st.columns([2, 1, 1, 1, 1])
@@ -124,12 +146,25 @@ def main():
 
                         # Action Panel
                         st.subheader("Action")
+
+                        # Guided Correction for DOWN votes
+                        is_downvote = any(
+                            f.get("thumb") == "DOWN" for f in detail.get("feedback", [])
+                        )
+                        if is_downvote:
+                            st.warning(
+                                "⚠️ **Fix Recommended**: User gave this query a thumbs-down. "
+                                "Please review and correct the SQL below."
+                            )
+
                         action_col1, action_col2, action_col3 = st.columns(3)
 
                         corrected_sql = st.text_area(
-                            "Corrected SQL (optional)", value=detail["generated_sql"]
+                            "Corrected SQL", value=detail["generated_sql"], height=200
                         )
-                        notes = st.text_input("Reviewer Notes")
+                        notes = st.text_input(
+                            "Reviewer Notes", placeholder="Reason for correction or approval"
+                        )
 
                         if action_col1.button("Approve", type="primary"):
                             res = asyncio.run(
@@ -187,8 +222,29 @@ def main():
                     st.error(f"Sync failed: {res.get('error')}")
 
     elif view == "Approved Examples":
-        st.header("Approved Few-Shot Examples")
-        st.info("This view will show approved examples. Implementation in progress.")
+        st.header("✅ Approved Few-Shot Examples")
+        st.write("These examples are currently verified and indexable in the Few-Shot Registry.")
+
+        with st.spinner("Loading examples..."):
+            examples = asyncio.run(call_admin_tool("list_approved_examples_tool", {"limit": 100}))
+
+        if isinstance(examples, list) and examples:
+            df_ex = pd.DataFrame(examples)
+            # Show search/filter
+            search = st.text_input("Search examples", placeholder="Filter by question or SQL...")
+            if search:
+                mask = df_ex["question"].str.contains(search, case=False) | df_ex[
+                    "sql_query"
+                ].str.contains(search, case=False)
+                df_ex = df_ex[mask]
+
+            st.dataframe(
+                df_ex[["question", "sql_query", "status", "created_at"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No approved examples found in the registry.")
 
 
 if __name__ == "__main__":

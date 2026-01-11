@@ -2,18 +2,18 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp_server.dal.ingestion.enrichment.main import EnrichmentPipeline
+from mcp_server.services.ingestion.enrichment.main import EnrichmentPipeline
 
 
 @patch.dict(os.environ, {"ENABLE_LLM_ENRICHMENT": "true"})
 class TestEnrichmentPipeline(unittest.IsolatedAsyncioTestCase):
     """Test suite for the EnrichmentPipeline orchestration."""
 
-    @patch("mcp_server.dal.ingestion.enrichment.main.GraphDatabase")
-    @patch("mcp_server.dal.ingestion.enrichment.main.get_nodes_needing_enrichment")
-    @patch("mcp_server.dal.ingestion.enrichment.main.EnrichmentAgent")
-    @patch("mcp_server.dal.ingestion.enrichment.main.WALManager")
-    @patch("mcp_server.dal.ingestion.enrichment.main.replay_wal")
+    @patch("mcp_server.services.ingestion.enrichment.main.GraphDatabase")
+    @patch("mcp_server.services.ingestion.enrichment.main.get_nodes_needing_enrichment")
+    @patch("mcp_server.services.ingestion.enrichment.main.EnrichmentAgent")
+    @patch("mcp_server.services.ingestion.enrichment.main.WALManager")
+    @patch("mcp_server.services.ingestion.enrichment.main.replay_wal")
     async def test_run_full_flow(
         self, mock_replay, mock_wal_cls, mock_agent_cls, mock_get_nodes, mock_gdb
     ):
@@ -72,10 +72,10 @@ class TestEnrichmentPipeline(unittest.IsolatedAsyncioTestCase):
         # Ensure replay_wal called twice (recovery + final)
         self.assertEqual(mock_replay.call_count, 2)
 
-    @patch("mcp_server.dal.ingestion.enrichment.main.GraphDatabase")
-    @patch("mcp_server.dal.ingestion.enrichment.main.get_nodes_needing_enrichment")
-    @patch("mcp_server.dal.ingestion.enrichment.main.replay_wal")
-    @patch("mcp_server.dal.ingestion.enrichment.main.WALManager")
+    @patch("mcp_server.services.ingestion.enrichment.main.GraphDatabase")
+    @patch("mcp_server.services.ingestion.enrichment.main.get_nodes_needing_enrichment")
+    @patch("mcp_server.services.ingestion.enrichment.main.replay_wal")
+    @patch("mcp_server.services.ingestion.enrichment.main.WALManager")
     async def test_run_recovery_only(self, mock_wal_cls, mock_replay, mock_get_nodes, mock_gdb):
         """Test that recovery runs even if no nodes need enrichment."""
         mock_driver = MagicMock()
@@ -97,8 +97,8 @@ class TestEnrichmentPipeline(unittest.IsolatedAsyncioTestCase):
         # Should NOT have entered generation loop
         # (Verified by lack of agent mock interaction needed)
 
-    @patch("mcp_server.dal.ingestion.enrichment.main.EnrichmentAgent")
-    @patch("mcp_server.dal.ingestion.enrichment.main.WALManager")
+    @patch("mcp_server.services.ingestion.enrichment.main.EnrichmentAgent")
+    @patch("mcp_server.services.ingestion.enrichment.main.WALManager")
     async def test_process_node_safely_handles_error(self, mock_wal_cls, mock_agent_cls):
         """Test that individual node failure doesn't crash pipeline and doesn't write to WAL."""
         mock_agent = mock_agent_cls.return_value

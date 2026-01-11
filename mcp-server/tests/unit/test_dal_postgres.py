@@ -237,6 +237,7 @@ class TestPostgresSchemaIntrospector:
         # 1. columns query
         # 2. fks query
         mock_conn.fetch.side_effect = [mock_cols, mock_fks]
+        mock_conn.fetchrow = AsyncMock(return_value=None)
 
         table_def = await introspector.get_table_def("users")
 

@@ -1,6 +1,6 @@
 """MCP tool: lookup_cache - Look up a query in the semantic registry cache."""
 
-from mcp_server.services.cache_service import lookup_cache as lookup_cache_svc
+from mcp_server.services.cache import lookup_cache as lookup_cache_svc
 from mcp_server.utils.parsing import format_result_for_tool
 
 TOOL_NAME = "lookup_cache"

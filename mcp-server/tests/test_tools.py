@@ -7,11 +7,15 @@ Tests import from the new per-tool modules.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
+import mcp_server.tools.execute_sql_query as execute_sql_query_mod
+import mcp_server.tools.get_semantic_definitions as get_semantic_definitions_mod
+import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
 import pytest
 from mcp_server.models import ColumnDef
-from mcp_server.tools.execute_sql_query import handler as execute_sql_query
-from mcp_server.tools.get_semantic_definitions import handler as get_semantic_definitions
-from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
+
+execute_sql_query = execute_sql_query_mod.handler
+get_semantic_definitions = get_semantic_definitions_mod.handler
+search_relevant_tables = search_relevant_tables_mod.handler
 
 
 class TestExecuteSqlQuery:
@@ -39,7 +43,7 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
 
             result = await execute_sql_query("SELECT COUNT(*) as count FROM film", tenant_id=1)
 
@@ -62,7 +66,7 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
@@ -82,7 +86,7 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM film", tenant_id=1)
 
@@ -138,7 +142,7 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
 
             result = await execute_sql_query("SELECT * FROM nonexistent", tenant_id=1)
 
@@ -166,7 +170,7 @@ class TestGetSemanticDefinitions:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.get_semantic_definitions.Database.get_connection", mock_get):
+        with patch.object(get_semantic_definitions_mod.Database, "get_connection", mock_get):
 
             result = await get_semantic_definitions(["High Value Customer"])
 
@@ -216,14 +220,13 @@ class TestSearchRelevantTables:
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "mcp_server.tools.search_relevant_tables.RagEngine.embed_text", return_value=[0.1] * 384
+        with patch.object(
+            search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
         ):
-            with patch(
-                "mcp_server.tools.search_relevant_tables.search_similar_tables",
-                new_callable=AsyncMock,
-            ) as mock_search, patch(
-                "mcp_server.tools.search_relevant_tables.Database.get_schema_introspector"
+            with patch.object(
+                search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
+            ) as mock_search, patch.object(
+                search_relevant_tables_mod.Database, "get_schema_introspector"
             ) as mock_intro:
                 mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
                 mock_table_def = MagicMock()
@@ -246,14 +249,13 @@ class TestSearchRelevantTables:
     @pytest.mark.asyncio
     async def test_search_relevant_tables_empty_result(self):
         """Test empty results handling."""
-        with patch(
-            "mcp_server.tools.search_relevant_tables.RagEngine.embed_text", return_value=[0.1] * 384
+        with patch.object(
+            search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
         ):
-            with patch(
-                "mcp_server.tools.search_relevant_tables.search_similar_tables",
-                new_callable=AsyncMock,
-            ) as mock_search, patch(
-                "mcp_server.tools.search_relevant_tables.Database.get_schema_introspector"
+            with patch.object(
+                search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
+            ) as mock_search, patch.object(
+                search_relevant_tables_mod.Database, "get_schema_introspector"
             ):
                 mock_search.return_value = []
 

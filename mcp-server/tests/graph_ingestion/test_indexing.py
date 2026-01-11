@@ -1,9 +1,9 @@
 """Tests for vector indexing with adaptive thresholding."""
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from mcp_server.dal.ingestion.indexing import (
+from mcp_server.services.ingestion.vector_indexer import (
     EmbeddingService,
     VectorIndexer,
     apply_adaptive_threshold,
@@ -17,58 +17,62 @@ ZERO_VECTOR = [0.0] * 1536
 
 @pytest.fixture
 def mock_openai():
-    """Mock OpenAI client."""
-    with patch("mcp_server.dal.ingestion.indexing.OpenAI") as mock:
+    """Mock AsyncOpenAI client."""
+    with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI") as mock:
         client_instance = mock.return_value
-        response_mock = Mock()
-        data_item = Mock()
+        response_mock = MagicMock()
+        data_item = MagicMock()
         data_item.embedding = MOCK_EMBEDDING
         response_mock.data = [data_item]
 
-        client_instance.embeddings.create.return_value = response_mock
+        client_instance.embeddings.create = AsyncMock(return_value=response_mock)
         yield mock
 
 
 @pytest.fixture
 def mock_store_cls():
     """Mock MemgraphStore class."""
-    with patch("mcp_server.dal.ingestion.indexing.MemgraphStore") as mock:
+    with patch("mcp_server.services.ingestion.vector_indexer.MemgraphStore") as mock:
         yield mock
 
 
 class TestEmbeddingService:
     """Test suite for EmbeddingService."""
 
-    def test_embed_text_valid(self, mock_openai):
+    @pytest.mark.asyncio
+    async def test_embed_text_valid(self, mock_openai):
         """Test valid text embedding generation."""
         service = EmbeddingService()
-        embedding = service.embed_text("test query")
+        embedding = await service.embed_text("test query")
 
         assert embedding == MOCK_EMBEDDING
         mock_openai.return_value.embeddings.create.assert_called_once()
 
-    def test_embed_text_none(self, mock_openai):
+    @pytest.mark.asyncio
+    async def test_embed_text_none(self, mock_openai):
         """Test handling of None input."""
         service = EmbeddingService()
-        embedding = service.embed_text(None)
+        embedding = await service.embed_text(None)
 
         assert embedding == ZERO_VECTOR
         mock_openai.return_value.embeddings.create.assert_not_called()
 
-    def test_embed_text_empty(self, mock_openai):
+    @pytest.mark.asyncio
+    async def test_embed_text_empty(self, mock_openai):
         """Test handling of empty string."""
         service = EmbeddingService()
-        embedding = service.embed_text("")
+        embedding = await service.embed_text("")
 
         assert embedding == ZERO_VECTOR
         mock_openai.return_value.embeddings.create.assert_not_called()
 
-    def test_embed_text_error(self, mock_openai):
+    @pytest.mark.asyncio
+    async def test_embed_text_error(self, mock_openai):
         """Test handling of API error."""
         mock_openai.return_value.embeddings.create.side_effect = Exception("API Error")
 
         service = EmbeddingService()
-        embedding = service.embed_text("test")
+        embedding = await service.embed_text("test")
 
         assert embedding == ZERO_VECTOR
 
@@ -139,7 +143,8 @@ class TestAdaptiveThreshold:
 class TestVectorIndexer:
     """Test suite for VectorIndexer."""
 
-    def test_create_indexes(self, mock_store_cls, mock_openai):
+    @pytest.mark.asyncio
+    async def test_create_indexes(self, mock_store_cls, mock_openai):
         """Test index creation creates property indexes."""
         # Setup mock driver via store
         mock_store_instance = mock_store_cls.return_value
@@ -148,7 +153,7 @@ class TestVectorIndexer:
         session_mock.__enter__.return_value = session_mock
 
         indexer = VectorIndexer()
-        indexer.create_indexes()
+        await indexer.create_indexes()
 
         # Should create 2 property indexes
         assert session_mock.run.call_count == 2
@@ -156,7 +161,8 @@ class TestVectorIndexer:
         assert any("Table" in c for c in calls)
         assert any("Column" in c for c in calls)
 
-    def test_search_nodes(self, mock_store_cls, mock_openai):
+    @pytest.mark.asyncio
+    async def test_search_nodes(self, mock_store_cls, mock_openai):
         """Test search logic with brute-force similarity."""
         # Setup mock driver via store
         mock_store_instance = mock_store_cls.return_value
@@ -183,7 +189,7 @@ class TestVectorIndexer:
         session_mock.run.return_value = [mock_record]
 
         indexer = VectorIndexer()
-        results = indexer.search_nodes("query", k=3, apply_threshold=False)
+        results = await indexer.search_nodes("query", k=3, apply_threshold=False)
 
         assert len(results) >= 0  # May be 0 if similarity too low
         mock_openai.return_value.embeddings.create.assert_called()

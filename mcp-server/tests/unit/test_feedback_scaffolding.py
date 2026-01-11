@@ -1,17 +1,7 @@
-import os
-import sys
 from unittest.mock import AsyncMock
 
 import pytest
-
-# Add mcp-server root to path to allow importing tests.fixtures
-# This hack allows running pytest from project root without complex pythonpath setup
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from tests.fixtures.feedback_fixtures import (  # noqa: E402
-    sample_feedback_payload,
-    sample_interaction_row,
-)
+from fixtures.feedback_fixtures import sample_feedback_payload, sample_interaction_row
 
 
 def test_interaction_row_structure():

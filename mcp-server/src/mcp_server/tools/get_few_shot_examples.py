@@ -1,6 +1,6 @@
 """MCP tool: get_few_shot_examples - Retrieve similar past queries and SQL."""
 
-from mcp_server.services.retrieval_service import get_relevant_examples
+from mcp_server.services.rag import get_relevant_examples
 
 TOOL_NAME = "get_few_shot_examples"
 

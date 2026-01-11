@@ -1,6 +1,6 @@
 """MCP tool: update_cache - Update the semantic registry with a new query-SQL pair."""
 
-from mcp_server.services.cache_service import update_cache as update_cache_svc
+from mcp_server.services.cache import update_cache as update_cache_svc
 
 TOOL_NAME = "update_cache"
 

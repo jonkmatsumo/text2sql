@@ -61,11 +61,11 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: pagila
+          POSTGRES_DB: control_plane
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -84,27 +84,22 @@ jobs:
             sleep 2
           done
 
-      - name: Test database initialization scripts
+      - name: Test control-plane database initialization
         run: |
-          # Copy init scripts to a test location
-          mkdir -p /tmp/init-scripts
-          cp database/init-scripts/*.sql /tmp/init-scripts/
-
-          # Test that SQL files are valid (syntax check)
-          for file in /tmp/init-scripts/*.sql; do
-            echo "Validating $file..."
-            # Basic syntax validation - check for common SQL errors
-            if ! grep -q "CREATE\|GRANT\|INSERT" "$file"; then
-              echo "Warning: $file may be empty or invalid"
-            fi
+          # Apply control-plane scripts in order
+          for file in database/control-plane/*.sql; do
+            echo "Applying $file..."
+            PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -f "$file" || exit 1
           done
+          echo "✓ Control-plane database initialized successfully"
 
-      - name: Verify SQL file structure
+      - name: Verify control-plane schema structure
         run: |
-          test -f database/init-scripts/01-schema.sql || exit 1
-          test -f database/init-scripts/02-data.sql || exit 1
-          test -f database/init-scripts/03-permissions.sql || exit 1
-          echo "✓ All required SQL files present"
+          # Basic verification that tables were created
+          PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -c "\dt" | grep -q "query_pairs" || exit 1
+          PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -c "\dt" | grep -q "feedback" || exit 1
+          PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -c "\dt" | grep -q "schema_embeddings" || exit 1
+          echo "✓ Critical control-plane tables verified"
 
   security-scan:
     name: Security Scan

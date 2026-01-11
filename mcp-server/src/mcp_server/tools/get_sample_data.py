@@ -3,12 +3,12 @@
 import json
 from typing import Optional
 
-from mcp_server.dal.factory import get_retriever
+from mcp_server.dal.factory import get_schema_introspector
 
 TOOL_NAME = "get_sample_data"
 
 
-def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = None) -> str:
+async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = None) -> str:
     """Get sample data rows from a table.
 
     Args:
@@ -19,6 +19,6 @@ def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = None) ->
     Returns:
         JSON string of sample data.
     """
-    retriever = get_retriever()
-    data = retriever.get_sample_rows(table_name, limit)
+    introspector = get_schema_introspector()
+    data = await introspector.get_sample_rows(table_name, limit)
     return json.dumps(data, separators=(",", ":"), default=str)
