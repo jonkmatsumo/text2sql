@@ -1,6 +1,6 @@
 """Unit tests for constraint extraction from natural language queries."""
 
-from agent_core.cache.constraint_extractor import extract_constraints, normalize_rating
+from mcp_server.services.cache.constraint_extractor import extract_constraints, normalize_rating
 
 
 class TestExtractConstraints:

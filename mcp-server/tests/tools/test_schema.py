@@ -1,8 +1,9 @@
 """Tests for schema tools (get_sample_data)."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from mcp_server.tools.get_sample_data import TOOL_NAME as get_sample_data_tool_name
 from mcp_server.tools.get_sample_data import handler as get_sample_data
 
@@ -15,16 +16,17 @@ class TestGetSampleData:
         assert not get_sample_data_tool_name.endswith("_tool")
         assert get_sample_data_tool_name == "get_sample_data"
 
-    @patch("mcp_server.tools.get_sample_data.get_retriever")
-    def test_get_sample_data(self, mock_get_retriever):
+    @pytest.mark.asyncio
+    @patch("mcp_server.tools.get_sample_data.get_schema_introspector")
+    async def test_get_sample_data(self, mock_get_introspector):
         """Test get_sample_data tool."""
-        mock_retriever = MagicMock()
-        mock_retriever.get_sample_rows.return_value = [{"a": 1}]
-        mock_get_retriever.return_value = mock_retriever
+        mock_introspector = MagicMock()
+        mock_introspector.get_sample_rows = AsyncMock(return_value=[{"a": 1}])
+        mock_get_introspector.return_value = mock_introspector
 
-        result_json = get_sample_data("t1", limit=5)
+        result_json = await get_sample_data("t1", limit=5)
         result = json.loads(result_json)
 
         assert len(result) == 1
         assert result[0] == {"a": 1}
-        mock_retriever.get_sample_rows.assert_called_with("t1", 5)
+        mock_introspector.get_sample_rows.assert_called_with("t1", 5)

@@ -1,7 +1,7 @@
 """Unit tests for DAL context management."""
 
 import pytest
-from mcp_server.dal.context import get_current_tenant, set_current_tenant, tenant_context
+from mcp_server.dal.util.context import get_current_tenant, set_current_tenant, tenant_context
 
 
 class TestTenantContext:

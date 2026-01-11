@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from mcp_server.dal.factory import get_retriever
+from mcp_server.dal.factory import get_schema_introspector
 from mcp_server.dal.memgraph import MemgraphStore
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class SyncEngine:
             graph_uri: Memgraph/Neo4j Bolt URI.
             graph_auth: Tuple of (user, password) for Memgraph.
         """
-        self.retriever = get_retriever()
+        self.introspector = get_schema_introspector()
         user = graph_auth[0] if graph_auth else ""
         password = graph_auth[1] if graph_auth else ""
         self.store = MemgraphStore(graph_uri, user, password)
@@ -27,23 +27,22 @@ class SyncEngine:
         """Close connections."""
         self.store.close()
 
-    def get_live_schema(self) -> Dict[str, Any]:
-        """Fetch current tables and columns from PostgreSQL using Retriever."""
+    async def get_live_schema(self) -> Dict[str, Any]:
+        """Fetch current tables and columns from PostgreSQL using Introspector."""
         schema_info = {"tables": {}}
 
-        tables = self.retriever.list_tables()
-        for table in tables:
-            table_name = table.name
-            columns = self.retriever.get_columns(table_name)
+        table_names = await self.introspector.list_table_names()
+        for t_name in table_names:
+            table_def = await self.introspector.get_table_def(t_name)
 
             col_dict = {}
-            for col in columns:
+            for col in table_def.columns:
                 col_dict[col.name] = {
                     "type": col.data_type,
-                    "nullable": True,  # Retriever doesn't expose nullable yet, defaulting
+                    "nullable": col.is_nullable,
                     "primary_key": col.is_primary_key,
                 }
-            schema_info["tables"][table_name] = col_dict
+            schema_info["tables"][t_name] = col_dict
 
         return schema_info
 
@@ -72,11 +71,11 @@ class SyncEngine:
 
         return graph_state
 
-    def reconcile_graph(self):
+    async def reconcile_graph(self):
         """Compare live schema with graph and update/prune."""
         logger.info("Starting schema reconciliation...")
 
-        live_schema = self.get_live_schema()
+        live_schema = await self.get_live_schema()
         graph_state = self.get_graph_state()
 
         live_tables = set(live_schema["tables"].keys())

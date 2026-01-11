@@ -1,12 +1,13 @@
 import json
 import logging
 import re
-from typing import Set, Tuple
+from typing import List, Set, Tuple
 
-from mcp_server.dal.ingestion.indexing import EmbeddingService
+from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
 from mcp_server.models import ColumnDef, TableDef
+
+from .vector_indexer import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -76,45 +77,57 @@ class GraphHydrator:
         """Close the connection."""
         self.store.close()
 
-    def hydrate_schema(self, retriever: DataSchemaRetriever):
+    async def hydrate_schema(self, introspector: SchemaIntrospector):
         """
         Hydrate the graph with tables, columns, and relationships.
 
         Args:
-            retriever: DataSchemaRetriever instance to fetch schema.
+            introspector: SchemaIntrospector instance to fetch schema.
         """
         logger.info("Starting graph hydration...")
 
-        # Fetch all tables first
-        tables = retriever.list_tables()
-        logger.info(f"Found {len(tables)} tables to hydrate.")
+        # Fetch all table names first
+        table_names = await introspector.list_table_names()
+        logger.info(f"Found {len(table_names)} tables to hydrate.")
 
-        # Build FK lookup for all tables (to know which columns are FKs)
+        # Build FK lookup and fetch full definitions
         fk_columns: Set[Tuple[str, str]] = set()
         all_fks = {}
-        for table in tables:
+        table_defs: List[TableDef] = []
+
+        for name in table_names:
             try:
-                fks = retriever.get_foreign_keys(table.name)
-                all_fks[table.name] = fks
+                # Get full definition (columns + FKs)
+                min_def = await introspector.get_table_def(name)
+
+                # Fetch sample data
+                try:
+                    samples = await introspector.get_sample_rows(name)
+                    min_def.sample_data = samples
+                except Exception as e:
+                    logger.warning(f"Failed to fetch samples for {name}: {e}")
+
+                table_defs.append(min_def)
+
+                # Collect FKs
+                fks = min_def.foreign_keys
+                all_fks[name] = fks
                 for fk in fks:
-                    fk_columns.add((table.name, fk.column_name))
+                    fk_columns.add((name, fk.column_name))
+
             except Exception as e:
-                logger.error(f"Error fetching FKs for table {table.name}: {e}")
-                all_fks[table.name] = []
+                logger.error(f"Error fetching definition for table {name}: {e}")
 
         skipped_embeddings = 0
 
         # Process each table completely (Table Node + Columns)
-        for table in tables:
+        for table in table_defs:
             try:
-                # Fetch columns first
-                columns = retriever.get_columns(table.name)
-
                 # 1. Create Table Node (Enriched with column names)
-                self._create_table_node(table, columns)
+                self._create_table_node(table, table.columns)
 
                 # 2. Create Column Nodes
-                skipped = self._create_column_nodes(table.name, columns, fk_columns)
+                skipped = self._create_column_nodes(table.name, table.columns, fk_columns)
                 skipped_embeddings += skipped
 
             except Exception as e:
@@ -124,7 +137,7 @@ class GraphHydrator:
             logger.info(f"Skipped embeddings for {skipped_embeddings} low-signal columns")
 
         # 3. Create Foreign Key relationships (done after all nodes exist)
-        for table in tables:
+        for table in table_defs:
             fks = all_fks.get(table.name, [])
             if fks:
                 self._create_fk_relationships(table.name, fks)

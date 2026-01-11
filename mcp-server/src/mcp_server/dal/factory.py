@@ -10,24 +10,21 @@ Environment Variables:
     SCHEMA_STORE_PROVIDER: Provider for SchemaStore (default: "postgres")
     SCHEMA_INTROSPECTOR_PROVIDER: Provider for SchemaIntrospector (default: "postgres")
     METADATA_STORE_PROVIDER: Provider for MetadataStore (default: "postgres")
-    RETRIEVER_PROVIDER: Provider for DataSchemaRetriever (default: "postgres")
 
 Canonical Provider IDs:
     - "postgres": PostgreSQL-based implementations
     - "memgraph": Memgraph/Neo4j-based implementations
 
 Example:
-    >>> from mcp_server.dal.factory import get_cache_store, get_graph_store, get_retriever
+    >>> from mcp_server.dal.factory import get_cache_store, get_graph_store
     >>> cache = get_cache_store()  # Returns PgSemanticCache by default
     >>> graph = get_graph_store()  # Returns MemgraphStore by default
-    >>> retriever = get_retriever()  # Returns PostgresRetriever by default
 """
 
 import logging
 import os
 from typing import Optional
 
-from mcp_server.dal.env import get_provider_env
 from mcp_server.dal.interfaces import (
     CacheStore,
     ConversationStore,
@@ -52,8 +49,7 @@ from mcp_server.dal.postgres import (
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
 )
-from mcp_server.dal.retrievers.data_schema_retriever import DataSchemaRetriever
-from mcp_server.dal.retrievers.postgres_retriever import PostgresRetriever
+from mcp_server.dal.util.env import get_provider_env
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +97,6 @@ INTERACTION_STORE_PROVIDERS: dict[str, type[InteractionStore]] = {
     "postgres": PostgresInteractionStore,
 }
 
-RETRIEVER_PROVIDERS: dict[str, type[DataSchemaRetriever]] = {
-    "postgres": PostgresRetriever,
-}
 
 # =============================================================================
 # Singleton Instances
@@ -119,7 +112,6 @@ _registry_store: Optional[RegistryStore] = None
 _conversation_store: Optional[ConversationStore] = None
 _feedback_store: Optional[FeedbackStore] = None
 _interaction_store: Optional[InteractionStore] = None
-_retriever: Optional[DataSchemaRetriever] = None
 
 
 # =============================================================================
@@ -335,7 +327,7 @@ def reset_singletons() -> None:
     Should not be called in production code.
     """
     global _graph_store, _cache_store, _example_store, _registry_store
-    global _schema_store, _schema_introspector, _metadata_store, _retriever
+    global _schema_store, _schema_introspector, _metadata_store
     global _conversation_store, _feedback_store, _interaction_store
 
     _graph_store = None
@@ -345,7 +337,6 @@ def reset_singletons() -> None:
     _schema_introspector = None
     _metadata_store = None
     _registry_store = None
-    _retriever = None
     _conversation_store = None
     _feedback_store = None
     _interaction_store = None
@@ -394,33 +385,3 @@ def get_interaction_store() -> InteractionStore:
         store_cls = INTERACTION_STORE_PROVIDERS[provider]
         _interaction_store = store_cls()
     return _interaction_store
-
-
-def get_retriever() -> DataSchemaRetriever:
-    """Get or create the singleton DataSchemaRetriever instance.
-
-    Provider is selected via RETRIEVER_PROVIDER env var.
-    Default: "postgres" (PostgresRetriever)
-
-    PostgresRetriever reads connection details from environment
-    via DATABASE_URL or individual DB_* variables.
-
-    Returns:
-        The singleton DataSchemaRetriever instance.
-
-    Raises:
-        ValueError: If RETRIEVER_PROVIDER is set to an invalid value.
-    """
-    global _retriever
-    if _retriever is None:
-        provider = get_provider_env(
-            "RETRIEVER_PROVIDER",
-            default="postgres",
-            allowed=set(RETRIEVER_PROVIDERS.keys()),
-        )
-        logger.info(f"Initializing DataSchemaRetriever with provider: {provider}")
-
-        retriever_cls = RETRIEVER_PROVIDERS[provider]
-        _retriever = retriever_cls()
-
-    return _retriever

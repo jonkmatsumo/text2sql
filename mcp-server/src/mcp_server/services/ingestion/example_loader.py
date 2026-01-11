@@ -4,7 +4,8 @@ import logging
 
 import numpy as np
 from mcp_server.config.database import Database
-from mcp_server.dal.ingestion.vector_indexes.protocol import VectorIndex
+
+from .vector_indexes.protocol import VectorIndex
 
 logger = logging.getLogger(__name__)
 

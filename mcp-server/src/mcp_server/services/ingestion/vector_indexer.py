@@ -3,12 +3,13 @@
 Includes adaptive thresholding to filter low-quality vector matches.
 """
 
+import asyncio
 import logging
 import math
 from typing import List, Optional
 
 from mcp_server.dal.memgraph import MemgraphStore
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,10 @@ class EmbeddingService:
 
     def __init__(self, model: str = "text-embedding-3-small"):
         """Initialize OpenAI client."""
-        self.client = OpenAI()
+        self.client = AsyncOpenAI()
         self.model = model
 
-    def embed_text(self, text: Optional[str]) -> List[float]:
+    async def embed_text(self, text: Optional[str]) -> List[float]:
         """Generate embedding for the given text.
 
         Returns a zero-vector if text is None or empty.
@@ -36,7 +37,7 @@ class EmbeddingService:
 
         try:
             text = text.replace("\n", " ")
-            response = self.client.embeddings.create(input=[text], model=self.model)
+            response = await self.client.embeddings.create(input=[text], model=self.model)
             return response.data[0].embedding
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
@@ -139,26 +140,32 @@ class VectorIndexer:
         """Access underlying driver for legacy support."""
         return self.store.driver
 
-    def create_indexes(self):
+    async def create_indexes(self):
         """Create property indexes to speed up node retrieval.
 
         Note: Vector indexes (usearch) are not available in base Memgraph.
         We use property indexes for filtering, then compute similarity in Python.
         """
         logger.info("Creating property indexes...")
-        with self.driver.session() as session:
-            try:
-                session.run("CREATE INDEX ON :Table(name)")
-            except Exception:
-                pass  # Index may already exist
-            try:
-                session.run("CREATE INDEX ON :Column(name, table)")
-            except Exception:
-                pass  # Index may already exist
 
+        # Note: session() on sync driver can still be used, but we should ideally move to async
+        # driver. For now, we wrap the sync call to avoid blocking the event loop extensively.
+        def _run_indexes():
+            with self.driver.session() as session:
+                try:
+                    session.run("CREATE INDEX ON :Table(name)")
+                except Exception:
+                    pass  # Index may already exist
+                try:
+                    session.run("CREATE INDEX ON :Column(name, table)")
+                except Exception:
+                    pass  # Index may already exist
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _run_indexes)
         logger.info("Property indexes created.")
 
-    def search_nodes(
+    async def search_nodes(
         self,
         query_text: str,
         label: str = "Table",
@@ -178,46 +185,50 @@ class VectorIndexer:
         Returns:
             List of dicts with 'node' and 'score' keys, sorted by score desc.
         """
-        query_vector = self.embedding_service.embed_text(query_text)
+        query_vector = await self.embedding_service.embed_text(query_text)
 
-        with self.driver.session() as session:
-            # Fetch all nodes of the given label that have embeddings
-            query = f"""
-            MATCH (n:{label})
-            WHERE n.embedding IS NOT NULL
-            RETURN n, n.embedding as embedding
-            """
+        def _run_search():
+            with self.driver.session() as session:
+                # Fetch all nodes of the given label that have embeddings
+                query = f"""
+                MATCH (n:{label})
+                WHERE n.embedding IS NOT NULL
+                RETURN n, n.embedding as embedding
+                """
 
-            result = session.run(query)
+                result = session.run(query)
 
-            hits = []
-            for record in result:
-                node = record["n"]
-                node_embedding = record["embedding"]
+                hits = []
+                for record in result:
+                    node = record["n"]
+                    node_embedding = record["embedding"]
 
-                if not node_embedding:
-                    continue
+                    if not node_embedding:
+                        continue
 
-                score = cosine_similarity(query_vector, node_embedding)
+                    score = cosine_similarity(query_vector, node_embedding)
 
-                # Convert node to dict, excluding embedding
-                node_dict = dict(node)
-                if "embedding" in node_dict:
-                    del node_dict["embedding"]
+                    # Convert node to dict, excluding embedding
+                    node_dict = dict(node)
+                    if "embedding" in node_dict:
+                        del node_dict["embedding"]
 
-                hits.append({"node": node_dict, "score": score})
+                    hits.append({"node": node_dict, "score": score})
 
-            # Sort by score descending
-            hits.sort(key=lambda x: x["score"], reverse=True)
+                # Sort by score descending
+                hits.sort(key=lambda x: x["score"], reverse=True)
 
-            # Take top k first
-            hits = hits[:k]
+                # Take top k first
+                hits = hits[:k]
 
-            # Apply adaptive thresholding
-            if apply_threshold:
-                hits = apply_adaptive_threshold(hits)
+                # Apply adaptive thresholding
+                if apply_threshold:
+                    hits = apply_adaptive_threshold(hits)
 
-            return hits
+                return hits
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_search)
 
 
 if __name__ == "__main__":

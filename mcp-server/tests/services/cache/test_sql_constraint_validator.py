@@ -1,8 +1,8 @@
 """Unit tests for SQL constraint validation."""
 
 import pytest
-from agent_core.cache.constraint_extractor import QueryConstraints
-from agent_core.cache.sql_constraint_validator import (
+from mcp_server.services.cache.constraint_extractor import QueryConstraints
+from mcp_server.services.cache.sql_constraint_validator import (
     extract_limit_from_sql,
     extract_rating_from_sql,
     validate_sql_constraints,
@@ -187,7 +187,7 @@ class TestRatingVariants:
     )
     def test_rating_extraction_parametrized(self, query, expected_rating):
         """Parametrized test for rating extraction from various queries."""
-        from agent_core.cache.constraint_extractor import extract_constraints
+        from mcp_server.services.cache.constraint_extractor import extract_constraints
 
         constraints = extract_constraints(query)
         assert constraints.rating == expected_rating
@@ -208,7 +208,7 @@ class TestRatingVariants:
 
     def test_pg_query_rejects_g_sql(self):
         """Critical test: PG query should reject G-rated SQL."""
-        from agent_core.cache.constraint_extractor import extract_constraints
+        from mcp_server.services.cache.constraint_extractor import extract_constraints
 
         constraints = extract_constraints("Top 10 actors in PG films")
         sql = "SELECT * FROM film WHERE rating = 'G'"
@@ -221,7 +221,7 @@ class TestRatingVariants:
 
     def test_g_query_rejects_r_sql(self):
         """Critical test: G query should reject R-rated SQL."""
-        from agent_core.cache.constraint_extractor import extract_constraints
+        from mcp_server.services.cache.constraint_extractor import extract_constraints
 
         constraints = extract_constraints("Top 10 actors in G films")
         sql = "SELECT * FROM film WHERE rating = 'R'"

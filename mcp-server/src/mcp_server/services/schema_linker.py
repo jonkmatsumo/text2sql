@@ -11,7 +11,7 @@ class SchemaLinker:
     """
 
     @classmethod
-    def rank_and_filter_columns(
+    async def rank_and_filter_columns(
         cls,
         user_query: str,
         table_nodes: List[Dict[str, Any]],
@@ -82,7 +82,7 @@ class SchemaLinker:
             if remaining_slots > 0 and candidate_columns:
                 # 3. Semantic Reranker
                 if query_embedding is None:
-                    query_embedding = RagEngine.embed_text(user_query)
+                    query_embedding = await RagEngine.embed_text(user_query)
 
                 # Prepare corpus: "table: column - description"
                 corpus_texts = []
@@ -93,7 +93,7 @@ class SchemaLinker:
                         text += f" - {desc}"
                     corpus_texts.append(text)
 
-                col_embeddings = RagEngine.embed_batch(corpus_texts)
+                col_embeddings = await RagEngine.embed_batch(corpus_texts)
 
                 # Calculate Cosine Similarity
                 q_vec = np.array(query_embedding)

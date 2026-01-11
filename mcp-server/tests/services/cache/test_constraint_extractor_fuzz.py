@@ -13,13 +13,13 @@ import pytest
 # Skip entire module if hypothesis is not installed
 pytest.importorskip("hypothesis")
 
-from agent_core.cache.constraint_extractor import (  # noqa: E402
+from hypothesis import given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+from mcp_server.services.cache.constraint_extractor import (  # noqa: E402
     SPELLED_NUMBERS,
     extract_constraints,
     normalize_rating,
 )
-from hypothesis import given, settings  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
 
 # Define rating strategies
 VALID_RATINGS = ["G", "PG", "PG-13", "R", "NC-17"]

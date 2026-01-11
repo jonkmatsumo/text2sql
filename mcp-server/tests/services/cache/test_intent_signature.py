@@ -1,6 +1,9 @@
 """Unit tests for intent signature generation."""
 
-from agent_core.cache.intent_signature import IntentSignature, build_signature_from_constraints
+from mcp_server.services.cache.intent_signature import (
+    IntentSignature,
+    build_signature_from_constraints,
+)
 
 
 class TestIntentSignature:

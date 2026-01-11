@@ -164,7 +164,9 @@ async def router_node(state: AgentState) -> dict:
             )
 
             clarification_msg = response.content.strip()
-            ambiguity_type = "AMBIGUOUS" if status == "AMBIGUOUS" else "MISSING_DATA"
+            ambiguity_type = res_data.get("ambiguity_type")
+            if not ambiguity_type:
+                ambiguity_type = "AMBIGUOUS" if status == "AMBIGUOUS" else "MISSING_DATA"
 
             span.set_outputs(
                 {

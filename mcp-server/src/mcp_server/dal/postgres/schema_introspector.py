@@ -52,6 +52,17 @@ class PostgresSchemaIntrospector(SchemaIntrospector):
             """
             fk_rows = await conn.fetch(fk_query, table_name, schema)
 
+            # Description (Comment)
+            # Use pg_catalog logic as information_schema doesn't always expose comments easily
+            desc_query = """
+                SELECT obj_description(c.oid) as comment
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = $1 AND n.nspname = $2
+            """
+            desc_row = await conn.fetchrow(desc_query, table_name, schema)
+            description = desc_row["comment"] if desc_row else None
+
         columns = [
             ColumnDef(
                 name=row["column_name"],
@@ -69,4 +80,18 @@ class PostgresSchemaIntrospector(SchemaIntrospector):
             )
             for row in fk_rows
         ]
-        return TableDef(name=table_name, columns=columns, foreign_keys=fks)
+        return TableDef(name=table_name, columns=columns, foreign_keys=fks, description=description)
+
+    async def get_sample_rows(
+        self, table_name: str, limit: int = 3, schema: str = "public"
+    ) -> List[dict]:
+        """Fetch sample rows."""
+        async with Database.get_connection() as conn:
+            # Safe quoting
+            safe_schema = schema.replace('"', '""')
+            safe_table = table_name.replace('"', '""')
+            query = f'SELECT * FROM "{safe_schema}"."{safe_table}" LIMIT $1'
+            rows = await conn.fetch(query, limit)
+            # Convert Record to dict and handle non-serializable types if necessary
+            # For now, simplistic dict conversion (asyncpg Record is like a dict)
+            return [dict(row) for row in rows]

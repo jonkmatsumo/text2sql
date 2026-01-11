@@ -10,29 +10,26 @@ import sys
 from pathlib import Path
 
 from mcp_server.config.database import Database
-from mcp_server.dal.factory import get_retriever
-from mcp_server.dal.ingestion.hydrator import GraphHydrator
+from mcp_server.dal.factory import get_schema_introspector
 from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
 from mcp_server.seeding.loader import load_from_directory, load_table_summaries
+from mcp_server.services.ingestion.graph_hydrator import GraphHydrator
 from mcp_server.services.registry import RegistryService
 
 
 async def _ingest_graph_schema():
-    """Ingest schema into Memgraph using DataSchemaRetriever."""
+    """Ingest schema into Memgraph using SchemaIntrospector."""
     print("Ingesting graph schema...")
     try:
-        # Get retriever (Postgres connection assumed via env vars)
-        retriever = get_retriever()
+        # Get introspector (Postgres connection assumed via env vars)
+        introspector = get_schema_introspector()
 
         # Hydrate - use MEMGRAPH_URI from environment
         memgraph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
         hydrator = GraphHydrator(uri=memgraph_uri)
         try:
-            # Run blocking hydration code in executor if needed,
-            # but for seeding script simplicity we can run it directly
-            # as long as we accept it blocks the asyncio loop temporarily
-            # (which is fine for a linear CLI script).
-            hydrator.hydrate_schema(retriever)
+            # Run async hydration
+            await hydrator.hydrate_schema(introspector)
             print("✓ Graph schema ingestion complete.")
         finally:
             hydrator.close()

@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from mcp_server.dal.ingestion.vector_indexes import HNSWIndex, ThreadSafeIndex
+from mcp_server.services.ingestion.vector_indexes import HNSWIndex, ThreadSafeIndex
 
 
 class TestThreadSafeIndex:

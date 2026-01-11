@@ -9,15 +9,12 @@ This reduces context window flooding and ensures focused prompt context.
 
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from .vector_indexes.protocol import VectorIndex
-
 from .vector_indexes import search_with_rerank
-from .vector_indexes.protocol import SearchResult
+from .vector_indexes.protocol import SearchResult, VectorIndex
 
 logger = logging.getLogger(__name__)
 

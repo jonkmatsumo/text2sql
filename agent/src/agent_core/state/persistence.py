@@ -15,13 +15,6 @@ class PersistenceAdapter:
         self, state: ConversationState, user_id: str, ttl_minutes: int = 60
     ) -> None:
         """Serialize and save state via MCP."""
-        # Convert state to dict (using internal method or asdict)
-        # Assuming we can just use json-compatible dict
-        # The domain object has `to_json`, but tool args expect a dict usually?
-        # Let's inspect `save_conversation_state` signature in tools.
-        # It expects `state_json: Dict[str, Any]`.
-        # So we can use `json.loads(state.to_json())` or implement `to_dict`.
-
         state_str = state.to_json()
         state_dict = json.loads(state_str)
 

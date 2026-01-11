@@ -1,12 +1,13 @@
 """RAG Engine for semantic schema retrieval."""
 
+import asyncio
 from typing import Optional
 
 import numpy as np
 from fastembed import TextEmbedding
-from mcp_server.dal.ingestion.vector_indexes.factory import create_vector_index
-from mcp_server.dal.ingestion.vector_indexes.protocol import VectorIndex
 from mcp_server.rag.schema_loader import SchemaLoader
+from mcp_server.services.ingestion.vector_indexes.factory import create_vector_index
+from mcp_server.services.ingestion.vector_indexes.protocol import VectorIndex
 
 
 class RagEngine:
@@ -24,7 +25,7 @@ class RagEngine:
         return cls._model
 
     @classmethod
-    def embed_text(cls, text: str) -> list[float]:
+    async def embed_text(cls, text: str) -> list[float]:
         """
         Generate embedding vector for a text string.
 
@@ -34,13 +35,18 @@ class RagEngine:
         Returns:
             List of 384 float values representing the embedding.
         """
-        model = cls._get_model()
-        # fastembed returns an iterator, convert to list
-        embedding = list(model.embed([text]))[0]
-        return embedding.tolist()
+
+        def _embed():
+            model = cls._get_model()
+            # fastembed returns an iterator, convert to list
+            embedding = list(model.embed([text]))[0]
+            return embedding.tolist()
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _embed)
 
     @classmethod
-    def embed_batch(cls, texts: list[str]) -> list[list[float]]:
+    async def embed_batch(cls, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for multiple texts efficiently.
 
@@ -50,9 +56,14 @@ class RagEngine:
         Returns:
             List of embedding vectors.
         """
-        model = cls._get_model()
-        embeddings = list(model.embed(texts))
-        return [emb.tolist() for emb in embeddings]
+
+        def _embed_batch():
+            model = cls._get_model()
+            embeddings = list(model.embed(texts))
+            return [emb.tolist() for emb in embeddings]
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _embed_batch)
 
 
 def generate_schema_document(

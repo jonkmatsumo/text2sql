@@ -3,13 +3,14 @@ import logging
 import os
 from contextlib import contextmanager
 
-from mcp_server.dal.ingestion.enrichment.agent import EnrichmentAgent
-from mcp_server.dal.ingestion.enrichment.config import PipelineConfig
-from mcp_server.dal.ingestion.enrichment.delta import get_nodes_needing_enrichment
-from mcp_server.dal.ingestion.enrichment.hashing import generate_canonical_hash
-from mcp_server.dal.ingestion.enrichment.loader import replay_wal
-from mcp_server.dal.ingestion.enrichment.wal import WALManager
 from neo4j import GraphDatabase
+
+from .agent import EnrichmentAgent
+from .config import PipelineConfig
+from .delta import get_nodes_needing_enrichment
+from .hashing import generate_canonical_hash
+from .loader import replay_wal
+from .wal import WALManager
 
 logger = logging.getLogger(__name__)
 
