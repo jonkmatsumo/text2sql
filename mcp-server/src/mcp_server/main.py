@@ -21,6 +21,7 @@ from mcp_server.tools import (
     search_relevant_tables,
 )
 from mcp_server.tools.conversation_tools import load_conversation_state, save_conversation_state
+from mcp_server.tools.interaction_tools import create_interaction_tool, update_interaction_tool
 
 # Load environment variables
 load_dotenv()
@@ -87,6 +88,10 @@ mcp.tool()(resolve_ambiguity)
 # 4. Conversation Tools (New)
 mcp.tool()(save_conversation_state)
 mcp.tool()(load_conversation_state)
+
+# 5. Interaction Logging
+mcp.tool()(create_interaction_tool)
+mcp.tool()(update_interaction_tool)
 
 
 @mcp.tool()
