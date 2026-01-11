@@ -10,12 +10,33 @@ services:
     volumes:
       # Mount initialization scripts (Schema -> Data -> Permissions)
       # They execute in alphanumeric order of filenames
-      - ./database/init-scripts:/docker-entrypoint-initdb.d
+      - ./database/query-target:/docker-entrypoint-initdb.d
       - pg_data:/var/lib/postgresql/data
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d pagila" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - text2sql_net
+
+  # Control-plane database for agent metadata, cache, and policies
+  agent-control-db:
+    image: pgvector/pgvector:pg16
+    container_name: agent_control_db
+    environment:
+      POSTGRES_USER: ${CONTROL_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${CONTROL_DB_PASSWORD:-control_password}
+      POSTGRES_DB: agent_control
+    volumes:
+      - ./database/control-plane:/docker-entrypoint-initdb.d
+      - control_pg_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d agent_control" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -42,6 +63,8 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
+      agent-control-db:
+        condition: service_started
       memgraph:
         condition: service_started
     environment:
@@ -50,11 +73,17 @@ services:
       DB_NAME: pagila
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
-      - ./database/queries:/app/queries:ro
-      - ./database/init-scripts/01-schema.sql:/app/schema.sql:ro
+      - ./database/query-target/queries:/app/queries:ro
+      - ./database/query-target/01-schema.sql:/app/schema.sql:ro
+      - ./database/query-target/patterns:/app/patterns:ro
     networks:
       - text2sql_net
 
@@ -64,12 +93,20 @@ services:
     depends_on:
       postgres-db:
         condition: service_healthy
+      agent-control-db:
+        condition: service_started
     environment:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: pagila
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -78,6 +115,8 @@ services:
       - "8000:8000"
     networks:
       - text2sql_net
+    volumes:
+      - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 
   streamlit:
@@ -89,6 +128,8 @@ services:
       mcp-server:
         condition: service_started
       mlflow-server:
+        condition: service_started
+      agent-control-db:
         condition: service_started
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -103,7 +144,16 @@ services:
       DB_NAME: pagila
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
       MLFLOW_TRACKING_URI: http://mlflow-server:5000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
     ports:
       - "8501:8501"
     volumes:
@@ -165,6 +215,7 @@ services:
 
 volumes:
   pg_data:
+  control_pg_data:
   mlflow_artifacts:
   memgraph_data:
 

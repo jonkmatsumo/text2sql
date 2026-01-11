@@ -1,7 +1,7 @@
 import json
+from contextlib import asynccontextmanager
 from typing import List
 
-from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.schema_store import SchemaStore
 from mcp_server.dal.postgres.common import _format_vector
 from mcp_server.models import SchemaEmbedding
@@ -9,6 +9,24 @@ from mcp_server.models import SchemaEmbedding
 
 class PostgresSchemaStore(SchemaStore):
     """Postgres implementation of SchemaStore."""
+
+    @staticmethod
+    @asynccontextmanager
+    async def _get_connection():
+        """Get connection from control-plane pool if available (metadata resides in control)."""
+        from mcp_server.config.control_plane import ControlPlaneDatabase
+        from mcp_server.config.database import Database
+
+        # Schema embeddings are strictly metadata.
+        # If Control Plane is configured, they should be there.
+        # Fallback to Database (Main) only if Control Plane not configured.
+
+        if ControlPlaneDatabase.is_configured():
+            async with ControlPlaneDatabase.get_direct_connection() as conn:
+                yield conn
+        else:
+            async with Database.get_connection() as conn:
+                yield conn
 
     async def fetch_schema_embeddings(self) -> List[SchemaEmbedding]:
         """Fetch all schema embeddings from schema_embeddings table.
@@ -22,7 +40,7 @@ class PostgresSchemaStore(SchemaStore):
             WHERE embedding IS NOT NULL
         """
 
-        async with Database.get_connection() as conn:
+        async with self._get_connection() as conn:
             rows = await conn.fetch(query)
 
         results = []
@@ -61,5 +79,5 @@ class PostgresSchemaStore(SchemaStore):
                 updated_at = CURRENT_TIMESTAMP
         """
 
-        async with Database.get_connection() as conn:
+        async with self._get_connection() as conn:
             await conn.execute(query, embedding.table_name, embedding.schema_text, pg_vector)

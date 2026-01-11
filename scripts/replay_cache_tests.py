@@ -78,8 +78,12 @@ def main():
     parser.add_argument(
         "--corpus",
         type=Path,
-        default=Path(__file__).parent / "test_corpus" / "rating_queries.json",
-        help="Path to test corpus JSON file",
+        default=Path(__file__).parent.parent
+        / "database"
+        / "query-target"
+        / "corpus"
+        / "rating_queries.json",
+        help="Path to corpus JSON file",
     )
     parser.add_argument("--quiet", action="store_true", help="Only show summary")
 

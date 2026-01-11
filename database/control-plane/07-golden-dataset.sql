@@ -43,11 +43,11 @@ CREATE INDEX IF NOT EXISTS idx_eval_results_test_id ON public.evaluation_results
 CREATE INDEX IF NOT EXISTS idx_eval_results_timestamp ON public.evaluation_results(run_timestamp);
 CREATE INDEX IF NOT EXISTS idx_eval_results_correct ON public.evaluation_results(is_correct);
 
--- Grant permissions
-GRANT SELECT, INSERT, UPDATE ON public.golden_dataset TO text2sql_ro;
-GRANT SELECT, INSERT ON public.evaluation_results TO text2sql_ro;
-GRANT USAGE ON SEQUENCE public.golden_dataset_test_id_seq TO text2sql_ro;
-GRANT USAGE ON SEQUENCE public.evaluation_results_evaluation_id_seq TO text2sql_ro;
+-- Permission grants removed for control plane (using superuser/rw for now)
+-- GRANT SELECT, INSERT, UPDATE ON public.golden_dataset TO text2sql_ro;
+-- GRANT SELECT, INSERT ON public.evaluation_results TO text2sql_ro;
+-- GRANT USAGE ON SEQUENCE public.golden_dataset_test_id_seq TO text2sql_ro;
+-- GRANT USAGE ON SEQUENCE public.evaluation_results_evaluation_id_seq TO text2sql_ro;
 
 -- Add comments
 COMMENT ON TABLE public.golden_dataset IS 'Golden test cases for regression testing. Each test case contains a question and expected SQL.';

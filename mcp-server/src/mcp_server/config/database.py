@@ -32,7 +32,7 @@ class Database:
         db_host = os.getenv("DB_HOST", "localhost")
         db_port = int(os.getenv("DB_PORT", "5432"))
         db_name = os.getenv("DB_NAME", "pagila")
-        db_user = os.getenv("DB_USER", "bi_agent_ro")
+        db_user = os.getenv("DB_USER", "text2sql_ro")
         db_pass = os.getenv("DB_PASS", "secure_agent_pass")
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
@@ -74,6 +74,11 @@ class Database:
 
             print("✓ Stores initialized via DAL factory")
 
+            # 4. Init Control-Plane Database (if enabled)
+            from mcp_server.config.control_plane import ControlPlaneDatabase
+
+            await ControlPlaneDatabase.init()
+
         except Exception as e:
             await cls.close()  # Cleanup partials
             raise ConnectionError(f"Failed to initialize databases: {e}")
@@ -90,6 +95,11 @@ class Database:
             cls._graph_store.close()
             print("✓ Graph store connection closed")
             cls._graph_store = None
+
+        # Close control-plane pool
+        from mcp_server.config.control_plane import ControlPlaneDatabase
+
+        await ControlPlaneDatabase.close()
 
         # Cache store (PgSemanticCache) doesn't hold its own connection,
         # it uses Database.get_connection, so no explicit close needed

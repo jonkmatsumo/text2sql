@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy project structure (build context is project root)
@@ -20,8 +20,15 @@ COPY streamlit/.streamlit/ ./streamlit/.streamlit/
 COPY agent/pyproject.toml ./agent/
 COPY agent/src/ ./agent/src/
 
+# Copy MCP Server dependencies (needed for shared config/DAL)
+COPY mcp-server/pyproject.toml ./mcp-server/
+COPY mcp-server/src/ ./mcp-server/src/
+
 # Install Streamlit dependencies
 RUN pip install --no-cache-dir -e ./streamlit
+
+# Install MCP Server dependencies
+RUN pip install --no-cache-dir -e ./mcp-server
 
 # Install Agent dependencies (needed for agent_core.graph import)
 RUN pip install --no-cache-dir -e ./agent

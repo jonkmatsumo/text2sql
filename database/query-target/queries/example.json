@@ -1,0 +1,6 @@
+[
+    {
+        "question": "Example question?",
+        "query": "SELECT * FROM example_table;"
+    }
+]

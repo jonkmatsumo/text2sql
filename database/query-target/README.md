@@ -1,0 +1,41 @@
+# Query Target Directory
+
+This directory contains the schema, data, and queries for the **Target Database** (the database the agent queries against).
+
+## Dataset Agostic
+This repository is configured to be dataset-agnostic. The actual schema, data, and specific query files are git-ignored.
+
+## Required Files
+To run the system, you must populate this directory with:
+
+1.  **Schema & Data**:
+    *   `01-schema.sql`: DDL for the target database.
+    *   `02-data.sql`: DML/Data for the target database.
+    *   (Optional) Run `./download_data.sh` to fetch the Pagila dataset (if you want to use the default demo).
+
+2.  **Queries** (`queries/`):
+    *   Place your `.json` or `.sql` query files here for seeding.
+    *   See `queries/example.json` for format.
+
+3.  **Patterns** (`patterns/`):
+    *   Place SpaCy entity patterns (`.jsonl`) here.
+    *   See `patterns/example.jsonl` for format.
+
+4.  **Corpus** (`corpus/`):
+    *   Place golden dataset files for testing here.
+
+## Directory Structure
+```
+database/query-target/
+├── 01-schema.sql          (Ignored)
+├── 02-data.sql            (Ignored)
+├── download_data.sh       (Ignored, script to fetch demo data)
+├── queries/
+│   ├── example.json       (Tracked)
+│   └── ...                (Ignored)
+├── patterns/
+│   ├── example.jsonl      (Tracked)
+│   └── ...                (Ignored)
+└── corpus/
+    └── ...                (Ignored)
+```

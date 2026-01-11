@@ -33,7 +33,12 @@ class TestPgSemanticCache:
         mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
 
         # Mock row return
-        mock_row = {"cache_id": 123, "generated_sql": "SELECT * FROM t", "similarity": 0.98}
+        mock_row = {
+            "cache_id": 123,
+            "generated_sql": "SELECT * FROM t",
+            "similarity": 0.98,
+            "user_query": "SELECT * FROM t",
+        }
         mock_conn.fetchrow.return_value = mock_row
 
         result = await cache.lookup(MOCK_EMBEDDING, tenant_id=1)
@@ -142,7 +147,7 @@ class TestPostgresSchemaStore:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.schema_store.Database") as mock:
+        with patch("mcp_server.config.database.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio

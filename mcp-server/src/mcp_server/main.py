@@ -147,21 +147,29 @@ async def get_sample_data_tool(table_name: str, limit: int = 3, ctx: Context = N
 
 
 @mcp.tool()
-async def execute_sql_query_tool(sql_query: str, ctx: Context = None) -> str:
+async def execute_sql_query_tool(
+    sql_query: str,
+    tenant_id: Optional[int] = None,
+    params: Optional[list] = None,
+    ctx: Context = None,
+) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON.
 
     Strictly read-only. Requires tenant context for RLS enforcement.
     """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
+    # Prefer explicit argument, fall back to context extraction
+    final_tenant_id = (
+        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
+    )
 
-    if tenant_id is None:
+    if final_tenant_id is None:
         error_msg = (
             "Unauthorized. No Tenant ID context found. "
             "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
         )
         return json.dumps({"error": error_msg}, separators=(",", ":"))
 
-    return await execute_sql_query(sql_query, tenant_id)
+    return await execute_sql_query(sql_query, final_tenant_id, params)
 
 
 @mcp.tool()
@@ -194,13 +202,18 @@ async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Conte
 
 
 @mcp.tool()
-async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
+async def lookup_cache_tool(
+    user_query: str, tenant_id: Optional[int] = None, ctx: Context = None
+) -> str:
     """Check semantic cache for similar query. Returns cached SQL if similarity >= 0.90."""
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    if not tenant_id:
+    final_tenant_id = (
+        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
+    )
+
+    if not final_tenant_id:
         return json.dumps({"error": "Tenant ID required for cache lookup"})
 
-    result = await lookup_cache(user_query, tenant_id)
+    result = await lookup_cache(user_query, final_tenant_id)
 
     if result:
         return json.dumps(
@@ -209,6 +222,7 @@ async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
                 "original_query": result.metadata.get("user_query"),
                 "similarity": result.similarity,
                 "metadata": result.metadata,
+                "cache_id": result.cache_id,
             },
             separators=(",", ":"),
         )
@@ -217,12 +231,17 @@ async def lookup_cache_tool(user_query: str, ctx: Context = None) -> str:
 
 
 @mcp.tool()
-async def update_cache_tool(user_query: str, sql: str, ctx: Context = None) -> str:
+async def update_cache_tool(
+    user_query: str, sql: str, tenant_id: Optional[int] = None, ctx: Context = None
+) -> str:
     """Cache a successful SQL generation for future use."""
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    if not tenant_id:
+    final_tenant_id = (
+        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
+    )
+
+    if not final_tenant_id:
         return json.dumps({"error": "Tenant ID required for cache update"})
-    await update_cache(user_query, sql, tenant_id)
+    await update_cache(user_query, sql, final_tenant_id)
     return json.dumps({"status": "cached"}, separators=(",", ":"))
 
 

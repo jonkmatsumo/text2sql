@@ -65,11 +65,6 @@ flowchart TB
         MLflow --> MinIO
     end
 
-    subgraph Ingestion["🛠️ Data Ingestion"]
-        SeederService["Seeder Service (Manual)<br/>text2sql_seeder"]
-        SeedData["Seed Data (JSON)<br/>Tables & Examples"]
-    end
-
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
         MCPTools["MCP Tools<br/>mcp_server/tools/"]
 
@@ -85,72 +80,49 @@ flowchart TB
         VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
         Canonicalizer["Linguistic Canonicalization<br/>(SpaCy + EntityRuler)"]
         TwoTierCache["Two-Tier Semantic Cache<br/>(Fingerprint + Vector)"]
-        SecurityCheck["SQL Security Checks<br/>AST validation"]
-        SchemaLinker["Schema Linker<br/>(Triple-Filter Strategy)<br/>mcp_server/services/schema_linker.py"]
+        PolicyEnforcer["Runtime Policy Enforcer<br/>AST-based Query Guardrail"]
+        TenantRewriter["Tenant Rewriter<br/>AST-based RLS Injection"]
+    end
+
+    subgraph ControlDB["�️ Control-Plane (Postgres)"]
+        PGVectorDB["pgvector Extension<br/>Few-shot examples<br/>Schema Embeddings"]
+        SemanticCache["semantic_cache Table<br/>Global SQL Cache"]
+        Tenants["Tenant Registry<br/>RLS & Policies"]
+    end
+
+    subgraph TargetDB["🗄️ Query-Target (Postgres)"]
+        PagilaDB["Pagila Database<br/>Sample data"]
+        Target_RO["Read-only User<br/>(text2sql_ro)"]
     end
 
     subgraph GraphDB["🔷 Memgraph (Graph DB)"]
         SchemaGraph["Schema Graph<br/>Tables, Columns, FKs"]
     end
 
-    subgraph Database["🗄️ PostgreSQL Database"]
-        PGVectorDB["pgvector Extension<br/>Few-shot examples<br/>Schema Embeddings"]
-        SemanticCache["semantic_cache Table<br/>Cached SQL queries"]
-        PagilaDB["Pagila Database<br/>Sample data"]
-    end
-
-    %% Initialization Flow
-    SeedData --> SeederService
-    SeederService -->|"Hydrate Graph"| SchemaGraph
-    SeederService -->|"Upsert Vectors"| PGVectorDB
-
-    %% Index Hydration
-    PGVectorDB -.->|"Hydrate (Startup)"| VectorIndex
-    SchemaGraph -.->|"Hydrate (Startup)"| VectorIndex
-
-    %% Agent Observability
-    RouterNode -.->|"Trace"| MLflow
-    RetrieveNode -.->|"Trace"| MLflow
-    PlanNode -.->|"Trace"| MLflow
-    GenerateNode -.->|"Trace"| MLflow
-    ValidateNode -.->|"Trace"| MLflow
-    ExecuteNode -.->|"Trace"| MLflow
-    CorrectNode -.->|"Trace"| MLflow
-    SynthesizeNode -.->|"Trace"| MLflow
-
     %% Agent to MCP Server via DAL
     RetrieveNode -->|"Call Tool"| MCPTools
     MCPTools -->|"Search/Query"| DAL
-    MCPTools -->|"Prune Schema"| SchemaLinker
     DAL -->|"Vector Search"| VectorIndex
 
     Impl_PG --> PGVectorDB
     Impl_PG --> SemanticCache
+    Impl_PG --> Tenants
     Impl_PG --> PagilaDB
 
     Impl_MG --> SchemaGraph
 
-    %% Execution
+    %% Execution flow with Hardening
     ExecuteNode -->|"Call Tool"| MCPTools
-    MCPTools -->|"Validate"| SecurityCheck
-    SecurityCheck -->|"Execute (via DAL)"| Impl_PG
-
-    %% Agent to LLM
-    RouterNode -->|"LLM call"| OpenAILLM["LLM Provider<br/>(OpenAI/Anthropic/Google)"]
-    PlanNode -->|"LLM call"| OpenAILLM
-    GenerateNode -->|"LLM call"| OpenAILLM
-    CorrectNode -->|"LLM call"| OpenAILLM
-    SynthesizeNode -->|"LLM call"| OpenAILLM
-
-    %% Seeder & Enrichment
-    SeederService -->|"Generate Descriptions"| OpenAILLM
-    SeederService -->|"Generate Embeddings"| Embeddings["Embedding Model<br/>(text-embedding-3-small)"]
+    MCPTools -->|"1. Validate Logic"| PolicyEnforcer
+    PolicyEnforcer -->|"2. Inject Context"| TenantRewriter
+    TenantRewriter -->|"3. Execute Read"| Target_RO
+    Target_RO --> PagilaDB
 
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
-    style Database fill:#4CAF50
+    style TargetDB fill:#4CAF50
+    style ControlDB fill:#2196F3
     style GraphDB fill:#9C27B0
-    style Ingestion fill:#FFC107
     style Observability fill:#E1BEE7
     style DAL fill:#FFCC80,stroke:#F57C00,stroke-width:2px
 ```
@@ -158,33 +130,27 @@ flowchart TB
 
 ## Key Features & Architecture
 
-### 🧠 Intelligent Agent Core
-*   **Multi-Provider LLM Support**: Switch between OpenAI (GPT-5.2), Anthropic (Claude 3.5 Sonnet), and Google (Gemini 2.5 Flash) via native integration.
-*   **Reasoning Loop**: Uses LangGraph to orchestrate a sophisticated `Retrieve → Plan → Generate → Validate → Correct` workflow.
-*   **Self-Correction**: Automatically detects SQL errors (syntax, types, logic) and retries generation with error context (up to 3 times).
-*   **Human-in-the-Loop**: Ambiguous queries trigger an interrupt mechanism, asking the user for clarification before proceeding, preserving context state.
+### 🔍 Approximate Nearest Neighbors (ANN) Based Retrieval Augmented Generation (RAG)
+*   **Dense Schema Linking**: Uses a **Triple-Filter Strategy** (Structural Backbone, Value Spy, Semantic Reranker) to intelligently prune relevant tables and columns, resolving "Context Starvation".
+*   **Scalable Vector Search**: Implements **HNSW (Hierarchical Navigable Small Worlds)** via `hnswlib` for millisecond-latency search across schema embeddings and few-shot examples.
+*   **Graph-Aware RAG**: Integrates Memgraph to traverse database relationships (Foreign Keys), ensuring retrieved contexts maintain relational integrity.
+*   **Enriched Ingestion**: Automatically generates high-fidelity descriptions and embeddings during seeding, ensuring the agent understands business domain semantics.
 
-### 🔍 Advanced Retrieval (RAG) & Schema Linking
-*   **Dense Schema Linking**: Replaces simple vector search with a **Triple-Filter Strategy** (Structural Backbone, Value Spy, Semantic Reranker) to intelligently prune relevant tables and columns, resolving "Context Starvation".
-*   **Adaptive Fallback**: Implements robust Top-K fallback logic to ensure dimension tables (e.g., `language`) are retrieved even with weak semantic signals.
-*   **Graph-Based Schema**: Uses Memgraph to model relationships (Foreign Keys) and `PostgresMetadataStore` for robust introspection.
-*   **Enriched Ingestion**: Generates high-fidelity embeddings by including column names and descriptions, ensuring accurate semantic matching.
-*   **Scalable Vector Search**: Uses **HNSW (Hierarchical Navigable Small Worlds)** via `hnswlib` for millisecond-latency approximate nearest neighbor search.
+### 🚀 Multi-Tier Semantic Caching Using SpaCy
+*   **Linguistic Canonicalization**: Uses **SpaCy** with custom `EntityRuler` and `DependencyMatcher` patterns to extract query intent (ratings, limits, entities) regardless of word order or phrasing.
+*   **Tier 1: Global Fingerprinting**: Generates a deterministic SHA-256 signature from canonical constraints for O(1) exact-match lookups that work across different tenants.
+*   **Tier 2: Semantic Fallback**: Falls back to high-threshold (0.90) vector similarity search if no exact fingerprint is found.
+*   **Deterministic Guardrails**: Every cache hit is cross-verified via AST parsing to ensure the cached SQL's predicates perfectly match the current user's intent.
 
-### 🛡️ Secure Data Access (MCP)
-*   **Model Context Protocol (MCP)**: Exposes database tools via a secure, read-only server interface.
-*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`GraphStore`, `MetadataStore`), ensuring modularity and preventing implementation leakage.
-*   **AST Security Validation**: Validates SQL using `sqlglot` AST traversal to strictly block forbidden commands (`DROP`, `DELETE`, `INSERT`) and restricted tables (`credentials`, `payroll`).
-
-### 🚀 Multi-Tier Semantic Caching
-*   **Linguistic Canonicalization**: Uses **SpaCy** with custom `EntityRuler` and `DependencyMatcher` patterns to extract query intent (ratings, limits, entities) regardless of word order.
-*   **Tier 1: Fingerprint Match**: Generates a deterministic SHA-256 signature from canonical constraints for O(1) exact-match lookups with 100% precision.
-*   **Tier 2: Vector Fallback**: Falls back to high-threshold (0.90) vector similarity search if no fingerprint is found.
-*   **Deterministic Guardrails**: Every cache hit (even vector-based) is cross-verified using AST parsing to ensure the cached SQL's predicates perfectly match the user's intent.
-*   **Cache Hygiene**: Automatically "tombstones" invalid or stale cache entries to prevent recursive false positives.
+### 🛡️ Extensible Foundation: Multi-Provider LLM & Multi-Engine Database Support
+*   **Extensible Tooling**: Built on the **Model Context Protocol (MCP)**, making database tools accessible to any MCP-compliant agent or client.
+*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`GraphStore`, `MetadataStore`), allowing the system to easily extend to other database types (e.g., MySQL, Snowflake) or query engines.
+*   **Runtime Policy Enforcement**: Uses a **Dual-Database Architecture** to separate sensitive control-plane data (tenants, keys, cache) from the query-target data.
+*   **AST-Based Security**: Employs `sqlglot` for AST traversal to strictly enforce read-only access and inject tenant isolation predicates at runtime.
+*   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
 ### 📡 Observability & Performance
-*   **Full Observability**: Integrated MLflow tracing provides end-to-end visibility into the agent's reasoning steps, tool calls, and cache decisions.
+*   **End-to-End Tracing**: Integrated MLflow tracking provides full visibility into the agent's reasoning steps, tool calls, and cache decisions.
 *   **Unified Monitoring**: Captures fingerprint hits, misses, and guardrail rejections as structured metadata in the trace.
 
 ## Project Structure
@@ -193,17 +159,17 @@ flowchart TB
 text2sql/
 ├── agent/                      # LangGraph AI agent
 │   ├── src/agent_core/         # Core logic (nodes, graph, state)
-│   ├── tests/                  # Unit tests (mocked)
-│   └── tests_integration/      # Live integration tests
+│   ├── tests/                  # Unit tests (Mocked)
+│   └── scripts/                # Evaluation & maintenance scripts
 ├── mcp-server/                 # Database access tools (FastMCP)
 │   ├── src/mcp_server/         # Server implementation
 │   │   ├── dal/                # Data Abstraction Layer (Interfaces & Adapters)
-│   │   ├── tools/              # MCP Tool definitions
-│   │   └── ...
-│   ├── tests/                  # Unit tests
-│   └── tests_integration/      # RLS & database integration tests
+│   │   ├── services/           # Schema linking, indexing, and caching
+│   │   └── tools/              # MCP Tool definitions
+├── database/                   # Seed assets
+│   ├── query-target/           # Target DB schema, data, and patterns
+│   └── control-plane/          # App metadata, RLS, and cache schema
 ├── streamlit/                  # Web interface
-├── database/                   # Init scripts & schema
 └── docker-compose.yml          # Service orchestration
 ```
 
@@ -215,20 +181,19 @@ text2sql/
 
 ### Setup & Run
 
-1.  **Initialize Data**: Download the Pagila sample database.
+1.  **Initialize Data**: Generate pattern files and prepare the environment.
     ```bash
-    ./database/init-scripts/download_data.sh
+    ./scripts/seed_graph.sh
     ```
 
-2.  **Configure Environment** (optional): Set your preferred LLM provider in `.env`:
+2.  **Configure Environment**: Set your API keys in `.env`:
     ```bash
+    OPENAI_API_KEY=your_key
     LLM_PROVIDER=openai      # Options: openai, anthropic, google
-    LLM_MODEL=gpt-5.2        # Or: claude-sonnet-4-20250514, gemini-2.5-flash-preview-05-20
-    ANTHROPIC_API_KEY=...    # Required for Anthropic
-    GOOGLE_API_KEY=...       # Required for Google
+    LLM_MODEL=gpt-5.2        # Or: claude-sonnet-4-20250514, gemini-2.5-pro-preview-05-06
     ```
 
-3.  **Start Services**: Build and launch the container cluster.
+3.  **Start Services**:
     ```bash
     docker compose up -d --build
     ```
@@ -237,14 +202,14 @@ text2sql/
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Web UI** | `http://localhost:8501` | Streamlit interface for end-users |
-| **MCP Server** | `http://localhost:8000/sse` | Tool server for the agent |
-| **MLflow UI** | `http://localhost:5001` | Traces and metrics dashboard |
-| **MinIO** | `http://localhost:9001` | S3-compatible artifact store |
+| **Web UI** | `http://localhost:8501` | Streamlit interface |
+| **MCP Server** | `http://localhost:8000/mcp` | FastMCP tool server |
+| **MLflow UI** | `http://localhost:5001` | Traces and metrics |
+| **MinIO** | `http://localhost:9001` | Artifact storage (user: minioadmin / pass: minioadmin) |
 
 ## Testing
 
-Run the isolated unit test suite (no Docker required):
+Run the full suite:
 ```bash
 pytest agent/tests mcp-server/tests
 ```

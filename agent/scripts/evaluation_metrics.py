@@ -15,7 +15,7 @@ async def get_evaluation_metrics(tenant_id: int = 1, days: int = 7):
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
     db_name = os.getenv("DB_NAME", "pagila")
-    db_user = os.getenv("DB_USER", "bi_agent_ro")
+    db_user = os.getenv("DB_USER", "text2sql_ro")
     db_pass = os.getenv("DB_PASS", "secure_agent_pass")
 
     conn = await asyncpg.connect(

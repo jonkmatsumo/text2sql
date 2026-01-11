@@ -13,8 +13,17 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_success_json_string(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_success_json_string(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test successful query execution with JSON string result."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         # Create mock tool
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
@@ -38,16 +47,26 @@ class TestValidateAndExecuteNode:
         mock_tool.ainvoke.assert_called_once()
         call_args = mock_tool.ainvoke.call_args[0][0]
         assert call_args["sql_query"] == "SELECT COUNT(*) as count FROM film"
-        assert "tenant_id" not in call_args  # tenant_id is extracted from context, not passed
+        assert call_args["tenant_id"] is None  # Mocks state tenant_id which is None here
 
         # Verify result was parsed and returned
         assert result["query_result"] == [{"count": 1000}]
         assert result["error"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_success_dict_result(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_success_dict_result(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test successful query execution with dict result."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
         mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1, "title": "Film 1"}])
@@ -69,9 +88,18 @@ class TestValidateAndExecuteNode:
         assert result["error"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_success_list_result(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_success_list_result(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test successful query execution with list result."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
         mock_tool.ainvoke = AsyncMock(return_value=[1, 2, 3])
@@ -93,9 +121,18 @@ class TestValidateAndExecuteNode:
         assert result["error"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_error_string(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_error_string(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test error handling when tool returns error string."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
         mock_tool.ainvoke = AsyncMock(return_value="Error: relation 'films' does not exist")
@@ -117,9 +154,18 @@ class TestValidateAndExecuteNode:
         assert result["query_result"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_database_error(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_database_error(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test error handling when tool returns database error string."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query_tool"
         mock_tool.ainvoke = AsyncMock(return_value="Database Error: syntax error at or near 'FROM'")

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.sql_examples (
     question TEXT NOT NULL,           -- The user's natural language question
     sql_query TEXT NOT NULL,          -- The verified SQL answer
     embedding vector(384),            -- Embedding of the question (bge-small model)
+    tenant_id INTEGER DEFAULT 1,      -- Tenant ID for multi-tenancy
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT uq_sql_examples_question UNIQUE (question)
@@ -23,9 +24,9 @@ CREATE INDEX IF NOT EXISTS idx_sql_examples_question
 ON public.sql_examples
 USING gin (to_tsvector('english', question));
 
--- Grant access to the agent user (SELECT for retrieval, INSERT for embedding generation)
-GRANT SELECT, INSERT, UPDATE ON public.sql_examples TO text2sql_ro;
-GRANT USAGE ON SEQUENCE public.sql_examples_id_seq TO text2sql_ro;
+-- Grants removed for control plane
+-- GRANT SELECT, INSERT, UPDATE ON public.sql_examples TO text2sql_ro;
+-- GRANT USAGE ON SEQUENCE public.sql_examples_id_seq TO text2sql_ro;
 
 -- Add comment for documentation
 COMMENT ON TABLE public.sql_examples IS 'Golden SQL examples for dynamic few-shot learning. Embeddings are generated from questions.';
