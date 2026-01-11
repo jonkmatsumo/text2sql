@@ -21,7 +21,7 @@ nest_asyncio.apply()
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
 
-from service.agent_service import AgentService  # noqa: E402
+from service.agent import AgentService  # noqa: E402
 
 load_dotenv()
 

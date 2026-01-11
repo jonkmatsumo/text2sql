@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
 # Copy project structure (build context is project root)
 COPY streamlit/pyproject.toml ./streamlit/
 COPY streamlit/Text_2_SQL_Agent.py ./streamlit/
-COPY streamlit/app_logic.py ./streamlit/
+COPY streamlit/service/ ./streamlit/service/
 COPY streamlit/pages/ ./streamlit/pages/
 
 # Copy Streamlit config directory

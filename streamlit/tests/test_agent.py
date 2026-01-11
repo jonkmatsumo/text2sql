@@ -19,7 +19,7 @@ sys.modules["langchain_mcp_adapters"] = MagicMock()
 sys.modules["langchain_mcp_adapters.client"] = MagicMock()
 sys.modules["mlflow"] = MagicMock()
 
-from service.agent_service import AgentService  # noqa: E402
+from service.agent import AgentService  # noqa: E402
 
 
 class TestRunAgent:
