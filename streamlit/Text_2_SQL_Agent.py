@@ -17,8 +17,9 @@ import streamlit as st
 # Apply nest_asyncio to allow nested event loops (required for MCP SSE client)
 nest_asyncio.apply()
 
-# Add app_logic to path
+# Add app_logic and agent src to path
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
 
 from app_logic import (  # noqa: E402
     format_conversation_entry,

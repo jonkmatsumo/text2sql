@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy project structure (build context is project root)
 COPY streamlit/pyproject.toml ./streamlit/
-COPY streamlit/app.py ./streamlit/
+COPY streamlit/Text_2_SQL_Agent.py ./streamlit/
 COPY streamlit/app_logic.py ./streamlit/
+COPY streamlit/pages/ ./streamlit/pages/
 
 # Copy Streamlit config directory
 RUN mkdir -p ./streamlit/.streamlit
@@ -36,8 +37,8 @@ RUN pip install --no-cache-dir -e ./agent
 # Expose Streamlit port
 EXPOSE 8501
 
-# Set working directory to streamlit for app.py
+# Set working directory to streamlit for Text_2_SQL_Agent.py
 WORKDIR /app/streamlit
 
 # Run Streamlit
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]
