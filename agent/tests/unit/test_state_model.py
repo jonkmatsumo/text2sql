@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from agent_core.state_management.domain import ConversationState, TurnRecord
+from agent_core.state.domain import ConversationState, TurnRecord
 
 
 def test_bounded_turn_history():

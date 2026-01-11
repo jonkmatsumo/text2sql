@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
 
-from agent_core.state_management.domain import ConversationState
+from agent_core.state.domain import ConversationState
 
 
 class TurnType(Enum):

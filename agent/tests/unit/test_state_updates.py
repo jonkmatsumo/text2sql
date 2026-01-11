@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from agent_core.state_management.classifier import TurnType
-from agent_core.state_management.domain import ConversationState, ExecutionContext, WorkingIntent
-from agent_core.state_management.manager import StateManager
+from agent_core.state.classifier import TurnType
+from agent_core.state.domain import ConversationState, ExecutionContext, WorkingIntent
+from agent_core.state.manager import StateManager
 
 
 @pytest.fixture

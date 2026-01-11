@@ -1,4 +1,4 @@
-from agent_core.state_management.domain import ConversationState
+from agent_core.state.domain import ConversationState
 
 
 def test_smoke_conversation_state_instantiation():

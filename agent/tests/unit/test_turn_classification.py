@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
 import pytest
-from agent_core.state_management.classifier import TopicShiftDetector, TurnType, classify_turn
-from agent_core.state_management.domain import ConversationState, ExecutionContext, TurnRecord
+from agent_core.state.classifier import TopicShiftDetector, TurnType, classify_turn
+from agent_core.state.domain import ConversationState, ExecutionContext, TurnRecord
 
 
 class MockSimilarity:

@@ -1,13 +1,8 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from agent_core.state_management.classifier import TurnType
-from agent_core.state_management.domain import (
-    ConversationState,
-    ExecutionContext,
-    TurnRecord,
-    WorkingIntent,
-)
+from agent_core.state.classifier import TurnType
+from agent_core.state.domain import ConversationState, ExecutionContext, TurnRecord, WorkingIntent
 
 
 class StateManager:
