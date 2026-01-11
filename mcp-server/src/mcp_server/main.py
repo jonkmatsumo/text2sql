@@ -3,13 +3,10 @@
 This module initializes the FastMCP server and registers all database tools.
 """
 
-import json
-import os
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastmcp import Context, FastMCP
+from fastmcp import FastMCP
 from mcp_server.config.database import Database
 from mcp_server.services.cache_service import lookup_cache, update_cache
 from mcp_server.services.retrieval_service import get_relevant_examples
@@ -23,6 +20,7 @@ from mcp_server.tools import (
     resolve_ambiguity,
     search_relevant_tables,
 )
+from mcp_server.tools.conversation_tools import load_conversation_state, save_conversation_state
 
 # Load environment variables
 load_dotenv()
@@ -58,217 +56,67 @@ async def lifespan(app):
             if count == 0:
                 print("Schema embeddings table is empty. Starting indexing...")
                 await index_all_tables()
-            else:
-                print(f"Schema already indexed ({count} tables)")
     except Exception as e:
-        print(f"Warning: Schema indexing skipped: {e}")
+        print(f"Warning: Index check or indexing failed: {e}")
 
-    yield  # Server runs here
+    yield
 
     # Shutdown: Close database connection pool
     await Database.close()
 
 
-# Initialize the MCP Server with lifespan
-mcp = FastMCP("Text 2 SQL Agent", lifespan=lifespan)
+# Initialize FastMCP Server with dependencies
+mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 
+# --- Register Tools ---
 
-def extract_tenant_id(ctx: Context) -> Optional[int]:
-    """Extract tenant_id from MCP request context.
+# 1. Retrieval Tools
+mcp.tool()(list_tables)
+mcp.tool()(get_table_schema)
+mcp.tool()(search_relevant_tables)
+mcp.tool()(get_semantic_subgraph)
+mcp.tool()(get_semantic_definitions)
 
-    Priority:
-    1. HTTP header 'X-Tenant-ID' (production)
-    2. MCP initialization params (if available)
-    3. Environment variable DEFAULT_TENANT_ID (local dev)
+# 2. Execution Tools
+mcp.tool()(execute_sql_query)
+mcp.tool()(get_sample_data)
 
-    Args:
-        ctx: FastMCP Context object
+# 3. Validation Tools
+mcp.tool()(resolve_ambiguity)
 
-    Returns:
-        tenant_id as integer, or None if not found
-    """
-    # Try HTTP headers (SSE transport)
-    if hasattr(ctx, "request_context") and ctx.request_context:
-        headers = getattr(ctx.request_context, "headers", {})
-        tenant_id_str = headers.get("x-tenant-id") or headers.get("X-Tenant-ID")
-        if tenant_id_str:
-            try:
-                return int(tenant_id_str)
-            except ValueError:
-                pass
-
-    # Try MCP initialization params (if available)
-    if hasattr(ctx, "params") and ctx.params:
-        tenant_id = ctx.params.get("tenant_id")
-        if tenant_id:
-            try:
-                return int(tenant_id)
-            except ValueError:
-                pass
-
-    # Fallback for local dev / stdio transport
-    default_tenant = os.getenv("DEFAULT_TENANT_ID")
-    if default_tenant:
-        try:
-            return int(default_tenant)
-        except ValueError:
-            pass
-
-    return None
-
-
-# Register tools
-@mcp.tool()
-async def list_tables_tool(search_term: str = None, ctx: Context = None) -> str:
-    """List available tables in the database. Use this to discover table names."""
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return list_tables(search_term, tenant_id)
+# 4. Conversation Tools (New)
+mcp.tool()(save_conversation_state)
+mcp.tool()(load_conversation_state)
 
 
 @mcp.tool()
-async def get_table_schema_tool(table_names: list[str], ctx: Context = None) -> str:
-    """
-    Retrieve the schema (columns, data types, foreign keys) for a list of tables.
+async def get_few_shot_examples_tool(query: str, limit: int = 3) -> str:
+    """Retrieve similar past queries and their corresponding SQL.
 
-    Returns JSON list of table schemas.
+    Use this tool to find examples of how to write SQL for similar questions.
     """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return get_table_schema(table_names, tenant_id)
+    return await get_relevant_examples(query, limit)
 
 
 @mcp.tool()
-async def get_sample_data_tool(table_name: str, limit: int = 3, ctx: Context = None) -> str:
+async def lookup_cache_tool(query: str, user_id: str = "default_user") -> str:
+    """Look up a query in the semantic cache.
+
+    Returns the cached SQL if a semantic match is found, or "MISSING" if not found.
     """
-    Get sample data rows from a table.
-
-    Returns JSON list of sample rows.
-    """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return get_sample_data(table_name, limit, tenant_id)
-
-
-@mcp.tool()
-async def execute_sql_query_tool(
-    sql_query: str,
-    tenant_id: Optional[int] = None,
-    params: Optional[list] = None,
-    ctx: Context = None,
-) -> str:
-    """Execute a valid SQL SELECT statement and return the result as JSON.
-
-    Strictly read-only. Requires tenant context for RLS enforcement.
-    """
-    # Prefer explicit argument, fall back to context extraction
-    final_tenant_id = (
-        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
-    )
-
-    if final_tenant_id is None:
-        error_msg = (
-            "Unauthorized. No Tenant ID context found. "
-            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
-        )
-        return json.dumps({"error": error_msg}, separators=(",", ":"))
-
-    return await execute_sql_query(sql_query, final_tenant_id, params)
-
-
-@mcp.tool()
-async def get_semantic_definitions_tool(terms: list[str], ctx: Context = None) -> str:
-    """Retrieve business metric definitions from the semantic layer."""
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await get_semantic_definitions(terms, tenant_id)
-
-
-@mcp.tool()
-async def search_relevant_tables_tool(user_query: str, limit: int = 5, ctx: Context = None) -> str:
-    """
-    Search for tables relevant to a natural language query using semantic similarity.
-
-    Returns JSON list of table schemas.
-    """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await search_relevant_tables(user_query, limit, tenant_id)
-
-
-@mcp.tool()
-async def resolve_ambiguity_tool(
-    query: str, schema_context: List[Dict[str, Any]], ctx: Context = None
-) -> str:
-    """
-    Resolve potential ambiguities in a user query against provided schema context.
-
-    Returns JSON string with resolution status and bindings.
-    """
-    return await resolve_ambiguity(query, schema_context)
-
-
-@mcp.tool()
-async def get_few_shot_examples_tool(user_query: str, limit: int = 3, ctx: Context = None) -> str:
-    """
-    Retrieve relevant SQL examples for few-shot learning based on user query.
-
-    Returns JSON list of examples.
-    """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await get_relevant_examples(user_query, limit, tenant_id)
-
-
-@mcp.tool()
-async def lookup_cache_tool(
-    user_query: str, tenant_id: Optional[int] = None, ctx: Context = None
-) -> str:
-    """Check semantic cache for similar query. Returns cached SQL if similarity >= 0.90."""
-    final_tenant_id = (
-        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
-    )
-
-    if not final_tenant_id:
-        return json.dumps({"error": "Tenant ID required for cache lookup"})
-
-    result = await lookup_cache(user_query, final_tenant_id)
-
-    if result:
-        return json.dumps(
-            {
-                "sql": result.value,
-                "original_query": result.metadata.get("user_query"),
-                "similarity": result.similarity,
-                "metadata": result.metadata,
-                "cache_id": result.cache_id,
-            },
-            separators=(",", ":"),
-        )
-
-    return json.dumps({"sql": None}, separators=(",", ":"))
+    return await lookup_cache(query, user_id)
 
 
 @mcp.tool()
 async def update_cache_tool(
-    user_query: str, sql: str, tenant_id: Optional[int] = None, ctx: Context = None
+    query: str, sql: str, thought_process: str, user_id: str = "default_user"
 ) -> str:
-    """Cache a successful SQL generation for future use."""
-    final_tenant_id = (
-        tenant_id if tenant_id is not None else (extract_tenant_id(ctx) if ctx else None)
-    )
+    """Update the semantic cache with a new query-SQL pair.
 
-    if not final_tenant_id:
-        return json.dumps({"error": "Tenant ID required for cache update"})
-    await update_cache(user_query, sql, final_tenant_id)
-    return json.dumps({"status": "cached"}, separators=(",", ":"))
-
-
-@mcp.tool()
-async def get_semantic_subgraph_tool(query: str, ctx: Context = None) -> str:
-    """Retrieve relevant subgraph of tables/columns based on query.
-
-    Use this to understand database structure.
+    Returns "OK" on success.
     """
-    tenant_id = extract_tenant_id(ctx) if ctx else None
-    return await get_semantic_subgraph(query, tenant_id)
+    return await update_cache(query, sql, thought_process, user_id)
 
 
 if __name__ == "__main__":
-    # Run via streamable-http for better stability.
-    # Host must be 0.0.0.0 to be accessible from outside the container.
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
+    mcp.run()
