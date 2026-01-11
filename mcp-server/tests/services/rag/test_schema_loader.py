@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from mcp_server.rag.schema_loader import SchemaLoader
+from mcp_server.services.rag.schema_loader import SchemaLoader
 
 
 class TestSchemaLoader:
@@ -21,7 +21,8 @@ class TestSchemaLoader:
         mock_index = MagicMock()
 
         with patch(
-            "mcp_server.rag.schema_loader.Database.get_schema_store", return_value=mock_store
+            "mcp_server.services.rag.schema_loader.Database.get_schema_store",
+            return_value=mock_store,
         ):
             loader = SchemaLoader()
             await loader.load_schema_embeddings(mock_index)
@@ -48,7 +49,8 @@ class TestSchemaLoader:
         mock_index = MagicMock()
 
         with patch(
-            "mcp_server.rag.schema_loader.Database.get_schema_store", return_value=mock_store
+            "mcp_server.services.rag.schema_loader.Database.get_schema_store",
+            return_value=mock_store,
         ):
             loader = SchemaLoader()
             await loader.load_schema_embeddings(mock_index)

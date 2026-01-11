@@ -1,9 +1,10 @@
 """Schema indexing service for RAG."""
 
-import mcp_server.rag
+import mcp_server.services.rag
 from mcp_server.config.database import Database
 from mcp_server.models import SchemaEmbedding
-from mcp_server.rag import RagEngine, generate_schema_document
+
+from .engine import RagEngine, generate_schema_document
 
 
 async def index_all_tables():
@@ -46,7 +47,7 @@ async def index_all_tables():
         schema_text = generate_schema_document(table_name, columns, foreign_keys)
 
         # Generate embedding
-        embedding_vector = RagEngine.embed_text(schema_text)
+        embedding_vector = await RagEngine.embed_text(schema_text)
 
         # Save to store
         schema_embedding = SchemaEmbedding(
@@ -59,5 +60,5 @@ async def index_all_tables():
     print(f"✓ Schema indexing complete: {len(table_names)} tables indexed")
 
     # Reload the in-memory vector index to reflect changes
-    await mcp_server.rag.reload_schema_index()
+    await mcp_server.services.rag.reload_schema_index()
     print("✓ Schema index reloaded")

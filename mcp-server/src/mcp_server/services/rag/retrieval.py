@@ -3,8 +3,6 @@
 import json
 import logging
 
-from mcp_server.services.registry import RegistryService
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +23,8 @@ async def get_relevant_examples(
         Formatted JSON string with examples, or empty string if none found
     """
     # 1. Fetch from Registry
+    from mcp_server.services.registry import RegistryService
+
     examples = await RegistryService.get_few_shot_examples(user_query, tenant_id, limit=limit)
 
     if not examples:

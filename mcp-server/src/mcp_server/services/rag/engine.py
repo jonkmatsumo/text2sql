@@ -5,9 +5,10 @@ from typing import Optional
 
 import numpy as np
 from fastembed import TextEmbedding
-from mcp_server.rag.schema_loader import SchemaLoader
 from mcp_server.services.ingestion.vector_indexes.factory import create_vector_index
 from mcp_server.services.ingestion.vector_indexes.protocol import VectorIndex
+
+from .schema_loader import SchemaLoader
 
 
 class RagEngine:

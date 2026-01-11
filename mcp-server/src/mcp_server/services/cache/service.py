@@ -3,8 +3,9 @@ import re
 from typing import Optional
 
 from mcp_server.models import CacheLookupResult
-from mcp_server.services.cache import extract_constraints, validate_sql_constraints
 from mcp_server.services.registry import RegistryService
+
+from . import extract_constraints, validate_sql_constraints
 
 logger = logging.getLogger(__name__)
 

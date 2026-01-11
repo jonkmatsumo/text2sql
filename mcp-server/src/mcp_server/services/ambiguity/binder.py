@@ -141,7 +141,7 @@ class CandidateBinder:
 
     def __init__(self):
         """Initialize binder."""
-        from mcp_server.rag import RagEngine
+        from mcp_server.services.rag import RagEngine
 
         self.rag = RagEngine
 

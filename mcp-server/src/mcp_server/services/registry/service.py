@@ -3,8 +3,8 @@ from typing import List, Optional
 
 from mcp_server.dal.factory import get_registry_store
 from mcp_server.models import QueryPair
-from mcp_server.rag import RagEngine
 from mcp_server.services.canonicalization import CanonicalizationService
+from mcp_server.services.rag import RagEngine
 
 logger = logging.getLogger(__name__)
 

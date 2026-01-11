@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Set
 
 import numpy as np
-from mcp_server.rag import RagEngine
+
+from .engine import RagEngine
 
 
 class SchemaLinker:

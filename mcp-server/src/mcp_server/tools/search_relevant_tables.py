@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 from mcp_server.config.database import Database
-from mcp_server.rag import RagEngine, search_similar_tables
+from mcp_server.services.rag.engine import RagEngine, search_similar_tables
 
 TOOL_NAME = "search_relevant_tables"
 
