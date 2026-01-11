@@ -4,13 +4,13 @@ from typing import Any, Dict, Optional
 
 
 class ConversationDAL:
-    """Data Access Layer for Conversation States."""
+    """Data Access Layer for Conversation States (Async)."""
 
     def __init__(self, db_client: Any):
         """Initialize with DB client."""
         self.db = db_client
 
-    def save_state(
+    async def save_state_async(
         self,
         conversation_id: str,
         user_id: str,
@@ -18,16 +18,15 @@ class ConversationDAL:
         version: int,
         ttl_minutes: int = 60,
     ) -> None:
-        """Upsert conversation state."""
+        """Upsert conversation state asynchronously."""
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
-        # Using json.dumps ensures it's a string for SQL JSONB
         state_str = json.dumps(state_json)
 
         sql = """
             INSERT INTO conversation_states (
                 conversation_id, user_id, state_version, state_json, updated_at, expires_at
             ) VALUES (
-                :conversation_id, :user_id, :version, :state_json, NOW(), :expires_at
+                $1, $2, $3, $4, NOW(), $5
             )
             ON CONFLICT (conversation_id) DO UPDATE SET
                 state_version = EXCLUDED.state_version,
@@ -36,30 +35,23 @@ class ConversationDAL:
                 expires_at = EXCLUDED.expires_at
         """
 
-        self.db.execute(
-            sql,
-            {
-                "conversation_id": conversation_id,
-                "user_id": user_id,
-                "version": version,
-                "state_json": state_str,
-                "expires_at": expires_at,
-            },
-        )
+        # asyncpg uses $n variables, not :name
+        await self.db.execute(sql, conversation_id, user_id, version, state_str, expires_at)
 
-    def load_state(self, conversation_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        """Load state if exists and not active."""
+    async def load_state_async(
+        self, conversation_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Load state if exists and not active asynchronously."""
         sql = """
             SELECT state_json FROM conversation_states
-            WHERE conversation_id = :conversation_id
-              AND user_id = :user_id
+            WHERE conversation_id = $1
+              AND user_id = $2
               AND expires_at > NOW()
         """
 
-        result = self.db.fetch_one(sql, {"conversation_id": conversation_id, "user_id": user_id})
+        result = await self.db.fetchrow(sql, conversation_id, user_id)
 
         if result and result.get("state_json"):
-            # Depending on DB driver, state_json might be object or string
             raw = result["state_json"]
             if isinstance(raw, str):
                 return json.loads(raw)
