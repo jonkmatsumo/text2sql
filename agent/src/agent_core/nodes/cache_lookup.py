@@ -40,13 +40,22 @@ async def cache_lookup_node(state: AgentState) -> dict:
             cache_json = await cache_tool.ainvoke({"query": user_query, "tenant_id": tenant_id})
             cache_data = parse_tool_output(cache_json)
 
-            if cache_data is None or not cache_data.get("value"):
+            if not cache_data:
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_outputs({"hit": False})
                 return {"cached_sql": None, "from_cache": False}
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
                 cache_data = cache_data[0]
+            if not isinstance(cache_data, dict):
+                logger.info("Cache Miss or Rejected Hit")
+                span.set_outputs({"hit": False})
+                return {"cached_sql": None, "from_cache": False}
+
+            if not cache_data.get("value"):
+                logger.info("Cache Miss or Rejected Hit")
+                span.set_outputs({"hit": False})
+                return {"cached_sql": None, "from_cache": False}
 
             # Cache Hit!
             cached_sql = cache_data.get("value")

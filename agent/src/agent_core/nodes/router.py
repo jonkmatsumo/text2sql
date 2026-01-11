@@ -35,9 +35,15 @@ An ambiguity or missing data issue was detected in a user's SQL query.
 Your task:
 1. If the status is AMBIGUOUS: Generate a polite clarification question
    based ONLY on the provided options.
-   NEVER expose schema names or invent new options.
+   - Use NATURAL LANGUAGE. Do NOT use internal schema names (e.g., `table.column`, snake_case).
+   - BAD: "Do you mean language.name = 'Spanish'?"
+   - GOOD:
+     "Do you mean films spoken in Spanish, or films with Spanish as the original language?"
+
 2. If the status is MISSING: Generate a helpful refusal message
    explaining what's missing and suggest alternatives based on the Schema Context.
+   - Be specific about what concept is missing but use natural terms
+     (e.g., "rating" instead of "film.rating").
 
 ## Ambiguity Data
 {ambiguity_data}

@@ -112,41 +112,41 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.update_cache import handler as update_cache
 
     # Register core retrieval tools
-    mcp.tool()(list_tables)
-    mcp.tool()(get_table_schema)
-    mcp.tool()(get_sample_data)
-    mcp.tool()(search_relevant_tables)
-    mcp.tool()(get_semantic_subgraph)
-    mcp.tool()(get_semantic_definitions)
+    mcp.tool(name="list_tables")(list_tables)
+    mcp.tool(name="get_table_schema")(get_table_schema)
+    mcp.tool(name="get_sample_data")(get_sample_data)
+    mcp.tool(name="search_relevant_tables")(search_relevant_tables)
+    mcp.tool(name="get_semantic_subgraph")(get_semantic_subgraph)
+    mcp.tool(name="get_semantic_definitions")(get_semantic_definitions)
 
     # Register execution tools
-    mcp.tool()(execute_sql_query)
+    mcp.tool(name="execute_sql_query")(execute_sql_query)
 
     # Register validation tools
-    mcp.tool()(resolve_ambiguity)
+    mcp.tool(name="resolve_ambiguity")(resolve_ambiguity)
 
     # Register cache tools
-    mcp.tool()(lookup_cache)
-    mcp.tool()(update_cache)
-    mcp.tool()(get_few_shot_examples)
+    mcp.tool(name="lookup_cache")(lookup_cache)
+    mcp.tool(name="update_cache")(update_cache)
+    mcp.tool(name="get_few_shot_examples")(get_few_shot_examples)
 
     # Register conversation tools
-    mcp.tool()(save_conversation_state)
-    mcp.tool()(load_conversation_state)
+    mcp.tool(name="save_conversation_state")(save_conversation_state)
+    mcp.tool(name="load_conversation_state")(load_conversation_state)
 
     # Register interaction tools
-    mcp.tool()(create_interaction)
-    mcp.tool()(update_interaction)
+    mcp.tool(name="create_interaction")(create_interaction)
+    mcp.tool(name="update_interaction")(update_interaction)
 
     # Register feedback tools
-    mcp.tool()(submit_feedback)
+    mcp.tool(name="submit_feedback")(submit_feedback)
 
     # Register admin tools
-    mcp.tool()(list_interactions)
-    mcp.tool()(get_interaction_details)
-    mcp.tool()(approve_interaction)
-    mcp.tool()(reject_interaction)
-    mcp.tool()(export_approved_to_fewshot)
-    mcp.tool()(list_approved_examples)
+    mcp.tool(name="list_interactions")(list_interactions)
+    mcp.tool(name="get_interaction_details")(get_interaction_details)
+    mcp.tool(name="approve_interaction")(approve_interaction)
+    mcp.tool(name="reject_interaction")(reject_interaction)
+    mcp.tool(name="export_approved_to_fewshot")(export_approved_to_fewshot)
+    mcp.tool(name="list_approved_examples")(list_approved_examples)
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

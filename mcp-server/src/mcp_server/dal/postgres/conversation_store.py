@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from mcp_server.config.database import Database
+from mcp_server.config.control_plane import ControlPlaneDatabase
 from mcp_server.dal.interfaces.conversation_store import ConversationStore
 
 
@@ -20,7 +20,7 @@ class PostgresConversationStore(ConversationStore):
         if self.db:
             yield self.db
         else:
-            async with Database.get_connection() as conn:
+            async with ControlPlaneDatabase.get_connection() as conn:
                 yield conn
 
     async def save_state_async(

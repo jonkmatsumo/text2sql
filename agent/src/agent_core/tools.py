@@ -7,7 +7,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 load_dotenv()
 
-# Default URL for streamable-http transport (endpoint is /messages)
+# Default URL for sse transport (endpoint is /messages)
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
 
 
@@ -27,12 +27,12 @@ async def get_mcp_tools():
     """
     mcp_url = os.getenv("MCP_SERVER_URL", DEFAULT_MCP_URL)
 
-    # Use sse transport for streamable-http server (requires text/event-stream)
+    # Use sse transport for compatibility
     client = MultiServerMCPClient(
         {
             "data-layer": {
                 "url": mcp_url,
-                "transport": "http",
+                "transport": "sse",
             }
         }
     )

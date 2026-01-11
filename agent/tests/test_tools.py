@@ -49,7 +49,7 @@ class TestGetMcpTools:
             {
                 "data-layer": {
                     "url": "http://localhost:8000/mcp",
-                    "transport": "http",
+                    "transport": "sse",
                 }
             }
         )
@@ -84,7 +84,7 @@ class TestGetMcpTools:
             {
                 "data-layer": {
                     "url": "http://localhost:8000/messages",
-                    "transport": "http",
+                    "transport": "sse",
                 }
             }
         )
@@ -111,7 +111,7 @@ class TestGetMcpTools:
             {
                 "data-layer": {
                     "url": "http://custom-host:9000/mcp",
-                    "transport": "http",
+                    "transport": "sse",
                 }
             }
         )
@@ -131,7 +131,7 @@ class TestGetMcpTools:
         # Verify server name is 'data-layer'
         call_args = mock_client_class.call_args[0][0]
         assert "data-layer" in call_args
-        assert call_args["data-layer"]["transport"] == "http"
+        assert call_args["data-layer"]["transport"] == "sse"
 
     @pytest.mark.asyncio
     @patch("agent_core.tools.MultiServerMCPClient")
@@ -147,7 +147,7 @@ class TestGetMcpTools:
 
         # Verify transport is 'sse'
         call_args = mock_client_class.call_args[0][0]
-        assert call_args["data-layer"]["transport"] == "http"
+        assert call_args["data-layer"]["transport"] == "sse"
 
     @pytest.mark.asyncio
     @patch("agent_core.tools.MultiServerMCPClient")

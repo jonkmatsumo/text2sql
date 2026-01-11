@@ -40,7 +40,11 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
             if subgraph_tool:
                 # Execute subgraph retrieval
-                subgraph_json = await subgraph_tool.ainvoke({"query": active_query})
+                payload = {"query": active_query}
+                tenant_id = state.get("tenant_id")
+                if tenant_id is not None:
+                    payload["tenant_id"] = tenant_id
+                subgraph_json = await subgraph_tool.ainvoke(payload)
 
                 if subgraph_json:
                     try:

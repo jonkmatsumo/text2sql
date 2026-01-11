@@ -2,7 +2,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import Any, List, Optional
 
-from mcp_server.config.database import Database
+from mcp_server.config.control_plane import ControlPlaneDatabase
 from mcp_server.dal.interfaces.interaction_store import InteractionStore
 
 
@@ -19,7 +19,7 @@ class PostgresInteractionStore(InteractionStore):
         if self.db:
             yield self.db
         else:
-            async with Database.get_connection() as conn:
+            async with ControlPlaneDatabase.get_connection() as conn:
                 yield conn
 
     async def create_interaction(

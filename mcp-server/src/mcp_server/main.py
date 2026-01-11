@@ -70,9 +70,9 @@ if __name__ == "__main__":
     port = int(os.getenv("MCP_PORT", "8000"))
 
     if transport in ("sse", "http", "streamable-http"):
-        # We standardize on streamable-http for bidirectional support.
-        # This replaces the more basic SSE transport and aligns with agent client.
-        print(f"🚀 Starting MCP server in streamable-http mode on {host}:{port}/messages")
-        mcp.run(transport="streamable-http", host=host, port=port, path="/messages")
+        # We standardize on sse transport to be compatible with langchain-mcp-adapters
+        # which does not yet support the session requirements of streamable-http.
+        print(f"🚀 Starting MCP server in sse mode on {host}:{port}/messages")
+        mcp.run(transport="sse", host=host, port=port, path="/messages")
     else:
         mcp.run(transport="stdio")

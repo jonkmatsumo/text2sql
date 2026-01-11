@@ -4,6 +4,7 @@ This module extracts relevant mentions from user queries and maps them to
 candidate elements in the database schema context.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -154,16 +155,16 @@ class CandidateBinder:
 
             # 1. Table Matching
             table_score = self._calculate_lexical_score(mention_text, table_name)
-            if table_score > 0.6:
-                candidates.append(
-                    Candidate(
-                        kind="table",
-                        id=table["name"],
-                        label=table.get("description", table["name"]),
-                        scores={"lexical": table_score},
-                        metadata={"table": table["name"]},
-                    )
+            # Remove strict threshold to allow semantic recovery
+            candidates.append(
+                Candidate(
+                    kind="table",
+                    id=table["name"],
+                    label=table.get("description", table["name"]),
+                    scores={"lexical": table_score},
+                    metadata={"table": table["name"]},
                 )
+            )
 
             # 2. Column Matching
             for col in table.get("columns", []):
@@ -178,16 +179,52 @@ class CandidateBinder:
 
                 final_lexical = max(col_score, desc_score)
 
-                if final_lexical > 0.6:
-                    candidates.append(
-                        Candidate(
-                            kind="column",
-                            id=f"{table['name']}.{col['name']}",
-                            label=col.get("description", col["name"]),
-                            scores={"lexical": final_lexical, "relational": 0.5},
-                            metadata={"table": table["name"], "column": col["name"]},
-                        )
+                # Remove strict threshold to allow semantic recovery
+                candidates.append(
+                    Candidate(
+                        kind="column",
+                        id=f"{table['name']}.{col['name']}",
+                        label=col.get("description", col["name"]),
+                        scores={"lexical": final_lexical, "relational": 0.5},
+                        metadata={"table": table["name"], "column": col["name"]},
                     )
+                )
+
+            # 3. Value Matching (from Sample Data)
+            if table.get("sample_data"):
+                try:
+                    samples = []
+                    if isinstance(table["sample_data"], str):
+                        samples = json.loads(table["sample_data"])
+                    elif isinstance(table["sample_data"], list):
+                        samples = table["sample_data"]
+
+                    # We check only the first few rows to avoid perf hit
+                    # though samples is usually small
+                    for row in samples:
+                        for col, val in row.items():
+                            if not val or not isinstance(val, (str, int, float)):
+                                continue
+
+                            val_str = str(val).lower()
+                            score = self._calculate_lexical_score(mention_text, val_str)
+
+                            if score > 0.6:
+                                candidates.append(
+                                    Candidate(
+                                        kind="value",
+                                        id=f"{table['name']}.{col}='{val}'",
+                                        label=f"Value '{val}' in {col}",
+                                        scores={"lexical": score, "relational": 0.4},
+                                        metadata={
+                                            "table": table["name"],
+                                            "column": col,
+                                            "value": val,
+                                        },
+                                    )
+                                )
+                except Exception as e:
+                    logger.debug(f"Failed to parse sample data for {table_name}: {e}")
 
         # Add table matching with boost
         for cand in candidates:

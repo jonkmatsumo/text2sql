@@ -112,7 +112,7 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      MCP_TRANSPORT: "sse"
+      MCP_TRANSPORT: "streamable-http"
       SPACY_ENABLED: "true"
     ports:
       - "8000:8000"
