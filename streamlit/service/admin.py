@@ -4,6 +4,7 @@ This service handles admin operations like reviewing interactions,
 managing few-shot examples, and syncing with the registry.
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -25,7 +26,30 @@ class AdminService:
             tool = next((t for t in tools if t.name == tool_name), None)
             if not tool:
                 return {"error": f"Tool {tool_name} not found"}
-            return await tool.ainvoke(args)
+
+            result = await tool.ainvoke(args)
+
+            # Unpack MCP content if needed
+            # LangChain MCP adapter returns a list of dicts like [{'type': 'text', 'text': '...'}]
+            if (
+                isinstance(result, list)
+                and result
+                and isinstance(result[0], dict)
+                and "type" in result[0]
+            ):
+                text_content = ""
+                for item in result:
+                    if item.get("type") == "text":
+                        text_content += item.get("text", "")
+
+                # Try parsing as JSON
+                if text_content.strip():
+                    try:
+                        return json.loads(text_content)
+                    except json.JSONDecodeError:
+                        return text_content
+
+            return result
         except Exception as e:
             return {"error": str(e)}
 
