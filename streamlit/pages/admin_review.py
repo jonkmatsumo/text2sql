@@ -9,7 +9,8 @@ import pandas as pd
 import streamlit as st
 
 # Add agent src to path for tools
-sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
+# Since this is in pages/, we go up three levels to reach the root
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
 
 from agent_core.tools import get_mcp_tools  # noqa: E402
 
