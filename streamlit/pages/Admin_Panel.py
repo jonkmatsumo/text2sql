@@ -67,9 +67,10 @@ def main():
 
                 for _, row in df.iterrows():
                     cols = st.columns([2, 1, 1, 1, 1])
-                    cols[0].write(row["user_nlq_text"])
-                    cols[1].write(row["execution_status"])
-                    thumb = row["thumb"] if row["thumb"] else "-"
+                    cols[0].write(row.get("user_nlq_text", "Unknown Query"))
+                    cols[1].write(row.get("execution_status", "UNKNOWN"))
+                    thumb = row.get("thumb")
+                    thumb = thumb if thumb else "-"
                     cols[2].write(thumb)
                     # Handle potential non-datetime timestamp if raw string
                     created_at = row.get("created_at", "")
