@@ -94,5 +94,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         return {
             "schema_context": context_str,
+            "raw_schema_context": (
+                graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+            ),
             "table_names": table_names,
         }

@@ -6,9 +6,13 @@ This module implements the entry point that:
 3. Routes to clarification or retrieval based on ambiguity detection
 """
 
+import json
+
 import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
+from agent_core.tools import get_mcp_tools
+from agent_core.utils.parsing import parse_tool_output
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -25,80 +29,23 @@ DO NOT answer the question. JUST rephrase it.
 If the latest question is already standalone, return it as is.
 """
 
-# Ambiguity taxonomy based on common enterprise data ambiguities
-AMBIGUITY_TAXONOMY = {
-    "UNCLEAR_SCHEMA_REFERENCE": {
-        "description": "Multiple tables contain the referenced column or entity",
-        "example": "'region' exists in both Customer and Store tables",
-        "question_template": ("Do you mean the {entity} from {option_a} or {option_b}?"),
-    },
-    "UNCLEAR_VALUE_REFERENCE": {
-        "description": "Value exists in multiple contexts",
-        "example": "'Fresno' is both a City name and a County name",
-        "question_template": "Are you referring to {value} as a {option_a} or {option_b}?",
-    },
-    "MISSING_TEMPORAL_CONSTRAINT": {
-        "description": "Query requires date range but none specified",
-        "example": "'Show total sales' without specifying time period",
-        "question_template": (
-            "Would you like {metric} for the current {period}, " "or a specific date range?"
-        ),
-    },
-    "LOGICAL_METRIC_CONFLICT": {
-        "description": "Multiple metrics could satisfy 'top', 'best', 'highest'",
-        "example": "'Top customers' could be by spend, frequency, or recency",
-        "question_template": "Should '{qualifier}' be calculated by {option_a} or {option_b}?",
-    },
-    "MISSING_FILTER_CRITERIA": {
-        "description": "Query could apply to multiple subsets without filter",
-        "example": "'Show orders' without specifying status or category",
-        "question_template": "Would you like to see all {entity}, or filter by {filter_options}?",
-    },
-}
+CLARIFICATION_SYSTEM_PROMPT = """You are a helpful data assistant.
+An ambiguity or missing data issue was detected in a user's SQL query.
 
+Your task:
+1. If the status is AMBIGUOUS: Generate a polite clarification question
+   based ONLY on the provided options.
+   NEVER expose schema names or invent new options.
+2. If the status is MISSING: Generate a helpful refusal message
+   explaining what's missing and suggest alternatives based on the Schema Context.
 
-ROUTER_SYSTEM_PROMPT = """You are a Helpful SQL Assistant.
-You will be provided with a User Query and a "Schema Context".
-
-Your Goal: Route the query to the Planner unless it is IMPOSSIBLE to answer.
-
-## GUIDING PRINCIPLES
-
-1. **BE HELPFUL & PERMISSIVE**:
-    - If a user's term is vague (e.g., "rated", "best", "top") but maps to *something* in the
-      schema (e.g., `film.rating`), **ASSUME THAT MAPPING**.
-    - DO NOT ask for clarification about "missing data" unless the user *explicitly* asks for a
-      column you definitely don't have (e.g., "user reviews" or "star rating").
-    - Example: "most rated movies" -> Assume "most films in a rating category" or "popular rental".
-      DO NOT refuse because you lack "user reviews".
-    - Example: "best actors" -> Assume "actors with most films".
-
-2. **NO HALLUCINATION**:
-   - Do not invent columns. But if a column *exists* that is a reasonable proxy for the user's term
-     (lexically or semantically), use it.
-
-3. **CLARIFY ONLY IF NECESSARY**:
-   - Only ask if there are two EQUALLY likely valid interpretations in the Schema.
-    - If one interpretation is "Missing Data" and the other is "Available Column",
-      CHOOSE THE AVAILABLE COLUMN.
-
-4. **OUTPUT FORMAT**:
-   - If you proceed, set `is_ambiguous: false`.
-    - If you must refuse, set `is_ambiguous: true`, `ambiguity_type: "MISSING_DATA"`,
-      and provide a helpful message.
+## Ambiguity Data
+{ambiguity_data}
 
 ## Schema Context
 {schema_context}
 
-## Output Schema (JSON)
-{{
-    "is_ambiguous": boolean,
-    "ambiguity_type": "string" or null,
-    "clarification_question": "string" or null,
-    "missing_data": "string" or null,
-    "hard_refusal_message": "string" or null,
-    "assumptions": ["List of assumptions made"]
-}}
+Output ONLY the question or refusal message for the user.
 """
 
 
@@ -178,91 +125,60 @@ async def router_node(state: AgentState) -> dict:
             span.set_outputs({"error": "No query to route"})
             return {}
 
-        # 3. Ambiguity Detection (on active_query)
+        # 3. Deterministic Ambiguity Detection
         # ---------------------------------------------------------------------
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", ROUTER_SYSTEM_PROMPT),
-                (
-                    "user",
-                    "Analyze this query for ambiguity: {question}",
-                ),
-            ]
-        )
+        tools = await get_mcp_tools()
+        resolver_tool = next((t for t in tools if t.name == "resolve_ambiguity_tool"), None)
 
-        chain = prompt | llm
+        raw_schema = state.get("raw_schema_context", [])
+        res_data = {"status": "CLEAR"}  # Fallback
 
-        response = chain.invoke(
-            {
-                "schema_context": schema_context,
-                "question": active_query,
-            }
-        )
+        if resolver_tool:
+            res_json = await resolver_tool.ainvoke(
+                {"query": active_query, "schema_context": raw_schema}
+            )
+            parsed_res = parse_tool_output(res_json)
+            if isinstance(parsed_res, list) and len(parsed_res) > 0:
+                res_data = parsed_res[0]
+        else:
+            print("Warning: resolve_ambiguity_tool not found.")
 
-        # Parse JSON response
-        import json
+        status = res_data.get("status", "CLEAR")
+        span.set_attribute("resolution_status", status)
 
-        response_text = response.content.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-
-        try:
-            analysis = json.loads(response_text)
-        except json.JSONDecodeError:
-            # Default to non-ambiguous if parsing fails
-            analysis = {"is_ambiguous": False, "confidence": 0.5}
-
-        is_ambiguous = analysis.get("is_ambiguous", False)
-        confidence = analysis.get("confidence", 1.0)
-        missing_data = analysis.get("missing_data")
-        hard_refusal_message = analysis.get("hard_refusal_message")
-
-        span.set_attribute("is_ambiguous", str(is_ambiguous))
-        span.set_attribute("confidence", str(confidence))
-        if missing_data:
-            span.set_attribute("missing_data", missing_data)
-
-        # FAIL-FAST: If data is missing, return hard refusal as clarification
-        if missing_data and hard_refusal_message:
-            span.set_outputs(
+        if status in ("AMBIGUOUS", "MISSING"):
+            # Use LLM to phrase the question/refusal nicely
+            prompt = ChatPromptTemplate.from_messages([("system", CLARIFICATION_SYSTEM_PROMPT)])
+            chain = prompt | llm
+            response = await chain.ainvoke(
                 {
-                    "action": "hard_refusal",
-                    "missing_data": missing_data,
+                    "ambiguity_data": json.dumps(res_data),
+                    "schema_context": schema_context,
                 }
             )
-            return {
-                "ambiguity_type": "MISSING_DATA",
-                "clarification_question": hard_refusal_message,
-                "active_query": active_query,
-            }
 
-        # GENUINE AMBIGUITY: Route to clarify
-        if is_ambiguous and confidence < 0.8:
-            ambiguity_type = analysis.get("ambiguity_type")
-            clarification_question = analysis.get(
-                "clarification_question",
-                "Could you please clarify your question?",
-            )
+            clarification_msg = response.content.strip()
+            ambiguity_type = "AMBIGUOUS" if status == "AMBIGUOUS" else "MISSING_DATA"
 
             span.set_outputs(
                 {
-                    "action": "clarify",
+                    "action": "clarify" if status == "AMBIGUOUS" else "refuse",
                     "ambiguity_type": ambiguity_type,
                 }
             )
 
             return {
                 "ambiguity_type": ambiguity_type,
-                "clarification_question": clarification_question,
+                "clarification_question": clarification_msg,
                 "active_query": active_query,
+                "resolved_bindings": res_data.get("resolved_bindings", {}),
             }
 
-        # CLEAR QUERY: Proceed to plan (schema already retrieved)
+        # CLEAR QUERY: Proceed to plan
         span.set_outputs({"action": "plan"})
         return {
             "ambiguity_type": None,
             "clarification_question": None,
             "active_query": active_query,
+            "resolved_bindings": res_data.get("resolved_bindings", {}),
         }

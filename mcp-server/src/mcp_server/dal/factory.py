@@ -25,7 +25,7 @@ Example:
 
 import logging
 import os
-from typing import Dict, Optional, Type
+from typing import Optional
 
 from mcp_server.dal.env import get_provider_env
 from mcp_server.dal.interfaces import (
@@ -33,6 +33,7 @@ from mcp_server.dal.interfaces import (
     ExampleStore,
     GraphStore,
     MetadataStore,
+    RegistryStore,
     SchemaIntrospector,
     SchemaStore,
 )
@@ -41,6 +42,7 @@ from mcp_server.dal.postgres import (
     PgSemanticCache,
     PostgresExampleStore,
     PostgresMetadataStore,
+    PostgresRegistryStore,
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
 )
@@ -53,31 +55,35 @@ logger = logging.getLogger(__name__)
 # Provider Registries
 # =============================================================================
 
-GRAPH_STORE_PROVIDERS: Dict[str, Type[GraphStore]] = {
+GRAPH_STORE_PROVIDERS: dict[str, type[GraphStore]] = {
     "memgraph": MemgraphStore,
 }
 
-CACHE_STORE_PROVIDERS: Dict[str, Type[CacheStore]] = {
+CACHE_STORE_PROVIDERS: dict[str, type[CacheStore]] = {
     "postgres": PgSemanticCache,
 }
 
-EXAMPLE_STORE_PROVIDERS: Dict[str, Type[ExampleStore]] = {
+EXAMPLE_STORE_PROVIDERS: dict[str, type[ExampleStore]] = {
     "postgres": PostgresExampleStore,
 }
 
-SCHEMA_STORE_PROVIDERS: Dict[str, Type[SchemaStore]] = {
+SCHEMA_STORE_PROVIDERS: dict[str, type[SchemaStore]] = {
     "postgres": PostgresSchemaStore,
 }
 
-SCHEMA_INTROSPECTOR_PROVIDERS: Dict[str, Type[SchemaIntrospector]] = {
+SCHEMA_INTROSPECTOR_PROVIDERS: dict[str, type[SchemaIntrospector]] = {
     "postgres": PostgresSchemaIntrospector,
 }
 
-METADATA_STORE_PROVIDERS: Dict[str, Type[MetadataStore]] = {
+METADATA_STORE_PROVIDERS: dict[str, type[MetadataStore]] = {
     "postgres": PostgresMetadataStore,
 }
 
-RETRIEVER_PROVIDERS: Dict[str, Type[DataSchemaRetriever]] = {
+REGISTRY_STORE_PROVIDERS: dict[str, type[RegistryStore]] = {
+    "postgres": PostgresRegistryStore,
+}
+
+RETRIEVER_PROVIDERS: dict[str, type[DataSchemaRetriever]] = {
     "postgres": PostgresRetriever,
 }
 
@@ -91,6 +97,7 @@ _example_store: Optional[ExampleStore] = None
 _schema_store: Optional[SchemaStore] = None
 _schema_introspector: Optional[SchemaIntrospector] = None
 _metadata_store: Optional[MetadataStore] = None
+_registry_store: Optional[RegistryStore] = None
 _retriever: Optional[DataSchemaRetriever] = None
 
 
@@ -190,6 +197,30 @@ def get_example_store() -> ExampleStore:
     return _example_store
 
 
+def get_registry_store() -> RegistryStore:
+    """Get or create the singleton RegistryStore instance.
+
+    Provider is selected via REGISTRY_STORE_PROVIDER env var.
+    Default: "postgres" (PostgresRegistryStore)
+
+    Returns:
+        The singleton RegistryStore instance.
+    """
+    global _registry_store
+    if _registry_store is None:
+        provider = get_provider_env(
+            "REGISTRY_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(REGISTRY_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing RegistryStore with provider: {provider}")
+
+        store_cls = REGISTRY_STORE_PROVIDERS[provider]
+        _registry_store = store_cls()
+
+    return _registry_store
+
+
 def get_schema_store() -> SchemaStore:
     """Get or create the singleton SchemaStore instance.
 
@@ -282,7 +313,7 @@ def reset_singletons() -> None:
     This allows tests to reinitialize stores with different providers.
     Should not be called in production code.
     """
-    global _graph_store, _cache_store, _example_store
+    global _graph_store, _cache_store, _example_store, _registry_store
     global _schema_store, _schema_introspector, _metadata_store, _retriever
 
     _graph_store = None
@@ -291,6 +322,7 @@ def reset_singletons() -> None:
     _schema_store = None
     _schema_introspector = None
     _metadata_store = None
+    _registry_store = None
     _retriever = None
 
 

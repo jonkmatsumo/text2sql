@@ -85,9 +85,13 @@ class CanonicalizationService:
 
         # Load patterns from files
         # Load patterns from files
-        # Priority: Env Var -> /app/patterns (Docker) -> Package (Local Dev)
+        # Priority: Env Var -> /app/patterns -> local dev project paths -> package path
         env_path = os.getenv("PATTERNS_DIR")
         docker_path = Path("/app/patterns")
+        dev_path = (
+            Path(__file__).parent.parent.parent.parent.parent.parent
+            / "database/query-target/patterns"
+        )
         package_path = Path(__file__).parent.parent.parent / "patterns"
 
         if env_path and Path(env_path).exists():
@@ -96,6 +100,9 @@ class CanonicalizationService:
         elif docker_path.exists():
             patterns_dir = docker_path
             logger.info(f"Loading patterns from Docker path: {patterns_dir}")
+        elif dev_path.exists():
+            patterns_dir = dev_path
+            logger.info(f"Loading patterns from dev path: {patterns_dir}")
         else:
             patterns_dir = package_path
             logger.info(f"Loading patterns from package path: {patterns_dir}")

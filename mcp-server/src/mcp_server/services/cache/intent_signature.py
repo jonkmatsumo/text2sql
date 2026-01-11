@@ -13,16 +13,7 @@ from typing import Any, Dict, Optional
 
 @dataclass
 class IntentSignature:
-    """Canonical representation of query intent for cache keying.
-
-    Attributes:
-        intent: High-level intent name (e.g., "top_actors_by_film_count")
-        entity: Primary entity (e.g., "actor")
-        item: Secondary entity (e.g., "film")
-        metric: Aggregation type (e.g., "count_distinct")
-        filters: Hard filter constraints (e.g., {"rating": "G"})
-        ranking: Ranking parameters (e.g., {"limit": 10, "include_ties": True})
-    """
+    """Canonical representation of query intent for cache keying."""
 
     intent: Optional[str] = None
     entity: Optional[str] = None
@@ -32,12 +23,7 @@ class IntentSignature:
     ranking: Dict[str, Any] = field(default_factory=dict)
 
     def to_canonical_json(self) -> str:
-        """Convert to canonical JSON with stable key ordering.
-
-        Returns:
-            JSON string with sorted keys, lowercase values, no extra whitespace.
-        """
-        # Build canonical dict with only non-None values
+        """Convert to canonical JSON with stable key ordering."""
         canonical = {}
         if self.intent:
             canonical["intent"] = self.intent.lower()
@@ -48,7 +34,6 @@ class IntentSignature:
         if self.metric:
             canonical["metric"] = self.metric.lower()
         if self.filters:
-            # Sort filter keys and normalize values
             canonical["filters"] = {
                 k.lower(): v.upper() if k == "rating" else str(v).lower()
                 for k, v in sorted(self.filters.items())
@@ -59,11 +44,7 @@ class IntentSignature:
         return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
 
     def compute_key(self) -> str:
-        """Compute SHA256 hash of canonical JSON as cache key.
-
-        Returns:
-            64-character hex string.
-        """
+        """Compute SHA256 hash of canonical JSON as cache key."""
         canonical = self.to_canonical_json()
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -99,20 +80,7 @@ def build_signature_from_constraints(
     entity: Optional[str] = None,
     metric: Optional[str] = None,
 ) -> IntentSignature:
-    """Build an IntentSignature from extracted constraints.
-
-    Args:
-        query: Original query (used for intent inference).
-        rating: Extracted rating constraint.
-        limit: Extracted limit constraint.
-        include_ties: Whether ties are included.
-        entity: Primary entity (actor, film, etc.).
-        metric: Aggregation metric.
-
-    Returns:
-        IntentSignature with populated fields.
-    """
-    # Infer intent from query patterns
+    """Build an IntentSignature from extracted constraints."""
     intent = None
     query_lower = query.lower()
     if "top" in query_lower and entity == "actor":
@@ -123,12 +91,10 @@ def build_signature_from_constraints(
     elif "top" in query_lower and entity == "film":
         intent = "top_films"
 
-    # Build filters
     filters = {}
     if rating:
         filters["rating"] = rating
 
-    # Build ranking
     ranking = {}
     if limit:
         ranking["limit"] = limit

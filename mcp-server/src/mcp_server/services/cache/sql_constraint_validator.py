@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import sqlglot
-from agent_core.cache.constraint_extractor import QueryConstraints
+from mcp_server.services.cache.constraint_extractor import QueryConstraints
 from sqlglot import exp
 
 
@@ -50,34 +50,17 @@ class ValidationResult:
         }
 
 
-# Valid MPAA ratings for validation
 VALID_RATINGS = frozenset({"G", "PG", "PG-13", "R", "NC-17"})
 
 
 def extract_rating_from_sql(sql: str) -> Optional[str]:
-    """
-    Extract rating predicate value from SQL WHERE clause.
-
-    Handles patterns like:
-    - WHERE rating = 'PG'
-    - WHERE f.rating = 'G'
-    - WHERE film.rating IN ('PG', 'G')
-
-    Args:
-        sql: SQL query string
-
-    Returns:
-        Extracted rating value or None if not found
-    """
+    """Extract rating predicate value from SQL WHERE clause."""
     try:
         ast = sqlglot.parse_one(sql, dialect="postgres")
     except Exception:
-        # Fallback to regex if AST parsing fails
         return _extract_rating_regex(sql)
 
-    # Find WHERE clause predicates
     for eq in ast.find_all(exp.EQ):
-        # Check if left side references 'rating' column
         left = eq.left
         if isinstance(left, exp.Column) and left.name.lower() == "rating":
             right = eq.right
@@ -86,23 +69,19 @@ def extract_rating_from_sql(sql: str) -> Optional[str]:
                 if rating in VALID_RATINGS:
                     return rating
 
-    # Check for IN expressions
     for in_expr in ast.find_all(exp.In):
         if isinstance(in_expr.this, exp.Column) and in_expr.this.name.lower() == "rating":
-            # For IN, return first rating found (limitation: doesn't handle multi-rating)
             for val in in_expr.expressions:
                 if isinstance(val, exp.Literal) and val.is_string:
                     rating = val.this.upper()
                     if rating in VALID_RATINGS:
                         return rating
 
-    # Fallback to regex
     return _extract_rating_regex(sql)
 
 
 def _extract_rating_regex(sql: str) -> Optional[str]:
     """Regex fallback for rating extraction."""
-    # Pattern: rating = 'X' or rating='X'
     patterns = [
         r"rating\s*=\s*'(NC-17|PG-13|PG|G|R)'",
         r'rating\s*=\s*"(NC-17|PG-13|PG|G|R)"',
@@ -115,21 +94,12 @@ def _extract_rating_regex(sql: str) -> Optional[str]:
 
 
 def extract_limit_from_sql(sql: str) -> Optional[int]:
-    """
-    Extract LIMIT value from SQL query.
-
-    Args:
-        sql: SQL query string
-
-    Returns:
-        LIMIT value or None if not found
-    """
+    """Extract LIMIT value from SQL query."""
     try:
         ast = sqlglot.parse_one(sql, dialect="postgres")
     except Exception:
         return _extract_limit_regex(sql)
 
-    # Find LIMIT clause
     limit_expr = ast.find(exp.Limit)
     if limit_expr and limit_expr.expression:
         if isinstance(limit_expr.expression, exp.Literal):
@@ -150,60 +120,39 @@ def _extract_limit_regex(sql: str) -> Optional[int]:
 
 
 def validate_sql_constraints(sql: str, constraints: QueryConstraints) -> ValidationResult:
-    """
-    Validate that a SQL query satisfies the given constraints.
-
-    Performs deterministic AST-based validation:
-    - Rating: WHERE clause must contain correct rating predicate
-    - Limit: LIMIT clause must match expected value (if specified)
-
-    Args:
-        sql: SQL query string to validate
-        constraints: Extracted constraints from user query
-
-    Returns:
-        ValidationResult with is_valid flag and any mismatches
-    """
+    """Validate that a SQL query satisfies the given constraints."""
     mismatches = []
     extracted = {}
 
-    # Validate rating constraint
     if constraints.rating:
         sql_rating = extract_rating_from_sql(sql)
         extracted["rating"] = sql_rating
 
         if sql_rating is None:
+            msg = f"Expected rating '{constraints.rating}' but " "no rating predicate found in SQL"
             mismatches.append(
                 ConstraintMismatch(
                     constraint_type="rating",
                     expected=constraints.rating,
                     found=None,
-                    message=(
-                        f"Expected rating '{constraints.rating}' "
-                        "but no rating predicate found in SQL"
-                    ),
+                    message=msg,
                 )
             )
         elif sql_rating != constraints.rating:
+            msg = f"Rating mismatch: expected '{constraints.rating}', found '{sql_rating}'"
             mismatches.append(
                 ConstraintMismatch(
                     constraint_type="rating",
                     expected=constraints.rating,
                     found=sql_rating,
-                    message=(
-                        f"Rating mismatch: expected '{constraints.rating}', "
-                        f"found '{sql_rating}'"
-                    ),
+                    message=msg,
                 )
             )
 
-    # Validate limit constraint (optional - only if constraints.limit is set)
     if constraints.limit:
         sql_limit = extract_limit_from_sql(sql)
         extracted["limit"] = sql_limit
 
-        # Note: We allow SQL to have a different limit if include_ties is true
-        # because WITH TIES may return more rows
         if sql_limit and not constraints.include_ties:
             if sql_limit != constraints.limit:
                 mismatches.append(

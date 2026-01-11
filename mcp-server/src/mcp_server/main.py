@@ -6,7 +6,7 @@ This module initializes the FastMCP server and registers all database tools.
 import json
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastmcp import Context, FastMCP
@@ -20,6 +20,7 @@ from mcp_server.tools import (
     get_semantic_subgraph,
     get_table_schema,
     list_tables,
+    resolve_ambiguity,
     search_relevant_tables,
 )
 
@@ -188,6 +189,18 @@ async def search_relevant_tables_tool(user_query: str, limit: int = 5, ctx: Cont
     """
     tenant_id = extract_tenant_id(ctx) if ctx else None
     return await search_relevant_tables(user_query, limit, tenant_id)
+
+
+@mcp.tool()
+async def resolve_ambiguity_tool(
+    query: str, schema_context: List[Dict[str, Any]], ctx: Context = None
+) -> str:
+    """
+    Resolve potential ambiguities in a user query against provided schema context.
+
+    Returns JSON string with resolution status and bindings.
+    """
+    return await resolve_ambiguity(query, schema_context)
 
 
 @mcp.tool()

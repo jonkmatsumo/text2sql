@@ -1,12 +1,8 @@
-"""Constraint extraction from natural language queries (defense-in-depth).
+"""Constraint extraction from natural language queries (deterministic regex).
 
 This module extracts hard constraints (rating, limit, ties, entity, metric)
 from user queries using deterministic regex patterns. These constraints are
 used to validate cached SQL before serving.
-
-Note: Primary constraint extraction and fingerprinting is now handled by
-the MCP server's CanonicalizationService (SpaCy-based). This agent-side
-extraction serves as a secondary validation layer for defense-in-depth.
 """
 
 import re
@@ -45,7 +41,6 @@ class QueryConstraints:
 
 
 # Rating patterns ordered by specificity (longer/more specific first)
-# This ensures NC-17 matches before N, PG-13 before PG, etc.
 RATING_PATTERNS = [
     (r"\bNC[-\s]?17\b", "NC-17"),
     (r"\bPG[-\s]?13\b", "PG-13"),
@@ -53,7 +48,7 @@ RATING_PATTERNS = [
     (r"\bG[- ]?rated\b", "G"),
     (r"\brated[- ]?G\b", "G"),
     (r"\brating\s*[=:]\s*['\"]?G['\"]?\b", "G"),
-    (r"\bG\b(?!\s*films?\s+rated)", "G"),  # Standalone G, not "G films rated"
+    (r"\bG\b(?!\s*films?\s+rated)", "G"),
     (r"\bR\b", "R"),
 ]
 
@@ -81,7 +76,6 @@ SPELLED_NUMBERS = {
     "twenty": 20,
 }
 
-# Build regex pattern for spelled numbers
 SPELLED_NUM_PATTERN = "|".join(SPELLED_NUMBERS.keys())
 
 
@@ -91,25 +85,21 @@ def _parse_spelled_number(m) -> int:
     return SPELLED_NUMBERS.get(word, 0)
 
 
-# Limit patterns
 LIMIT_PATTERNS = [
     (r"\btop\s+(\d+)\b", lambda m: int(m.group(1))),
     (r"\b(\d+)\s+(?:best|top|highest|most)\b", lambda m: int(m.group(1))),
     (r"\blimit\s+(\d+)\b", lambda m: int(m.group(1))),
     (r"\bfirst\s+(\d+)\b", lambda m: int(m.group(1))),
-    # Spelled-out numbers: "top ten", "top five", etc.
     (rf"\btop\s+({SPELLED_NUM_PATTERN})\b", _parse_spelled_number),
     (rf"\b({SPELLED_NUM_PATTERN})\s+(?:best|top|highest|most)\b", _parse_spelled_number),
 ]
 
-# Ties patterns
 TIES_PATTERNS = [
     r"\bincluding\s+ties\b",
     r"\bwith\s+ties\b",
     r"\binclude\s+ties\b",
 ]
 
-# Entity patterns (actor, film, customer, etc.)
 ENTITY_PATTERNS = [
     (r"\bactors?\b", "actor"),
     (r"\bfilms?\b", "film"),
@@ -120,7 +110,6 @@ ENTITY_PATTERNS = [
     (r"\brentals?\b", "rental"),
 ]
 
-# Metric patterns
 METRIC_PATTERNS = [
     (r"\bcount\s+(?:of\s+)?distinct\b", "count_distinct"),
     (r"\bdistinct\s+count\b", "count_distinct"),
@@ -135,26 +124,10 @@ METRIC_PATTERNS = [
 
 
 def extract_constraints(query: str) -> QueryConstraints:
-    """
-    Extract hard constraints from a natural language query.
-
-    Uses deterministic regex patterns with priority ordering to identify:
-    - Rating (NC-17, PG-13, PG, G, R)
-    - Limit (top N, first N)
-    - Include ties
-    - Entity (actor, film, customer)
-    - Metric (count_distinct, sum, avg)
-
-    Args:
-        query: Natural language query string
-
-    Returns:
-        QueryConstraints with extracted values and confidence score
-    """
+    """Extract hard constraints from a natural language query."""
     constraints = QueryConstraints()
     confidence_factors = []
 
-    # Extract rating (priority order: longer patterns first)
     for pattern, rating in RATING_PATTERNS:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.rating = rating
@@ -162,11 +135,9 @@ def extract_constraints(query: str) -> QueryConstraints:
             confidence_factors.append(1.0)
             break
 
-    # If no rating found, reduce confidence
     if not constraints.rating:
         confidence_factors.append(0.3)
 
-    # Extract limit
     for pattern, extractor in LIMIT_PATTERNS:
         match = re.search(pattern, query, re.IGNORECASE)
         if match:
@@ -174,28 +145,24 @@ def extract_constraints(query: str) -> QueryConstraints:
             constraints._matched_patterns.append(f"limit:{pattern}")
             break
 
-    # Check for ties
     for pattern in TIES_PATTERNS:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.include_ties = True
             constraints._matched_patterns.append(f"ties:{pattern}")
             break
 
-    # Extract entity
     for pattern, entity in ENTITY_PATTERNS:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.entity = entity
             constraints._matched_patterns.append(f"entity:{pattern}")
             break
 
-    # Extract metric
     for pattern, metric in METRIC_PATTERNS:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.metric = metric
             constraints._matched_patterns.append(f"metric:{pattern}")
             break
 
-    # Calculate overall confidence
     if confidence_factors:
         constraints.confidence = sum(confidence_factors) / len(confidence_factors)
     else:
@@ -205,30 +172,12 @@ def extract_constraints(query: str) -> QueryConstraints:
 
 
 def normalize_rating(rating_str: str) -> Optional[str]:
-    """
-    Normalize rating string to canonical form.
-
-    Handles variations like:
-    - "pg" -> "PG"
-    - "pg-13" -> "PG-13"
-    - "pg 13" -> "PG-13"
-    - "nc17" -> "NC-17"
-
-    Args:
-        rating_str: Raw rating string
-
-    Returns:
-        Canonical rating or None if unrecognized
-    """
+    """Normalize rating string to canonical form."""
     if not rating_str:
         return None
 
     normalized = rating_str.upper().strip()
-
-    # Handle hyphen/space variations
     normalized = re.sub(r"[-\s]+", "-", normalized)
-
-    # Map to canonical forms
     rating_map = {
         "G": "G",
         "PG": "PG",
@@ -237,5 +186,4 @@ def normalize_rating(rating_str: str) -> Optional[str]:
         "NC-17": "NC-17",
         "NC17": "NC-17",
     }
-
     return rating_map.get(normalized)

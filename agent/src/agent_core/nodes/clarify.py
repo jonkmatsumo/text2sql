@@ -65,6 +65,7 @@ async def clarify_node(state: AgentState) -> dict:
                     "type": "clarification_needed",
                     "question": clarification_question,
                     "ambiguity_type": ambiguity_type,
+                    "resolved_bindings": state.get("resolved_bindings", {}),
                 }
             )
 
