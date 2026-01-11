@@ -33,6 +33,7 @@ async def handler(limit: int = 10) -> dict:
                 metadata={
                     "interaction_id": item["interaction_id"],
                     "resolution_type": item["resolution_type"],
+                    "source": "user_feedback",
                 },
             )
 

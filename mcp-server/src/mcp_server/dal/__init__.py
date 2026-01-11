@@ -4,6 +4,13 @@ This package exposes the core interfaces and implementation-agnostic contexts fo
 including the Function Call Context for tenant isolation.
 """
 
+from mcp_server.utils.tenant_context import (
+    get_current_tenant,
+    reset_tenant_context,
+    set_current_tenant,
+    tenant_context,
+)
+
 from .interfaces.cache_store import CacheStore
 from .interfaces.example_store import ExampleStore
 from .interfaces.extended_vector_index import ExtendedVectorIndex
@@ -11,12 +18,6 @@ from .interfaces.graph_store import GraphStore
 from .interfaces.metadata_store import MetadataStore
 from .interfaces.schema_introspector import SchemaIntrospector
 from .interfaces.schema_store import SchemaStore
-from .util.context import (
-    get_current_tenant,
-    reset_tenant_context,
-    set_current_tenant,
-    tenant_context,
-)
 
 __all__ = [
     "get_current_tenant",

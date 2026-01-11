@@ -11,7 +11,6 @@ from pathlib import Path
 
 from mcp_server.config.database import Database
 from mcp_server.dal.factory import get_schema_introspector
-from mcp_server.seeding.loader import load_from_directory, load_table_summaries
 from mcp_server.services.ingestion.graph_hydrator import GraphHydrator
 from mcp_server.services.rag.engine import (
     RagEngine,
@@ -19,6 +18,7 @@ from mcp_server.services.rag.engine import (
     generate_schema_document,
 )
 from mcp_server.services.registry import RegistryService
+from mcp_server.services.seeding.loader import load_from_directory, load_table_summaries
 
 
 async def _ingest_graph_schema():

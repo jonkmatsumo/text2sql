@@ -9,10 +9,10 @@ This script introspects the database to generate dynamic patterns for:
 Run this whenever the database schema changes or new enum values are added.
 
 Usage:
-    python -m mcp_server.scripts.generate_patterns
+    python -m mcp_server.services.patterns.generator
 
 Or from project root:
-    docker exec text2sql_core python -m mcp_server.scripts.generate_patterns
+    docker exec text2sql_core python -m mcp_server.services.patterns.generator
 """
 
 import asyncio
@@ -65,7 +65,6 @@ async def main() -> None:
     patterns = await generate_entity_patterns()
 
     # Write to JSONL file
-    # Write to JSONL file
     import os
 
     env_path = os.getenv("PATTERNS_DIR")
@@ -75,11 +74,10 @@ async def main() -> None:
         output_dir = Path("/app/patterns")
     else:
         # Fallback for local run: ../../../database/query-target/patterns
-        # Script is at mcp-server/src/mcp_server/scripts/generate_patterns.py
-        # root is 5 levels up?
-        # mcp-server (3 up) -> text2sql (4 up)
+        # Script is at mcp-server/src/mcp_server/services/patterns/generator.py
+        # root is 6 levels up
         output_dir = (
-            Path(__file__).parent.parent.parent.parent.parent
+            Path(__file__).parent.parent.parent.parent.parent.parent
             / "database"
             / "query-target"
             / "patterns"

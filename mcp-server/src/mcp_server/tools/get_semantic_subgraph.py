@@ -156,7 +156,7 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                     )
                     rels_list.append({"source": t_id, "target": c_id, "type": "HAS_COLUMN"})
 
-        from mcp_server.services.schema_linker import SchemaLinker
+        from mcp_server.services.rag.linker import SchemaLinker
 
         # Dense Schema Linking (Triple-Filter Pruning)
         tables = []

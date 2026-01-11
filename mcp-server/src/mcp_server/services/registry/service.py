@@ -43,7 +43,7 @@ class RegistryService:
             fingerprint = f"RAW:{question.lower().strip()}"
 
         # 2. Generate Embedding
-        embedding = RagEngine.embed_text(question)
+        embedding = await RagEngine.embed_text(question)
 
         # 3. Create Model
         pair = QueryPair(
@@ -89,7 +89,7 @@ class RegistryService:
         role: Optional[str] = None,
     ) -> List[QueryPair]:
         """Search for semantically similar pairs."""
-        embedding = RagEngine.embed_text(question)
+        embedding = await RagEngine.embed_text(question)
         store = get_registry_store()
         return await store.lookup_semantic_candidates(
             embedding, tenant_id, threshold=threshold, limit=limit, role=role
