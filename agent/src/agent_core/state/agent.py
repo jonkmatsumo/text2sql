@@ -25,6 +25,9 @@ class AgentState(TypedDict):
     # Context retrieved from RAG (Schema DDLs + Semantic Definitions)
     schema_context: str
 
+    # Raw schema context (list of node dictionaries) for tool consumption
+    raw_schema_context: Optional[List[dict]]
+
     # Identified table names from retrieval (used to fetch live DDL)
     table_names: Optional[List[str]]
 
