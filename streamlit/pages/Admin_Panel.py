@@ -57,7 +57,7 @@ def main():
 
         # Load interactions
         with st.spinner("Loading interactions..."):
-            interactions = asyncio.run(call_admin_tool("list_interactions_tool", {"limit": 50}))
+            interactions = asyncio.run(call_admin_tool("list_interactions", {"limit": 50}))
 
         if isinstance(interactions, list):
             df = pd.DataFrame(interactions)
@@ -104,7 +104,7 @@ def main():
                     st.subheader(f"Reviewing Interaction: {rid}")
 
                     detail = asyncio.run(
-                        call_admin_tool("get_interaction_details_tool", {"interaction_id": rid})
+                        call_admin_tool("get_interaction_details", {"interaction_id": rid})
                     )
 
                     if "error" in detail:
@@ -170,7 +170,7 @@ def main():
                         if action_col1.button("Approve", type="primary"):
                             res = asyncio.run(
                                 call_admin_tool(
-                                    "approve_interaction_tool",
+                                    "approve_interaction",
                                     {
                                         "interaction_id": rid,
                                         "corrected_sql": corrected_sql,
@@ -191,7 +191,7 @@ def main():
                         if action_col2.button("Reject"):
                             res = asyncio.run(
                                 call_admin_tool(
-                                    "reject_interaction_tool",
+                                    "reject_interaction",
                                     {
                                         "interaction_id": rid,
                                         "reason": "CANNOT_FIX",
@@ -214,7 +214,7 @@ def main():
 
         if st.button("🚀 Sync All Approved to Few-Shot", type="primary"):
             with st.spinner("Syncing..."):
-                res = asyncio.run(call_admin_tool("export_approved_to_fewshot_tool", {"limit": 50}))
+                res = asyncio.run(call_admin_tool("export_approved_to_fewshot", {"limit": 50}))
                 if "published" in res:
                     st.success(f"Successfully published {res['published']} examples!")
                     if res["errors"]:
@@ -227,7 +227,7 @@ def main():
         st.write("These examples are currently verified and indexable in the Few-Shot Registry.")
 
         with st.spinner("Loading examples..."):
-            examples = asyncio.run(call_admin_tool("list_approved_examples_tool", {"limit": 100}))
+            examples = asyncio.run(call_admin_tool("list_approved_examples", {"limit": 100}))
 
         if isinstance(examples, list) and examples:
             df_ex = pd.DataFrame(examples)
