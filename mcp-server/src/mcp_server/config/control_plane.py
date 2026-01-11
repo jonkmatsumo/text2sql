@@ -73,7 +73,10 @@ class ControlPlaneDatabase:
         """Close control-plane connection pool."""
         if cls._pool:
             await cls._pool.close()
-            print("✓ Control-plane connection pool closed")
+            try:
+                print("✓ Control-plane connection pool closed")
+            except ValueError:
+                pass
             cls._pool = None
 
     @classmethod

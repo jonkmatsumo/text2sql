@@ -88,12 +88,18 @@ class Database:
         """Close connection pools."""
         if cls._pool:
             await cls._pool.close()
-            print("✓ Database connection pool closed")
+            try:
+                print("✓ Database connection pool closed")
+            except ValueError:
+                pass
             cls._pool = None
 
         if cls._graph_store:
             cls._graph_store.close()
-            print("✓ Graph store connection closed")
+            try:
+                print("✓ Graph store connection closed")
+            except ValueError:
+                pass
             cls._graph_store = None
 
         # Close control-plane pool

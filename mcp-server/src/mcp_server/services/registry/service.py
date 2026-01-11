@@ -34,6 +34,14 @@ class RegistryService:
         # 1. Generate Canonical Signature
         constraints, fingerprint, signature_key = canonicalizer.process_query(question)
 
+        # Fallback to raw question hash if canonicalization is disabled or fails
+        # This prevents collisions in the registry when SpaCy is unavailable
+        if not fingerprint:
+            import hashlib
+
+            signature_key = hashlib.sha256(question.lower().strip().encode()).hexdigest()
+            fingerprint = f"RAW:{question.lower().strip()}"
+
         # 2. Generate Embedding
         embedding = RagEngine.embed_text(question)
 
@@ -62,7 +70,12 @@ class RegistryService:
     async def lookup_canonical(question: str, tenant_id: int) -> Optional[QueryPair]:
         """Fetch a specific pair by its canonical signature."""
         canonicalizer = CanonicalizationService.get_instance()
-        _, _, signature_key = canonicalizer.process_query(question)
+        _, fingerprint, signature_key = canonicalizer.process_query(question)
+
+        if not fingerprint:
+            import hashlib
+
+            signature_key = hashlib.sha256(question.lower().strip().encode()).hexdigest()
 
         store = get_registry_store()
         return await store.lookup_by_signature(signature_key, tenant_id)
@@ -96,6 +109,14 @@ class RegistryService:
 
         # Ensure they are verified if we want high trust
         return [c for c in candidates if c.status == "verified"]
+
+    @staticmethod
+    async def list_examples(tenant_id: Optional[int] = None, limit: int = 50) -> List[QueryPair]:
+        """List all verified few-shot examples."""
+        store = get_registry_store()
+        return await store.fetch_by_role(
+            role="example", status="verified", tenant_id=tenant_id, limit=limit
+        )
 
     @staticmethod
     async def tombstone_pair(signature_key: str, tenant_id: int, reason: str) -> bool:

@@ -111,3 +111,10 @@ class AgentState(TypedDict):
     # Context about a rejected cache hit to guide generation (e.g. "similar query but wrong entity")
     # Structure: {"sql": str, "original_query": str, "reason": str}
     rejected_cache_context: Optional[dict]
+
+    # =========================================================================
+    # Feedback and Interaction Fields
+    # =========================================================================
+
+    # Unique identifier for the current query interaction (for feedback logging)
+    interaction_id: Optional[str]

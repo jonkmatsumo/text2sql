@@ -30,8 +30,11 @@ from typing import Optional
 from mcp_server.dal.env import get_provider_env
 from mcp_server.dal.interfaces import (
     CacheStore,
+    ConversationStore,
     ExampleStore,
+    FeedbackStore,
     GraphStore,
+    InteractionStore,
     MetadataStore,
     RegistryStore,
     SchemaIntrospector,
@@ -40,7 +43,10 @@ from mcp_server.dal.interfaces import (
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.postgres import (
     PgSemanticCache,
+    PostgresConversationStore,
     PostgresExampleStore,
+    PostgresFeedbackStore,
+    PostgresInteractionStore,
     PostgresMetadataStore,
     PostgresRegistryStore,
     PostgresSchemaIntrospector,
@@ -83,6 +89,18 @@ REGISTRY_STORE_PROVIDERS: dict[str, type[RegistryStore]] = {
     "postgres": PostgresRegistryStore,
 }
 
+CONVERSATION_STORE_PROVIDERS: dict[str, type[ConversationStore]] = {
+    "postgres": PostgresConversationStore,
+}
+
+FEEDBACK_STORE_PROVIDERS: dict[str, type[FeedbackStore]] = {
+    "postgres": PostgresFeedbackStore,
+}
+
+INTERACTION_STORE_PROVIDERS: dict[str, type[InteractionStore]] = {
+    "postgres": PostgresInteractionStore,
+}
+
 RETRIEVER_PROVIDERS: dict[str, type[DataSchemaRetriever]] = {
     "postgres": PostgresRetriever,
 }
@@ -98,6 +116,9 @@ _schema_store: Optional[SchemaStore] = None
 _schema_introspector: Optional[SchemaIntrospector] = None
 _metadata_store: Optional[MetadataStore] = None
 _registry_store: Optional[RegistryStore] = None
+_conversation_store: Optional[ConversationStore] = None
+_feedback_store: Optional[FeedbackStore] = None
+_interaction_store: Optional[InteractionStore] = None
 _retriever: Optional[DataSchemaRetriever] = None
 
 
@@ -315,6 +336,7 @@ def reset_singletons() -> None:
     """
     global _graph_store, _cache_store, _example_store, _registry_store
     global _schema_store, _schema_introspector, _metadata_store, _retriever
+    global _conversation_store, _feedback_store, _interaction_store
 
     _graph_store = None
     _cache_store = None
@@ -324,6 +346,54 @@ def reset_singletons() -> None:
     _metadata_store = None
     _registry_store = None
     _retriever = None
+    _conversation_store = None
+    _feedback_store = None
+    _interaction_store = None
+
+
+def get_conversation_store() -> ConversationStore:
+    """Get or create the singleton ConversationStore instance."""
+    global _conversation_store
+    if _conversation_store is None:
+        provider = get_provider_env(
+            "CONVERSATION_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(CONVERSATION_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing ConversationStore with provider: {provider}")
+        store_cls = CONVERSATION_STORE_PROVIDERS[provider]
+        _conversation_store = store_cls()
+    return _conversation_store
+
+
+def get_feedback_store() -> FeedbackStore:
+    """Get or create the singleton FeedbackStore instance."""
+    global _feedback_store
+    if _feedback_store is None:
+        provider = get_provider_env(
+            "FEEDBACK_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(FEEDBACK_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing FeedbackStore with provider: {provider}")
+        store_cls = FEEDBACK_STORE_PROVIDERS[provider]
+        _feedback_store = store_cls()
+    return _feedback_store
+
+
+def get_interaction_store() -> InteractionStore:
+    """Get or create the singleton InteractionStore instance."""
+    global _interaction_store
+    if _interaction_store is None:
+        provider = get_provider_env(
+            "INTERACTION_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(INTERACTION_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing InteractionStore with provider: {provider}")
+        store_cls = INTERACTION_STORE_PROVIDERS[provider]
+        _interaction_store = store_cls()
+    return _interaction_store
 
 
 def get_retriever() -> DataSchemaRetriever:

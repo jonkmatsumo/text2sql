@@ -1,45 +1,40 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+"""Tests for feedback tools.
+
+These tests verify the feedback tools work correctly with the DAL layer.
+"""
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.tools.feedback_tools import submit_feedback_tool
+from mcp_server.tools.feedback.submit_feedback import handler as submit_feedback
 
 
-@pytest.fixture
-def mock_db_connection():
-    """Create mock DB connection."""
-    cm = AsyncMock()
-    cm.__aenter__.return_value = MagicMock()
-    cm.__aexit__.return_value = None
-    return cm
-
-
-@patch("mcp_server.config.database.Database.get_connection")
-@patch("mcp_server.tools.feedback_tools.FeedbackDAL")
 @pytest.mark.asyncio
-async def test_submit_feedback_tool_upvote(MockDAL, mock_get_conn, mock_db_connection):
+async def test_submit_feedback_upvote():
     """Verify upvote calls create_feedback only."""
-    mock_get_conn.return_value = mock_db_connection
-    dal = MockDAL.return_value
-    dal.create_feedback = AsyncMock(return_value="fb-id")
+    with patch("mcp_server.tools.feedback.submit_feedback.get_feedback_store") as mock_get_store:
+        mock_store = AsyncMock()
+        mock_store.create_feedback = AsyncMock(return_value="fb-id")
+        mock_store.ensure_review_queue = AsyncMock()
+        mock_get_store.return_value = mock_store
 
-    result = await submit_feedback_tool(interaction_id="int-1", thumb="UP", comment="Nice")
+        result = await submit_feedback(interaction_id="int-1", thumb="UP", comment="Nice")
 
-    assert result == "OK"
-    dal.create_feedback.assert_called_once()
-    dal.ensure_review_queue.assert_not_called()
+        assert result == "OK"
+        mock_store.create_feedback.assert_called_once()
+        mock_store.ensure_review_queue.assert_not_called()
 
 
-@patch("mcp_server.config.database.Database.get_connection")
-@patch("mcp_server.tools.feedback_tools.FeedbackDAL")
 @pytest.mark.asyncio
-async def test_submit_feedback_tool_downvote(MockDAL, mock_get_conn, mock_db_connection):
+async def test_submit_feedback_downvote():
     """Verify downvote calls create_feedback AND ensure_review_queue."""
-    mock_get_conn.return_value = mock_db_connection
-    dal = MockDAL.return_value
-    dal.create_feedback = AsyncMock(return_value="fb-id")
-    dal.ensure_review_queue = AsyncMock()
+    with patch("mcp_server.tools.feedback.submit_feedback.get_feedback_store") as mock_get_store:
+        mock_store = AsyncMock()
+        mock_store.create_feedback = AsyncMock(return_value="fb-id")
+        mock_store.ensure_review_queue = AsyncMock()
+        mock_get_store.return_value = mock_store
 
-    await submit_feedback_tool(interaction_id="int-1", thumb="DOWN", comment="Bad")
+        await submit_feedback(interaction_id="int-1", thumb="DOWN", comment="Bad")
 
-    dal.create_feedback.assert_called_once()
-    dal.ensure_review_queue.assert_called_once()
+        mock_store.create_feedback.assert_called_once()
+        mock_store.ensure_review_queue.assert_called_once()

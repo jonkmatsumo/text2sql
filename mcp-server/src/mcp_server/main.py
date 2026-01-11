@@ -1,6 +1,7 @@
 """MCP Server entrypoint for Text 2 SQL Agent.
 
-This module initializes the FastMCP server and registers all database tools.
+This module initializes the FastMCP server and registers all database tools
+via the central registry.
 """
 
 from contextlib import asynccontextmanager
@@ -8,21 +9,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from mcp_server.config.database import Database
-from mcp_server.services.cache_service import lookup_cache, update_cache
-from mcp_server.services.retrieval_service import get_relevant_examples
-from mcp_server.tools import (
-    execute_sql_query,
-    get_sample_data,
-    get_semantic_definitions,
-    get_semantic_subgraph,
-    get_table_schema,
-    list_tables,
-    resolve_ambiguity,
-    search_relevant_tables,
-)
-from mcp_server.tools.conversation_tools import load_conversation_state, save_conversation_state
-from mcp_server.tools.feedback_tools import submit_feedback_tool
-from mcp_server.tools.interaction_tools import create_interaction_tool, update_interaction_tool
+from mcp_server.tools.registry import register_all
 
 # Load environment variables
 load_dotenv()
@@ -70,62 +57,22 @@ async def lifespan(app):
 # Initialize FastMCP Server with dependencies
 mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 
-# --- Register Tools ---
-
-# 1. Retrieval Tools
-mcp.tool()(list_tables)
-mcp.tool()(get_table_schema)
-mcp.tool()(search_relevant_tables)
-mcp.tool()(get_semantic_subgraph)
-mcp.tool()(get_semantic_definitions)
-
-# 2. Execution Tools
-mcp.tool()(execute_sql_query)
-mcp.tool()(get_sample_data)
-
-# 3. Validation Tools
-mcp.tool()(resolve_ambiguity)
-
-# 4. Conversation Tools (New)
-mcp.tool()(save_conversation_state)
-mcp.tool()(load_conversation_state)
-
-# 5. Interaction Logging
-mcp.tool()(create_interaction_tool)
-mcp.tool()(update_interaction_tool)
-
-# 6. Feedback
-mcp.tool()(submit_feedback_tool)
-
-
-@mcp.tool()
-async def get_few_shot_examples_tool(query: str, limit: int = 3) -> str:
-    """Retrieve similar past queries and their corresponding SQL.
-
-    Use this tool to find examples of how to write SQL for similar questions.
-    """
-    return await get_relevant_examples(query, limit)
-
-
-@mcp.tool()
-async def lookup_cache_tool(query: str, user_id: str = "default_user") -> str:
-    """Look up a query in the semantic cache.
-
-    Returns the cached SQL if a semantic match is found, or "MISSING" if not found.
-    """
-    return await lookup_cache(query, user_id)
-
-
-@mcp.tool()
-async def update_cache_tool(
-    query: str, sql: str, thought_process: str, user_id: str = "default_user"
-) -> str:
-    """Update the semantic cache with a new query-SQL pair.
-
-    Returns "OK" on success.
-    """
-    return await update_cache(query, sql, thought_process, user_id)
+# Register all tools via the central registry
+register_all(mcp)
 
 
 if __name__ == "__main__":
-    mcp.run()
+    import os
+
+    # Respect transport and host/port from environment for containerized use
+    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    host = os.getenv("MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("MCP_PORT", "8000"))
+
+    if transport in ("sse", "http", "streamable-http"):
+        # We standardize on streamable-http for bidirectional support.
+        # This replaces the more basic SSE transport and aligns with agent client.
+        print(f"🚀 Starting MCP server in streamable-http mode on {host}:{port}/messages")
+        mcp.run(transport="streamable-http", host=host, port=port, path="/messages")
+    else:
+        mcp.run(transport="stdio")

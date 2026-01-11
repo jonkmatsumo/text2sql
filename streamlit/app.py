@@ -20,7 +20,12 @@ nest_asyncio.apply()
 # Add app_logic to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app_logic import format_conversation_entry, run_agent, validate_tenant_id  # noqa: E402
+from app_logic import (  # noqa: E402
+    format_conversation_entry,
+    run_agent,
+    submit_feedback,
+    validate_tenant_id,
+)
 
 load_dotenv()
 
@@ -151,6 +156,33 @@ def main():
 
                 if entry.get("response"):
                     st.write(entry["response"])
+
+                # Feedback section
+                if entry.get("interaction_id"):
+                    interaction_id = entry["interaction_id"]
+
+                    # Check if feedback was already submitted in this session to show thank you
+                    if st.session_state.get(f"feedback_done_{interaction_id}"):
+                        st.caption("✅ Feedback submitted. Thank you!")
+                    else:
+                        cols = st.columns([0.1, 0.1, 0.8])
+                        with cols[0]:
+                            if st.button("👍", key=f"up_{interaction_id}"):
+                                asyncio.run(submit_feedback(interaction_id, "UP"))
+                                st.session_state[f"feedback_done_{interaction_id}"] = True
+                                st.rerun()
+                        with cols[1]:
+                            if st.button("👎", key=f"down_{interaction_id}"):
+                                st.session_state[f"show_fm_{interaction_id}"] = True
+
+                        if st.session_state.get(f"show_fm_{interaction_id}"):
+                            with st.expander("Provide more details"):
+                                f_comment = st.text_area("Comment", key=f"txt_{interaction_id}")
+                                if st.button("Submit Feedback", key=f"btn_{interaction_id}"):
+                                    asyncio.run(submit_feedback(interaction_id, "DOWN", f_comment))
+                                    st.session_state[f"feedback_done_{interaction_id}"] = True
+                                    st.session_state[f"show_fm_{interaction_id}"] = False
+                                    st.rerun()
 
     # Process new question
     if question:

@@ -23,7 +23,7 @@ class TestGetMcpTools:
         mock_tool2 = MagicMock()
         mock_tool2.name = "get_table_schema"
         mock_tool3 = MagicMock()
-        mock_tool3.name = "execute_sql_query_tool"
+        mock_tool3.name = "execute_sql_query"
         mock_tool4 = MagicMock()
         mock_tool4.name = "get_semantic_definitions"
         mock_tool5 = MagicMock()
@@ -62,7 +62,7 @@ class TestGetMcpTools:
         tool_names = [tool.name for tool in result]
         assert "list_tables" in tool_names
         assert "get_table_schema" in tool_names
-        assert "execute_sql_query_tool" in tool_names
+        assert "execute_sql_query" in tool_names
         assert "get_semantic_definitions" in tool_names
         assert "search_relevant_tables" in tool_names
 
@@ -83,7 +83,7 @@ class TestGetMcpTools:
         mock_client_class.assert_called_once_with(
             {
                 "data-layer": {
-                    "url": "http://localhost:8000/mcp",
+                    "url": "http://localhost:8000/messages",
                     "transport": "http",
                 }
             }
@@ -187,7 +187,7 @@ class TestGetMcpTools:
         mock_tool1 = MagicMock()
         mock_tool1.name = "list_tables"
         mock_tool2 = MagicMock()
-        mock_tool2.name = "execute_sql_query_tool"
+        mock_tool2.name = "execute_sql_query"
         mock_client.get_tools = AsyncMock(return_value=[mock_tool1, mock_tool2])
         mock_client_class.return_value = mock_client
 
@@ -196,4 +196,4 @@ class TestGetMcpTools:
         assert len(result) == 2
         tool_names = [tool.name for tool in result]
         assert "list_tables" in tool_names
-        assert "execute_sql_query_tool" in tool_names
+        assert "execute_sql_query" in tool_names

@@ -76,10 +76,10 @@ class TestGenerateSchema(unittest.IsolatedAsyncioTestCase):
 
     @patch("agent_core.tools.get_mcp_tools")
     async def test_generate_few_shot_structured(self, mock_get_mcp_tools):
-        """Test that get_few_shot_examples_tool output is handled correctly."""
-        # 1. Setup Mock for get_few_shot_examples_tool
+        """Test that get_few_shot_examples output is handled correctly."""
+        # 1. Setup Mock for get_few_shot_examples
         mock_example_tool = MagicMock()
-        mock_example_tool.name = "get_few_shot_examples_tool"
+        mock_example_tool.name = "get_few_shot_examples"
 
         # Simulate compact JSON output (no spaces)
         examples_payload = [

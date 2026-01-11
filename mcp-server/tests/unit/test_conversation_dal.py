@@ -2,7 +2,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from mcp_server.dal.conversation import ConversationDAL
+from mcp_server.dal.postgres import PostgresConversationStore
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def mock_db():
 @pytest.fixture
 def dal(mock_db):
     """Create DAL instance."""
-    return ConversationDAL(mock_db)
+    return PostgresConversationStore(mock_db)
 
 
 @pytest.mark.asyncio

@@ -20,10 +20,7 @@ ALTER TABLE conversation_states ADD CONSTRAINT check_state_structure
 -- RLS
 ALTER TABLE conversation_states ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view own conversations"
-  ON conversation_states FOR SELECT
-  USING (auth.uid()::text = user_id);
-
-CREATE POLICY "Users can insert/update own conversations"
-  ON conversation_states FOR ALL
-  USING (auth.uid()::text = user_id);
+-- Allow full access for now (managed by app layer)
+CREATE POLICY service_role_full_access ON conversation_states
+    USING (true)
+    WITH CHECK (true);

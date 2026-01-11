@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from mcp_server.dal.interaction import InteractionDAL
+from mcp_server.dal.postgres import PostgresInteractionStore
 
 
 @pytest.fixture
@@ -11,13 +11,15 @@ def mock_db():
     db = MagicMock()
     db.fetchval = AsyncMock()
     db.execute = AsyncMock()
+    db.fetch = AsyncMock()
+    db.fetchrow = AsyncMock()
     return db
 
 
 @pytest.fixture
 def dal(mock_db):
     """Create DAL."""
-    return InteractionDAL(mock_db)
+    return PostgresInteractionStore(mock_db)
 
 
 @pytest.mark.asyncio
@@ -79,3 +81,26 @@ async def test_update_interaction_result(dal, mock_db):
     sql = mock_db.execute.call_args[0][0]
     assert "UPDATE query_interactions" in sql
     assert "generated_sql" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_recent_interactions(dal, mock_db):
+    """Verify get_recent_interactions returns list of dicts."""
+    mock_db.fetch.return_value = [{"id": "int-1", "user_nlq_text": "query"}]
+    results = await dal.get_recent_interactions(limit=10)
+
+    assert len(results) == 1
+    assert results[0]["id"] == "int-1"
+    mock_db.fetch.assert_called_once()
+    assert "LIMIT $1 OFFSET $2" in mock_db.fetch.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_get_interaction_detail(dal, mock_db):
+    """Verify get_interaction_detail returns single dict."""
+    mock_db.fetchrow.return_value = {"id": "int-1", "user_nlq_text": "query"}
+    result = await dal.get_interaction_detail("int-1")
+
+    assert result["id"] == "int-1"
+    mock_db.fetchrow.assert_called_once()
+    assert "WHERE id = $1::uuid" in mock_db.fetchrow.call_args[0][0]

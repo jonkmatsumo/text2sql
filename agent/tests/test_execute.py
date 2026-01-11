@@ -26,7 +26,7 @@ class TestValidateAndExecuteNode:
 
         # Create mock tool
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value=json.dumps([{"count": 1000}]))
 
         mock_get_tools.return_value = [mock_tool]
@@ -68,7 +68,7 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
 
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1, "title": "Film 1"}])
 
         mock_get_tools.return_value = [mock_tool]
@@ -101,7 +101,7 @@ class TestValidateAndExecuteNode:
         # Mock rewriter to return same SQL
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value=[1, 2, 3])
 
         mock_get_tools.return_value = [mock_tool]
@@ -134,7 +134,7 @@ class TestValidateAndExecuteNode:
         # Mock rewriter to return same SQL
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value="Error: relation 'films' does not exist")
 
         mock_get_tools.return_value = [mock_tool]
@@ -167,7 +167,7 @@ class TestValidateAndExecuteNode:
         # Mock rewriter to return same SQL
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value="Database Error: syntax error at or near 'FROM'")
 
         mock_get_tools.return_value = [mock_tool]
@@ -189,8 +189,8 @@ class TestValidateAndExecuteNode:
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
     async def test_validate_and_execute_node_missing_tool(self, mock_get_tools):
-        """Test error handling when execute_sql_query_tool is not found."""
-        # Return tools without execute_sql_query_tool
+        """Test error handling when execute_sql_query is not found."""
+        # Return tools without execute_sql_query
         mock_tool = MagicMock()
         mock_tool.name = "list_tables"
         mock_get_tools.return_value = [mock_tool]
@@ -206,7 +206,7 @@ class TestValidateAndExecuteNode:
 
         result = await validate_and_execute_node(state)
 
-        assert result["error"] == "execute_sql_query_tool not found in MCP server"
+        assert result["error"] == "execute_sql_query tool not found in MCP server"
         assert result["query_result"] is None
 
     @pytest.mark.asyncio
@@ -214,7 +214,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_no_sql(self, mock_get_tools):
         """Test error handling when current_sql is None."""
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_get_tools.return_value = [mock_tool]
 
         state = AgentState(
@@ -236,7 +236,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_empty_sql(self, mock_get_tools):
         """Test error handling when current_sql is empty string."""
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_get_tools.return_value = [mock_tool]
 
         state = AgentState(
@@ -258,7 +258,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_execution_exception(self, mock_get_tools):
         """Test error handling when tool execution raises exception."""
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(side_effect=Exception("Connection timeout"))
 
         mock_get_tools.return_value = [mock_tool]
@@ -282,7 +282,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_invalid_json(self, mock_get_tools):
         """Test handling when result is string but not valid JSON."""
         mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query_tool"
+        mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value="Error: Invalid JSON string")
 
         mock_get_tools.return_value = [mock_tool]
@@ -319,5 +319,5 @@ class TestValidateAndExecuteNode:
 
         result = await validate_and_execute_node(state)
 
-        assert result["error"] == "execute_sql_query_tool not found in MCP server"
+        assert result["error"] == "execute_sql_query tool not found in MCP server"
         assert result["query_result"] is None

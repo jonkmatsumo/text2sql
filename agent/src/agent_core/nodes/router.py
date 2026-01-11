@@ -128,7 +128,7 @@ async def router_node(state: AgentState) -> dict:
         # 3. Deterministic Ambiguity Detection
         # ---------------------------------------------------------------------
         tools = await get_mcp_tools()
-        resolver_tool = next((t for t in tools if t.name == "resolve_ambiguity_tool"), None)
+        resolver_tool = next((t for t in tools if t.name == "resolve_ambiguity"), None)
 
         raw_schema = state.get("raw_schema_context", [])
         res_data = {"status": "CLEAR"}  # Fallback
@@ -141,7 +141,7 @@ async def router_node(state: AgentState) -> dict:
             if isinstance(parsed_res, list) and len(parsed_res) > 0:
                 res_data = parsed_res[0]
         else:
-            print("Warning: resolve_ambiguity_tool not found.")
+            print("Warning: resolve_ambiguity tool not found.")
 
         status = res_data.get("status", "CLEAR")
         span.set_attribute("resolution_status", status)

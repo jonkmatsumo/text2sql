@@ -21,7 +21,7 @@ async def test_generate_few_shot_integration(
 
     # Mock Tool
     mock_tool = MagicMock()
-    mock_tool.name = "get_few_shot_examples_tool"
+    mock_tool.name = "get_few_shot_examples"
 
     examples_data = [
         {"question": "How many users?", "sql": "SELECT count(*) FROM users"},

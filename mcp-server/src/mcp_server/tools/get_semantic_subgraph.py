@@ -1,4 +1,4 @@
-"""Semantic subgraph retrieval tool for MCP server.
+"""MCP tool: get_semantic_subgraph - Retrieve relevant schema subgraph.
 
 Uses deterministic "Mini-Schema" expansion:
 1. Seed selection (adaptive vector search)
@@ -15,6 +15,8 @@ from mcp_server.dal.executor import ContextAwareExecutor
 from mcp_server.dal.ingestion.indexing import VectorIndexer
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.rag import RagEngine
+
+TOOL_NAME = "get_semantic_subgraph"
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
     Returns:
         Dict with 'nodes' and 'relationships' keys
     """
-    # Reuse existing store connection
     indexer = VectorIndexer(store=store)
 
     try:
@@ -43,7 +44,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         if not table_hits:
             logger.info("No table hits, falling back to column search")
             seeds = indexer.search_nodes(query_text, label="Column", k=COLUMNS_K)
-            # Map column seeds to their parent tables
             seed_table_names = list(
                 set(s["node"].get("table") for s in seeds if s["node"].get("table"))
             )
@@ -78,7 +78,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         # Use the store's driver session
         with store.driver.session() as session:
             # Step 1: Fetch Seed Tables and their Columns
-            # We fetch all columns but will rely on formatter to truncate if too many.
             query_step1 = """
             MATCH (t:Table)
             WHERE t.name IN $seed_tables
@@ -92,10 +91,8 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 columns = record["columns"]
                 t_name = t.get("name")
 
-                # Add Table
                 t_id = add_node(t, "Table", score=seed_scores.get(t_name))
 
-                # Add All Columns (capped by formatter later)
                 for col in columns:
                     if col:
                         c_id = add_node(col, "Column")
@@ -103,8 +100,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                             rels_list.append({"source": t_id, "target": c_id, "type": "HAS_COLUMN"})
 
             # Step 2: Join Discovery
-            # Trace FKs from seed tables to *referenced* tables.
-            # Initially only include the referenced *columns* (PK).
             query_step2 = """
             MATCH (t:Table) WHERE t.name IN $seed_tables
             MATCH (t)-[:HAS_COLUMN]->(sc:Column)-[:FOREIGN_KEY_TO]->(tc:Column)
@@ -116,27 +111,21 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
             """
             result2 = session.run(query_step2, seed_tables=seed_table_names)
 
-            # Track newly discovered FK tables (dimension tables)
             fk_table_names = set()
 
             for record in result2:
-                # source_table_name = record["source_table_name"] # Already processed in Step 1
-                source_col = record["source_col"]  # Already processed in Step 1
+                source_col = record["source_col"]
                 target_table = record["target_table"]
                 target_col = record["target_col"]
 
                 sc_id = add_node(source_col, "Column")
-
-                # Add Referenced Table (rt)
                 rt_id = add_node(target_table, "Table")
                 rt_name = target_table.get("name") if target_table else None
                 if rt_name and rt_name not in seed_table_names:
                     fk_table_names.add(rt_name)
 
-                # Add Referenced Column (tc) - this is the "Bridge" logic
                 tc_id = add_node(target_col, "Column")
 
-                # Add relationships
                 if sc_id and tc_id:
                     rels_list.append({"source": sc_id, "target": tc_id, "type": "FOREIGN_KEY_TO"})
 
@@ -144,8 +133,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                     rels_list.append({"source": rt_id, "target": tc_id, "type": "HAS_COLUMN"})
 
             # Step 2.5: Full Column Expansion for Dimension Tables
-            # Fetch ALL columns for FK-referenced tables (not just the PK).
-            # This ensures dimension table columns like `language.name` are available.
             if fk_table_names:
                 logger.info(f"Expanding columns for dimension tables: {list(fk_table_names)}")
                 query_step2_5 = """
@@ -165,19 +152,16 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
 
         from mcp_server.services.schema_linker import SchemaLinker
 
-        # --- DENSE SCHEMA LINKING (Triple-Filter Pruning) ---
-        # 1. Regroup Nodes (Attach columns to tables)
-        # nodes_map values are dicts (properties). We can attach 'columns' list to them temporarily.
+        # Dense Schema Linking (Triple-Filter Pruning)
         tables = []
         col_id_to_node = {}
         for nid, props in nodes_map.items():
             if props.get("type") == "Table":
-                props["columns"] = []  # Initialize
+                props["columns"] = []
                 tables.append(props)
             elif props.get("type") == "Column":
                 col_id_to_node[nid] = props
 
-        # Populate 'columns' list in table props using HAS_COLUMN edges
         for rel in rels_list:
             if rel["type"] == "HAS_COLUMN":
                 t_id = rel["source"]
@@ -185,19 +169,14 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 if t_id in nodes_map and c_id in col_id_to_node:
                     nodes_map[t_id]["columns"].append(col_id_to_node[c_id])
 
-        # 2. Run Schema Linker
-        # Modifies 'columns' list in-place to keep only relevant ones
         SchemaLinker.rank_and_filter_columns(query_text, tables, target_cols_per_table=15)
 
-        # 3. Prune Graph (Rebuild nodes and edges)
         kept_col_ids = set()
         for t in tables:
             for c in t["columns"]:
                 kept_col_ids.add(c["id"])
-            # Remove the temp 'columns' key to keep response clean
             t.pop("columns", None)
 
-        # Filter Nodes
         final_nodes = []
         for nid, props in nodes_map.items():
             if props.get("type") == "Table":
@@ -206,10 +185,8 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 if nid in kept_col_ids:
                     final_nodes.append(props)
             else:
-                final_nodes.append(props)  # Other types if any
+                final_nodes.append(props)
 
-        # Filter Relationships
-        # Only keep edges where both source/target exist in final_nodes
         final_node_ids = set(n["id"] for n in final_nodes)
 
         kept_rels = []
@@ -218,7 +195,6 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 kept_rels.append(rel)
 
         rels_list = kept_rels
-        # --- END DENSE SCHEMA LINKING ---
 
         # Process relationships uniqueness
         seen_rels = set()
@@ -236,7 +212,7 @@ def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         return {"error": str(e)}
 
 
-async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
+async def handler(query: str, tenant_id: int = None) -> str:
     """Retrieve relevant subgraph of tables and columns based on a natural language query.
 
     Args:
@@ -246,15 +222,13 @@ async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
-    # --- Cache Read (The Sandwich Top) ---
+    # Cache Read
     embedding = None
     if tenant_id:
         try:
             cache = Database.get_cache_store()
-            # Calculate embedding for lookup and later storage
             embedding = RagEngine.embed_text(query)
 
-            # Using 0.90 threshold as recommended in audit
             cached = await cache.lookup(embedding, tenant_id, threshold=0.90, cache_type="subgraph")
             if cached:
                 logger.info(f"✓ Cache Hit for semantic subgraph: {query[:50]}...")
@@ -262,7 +236,7 @@ async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
 
-    # --- The Work (Existing Logic) ---
+    # The Work
     try:
         store = Database.get_graph_store()
     except Exception as e:
@@ -275,11 +249,10 @@ async def get_semantic_subgraph(query: str, tenant_id: int = None) -> str:
 
     json_result = json.dumps(result, separators=(",", ":"))
 
-    # --- Cache Write (The Sandwich Bottom) ---
+    # Cache Write
     if tenant_id and embedding and not result.get("error"):
         try:
             cache = Database.get_cache_store()
-            # Store the JSON result in the 'generated_sql' column (repurposed for tool output)
             await cache.store(
                 user_query=query,
                 generated_sql=json_result,

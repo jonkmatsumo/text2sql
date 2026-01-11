@@ -12,7 +12,7 @@ load_dotenv()
 llm = get_llm_client(temperature=0)
 
 
-async def get_few_shot_examples(user_query: str) -> str:
+async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
     """
     Retrieve relevant few-shot examples via MCP server.
 
@@ -29,10 +29,10 @@ async def get_few_shot_examples(user_query: str) -> str:
     if not tools:
         return ""
 
-    # Find the get_few_shot_examples_tool
+    # Find the get_few_shot_examples
     few_shot_tool = None
     for tool in tools:
-        if tool.name == "get_few_shot_examples_tool":
+        if tool.name == "get_few_shot_examples":
             few_shot_tool = tool
             break
 
@@ -40,8 +40,10 @@ async def get_few_shot_examples(user_query: str) -> str:
         return ""
 
     try:
-        # Call the tool
-        result = await few_shot_tool.ainvoke({"user_query": user_query, "limit": 3})
+        # Call the tool with standardized 'query'
+        result = await few_shot_tool.ainvoke(
+            {"query": user_query, "tenant_id": tenant_id, "limit": 3}
+        )
         if not result:
             return ""
 
@@ -103,12 +105,12 @@ async def generate_sql_node(state: AgentState) -> dict:
         # Retrieve few-shot examples
         few_shot_examples = ""
         try:
-            few_shot_examples = await get_few_shot_examples(user_query)
+            few_shot_examples = await get_few_shot_examples(user_query, tenant_id or 1)
         except Exception as e:
             print(f"Warning: Could not retrieve few-shot examples: {e}")
 
         # Use schema_context directly from retrieve node (now powered by semantic subgraph)
-        # No need for redundant get_table_schema_tool call - graph already contains full schema
+        # No need for redundant get_table_schema call - graph already contains full schema
         schema_context_to_use = context
 
         # Build system prompt with examples section

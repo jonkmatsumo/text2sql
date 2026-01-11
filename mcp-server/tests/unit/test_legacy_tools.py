@@ -1,9 +1,16 @@
+"""Test suite for refactored legacy tools.
+
+These tests verify the tools use the expected DAL/store implementations.
+"""
+
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp_server.models import ColumnDef, TableDef
-from mcp_server.tools.legacy import get_table_schema, list_tables, search_relevant_tables
+from mcp_server.tools.get_table_schema import handler as get_table_schema
+from mcp_server.tools.list_tables import handler as list_tables
+from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
 
 
 class TestLegacyTools:
@@ -15,7 +22,9 @@ class TestLegacyTools:
         mock_store = AsyncMock()
         mock_store.list_tables.return_value = ["users", "orders"]
 
-        with patch("mcp_server.tools.legacy.Database.get_metadata_store", return_value=mock_store):
+        with patch(
+            "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
+        ):
             result = await list_tables(search_term="order")
 
             mock_store.list_tables.assert_called_once()
@@ -30,7 +39,9 @@ class TestLegacyTools:
             {"table_name": "t1", "columns": []}
         )
 
-        with patch("mcp_server.tools.legacy.Database.get_metadata_store", return_value=mock_store):
+        with patch(
+            "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
+        ):
             result = await get_table_schema(["t1"])
 
             mock_store.get_table_definition.assert_called_once_with("t1")
@@ -50,10 +61,13 @@ class TestLegacyTools:
 
         mock_search = [{"table_name": "t1", "schema_text": "text", "distance": 0.1}]
 
-        with patch("mcp_server.tools.legacy.RagEngine.embed_text", return_value=[0.1]), patch(
-            "mcp_server.tools.legacy.search_similar_tables", return_value=mock_search
+        with patch(
+            "mcp_server.tools.search_relevant_tables.RagEngine.embed_text", return_value=[0.1]
         ), patch(
-            "mcp_server.tools.legacy.Database.get_schema_introspector",
+            "mcp_server.tools.search_relevant_tables.search_similar_tables",
+            return_value=mock_search,
+        ), patch(
+            "mcp_server.tools.search_relevant_tables.Database.get_schema_introspector",
             return_value=mock_introspector,
         ):
 

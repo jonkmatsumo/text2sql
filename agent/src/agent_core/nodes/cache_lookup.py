@@ -28,21 +28,19 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
         # 1. Lookup Cache via tool
         tools = await get_mcp_tools()
-        cache_tool = next((t for t in tools if t.name == "lookup_cache_tool"), None)
+        cache_tool = next((t for t in tools if t.name == "lookup_cache"), None)
 
         if not cache_tool:
-            logger.warning("lookup_cache_tool not found")
+            logger.warning("lookup_cache tool not found")
             span.set_attribute("lookup_mode", "error")
             return {"cached_sql": None, "from_cache": False}
 
         try:
             tenant_id = state.get("tenant_id")
-            cache_json = await cache_tool.ainvoke(
-                {"user_query": user_query, "tenant_id": tenant_id}
-            )
+            cache_json = await cache_tool.ainvoke({"query": user_query, "tenant_id": tenant_id})
             cache_data = parse_tool_output(cache_json)
 
-            if cache_data is None or not cache_data.get("sql"):
+            if cache_data is None or not cache_data.get("value"):
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_outputs({"hit": False})
                 return {"cached_sql": None, "from_cache": False}
@@ -51,7 +49,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 cache_data = cache_data[0]
 
             # Cache Hit!
-            cached_sql = cache_data.get("sql")
+            cached_sql = cache_data.get("value")
             cache_id = cache_data.get("cache_id")
             similarity = cache_data.get("similarity", 1.0)  # Could be 1.0 for fingerprint
 

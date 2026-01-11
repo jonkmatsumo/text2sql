@@ -10,7 +10,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
     """Retrieve schema context using semantic subgraph search.
 
     Queries Memgraph via MCP server for relevant tables and relationships.
-    Uses the get_semantic_subgraph_tool for graph-based retrieval.
+    Uses the get_semantic_subgraph for graph-based retrieval.
 
     Args:
         state: Current agent state containing conversation messages
@@ -32,10 +32,11 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         context_str = ""
         table_names = []
+        graph_data = {}
 
         try:
             tools = await get_mcp_tools()
-            subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph_tool"), None)
+            subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
 
             if subgraph_tool:
                 # Execute subgraph retrieval
@@ -77,7 +78,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 else:
                     context_str = "No relevant tables found."
             else:
-                print("Warning: get_semantic_subgraph_tool not found.")
+                print("Warning: get_semantic_subgraph tool not found.")
                 context_str = "Schema retrieval tool not available."
 
         except Exception as e:

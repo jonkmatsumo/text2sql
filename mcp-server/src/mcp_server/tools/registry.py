@@ -1,0 +1,152 @@
+"""Central registry for MCP tools.
+
+This module provides a single point of registration for all MCP tools.
+It collects tool modules and registers them with the FastMCP server.
+"""
+
+import logging
+from typing import TYPE_CHECKING, List, Set
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
+
+# Canonical tool names (without _tool suffix)
+# This is the authoritative list of all public tools
+CANONICAL_TOOLS: Set[str] = {
+    # Core schema/retrieval tools
+    "list_tables",
+    "get_table_schema",
+    "get_sample_data",
+    "search_relevant_tables",
+    "get_semantic_subgraph",
+    "get_semantic_definitions",
+    # Execution tools
+    "execute_sql_query",
+    # Validation tools
+    "resolve_ambiguity",
+    # Cache tools
+    "lookup_cache",
+    "update_cache",
+    "get_few_shot_examples",
+    # Conversation tools
+    "save_conversation_state",
+    "load_conversation_state",
+    # Interaction tools
+    "create_interaction",
+    "update_interaction",
+    # Feedback tools
+    "submit_feedback",
+    # Admin tools
+    "list_interactions",
+    "get_interaction_details",
+    "approve_interaction",
+    "reject_interaction",
+    "export_approved_to_fewshot",
+    "list_approved_examples",
+}
+
+
+def get_all_tool_names() -> List[str]:
+    """Return list of all canonical tool names."""
+    return sorted(CANONICAL_TOOLS)
+
+
+def validate_tool_names() -> bool:
+    """Validate that no canonical tool names end with '_tool'.
+
+    Returns:
+        True if all names are valid, raises ValueError otherwise.
+    """
+    invalid = [name for name in CANONICAL_TOOLS if name.endswith("_tool")]
+    if invalid:
+        raise ValueError(f"Tool names must not end with '_tool': {invalid}")
+    return True
+
+
+def register_all(mcp: "FastMCP") -> None:
+    """Register all tools with the MCP server.
+
+    Args:
+        mcp: FastMCP server instance
+    """
+    # Validate tool names before registration
+    validate_tool_names()
+
+    # Import tool handlers
+    # Admin tools
+    from mcp_server.tools.admin.approve_interaction import handler as approve_interaction
+    from mcp_server.tools.admin.export_approved_to_fewshot import (
+        handler as export_approved_to_fewshot,
+    )
+    from mcp_server.tools.admin.get_interaction_details import handler as get_interaction_details
+    from mcp_server.tools.admin.list_approved_examples import handler as list_approved_examples
+    from mcp_server.tools.admin.list_interactions import handler as list_interactions
+    from mcp_server.tools.admin.reject_interaction import handler as reject_interaction
+
+    # Conversation tools
+    from mcp_server.tools.conversation.load_conversation_state import (
+        handler as load_conversation_state,
+    )
+    from mcp_server.tools.conversation.save_conversation_state import (
+        handler as save_conversation_state,
+    )
+    from mcp_server.tools.execute_sql_query import handler as execute_sql_query
+
+    # Feedback tools
+    from mcp_server.tools.feedback.submit_feedback import handler as submit_feedback
+    from mcp_server.tools.get_few_shot_examples import handler as get_few_shot_examples
+    from mcp_server.tools.get_sample_data import handler as get_sample_data
+    from mcp_server.tools.get_semantic_definitions import handler as get_semantic_definitions
+    from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
+    from mcp_server.tools.get_table_schema import handler as get_table_schema
+
+    # Interaction tools
+    from mcp_server.tools.interaction.create_interaction import handler as create_interaction
+    from mcp_server.tools.interaction.update_interaction import handler as update_interaction
+    from mcp_server.tools.list_tables import handler as list_tables
+    from mcp_server.tools.lookup_cache import handler as lookup_cache
+    from mcp_server.tools.resolve_ambiguity import handler as resolve_ambiguity
+    from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
+    from mcp_server.tools.update_cache import handler as update_cache
+
+    # Register core retrieval tools
+    mcp.tool()(list_tables)
+    mcp.tool()(get_table_schema)
+    mcp.tool()(get_sample_data)
+    mcp.tool()(search_relevant_tables)
+    mcp.tool()(get_semantic_subgraph)
+    mcp.tool()(get_semantic_definitions)
+
+    # Register execution tools
+    mcp.tool()(execute_sql_query)
+
+    # Register validation tools
+    mcp.tool()(resolve_ambiguity)
+
+    # Register cache tools
+    mcp.tool()(lookup_cache)
+    mcp.tool()(update_cache)
+    mcp.tool()(get_few_shot_examples)
+
+    # Register conversation tools
+    mcp.tool()(save_conversation_state)
+    mcp.tool()(load_conversation_state)
+
+    # Register interaction tools
+    mcp.tool()(create_interaction)
+    mcp.tool()(update_interaction)
+
+    # Register feedback tools
+    mcp.tool()(submit_feedback)
+
+    # Register admin tools
+    mcp.tool()(list_interactions)
+    mcp.tool()(get_interaction_details)
+    mcp.tool()(approve_interaction)
+    mcp.tool()(reject_interaction)
+    mcp.tool()(export_approved_to_fewshot)
+    mcp.tool()(list_approved_examples)
+
+    logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

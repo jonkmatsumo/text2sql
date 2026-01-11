@@ -1,4 +1,4 @@
-"""Tools for detecting and resolving query ambiguity."""
+"""MCP tool: resolve_ambiguity - Detect and resolve query ambiguity."""
 
 import json
 import logging
@@ -6,9 +6,11 @@ from typing import Any, Dict, List, Optional
 
 from mcp_server.services.ambiguity.resolver import AmbiguityResolver
 
+TOOL_NAME = "resolve_ambiguity"
+
 logger = logging.getLogger(__name__)
 
-# Singleton resolver for the tool
+# Singleton resolver
 _resolver: Optional[AmbiguityResolver] = None
 
 
@@ -20,10 +22,15 @@ def get_resolver() -> AmbiguityResolver:
     return _resolver
 
 
-async def resolve_ambiguity(query: str, schema_context: List[Dict[str, Any]]) -> str:
+async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     """Resolve potential ambiguities in a user query against provided schema context.
 
-    Returns JSON string with resolution status and bindings.
+    Args:
+        query: The user query to analyze for ambiguities.
+        schema_context: List of schema objects providing context for resolution.
+
+    Returns:
+        JSON string with resolution status and bindings.
     """
     try:
         resolver = get_resolver()
