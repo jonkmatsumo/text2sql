@@ -21,6 +21,7 @@ from mcp_server.tools import (
     search_relevant_tables,
 )
 from mcp_server.tools.conversation_tools import load_conversation_state, save_conversation_state
+from mcp_server.tools.feedback_tools import submit_feedback_tool
 from mcp_server.tools.interaction_tools import create_interaction_tool, update_interaction_tool
 
 # Load environment variables
@@ -92,6 +93,9 @@ mcp.tool()(load_conversation_state)
 # 5. Interaction Logging
 mcp.tool()(create_interaction_tool)
 mcp.tool()(update_interaction_tool)
+
+# 6. Feedback
+mcp.tool()(submit_feedback_tool)
 
 
 @mcp.tool()
