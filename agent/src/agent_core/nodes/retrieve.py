@@ -10,7 +10,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
     """Retrieve schema context using semantic subgraph search.
 
     Queries Memgraph via MCP server for relevant tables and relationships.
-    Uses the get_semantic_subgraph_tool for graph-based retrieval.
+    Uses the get_semantic_subgraph for graph-based retrieval.
 
     Args:
         state: Current agent state containing conversation messages
@@ -32,20 +32,32 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         context_str = ""
         table_names = []
+        graph_data = {}
 
         try:
             tools = await get_mcp_tools()
-            subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph_tool"), None)
+            subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
 
             if subgraph_tool:
                 # Execute subgraph retrieval
-                subgraph_json = await subgraph_tool.ainvoke({"query": active_query})
+                payload = {"query": active_query}
+                tenant_id = state.get("tenant_id")
+                if tenant_id is not None:
+                    payload["tenant_id"] = tenant_id
+                subgraph_json = await subgraph_tool.ainvoke(payload)
 
                 if subgraph_json:
                     try:
                         from agent_core.utils.parsing import parse_tool_output
 
                         graph_data = parse_tool_output(subgraph_json)
+
+                        print(f"DEBUG: subgraph_json type: {type(subgraph_json)}")
+                        print(f"DEBUG: parse_tool_output result type: {type(graph_data)}")
+                        if isinstance(graph_data, list):
+                            print(f"DEBUG: graph_data list len: {len(graph_data)}")
+                            if len(graph_data) > 0:
+                                print(f"DEBUG: graph_data[0] type: {type(graph_data[0])}")
 
                         # Handle case where graph_data is a list with single dict
                         if isinstance(graph_data, list) and len(graph_data) > 0:
@@ -77,7 +89,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 else:
                     context_str = "No relevant tables found."
             else:
-                print("Warning: get_semantic_subgraph_tool not found.")
+                print("Warning: get_semantic_subgraph tool not found.")
                 context_str = "Schema retrieval tool not available."
 
         except Exception as e:
@@ -94,5 +106,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         return {
             "schema_context": context_str,
+            "raw_schema_context": (
+                graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+            ),
             "table_names": table_names,
         }

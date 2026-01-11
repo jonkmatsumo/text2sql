@@ -13,15 +13,28 @@ def parse_tool_output(tool_output):
     """
     aggregated_results = []
 
+    def _normalize_inputs(value):
+        if isinstance(value, tuple) and len(value) == 2:
+            content, _artifact = value
+            return _normalize_inputs(content)
+        if isinstance(value, list):
+            if value and all(isinstance(item, dict) and "type" in item for item in value):
+                return value
+            return value
+        return [value]
+
     # Ensure input is a list to unify processing logic
-    inputs = tool_output if isinstance(tool_output, list) else [tool_output]
+    inputs = _normalize_inputs(tool_output)
 
     for item in inputs:
         raw_payload = None
 
         # 1. Extract the raw string payload
         if isinstance(item, dict):
-            raw_payload = item.get("text") or item.get("content")
+            if item.get("type") == "text":
+                raw_payload = item.get("text")
+            else:
+                raw_payload = item.get("text") or item.get("content")
             # If no message wrapper keys found, treat the dict itself as a data chunk
             if raw_payload is None:
                 aggregated_results.append(item)
@@ -67,7 +80,10 @@ def parse_tool_output(tool_output):
                 aggregated_results.append(parsed_chunk)
 
         except (json.JSONDecodeError, TypeError) as e:
-            logger.warning(f"Failed to parse tool output chunk: {str(e)[:100]}...")
+            logger.warning(
+                f"Failed to parse tool output chunk: {str(e)[:100]}... "
+                f"Raw Payload Start: {str(raw_payload)[:100]}"
+            )
             continue
 
     return aggregated_results

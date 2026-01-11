@@ -78,6 +78,8 @@ services:
       CONTROL_DB_NAME: agent_control
       CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
       CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
+      SPACY_ENABLED: "true"
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
@@ -110,6 +112,7 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MCP_TRANSPORT: "streamable-http"
       SPACY_ENABLED: "true"
     ports:
       - "8000:8000"
@@ -137,7 +140,7 @@ services:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
-      MCP_SERVER_URL: http://mcp-server:8000/mcp
+      MCP_SERVER_URL: http://mcp-server:8000/messages
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
       DB_HOST: postgres-db
       DB_PORT: 5432

@@ -22,12 +22,12 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     async def test_generate_sql_node_does_not_call_schema_tool(self, mock_state):
-        """Verify get_table_schema_tool is NOT called since we removed that code."""
+        """Verify get_table_schema is NOT called since we removed that code."""
         from agent_core.nodes.generate import generate_sql_node
 
         # Mock the schema tool
         mock_schema_tool = MagicMock()
-        mock_schema_tool.name = "get_table_schema_tool"
+        mock_schema_tool.name = "get_table_schema"
         mock_schema_tool.ainvoke = AsyncMock(return_value="[]")
 
         # Track all tool calls
@@ -59,5 +59,5 @@ class TestGenerateSqlNode:
 
                     await generate_sql_node(mock_state)
 
-                    # CRUCIAL: Verify get_table_schema_tool was NEVER called
+                    # CRUCIAL: Verify get_table_schema was NEVER called
                     mock_schema_tool.ainvoke.assert_not_called()

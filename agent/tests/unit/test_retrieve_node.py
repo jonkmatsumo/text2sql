@@ -12,7 +12,7 @@ class TestRetrieveContextNode:
 
     @pytest.fixture
     def sample_graph_data(self):
-        """Sample graph data mimicking get_semantic_subgraph_tool output."""
+        """Sample graph data mimicking get_semantic_subgraph output."""
         return {
             "nodes": [
                 {
@@ -62,7 +62,7 @@ class TestRetrieveContextNode:
 
         # Mock the subgraph tool
         mock_tool = MagicMock()
-        mock_tool.name = "get_semantic_subgraph_tool"
+        mock_tool.name = "get_semantic_subgraph"
         mock_tool.ainvoke = AsyncMock(return_value=json.dumps(sample_graph_data))
 
         with patch(
@@ -101,7 +101,7 @@ class TestRetrieveContextNode:
         empty_graph = {"nodes": [], "relationships": []}
 
         mock_tool = MagicMock()
-        mock_tool.name = "get_semantic_subgraph_tool"
+        mock_tool.name = "get_semantic_subgraph"
         mock_tool.ainvoke = AsyncMock(return_value=json.dumps(empty_graph))
 
         with patch(

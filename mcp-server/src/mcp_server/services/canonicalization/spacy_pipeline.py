@@ -84,10 +84,13 @@ class CanonicalizationService:
         ruler = self.nlp.add_pipe("entity_ruler", before="ner")
 
         # Load patterns from files
-        # Load patterns from files
-        # Priority: Env Var -> /app/patterns (Docker) -> Package (Local Dev)
+        # Priority: Env Var -> /app/patterns -> local dev project paths -> package path
         env_path = os.getenv("PATTERNS_DIR")
         docker_path = Path("/app/patterns")
+        dev_path = (
+            Path(__file__).parent.parent.parent.parent.parent.parent
+            / "database/query-target/patterns"
+        )
         package_path = Path(__file__).parent.parent.parent / "patterns"
 
         if env_path and Path(env_path).exists():
@@ -96,17 +99,28 @@ class CanonicalizationService:
         elif docker_path.exists():
             patterns_dir = docker_path
             logger.info(f"Loading patterns from Docker path: {patterns_dir}")
+        elif dev_path.exists():
+            patterns_dir = dev_path
+            logger.info(f"Loading patterns from dev path: {patterns_dir}")
         else:
             patterns_dir = package_path
             logger.info(f"Loading patterns from package path: {patterns_dir}")
 
         if patterns_dir.exists():
+            import srsly
+
+            all_patterns = []
             for pattern_file in patterns_dir.glob("*.jsonl"):
                 try:
-                    ruler.from_disk(pattern_file)
-                    logger.info(f"Loaded patterns from {pattern_file.name}")
+                    patterns = list(srsly.read_jsonl(pattern_file))
+                    all_patterns.extend(patterns)
+                    logger.info(f"Loaded {len(patterns)} patterns from {pattern_file.name}")
                 except Exception as e:
                     logger.warning(f"Failed to load {pattern_file}: {e}")
+
+            if all_patterns:
+                ruler.add_patterns(all_patterns)
+                logger.info(f"Total entity patterns loaded: {len(all_patterns)}")
         else:
             logger.warning(f"Patterns directory not found at {patterns_dir}")
 
@@ -193,6 +207,16 @@ class CanonicalizationService:
                             constraints["entity"] = "FILM"
                         elif lemma in ("actor", "actress", "performer"):
                             constraints["entity"] = "ACTOR"
+
+                elif pattern_name == "RATING_CONSTRAINT":
+                    # Pattern matches [film] -> [rated] -> [PG] or similar
+                    for idx in token_ids:
+                        token = doc[idx]
+                        # Heuristic: Rating is usually upper case or specific values like 'G', 'R'
+                        if token.text.upper() in ("G", "PG", "PG-13", "R", "NC-17", "NC17"):
+                            constraints["rating"] = token.text.upper()
+                            constraints["confidence"] += 0.3
+                            break
 
         return constraints
 

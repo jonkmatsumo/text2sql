@@ -5,7 +5,6 @@ before the main MCP server starts.
 """
 
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -13,8 +12,9 @@ from pathlib import Path
 from mcp_server.config.database import Database
 from mcp_server.dal.factory import get_retriever
 from mcp_server.dal.ingestion.hydrator import GraphHydrator
-from mcp_server.rag import RagEngine, format_vector_for_postgres
-from mcp_server.seeding.loader import load_from_directory
+from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
+from mcp_server.seeding.loader import load_from_directory, load_table_summaries
+from mcp_server.services.registry import RegistryService
 
 
 async def _ingest_graph_schema():
@@ -41,64 +41,8 @@ async def _ingest_graph_schema():
         print(f"Error ingesting graph schema: {e}")
 
 
-async def _upsert_sql_example(conn, item: dict):
-    """Upsert item into sql_examples."""
-    question = item["question"]
-    sql = item["query"]
-
-    # Compute embedding
-    # TODO: Add batch support to RagEngine for faster seeding
-    embedding = RagEngine.embed_text(question)
-    pg_vector = format_vector_for_postgres(embedding)
-
-    await conn.execute(
-        """
-        INSERT INTO sql_examples (question, sql_query, embedding)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (question) DO UPDATE
-        SET sql_query = EXCLUDED.sql_query,
-            embedding = EXCLUDED.embedding,
-            updated_at = NOW()
-        """,
-        question,
-        sql,
-        pg_vector,
-    )
-
-
-async def _upsert_golden_record(conn, item: dict):
-    """Upsert item into golden_dataset."""
-    expected_result = item.get("expected_result")
-    if expected_result is not None:
-        expected_result = json.dumps(expected_result)
-
-    await conn.execute(
-        """
-        INSERT INTO golden_dataset (
-            question, ground_truth_sql, expected_result,
-            expected_row_count, category, difficulty, tenant_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (question) DO UPDATE
-        SET ground_truth_sql = EXCLUDED.ground_truth_sql,
-            expected_result = EXCLUDED.expected_result,
-            expected_row_count = EXCLUDED.expected_row_count,
-            category = EXCLUDED.category,
-            difficulty = EXCLUDED.difficulty,
-            tenant_id = EXCLUDED.tenant_id
-        """,
-        item["question"],
-        item["query"],
-        expected_result,
-        item.get("expected_row_count"),
-        item.get("category"),
-        item.get("difficulty", "medium"),
-        item.get("tenant_id", 1),
-    )
-
-
-async def _process_seed_data(conn: any, base_path: Path):
-    """Load and upsert query examples."""
+async def _process_seed_data(base_path: Path):
+    """Load and register query examples into the unified registry."""
     items = load_from_directory(base_path)
     if not items:
         print("No seed files found.")
@@ -106,8 +50,20 @@ async def _process_seed_data(conn: any, base_path: Path):
 
     print(f"Processing {len(items)} items from {base_path}...")
     for item in items:
-        await _upsert_sql_example(conn, item)
-        await _upsert_golden_record(conn, item)
+        # Register in Unified Registry with both 'example' and 'golden' roles
+        await RegistryService.register_pair(
+            question=item["question"],
+            sql_query=item["query"],
+            tenant_id=item.get("tenant_id", 1),
+            roles=["example", "golden"],
+            status="verified",
+            metadata={
+                "category": item.get("category"),
+                "difficulty": item.get("difficulty", "medium"),
+                "expected_row_count": item.get("expected_row_count"),
+            },
+        )
+    print(f"✓ Registered {len(items)} items in Unified Registry.")
 
 
 async def main():
@@ -146,8 +102,8 @@ async def main():
             async with ctx as conn_control:
                 print("✓ Control DB connection established.")
 
-                # 1. Seed Few-Shot Examples & Golden Dataset (Write to Control)
-                await _process_seed_data(conn_control, Path("/app/queries"))
+                # 1. Seed Few-Shot Examples & Golden Dataset (Write to Registry via RegistryService)
+                await _process_seed_data(Path("/app/queries"))
 
                 # 2. Seed Table Summaries (Read Main, Write Control)
                 await _seed_table_summaries(conn_main, conn_control, Path("/app/queries"))
@@ -172,9 +128,6 @@ async def main():
 
 async def _seed_table_summaries(conn_read: any, conn_write: any, base_path: Path):
     """Load and index table summaries."""
-    from mcp_server.rag import RagEngine, format_vector_for_postgres, generate_schema_document
-    from mcp_server.seeding.loader import load_table_summaries
-
     summaries = load_table_summaries(base_path)
     if not summaries:
         print("No table summaries found.")

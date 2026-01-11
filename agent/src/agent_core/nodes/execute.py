@@ -77,10 +77,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
         try:
             tools = await get_mcp_tools()
-            executor_tool = next((t for t in tools if t.name == "execute_sql_query_tool"), None)
+            executor_tool = next((t for t in tools if t.name == "execute_sql_query"), None)
 
             if not executor_tool:
-                error = "execute_sql_query_tool not found in MCP server"
+                error = "execute_sql_query tool not found in MCP server"
                 span.set_outputs({"error": error})
                 return {
                     "error": error,
@@ -150,14 +150,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if not error and original_sql and tenant_id and not from_cache:
                 try:
                     # Get cache update tool
-                    cache_tool = next((t for t in tools if t.name == "update_cache_tool"), None)
+                    cache_tool = next((t for t in tools if t.name == "update_cache"), None)
                     if cache_tool:
                         # Extract user query from first message
                         user_query = state["messages"][0].content if state["messages"] else ""
                         if user_query:
                             await cache_tool.ainvoke(
                                 {
-                                    "user_query": user_query,
+                                    "query": user_query,
                                     "sql": original_sql,
                                     "tenant_id": tenant_id,
                                 }

@@ -1,6 +1,8 @@
 """LangGraph workflow definition for Text 2 SQL agent with MLflow tracing."""
 
+import json
 import os
+import uuid
 
 import mlflow
 from agent_core.nodes.cache_lookup import cache_lookup_node
@@ -226,8 +228,6 @@ async def run_agent_with_tracing(
     Returns:
         Agent state after workflow completion
     """
-    import uuid
-
     from langchain_core.messages import HumanMessage
 
     # Prepare initial state
@@ -254,8 +254,55 @@ async def run_agent_with_tracing(
     # Config with thread_id for checkpointer
     config = {"configurable": {"thread_id": thread_id}}
 
+    # 1. Start Interaction Logging (Pre-execution)
+    interaction_id = None
+    try:
+        from agent_core.tools import get_mcp_tools
+
+        tools = await get_mcp_tools()
+        create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+        if create_tool:
+            interaction_id = await create_tool.ainvoke(
+                {
+                    "conversation_id": session_id or thread_id,
+                    "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
+                    "user_nlq_text": question,
+                    "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
+                    "prompt_version": "v1.0",
+                    "trace_id": thread_id,
+                }
+            )
+            inputs["interaction_id"] = interaction_id
+    except Exception as e:
+        print(f"Warning: Failed to create interaction log: {e}")
+
     # Execute workflow - autologger will create the root trace
     result = await app.ainvoke(inputs, config=config)
+
+    # 2. Update Interaction Logging (Post-execution)
+    if interaction_id:
+        try:
+            update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+            if update_tool:
+                # Determine status
+                status = "SUCCESS" if not result.get("error") else "FAILURE"
+                # Get last message as response
+                last_msg = result["messages"][-1].content if result.get("messages") else ""
+
+                await update_tool.ainvoke(
+                    {
+                        "interaction_id": interaction_id,
+                        "generated_sql": result.get("current_sql"),
+                        "response_payload": json.dumps(
+                            {"text": last_msg, "error": result.get("error")}
+                        ),
+                        "execution_status": status,
+                        "error_type": result.get("error_category"),
+                        "tables_used": result.get("table_names", []),
+                    }
+                )
+        except Exception as e:
+            print(f"Warning: Failed to update interaction log: {e}")
 
     # Enrich the trace with user/session metadata after invocation
     # Note: update_current_trace must be called within the trace context

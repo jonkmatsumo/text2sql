@@ -39,9 +39,9 @@ class TestMain:
         assert hasattr(Database, "init")
         assert hasattr(Database, "close")
 
-    def test_tool_functions_imported(self):
-        """Test that all tool functions are imported."""
-        from mcp_server.main import (
+    def test_tool_functions_available(self):
+        """Test that all tool functions are available in the tools package."""
+        from mcp_server.tools import (
             execute_sql_query,
             get_semantic_definitions,
             get_table_schema,

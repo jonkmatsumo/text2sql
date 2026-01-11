@@ -38,6 +38,7 @@ agent/.env
 # OS
 .DS_Store
 Thumbs.db
+AGENTS.md
 
 # Node modules
 node_modules/

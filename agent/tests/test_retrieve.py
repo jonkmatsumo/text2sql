@@ -19,7 +19,7 @@ class TestRetrieveContextNode:
         return mock_span
 
     def _make_graph_data(self, tables, columns=None, relationships=None):
-        """Build graph data structure matching get_semantic_subgraph_tool output."""
+        """Build graph data structure matching get_semantic_subgraph output."""
         nodes = []
         for i, table in enumerate(tables):
             nodes.append(
@@ -53,9 +53,9 @@ class TestRetrieveContextNode:
         """Test successful context retrieval."""
         self._mock_mlflow_span(mock_start_span)
 
-        # Create mock tool matching get_semantic_subgraph_tool
+        # Create mock tool matching get_semantic_subgraph
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
 
         graph_data = self._make_graph_data(
             tables=[
@@ -114,7 +114,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
         mock_subgraph_tool.ainvoke = AsyncMock(
             return_value=json.dumps({"nodes": [], "relationships": []})
         )
@@ -145,7 +145,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
 
         graph_data = self._make_graph_data(
             tables=[
@@ -184,7 +184,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
         mock_subgraph_tool.ainvoke = AsyncMock(
             return_value=json.dumps({"nodes": [], "relationships": []})
         )
@@ -217,7 +217,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
         mock_subgraph_tool.ainvoke = AsyncMock(
             return_value=json.dumps({"nodes": [], "relationships": []})
         )
@@ -276,7 +276,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
 
         graph_data = self._make_graph_data(
             tables=[{"name": "single_table", "description": "Single schema"}]
@@ -310,7 +310,7 @@ class TestRetrieveContextNode:
         self._mock_mlflow_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
-        mock_subgraph_tool.name = "get_semantic_subgraph_tool"
+        mock_subgraph_tool.name = "get_semantic_subgraph"
 
         # Create 5 tables
         tables = [{"name": f"table{i+1}", "description": f"Schema {i+1}"} for i in range(5)]

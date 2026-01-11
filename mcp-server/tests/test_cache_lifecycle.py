@@ -4,7 +4,7 @@ import time
 import pytest
 from mcp_server.config.database import Database
 from mcp_server.dal.factory import get_cache_store
-from mcp_server.tools.semantic import get_semantic_subgraph
+from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
 
 TEST_QUERY = "Integration Test: Show me the hierarchy of the payment system"
 TENANT_ID = 1

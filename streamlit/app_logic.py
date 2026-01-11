@@ -6,16 +6,11 @@ and result processing.
 """
 
 import sys
-import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
-from langchain_core.messages import HumanMessage
-
 # Add agent to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "agent" / "src"))
-
-from agent_core.graph import app  # noqa: E402
 
 
 async def run_agent(question: str, tenant_id: int, thread_id: str = None) -> Dict:
@@ -38,51 +33,34 @@ async def run_agent(question: str, tenant_id: int, thread_id: str = None) -> Dic
             - response: Natural language response (if any)
             - error: Error message (if any)
             - from_cache: Boolean indicating if SQL came from cache
+            - interaction_id: Unique identifier for the interaction
 
     Raises:
         Exception: If agent workflow fails unexpectedly
     """
-    if not thread_id:
-        thread_id = str(uuid.uuid4())
+    from agent_core.graph import run_agent_with_tracing
 
-    inputs = {
-        "messages": [HumanMessage(content=question)],
-        "schema_context": "",
-        "current_sql": None,
-        "query_result": None,
-        "error": None,
-        "retry_count": 0,
-        "tenant_id": tenant_id,
-    }
+    # Execute with full tracing and logging
+    state = await run_agent_with_tracing(
+        question=question, tenant_id=tenant_id, thread_id=thread_id
+    )
 
     results = {
-        "sql": None,
-        "result": None,
+        "sql": state.get("current_sql"),
+        "result": state.get("query_result"),
         "response": None,
-        "error": None,
-        "from_cache": False,
+        "error": state.get("error"),
+        "from_cache": state.get("from_cache", False),
+        "interaction_id": state.get("interaction_id"),
     }
 
-    config = {"configurable": {"thread_id": thread_id}}
+    # Extract response from messages
+    if state.get("messages"):
+        results["response"] = state["messages"][-1].content
 
-    async for event in app.astream(inputs, config=config):
-        for node_name, node_output in event.items():
-            if "current_sql" in node_output:
-                results["sql"] = node_output["current_sql"]
-            if "from_cache" in node_output:
-                results["from_cache"] = node_output["from_cache"]
-            if "query_result" in node_output:
-                results["result"] = node_output["query_result"]
-            if "error" in node_output and node_output["error"]:
-                results["error"] = node_output["error"]
-            if node_name == "synthesize" and "messages" in node_output:
-                if node_output["messages"]:
-                    results["response"] = node_output["messages"][-1].content
-            # Handle interrupt/clarification if needed (future enhancement for UI)
-            if node_name == "router" and "clarification_question" in node_output:
-                if node_output.get("clarification_question"):
-                    results["response"] = node_output["clarification_question"]
-                    # We might want to flag this as a clarification request in the future
+    # Handle clarification
+    if state.get("clarification_question"):
+        results["response"] = state["clarification_question"]
 
     return results
 
@@ -105,6 +83,7 @@ def format_conversation_entry(question: str, results: Dict) -> Dict:
         "response": results.get("response"),
         "error": results.get("error"),
         "from_cache": results.get("from_cache", False),
+        "interaction_id": results.get("interaction_id"),
     }
 
 
@@ -119,3 +98,24 @@ def validate_tenant_id(tenant_id: Optional[int]) -> int:
         Valid tenant ID (defaults to 1)
     """
     return tenant_id if tenant_id is not None and tenant_id > 0 else 1
+
+
+async def submit_feedback(interaction_id: str, thumb: str, comment: str = None) -> bool:
+    """Submit feedback for an interaction."""
+    if not interaction_id:
+        return False
+
+    from agent_core.tools import get_mcp_tools
+
+    try:
+        tools = await get_mcp_tools()
+        feedback_tool = next((t for t in tools if t.name == "submit_feedback_tool"), None)
+        if feedback_tool:
+            await feedback_tool.ainvoke(
+                {"interaction_id": interaction_id, "thumb": thumb, "comment": comment}
+            )
+            return True
+    except Exception as e:
+        print(f"Error submitting feedback: {e}")
+
+    return False

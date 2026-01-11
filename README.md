@@ -15,7 +15,7 @@ Designed for security and scalability, it uses modern containerization and secur
 ```mermaid
 flowchart TB
     subgraph Agent["🤖 Agent System (LangGraph)"]
-        UserQuery["User Query<br/>'Show payments'"]
+        UserQuery["User Query<br/>'Show movies'"]
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
 
         %% Nodes
@@ -47,7 +47,6 @@ flowchart TB
 
         ExecuteNode -->|"Success"| SynthesizeNode
         ExecuteNode -->|"Error"| CorrectNode
-        ExecuteNode -->|"Success (Write-Through)"| MCPTools
 
         CorrectNode -->|"Retry (Loop)"| ValidateNode
         SynthesizeNode --> Response
@@ -65,12 +64,14 @@ flowchart TB
         MLflow --> MinIO
     end
 
+
+
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
-        MCPTools["MCP Tools<br/>mcp_server/tools/"]
+        MCPTools["MCP Tools<br/>mcp-server/src/mcp_server/tools/"]
 
         subgraph DAL["🛡️ Data Abstraction Layer"]
-            I_Store["Protocols<br/>(GraphStore, MetadataStore)"]
-            Impl_PG["Postgres Adapter<br/>(pgvector, introspection)"]
+            I_Store["Protocols<br/>(RegistryStore, GraphStore)"]
+            Impl_PG["Postgres Adapter<br/>(Unified Registry, Introspection)"]
             Impl_MG["Memgraph Adapter<br/>(Cypher)"]
 
             I_Store --> Impl_PG
@@ -79,14 +80,14 @@ flowchart TB
 
         VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
         Canonicalizer["Linguistic Canonicalization<br/>(SpaCy + EntityRuler)"]
-        TwoTierCache["Two-Tier Semantic Cache<br/>(Fingerprint + Vector)"]
+        RegistryService["Unified Registry Service<br/>(Unified Lifecycle)"]
         PolicyEnforcer["Runtime Policy Enforcer<br/>AST-based Query Guardrail"]
         TenantRewriter["Tenant Rewriter<br/>AST-based RLS Injection"]
     end
 
-    subgraph ControlDB["�️ Control-Plane (Postgres)"]
-        PGVectorDB["pgvector Extension<br/>Few-shot examples<br/>Schema Embeddings"]
-        SemanticCache["semantic_cache Table<br/>Global SQL Cache"]
+    subgraph ControlDB["🛡️ Control-Plane (Postgres)"]
+        QueryRegistry["Query Registry (query_pairs)<br/>Cache + Examples + Golden<br/>pgvector index"]
+        SchemaEmbeddings["Schema Embeddings<br/>Table/Column context"]
         Tenants["Tenant Registry<br/>RLS & Policies"]
     end
 
@@ -99,20 +100,26 @@ flowchart TB
         SchemaGraph["Schema Graph<br/>Tables, Columns, FKs"]
     end
 
-    %% Agent to MCP Server via DAL
+    %% Agent to MCP Server
     RetrieveNode -->|"Call Tool"| MCPTools
-    MCPTools -->|"Search/Query"| DAL
-    DAL -->|"Vector Search"| VectorIndex
+    ExecuteNode -->|"Call Tool"| MCPTools
 
-    Impl_PG --> PGVectorDB
-    Impl_PG --> SemanticCache
+    %% Observability Connections
+    Agent --> Observability
+    AgentState -.->|"Auto-log"| MLflow
+    MCPServer -.->|"Traces"| MLflow
+
+    %% MCP Server Internal Connections
+    MCPTools --> DAL
+    DAL --> Impl_PG
+    Impl_PG --> QueryRegistry
+    Impl_PG --> SchemaEmbeddings
     Impl_PG --> Tenants
     Impl_PG --> PagilaDB
 
     Impl_MG --> SchemaGraph
 
     %% Execution flow with Hardening
-    ExecuteNode -->|"Call Tool"| MCPTools
     MCPTools -->|"1. Validate Logic"| PolicyEnforcer
     PolicyEnforcer -->|"2. Inject Context"| TenantRewriter
     TenantRewriter -->|"3. Execute Read"| Target_RO
@@ -136,22 +143,25 @@ flowchart TB
 *   **Graph-Aware RAG**: Integrates Memgraph to traverse database relationships (Foreign Keys), ensuring retrieved contexts maintain relational integrity.
 *   **Enriched Ingestion**: Automatically generates high-fidelity descriptions and embeddings during seeding, ensuring the agent understands business domain semantics.
 
-### 🚀 Multi-Tier Semantic Caching Using SpaCy
-*   **Linguistic Canonicalization**: Uses **SpaCy** with custom `EntityRuler` and `DependencyMatcher` patterns to extract query intent (ratings, limits, entities) regardless of word order or phrasing.
-*   **Tier 1: Global Fingerprinting**: Generates a deterministic SHA-256 signature from canonical constraints for O(1) exact-match lookups that work across different tenants.
-*   **Tier 2: Semantic Fallback**: Falls back to high-threshold (0.90) vector similarity search if no exact fingerprint is found.
-*   **Deterministic Guardrails**: Every cache hit is cross-verified via AST parsing to ensure the cached SQL's predicates perfectly match the current user's intent.
+### 🚀 Unified NLQ↔SQL Registry & Semantic Caching
+*   **Canonical Identifiers**: Every query pair is anchored by a **SpaCy-generated signature key**, ensuring that semantically identical questions share a single source of truth.
+*   **Multi-Role Lifecycle**: A single entry in the `query_pairs` registry can serve multiple roles:
+    *   **Cache**: Fast runtime lookups for repeating queries.
+    *   **Example**: High-quality few-shot examples for LLM guidance.
+    *   **Golden**: Verified test cases for evaluation and regression testing.
+*   **Trust Levels**: Clear distinction between `verified` human-curated data and `autogenerated` machine results.
+*   **Deterministic Guardrails**: Cache hits are cross-verified via AST parsing to ensure SQL predicates match user intent.
 
 ### 🛡️ Extensible Foundation: Multi-Provider LLM & Multi-Engine Database Support
 *   **Extensible Tooling**: Built on the **Model Context Protocol (MCP)**, making database tools accessible to any MCP-compliant agent or client.
-*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`GraphStore`, `MetadataStore`), allowing the system to easily extend to other database types (e.g., MySQL, Snowflake) or query engines.
-*   **Runtime Policy Enforcement**: Uses a **Dual-Database Architecture** to separate sensitive control-plane data (tenants, keys, cache) from the query-target data.
+*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`RegistryStore`, `GraphStore`), allowing the system to easily extend to other database types (e.g., MySQL, Snowflake).
+*   **Runtime Policy Enforcement**: Uses a **Dual-Database Architecture** to separate sensitive control-plane data (tenants, keys, registry) from the query-target data.
 *   **AST-Based Security**: Employs `sqlglot` for AST traversal to strictly enforce read-only access and inject tenant isolation predicates at runtime.
 *   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
 ### 📡 Observability & Performance
-*   **End-to-End Tracing**: Integrated MLflow tracking provides full visibility into the agent's reasoning steps, tool calls, and cache decisions.
-*   **Unified Monitoring**: Captures fingerprint hits, misses, and guardrail rejections as structured metadata in the trace.
+*   **End-to-End Tracing**: Integrated MLflow tracking provides full visibility into the agent's reasoning steps, tool calls, and registry decisions.
+*   **Unified Monitoring**: Captures signature hits, misses, and guardrail rejections as structured metadata in the trace.
 
 ## Project Structure
 
