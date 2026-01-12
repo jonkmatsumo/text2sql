@@ -2,11 +2,64 @@
 
 import argparse
 import sys
+from pathlib import Path
+
+from text2sql_synth.config import ScalePreset, SynthConfig
+
+
+def resolve_config(args: argparse.Namespace) -> SynthConfig:
+    """Resolve configuration from either --preset or --config.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        Resolved SynthConfig instance.
+
+    Raises:
+        SystemExit: If neither or both --preset and --config are specified.
+    """
+    if args.preset and args.config:
+        print("Error: Cannot specify both --preset and --config", file=sys.stderr)
+        sys.exit(1)
+
+    if args.preset:
+        return SynthConfig.preset(args.preset)
+
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.suffix in (".yaml", ".yml"):
+            return SynthConfig.from_yaml(config_path)
+        elif config_path.suffix == ".json":
+            return SynthConfig.from_json(config_path)
+        else:
+            # Try YAML first, then JSON
+            try:
+                return SynthConfig.from_yaml(config_path)
+            except Exception:
+                return SynthConfig.from_json(config_path)
+
+    print("Error: Must specify either --preset or --config", file=sys.stderr)
+    sys.exit(1)
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    """Generate synthetic data from a configuration file."""
-    print(f"generate: config={args.config}, out={args.out}")
+    """Generate synthetic data from a configuration file or preset."""
+    try:
+        config = resolve_config(args)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    # Print resolved configuration
+    print("Resolved configuration:")
+    print(config.to_json())
+    print()
+
+    print(f"Output directory: {args.out}")
     print("NOT IMPLEMENTED")
     return 1
 
@@ -36,16 +89,23 @@ def build_parser() -> argparse.ArgumentParser:
     # generate subcommand
     gen_parser = subparsers.add_parser(
         "generate",
-        help="Generate synthetic data from a configuration file",
+        help="Generate synthetic data from a configuration file or preset",
     )
-    gen_parser.add_argument(
+    config_group = gen_parser.add_mutually_exclusive_group(required=True)
+    config_group.add_argument(
         "--config",
-        required=True,
-        help="Path to the generation configuration file",
+        metavar="PATH",
+        help="Path to the generation configuration file (YAML or JSON)",
+    )
+    config_group.add_argument(
+        "--preset",
+        choices=[p.value for p in ScalePreset],
+        help="Use a built-in preset (small, mvp, or medium)",
     )
     gen_parser.add_argument(
         "--out",
         required=True,
+        metavar="DIR",
         help="Output directory for generated data",
     )
     gen_parser.set_defaults(func=cmd_generate)
