@@ -2,7 +2,6 @@
 
 import os
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,9 +9,6 @@ import pytest
 # Set OpenAI API key before importing app_logic (which imports agent modules)
 os.environ.setdefault("OPENAI_API_KEY", "test-key-for-testing-only")
 
-# Add parent directory and agent src to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
 
 # Mock missing dependencies
 sys.modules["langchain_mcp_adapters"] = MagicMock()

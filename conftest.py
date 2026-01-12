@@ -34,3 +34,9 @@ mcp_server_tests = ROOT_DIR / "mcp-server" / "tests"
 if str(mcp_server_tests) not in sys.path:
     sys.path.insert(0, str(mcp_server_tests))
     print(f"conftest.py: Added {mcp_server_tests} to sys.path")
+
+# Add streamlit directory to sys.path to allow importing service modules
+streamlit_dir = ROOT_DIR / "streamlit"
+if str(streamlit_dir) not in sys.path:
+    sys.path.insert(0, str(streamlit_dir))
+    print(f"conftest.py: Added {streamlit_dir} to sys.path")

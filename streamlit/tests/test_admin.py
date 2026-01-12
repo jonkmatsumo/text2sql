@@ -1,15 +1,8 @@
 """Unit tests for Streamlit AdminService."""
 
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-# Add parent directory and agent src to path (mimicking other tests)
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
-
 from service.admin import AdminService  # noqa: E402
 
 
