@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List
 
 from mcp_server.models import QueryPair
+from mcp_server.services.recommendation.config import RECO_CONFIG
 from mcp_server.services.recommendation.interface import RecommendationResult, RecommendedExample
 from mcp_server.services.registry import RegistryService
 
@@ -27,12 +28,14 @@ class RecommendationService:
         4. If insufficient and enabled, fetch from interaction history (fallback).
         """
         # 1. Fetch Candidates
+        fetch_limit = limit * RECO_CONFIG.candidate_multiplier
+
         approved = await RegistryService.lookup_semantic(
-            question, tenant_id, role="example", status="verified", limit=limit * 2
+            question, tenant_id, role="example", status="verified", limit=fetch_limit
         )
 
         seeded = await RegistryService.lookup_semantic(
-            question, tenant_id, role="example", status="seeded", limit=limit * 2
+            question, tenant_id, role="example", status="seeded", limit=fetch_limit
         )
 
         # 2. Rank and Deduplicate
@@ -40,14 +43,20 @@ class RecommendationService:
         recommended = RecommendationService._rank_and_deduplicate(all_candidates, limit)
 
         fallback_used = False
-        # 3. Fallback Path
-        if len(recommended) < limit and enable_fallback:
+        # 3. Fallback Path (enabled by both arg AND config)
+        effective_fallback_enabled = enable_fallback and RECO_CONFIG.fallback_enabled
+
+        if len(recommended) < limit and effective_fallback_enabled:
             # For fallback, we look at successful interactions
             # Note: We currently don't have a specific status for 'success' in QueryPair
             # in a way that matches this exactly, but we can look for role='interaction'
             # and potentially a high similarity threshold.
             history = await RegistryService.lookup_semantic(
-                question, tenant_id, role="interaction", threshold=0.85, limit=limit
+                question,
+                tenant_id,
+                role="interaction",
+                threshold=RECO_CONFIG.fallback_threshold,
+                limit=limit,
             )
 
             if history:
@@ -86,10 +95,15 @@ class RecommendationService:
     @staticmethod
     def _rank_candidates(candidates: List[QueryPair]) -> List[QueryPair]:
         """Rank candidates by status priority and existing order (similarity)."""
+        # Build priority map from config
+        # Lower index = higher priority
+        priority_map = {status: i for i, status in enumerate(RECO_CONFIG.status_priority)}
+        # Unknown statuses get pushed to the end
+        default_priority = len(RECO_CONFIG.status_priority)
 
         def sort_key(cp: QueryPair):
-            # Status priority: verified (0) > seeded (1) > others (2)
-            status_pri = 0 if cp.status == "verified" else (1 if cp.status == "seeded" else 2)
+            # Status priority from config
+            status_pri = priority_map.get(cp.status, default_priority)
             return status_pri
 
         # Candidates from lookup_semantic are already sorted by similarity.
