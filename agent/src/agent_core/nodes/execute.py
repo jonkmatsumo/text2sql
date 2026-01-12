@@ -1,9 +1,9 @@
-"""SQL execution and validation node with MLflow tracing."""
+"""SQL execution node for running validated queries with telemetry tracing."""
 
 import logging
 
-import mlflow
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from agent_core.tools import get_mcp_tools
 from agent_core.validation.policy_enforcer import PolicyEnforcer
 from agent_core.validation.tenant_rewriter import TenantRewriter
@@ -24,9 +24,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with query_result or error
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="execute_sql",
-        span_type=mlflow.entities.SpanType.TOOL,
+        span_type=SpanType.TOOL,
     ) as span:
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")

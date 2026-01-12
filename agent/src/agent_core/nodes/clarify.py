@@ -6,8 +6,8 @@ This module implements the clarification flow that:
 3. Resumes with user's response
 """
 
-import mlflow
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 
 # Try to import interrupt from langgraph.types (LangGraph 0.2+)
 try:
@@ -38,9 +38,9 @@ async def clarify_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with user_clarification
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="clarify",
-        span_type=mlflow.entities.SpanType.CHAIN,
+        span_type=SpanType.CHAIN,
     ) as span:
         clarification_question = state.get("clarification_question")
         ambiguity_type = state.get("ambiguity_type")
