@@ -15,13 +15,13 @@ class MaintenanceService:
     async def generate_patterns(dry_run: bool = False) -> AsyncGenerator[str, None]:
         """Generate EntityRuler patterns from database schema interactions."""
         from mcp_server.services.patterns.generator import generate_entity_patterns
-        
+
         yield "Starting pattern generation (Intospection & LLM Enrichment)..."
-        
+
         try:
             patterns = await generate_entity_patterns()
             yield f"Generated {len(patterns)} patterns."
-            
+
             if dry_run:
                 yield "DRY RUN: Skipping database write."
                 for p in patterns[:5]:
@@ -38,18 +38,18 @@ class MaintenanceService:
                 async with Database.get_connection() as conn:
                     # Prepare data for executemany
                     data = [(p["id"], p["label"], p["pattern"]) for p in patterns]
-                    
+
                     await conn.executemany(
                         """
                         INSERT INTO nlp_patterns (id, label, pattern)
                         VALUES ($1, $2, $3)
-                        ON CONFLICT (label, pattern) 
+                        ON CONFLICT (label, pattern)
                         DO UPDATE SET id = EXCLUDED.id, created_at = CURRENT_TIMESTAMP
                         """,
-                        data
+                        data,
                     )
                 yield "Patterns successfully saved to 'nlp_patterns' table."
-                
+
         except Exception as e:
             logger.error(f"Pattern generation failed: {e}", exc_info=True)
             yield f"Error: {e}"
@@ -64,8 +64,6 @@ class MaintenanceService:
         # For Phase 1, we just need the stub or basic integration.
         # Let's import it to see if it works, or leave as comment if it's complex dependency.
         try:
-            from mcp_server.services.seeding.cli import DatabaseSeeder
-
             # Note: The original CLI logic might need refactoring to separate logging from execution
             # For now, we yield a placeholder
             yield "Hydration logic invoked."
