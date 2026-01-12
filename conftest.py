@@ -1,58 +1,42 @@
-"""Root-level pytest configuration for path management.
-
-This conftest runs before test-specific conftests to ensure correct import path ordering.
-It guarantees that mcp-server/src is found before agent/src when both are in sys.path.
-"""
-
 import sys
 from pathlib import Path
 
+# ==============================================================================
+# CRITICAL INFRASTRUCTURE FILE - DO NOT DELETE
+# ==============================================================================
+# This file is essential for Pytest configuration and CI/CD pipeline stability.
+# It ensures that 'mcp-server/src' and 'agent/src' are correctly added to sys.path
+# before test collection begins. Removing this file will cause ModuleNotFoundErrors
+# in CI environments.
+# ==============================================================================
 
-def _setup_path_order():
-    """Set up sys.path order to ensure mcp-server is found before agent."""
-    # Get project root directory
-    root_dir = Path(__file__).parent
-    mcp_server_dir = root_dir / "mcp-server"
-    agent_dir = root_dir / "agent"
+# Calculate root directory
+ROOT_DIR = Path(__file__).parent.absolute()
 
-    mcp_server_dir_str = str(mcp_server_dir.resolve())
-    agent_dir_str = str(agent_dir.resolve())
+# Add source directories to sys.path
+# We prepend to ensure these local packages take precedence over installed ones
+# This fixes "ModuleNotFoundError" in CI where editable installs might behave differently
+# or when relying on 'import-mode=importlib' without explicit path setup.
 
-    # Remove both directories from path if already present
-    # This ensures we can control the exact order
-    paths_to_remove = []
-    for i, path in enumerate(sys.path):
-        try:
-            path_obj = Path(path)
-            if path_obj.exists():
-                resolved_path = str(path_obj.resolve())
-                if resolved_path == mcp_server_dir_str or resolved_path == agent_dir_str:
-                    paths_to_remove.append(i)
-        except (OSError, ValueError):
-            # Skip invalid paths
-            continue
+mcp_server_src = ROOT_DIR / "mcp-server" / "src"
+agent_src = ROOT_DIR / "agent" / "src"
 
-    # Remove paths in reverse order to maintain indices
-    for i in reversed(paths_to_remove):
-        sys.path.pop(i)
+if str(mcp_server_src) not in sys.path:
+    sys.path.insert(0, str(mcp_server_src))
+    print(f"conftest.py: Added {mcp_server_src} to sys.path")
 
-    # Insert mcp-server first, then agent
-    # This ensures mcp-server/src is found before agent/src for all imports
-    if mcp_server_dir.exists():
-        sys.path.insert(0, mcp_server_dir_str)
+if str(agent_src) not in sys.path:
+    sys.path.insert(0, str(agent_src))
+    print(f"conftest.py: Added {agent_src} to sys.path")
 
-    if agent_dir.exists():
-        # Insert after mcp-server (at index 1 if mcp-server was added, otherwise at 0)
-        insert_index = 1 if mcp_server_dir.exists() else 0
-        sys.path.insert(insert_index, agent_dir_str)
+# Add mcp-server/tests to sys.path to allow importing fixtures
+mcp_server_tests = ROOT_DIR / "mcp-server" / "tests"
+if str(mcp_server_tests) not in sys.path:
+    sys.path.insert(0, str(mcp_server_tests))
+    print(f"conftest.py: Added {mcp_server_tests} to sys.path")
 
-
-# Set up path immediately when module is imported
-# This ensures correct path order before any test collection or imports happen
-_setup_path_order()
-
-
-def pytest_configure(config):
-    """Configure pytest - ensure path order is correct."""
-    # Re-setup path order in case pytest.ini or other config changed it
-    _setup_path_order()
+# Add streamlit directory to sys.path to allow importing service modules
+streamlit_dir = ROOT_DIR / "streamlit"
+if str(streamlit_dir) not in sys.path:
+    sys.path.insert(0, str(streamlit_dir))
+    print(f"conftest.py: Added {streamlit_dir} to sys.path")

@@ -66,7 +66,7 @@ class PgSemanticCache(CacheStore):
 
         if row:
             return CacheLookupResult(
-                cache_id=row["cache_id"],
+                cache_id=str(row["cache_id"]),
                 value=row["generated_sql"],
                 similarity=row["similarity"],
                 metadata={"user_query": row["user_query"]},

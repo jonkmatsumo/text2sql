@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.seeding import cli
-from mcp_server.seeding.loader import load_from_directory
+from mcp_server.services.seeding import cli
+from mcp_server.services.seeding.loader import load_from_directory
 
 
 class TestLoader:
