@@ -146,60 +146,58 @@ class CanonicalizationService:
         if self.nlp is None:
             return
 
-        try:
-            from mcp_server.config.database import Database
+        from mcp_server.config.database import Database
 
-            logger.info("Reloading patterns from database...")
-            patterns = []
+        logger.info("Reloading patterns from database...")
+        patterns = []
 
-            # Use a new connection or the pool
-            async with Database.get_connection() as conn:
-                # Check if table exists first (in case running before migration,
-                # though ensure_schema should handle it).
-                # But typically we just query.
-                rows = await conn.fetch("SELECT label, pattern, id FROM nlp_patterns")
+        # Use a new connection or the pool
+        async with Database.get_connection() as conn:
+            # Check if table exists first (in case running before migration,
+            # though ensure_schema should handle it).
+            # But typically we just query.
+            rows = await conn.fetch("SELECT label, pattern, id FROM nlp_patterns")
 
-                for row in rows:
-                    patterns.append(
-                        {
-                            "label": row["label"],
-                            "pattern": row["pattern"],
-                            "id": row["id"],
-                        }
-                    )
+            for row in rows:
+                patterns.append(
+                    {
+                        "label": row["label"],
+                        "pattern": row["pattern"],
+                        "id": row["id"],
+                    }
+                )
 
-            if patterns:
-                # Get existing ruler
-                if "entity_ruler" in self.nlp.pipe_names:
-                    ruler = self.nlp.get_pipe("entity_ruler")
-                    # We can't easily "remove" patterns from a compiled ruler without resetting
-                    # But we can add new ones.
-                    # If we want to fully reload, we might need to remove and re-add the pipe.
-                    self.nlp.remove_pipe("entity_ruler")
-
-                ruler = self.nlp.add_pipe("entity_ruler", before="ner")
-
-                # Re-load static patterns + new DB patterns
-                # This is a bit expensive but correct.
-                # Ideally we merge them.
-                # For now, let's just add DB patterns to existing ruler if possible?
-                # SpaCy documentation says we can add_patterns.
-                # If we want to replace, we must remove pipe.
-                # Let's assume we want to APPEND (or overwrite if collision? SpaCy
-                # handles overlaps by order).
-
-                # To be safe and support "Reload" fully, re-run _setup_entity_ruler()
-                # then add DB patterns.
-                self._setup_entity_ruler()  # Re-adds pipe and static patterns
+        if patterns:
+            # Get existing ruler
+            if "entity_ruler" in self.nlp.pipe_names:
                 ruler = self.nlp.get_pipe("entity_ruler")
-                ruler.add_patterns(patterns)
+                # We can't easily "remove" patterns from a compiled ruler without resetting
+                # But we can add new ones.
+                # If we want to fully reload, we might need to remove and re-add the pipe.
+                self.nlp.remove_pipe("entity_ruler")
 
-                logger.info(f"Loaded {len(patterns)} patterns from database.")
-            else:
-                logger.info("No patterns found in database.")
+            ruler = self.nlp.add_pipe("entity_ruler", before="ner")
 
-        except Exception as e:
-            logger.warning(f"Failed to reload patterns from DB: {e}")
+            # Re-load static patterns + new DB patterns
+            # This is a bit expensive but correct.
+            # Ideally we merge them.
+            # For now, let's just add DB patterns to existing ruler if possible?
+            # SpaCy documentation says we can add_patterns.
+            # If we want to replace, we must remove pipe.
+            # Let's assume we want to APPEND (or overwrite if collision? SpaCy
+            # handles overlaps by order).
+
+            # To be safe and support "Reload" fully, re-run _setup_entity_ruler()
+            # then add DB patterns.
+            self._setup_entity_ruler()  # Re-adds pipe and static patterns
+            ruler = self.nlp.get_pipe("entity_ruler")
+            ruler.add_patterns(patterns)
+
+            logger.info(f"Loaded {len(patterns)} patterns from database.")
+            return len(patterns)
+        else:
+            logger.info("No patterns found in database.")
+            return 0
 
     def is_available(self) -> bool:
         """Check if SpaCy is properly initialized."""
