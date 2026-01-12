@@ -13,7 +13,12 @@ async def test_reload_patterns_tool_success():
         # Setup mock return
         now = datetime.utcnow()
         mock_reload.return_value = ReloadResult(
-            success=True, error=None, reloaded_at=now, pattern_count=123
+            success=True,
+            error=None,
+            reloaded_at=now,
+            pattern_count=123,
+            reload_id="abc-123",
+            duration_ms=45.6,
         )
 
         # Execute tool
@@ -24,6 +29,8 @@ async def test_reload_patterns_tool_success():
         assert result["error"] is None
         assert result["reloaded_at"] == now.isoformat()
         assert result["pattern_count"] == 123
+        assert result["reload_id"] == "abc-123"
+        assert result["duration_ms"] == 45.6
         mock_reload.assert_awaited_once()
 
 
@@ -34,7 +41,12 @@ async def test_reload_patterns_tool_failure():
         # Setup mock return
         now = datetime.utcnow()
         mock_reload.return_value = ReloadResult(
-            success=False, error="Something went wrong", reloaded_at=now, pattern_count=None
+            success=False,
+            error="Something went wrong",
+            reloaded_at=now,
+            pattern_count=None,
+            reload_id="err-456",
+            duration_ms=12.3,
         )
 
         # Execute tool
@@ -45,4 +57,6 @@ async def test_reload_patterns_tool_failure():
         assert result["error"] == "Something went wrong"
         assert result["reloaded_at"] == now.isoformat()
         assert result["pattern_count"] is None
+        assert result["reload_id"] == "err-456"
+        assert result["duration_ms"] == 12.3
         mock_reload.assert_awaited_once()

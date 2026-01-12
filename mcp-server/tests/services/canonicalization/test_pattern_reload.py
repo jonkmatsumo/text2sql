@@ -25,6 +25,8 @@ async def test_reload_success():
         assert result.error is None
         assert result.pattern_count == 42
         assert result.reloaded_at is not None
+        assert result.reload_id is not None
+        assert result.duration_ms >= 0
         mock_instance.reload_patterns.assert_awaited_once()
 
 
@@ -47,6 +49,8 @@ async def test_reload_failure():
         assert result.error == "DB Connection Failed"
         assert result.pattern_count is None
         assert result.reloaded_at is not None
+        assert result.reload_id is not None
+        assert result.duration_ms >= 0
         mock_instance.reload_patterns.assert_awaited_once()
 
 

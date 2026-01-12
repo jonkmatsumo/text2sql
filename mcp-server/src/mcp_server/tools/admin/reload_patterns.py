@@ -18,4 +18,6 @@ async def handler() -> Dict[str, Any]:
         "error": result.error,
         "reloaded_at": result.reloaded_at.isoformat(),
         "pattern_count": result.pattern_count,
+        "reload_id": result.reload_id,
+        "duration_ms": result.duration_ms,
     }
