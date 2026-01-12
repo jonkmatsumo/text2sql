@@ -29,6 +29,7 @@ from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
 from mcp_server.models import ColumnDef
 from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
+from mcp_server.services.patterns.validator import PatternValidator
 from openai import AsyncOpenAI
 
 logging.basicConfig(level=logging.INFO)
@@ -359,6 +360,21 @@ async def generate_entity_patterns() -> list[dict]:
                             logger.info(f"Enriching {label} with LLM...")
                             synonyms = await enrich_values_with_llm(client, label, values)
                             patterns.extend(synonyms)
+
+        # Validation Stage
+        logger.info(f"Validating {len(patterns)} candidate patterns...")
+        validator = PatternValidator()
+        valid_patterns, failures = validator.validate_batch(patterns)
+
+        if failures:
+            logger.warning(f"Validation dropped {len(failures)} patterns:")
+            for f in failures:
+                logger.warning(
+                    f"  [{f.reason}] '{f.raw_pattern}' -> '{f.sanitized_pattern}' : {f.details}"
+                )
+
+        patterns = valid_patterns
+        logger.info(f"Retained {len(patterns)} valid patterns.")
 
     except Exception as e:
         logger.error(f"Error in pattern generation: {e}")
