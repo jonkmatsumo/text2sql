@@ -213,3 +213,29 @@ def test_diversity_policy_verified_floor():
     assert len(result) == 2
     assert result[0].fingerprint == "F2"  # Verified picked first due to floor logic
     assert result[1].fingerprint == "F1"  # Seeded picked second
+
+
+def test_diversity_invalid_config(caplog):
+    """Test that invalid config disables diversity and logs warning."""
+    import logging
+
+    candidates = [make_qp("F1", "verified"), make_qp("F2", "seeded")]
+
+    # Invalid max_per_source
+    config = {"diversity_enabled": True, "diversity_max_per_source": "invalid"}
+
+    with caplog.at_level(logging.WARNING):
+        result = RecommendationService._apply_diversity_policy(candidates, 2, config)
+
+    assert len(result) == 2
+    assert "Invalid diversity_max_per_source" in caplog.text
+
+    # Invalid min_verified
+    caplog.clear()
+    config = {"diversity_enabled": True, "diversity_min_verified": -5}
+
+    with caplog.at_level(logging.WARNING):
+        result = RecommendationService._apply_diversity_policy(candidates, 2, config)
+
+    assert len(result) == 2
+    assert "Invalid diversity_min_verified" in caplog.text

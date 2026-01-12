@@ -111,12 +111,36 @@ class RecommendationService:
     def _apply_diversity_policy(
         candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
     ) -> List[QueryPair]:
-        """Apply diversity selection policy."""
-        if not config or not config.get("diversity_enabled", False):
+        """Apply diversity selection policy.
+
+        Expected inputs:
+        - candidates: List of QueryPair objects, ranked by primary criteria.
+        - limit: Maximum number of candidates to return.
+        - config: Configuration dictionary (env-backed).
+
+        Preserved invariants:
+        - Output subset of inputs.
+        - Order matches selection order (stable relative to inputs where posssible).
+        - Fingerprint uniqueness (already enforced, but preserved here).
+
+        Future extension points:
+        - Add 'diversity_weights' to config for score adjustment.
+        - Support additional dimensions beyond 'source'.
+        """
+        if not config or not isinstance(config, dict) or not config.get("diversity_enabled", False):
             return candidates
 
         max_per_source = config.get("diversity_max_per_source", -1)
+        if not isinstance(max_per_source, int) or max_per_source < -1:
+            logger.warning(
+                f"Invalid diversity_max_per_source: {max_per_source}. Disabling diversity."
+            )
+            return candidates
+
         min_verified = config.get("diversity_min_verified", 0)
+        if not isinstance(min_verified, int) or min_verified < 0:
+            logger.warning(f"Invalid diversity_min_verified: {min_verified}. Disabling diversity.")
+            return candidates
 
         selected: List[QueryPair] = []
         source_counts = {"approved": 0, "seeded": 0, "fallback": 0}
