@@ -4,7 +4,6 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
-
 from text2sql_synth.context import GenerationContext, TimeWindowConfig
 
 
@@ -14,7 +13,7 @@ def make_context(
     start: date = date(2024, 1, 1),
     end: date = date(2024, 1, 31),
 ) -> GenerationContext:
-    """Helper to create a GenerationContext with defaults."""
+    """Create a GenerationContext with defaults."""
     time_window = TimeWindowConfig(start_date=start, end_date=end)
     return GenerationContext(seed=seed, schema_definition=schema, time_window=time_window)
 

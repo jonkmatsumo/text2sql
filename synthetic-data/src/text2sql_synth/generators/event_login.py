@@ -5,11 +5,10 @@ Login events with device and location tracking.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -109,12 +108,34 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             # Random date in range
             login_date = dates[rng.integers(0, len(dates))]
             # Random time (peak during business hours)
-            hour_weights = np.array([
-                0.01, 0.01, 0.01, 0.01, 0.01, 0.02,  # 0-5
-                0.04, 0.08, 0.10, 0.10, 0.08, 0.08,  # 6-11
-                0.06, 0.06, 0.06, 0.05, 0.05, 0.06,  # 12-17
-                0.07, 0.08, 0.06, 0.04, 0.02, 0.01,  # 18-23
-            ])
+            hour_weights = np.array(
+                [
+                    0.01,
+                    0.01,
+                    0.01,
+                    0.01,
+                    0.01,
+                    0.02,  # 0-5
+                    0.04,
+                    0.08,
+                    0.10,
+                    0.10,
+                    0.08,
+                    0.08,  # 6-11
+                    0.06,
+                    0.06,
+                    0.06,
+                    0.05,
+                    0.05,
+                    0.06,  # 12-17
+                    0.07,
+                    0.08,
+                    0.06,
+                    0.04,
+                    0.02,
+                    0.01,  # 18-23
+                ]
+            )
             hour = rng.choice(24, p=hour_weights / hour_weights.sum())
             minute = rng.integers(0, 60)
             second = rng.integers(0, 60)
@@ -151,7 +172,10 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             )
 
             # IP address (simplified)
-            ip_address = f"{rng.integers(1, 255)}.{rng.integers(0, 255)}.{rng.integers(0, 255)}.{rng.integers(1, 255)}"
+            ip_address = (
+                f"{rng.integers(1, 255)}.{rng.integers(0, 255)}."
+                f"{rng.integers(0, 255)}.{rng.integers(1, 255)}"
+            )
 
             # Location (mostly US)
             if rng.random() < 0.95:
@@ -171,9 +195,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             session_duration_seconds = None
             if login_outcome == "success":
                 # Session 1 minute to 2 hours, Pareto distributed
-                session_duration_seconds = int(
-                    min(ctx.sample_pareto(rng, 2.0, scale=60), 7200)
-                )
+                session_duration_seconds = int(min(ctx.sample_pareto(rng, 2.0, scale=60), 7200))
 
             # MFA method (for some logins)
             mfa_method = None

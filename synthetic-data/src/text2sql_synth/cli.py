@@ -1,18 +1,17 @@
 """CLI entrypoint for text2sql-synth."""
 
 import argparse
-import sys
 import logging
+import sys
 from pathlib import Path
 
 from text2sql_synth.config import ScalePreset, SynthConfig
-from text2sql_synth.orchestrator import generate_tables
 from text2sql_synth.export import export_to_directory
+from text2sql_synth.orchestrator import generate_tables
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return 1
 
     logger.info("Configuration resolved.")
-    
+
     try:
         # Process --only to handle commas if provided
         only_tables = None
@@ -76,28 +75,28 @@ def cmd_generate(args: argparse.Namespace) -> int:
                     only_tables.extend(i.strip() for i in item.split(",") if i.strip())
                 else:
                     only_tables.append(item.strip())
-        
+
         # Run generation
         ctx, tables = generate_tables(config, only=only_tables)
-        
+
         # Export results
         manifest_path = export_to_directory(ctx, config, args.out)
-        
+
         logger.info("Generation and export successful!")
-        
+
         # Print summary
-        print("\n" + "="*40)
+        print("\n" + "=" * 40)
         print("SYNTHETIC DATA GENERATION SUMMARY")
-        print("="*40)
+        print("=" * 40)
         print(f"Output Directory: {args.out}")
         print(f"Manifest:         {manifest_path}")
         print(f"Seed:             {config.seed}")
         print(f"Tables Generated: {len(tables)}")
-        print("-"*40)
+        print("-" * 40)
         for table_name, df in sorted(tables.items()):
             print(f"- {table_name:25} {len(df):>8} rows")
-        print("="*40 + "\n")
-        
+        print("=" * 40 + "\n")
+
         return 0
     except Exception as e:
         logger.exception("Failed to generate data: %s", e)
@@ -107,28 +106,26 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a generated manifest."""
     from text2sql_synth.validate import validate_manifest
-    
+
     logger.info(f"Starting validation for manifest: {args.manifest}")
     result = validate_manifest(args.manifest)
-    
+
     if result.is_valid:
         print("\n✅ Validation PASSED")
     else:
         print("\n❌ Validation FAILED")
         for error in result.errors:
             print(f"  - {error}")
-            
+
     print(f"\nReport written to {Path(args.manifest).parent / 'validation_report.md'}")
-    
+
     return 0 if result.is_valid else 1
-
-
 
 
 def cmd_load_postgres(args: argparse.Namespace) -> int:
     """Load generated data into a Postgres database."""
     from text2sql_synth.loaders.postgres import load_from_manifest
-    
+
     try:
         load_from_manifest(
             args.manifest,
@@ -229,12 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     val_parser.set_defaults(func=cmd_validate)
 
-
     return parser
 
 
 def main() -> int:
-    """Main CLI entrypoint."""
+    """Run the CLI entrypoint."""
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)

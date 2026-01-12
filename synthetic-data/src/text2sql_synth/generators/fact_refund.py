@@ -7,9 +7,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -102,9 +100,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             refund_amount = gross_amount
 
         # Refund reason
-        refund_reason = ctx.sample_categorical(
-            rng, REFUND_REASONS, weights=REFUND_REASON_WEIGHTS
-        )
+        refund_reason = ctx.sample_categorical(rng, REFUND_REASONS, weights=REFUND_REASON_WEIGHTS)
 
         # Refund timing (1-30 days after transaction)
         days_until_request = int(rng.integers(1, 31))

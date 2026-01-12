@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -46,7 +45,6 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     Returns:
         DataFrame with time dimension data.
     """
-    rng = ctx.rng_for(TABLE_NAME)
     start_date = cfg.time_window.start_date
     end_date = cfg.time_window.end_date
 
@@ -57,8 +55,18 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     # Day names
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     month_names = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ]
 
     # US Federal Holidays (simplified - fixed dates only)
@@ -101,6 +109,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         # Base sinusoidal pattern: peak in December, trough in summer
         # Shift so December is high, July is low
         import math
+
         # Day 350 (mid-December) should be peak
         # Day 180 (late June) should be trough
         phase = 2 * math.pi * (day_of_year - 350) / 365

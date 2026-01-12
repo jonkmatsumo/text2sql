@@ -5,12 +5,10 @@ Core transaction fact table with multi-table joins, seasonality, and risk correl
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -77,10 +75,30 @@ def _generate_transaction_time(
     """
     # Hour distribution weights (24 hours)
     hour_weights = [
-        0.02, 0.01, 0.01, 0.01, 0.01, 0.02,  # 0-5 AM (very low)
-        0.03, 0.05, 0.06, 0.07, 0.08, 0.09,  # 6-11 AM (building up)
-        0.10, 0.09, 0.08, 0.07, 0.06, 0.07,  # 12-5 PM (peak to stable)
-        0.08, 0.09, 0.08, 0.06, 0.04, 0.03,  # 6-11 PM (evening peak then decline)
+        0.02,
+        0.01,
+        0.01,
+        0.01,
+        0.01,
+        0.02,  # 0-5 AM (very low)
+        0.03,
+        0.05,
+        0.06,
+        0.07,
+        0.08,
+        0.09,  # 6-11 AM (building up)
+        0.10,
+        0.09,
+        0.08,
+        0.07,
+        0.06,
+        0.07,  # 12-5 PM (peak to stable)
+        0.08,
+        0.09,
+        0.08,
+        0.06,
+        0.04,
+        0.03,  # 6-11 PM (evening peak then decline)
     ]
     hour_weights = np.array(hour_weights)
     hour_weights = hour_weights / hour_weights.sum()
@@ -142,13 +160,10 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     account_df = ctx.get_table("dim_account")
     merchant_df = ctx.get_table("dim_merchant")
     counterparty_df = ctx.get_table("dim_counterparty")
-    institution_df = ctx.get_table("dim_institution")
-
     if any(df is None for df in [time_df, customer_df, account_df, merchant_df]):
         raise ValueError("Dimension tables must be generated before fact_transaction")
 
     # Build lookup structures
-    account_to_customer = dict(zip(account_df["account_id"], account_df["customer_id"]))
     account_to_institution = dict(zip(account_df["account_id"], account_df["institution_id"]))
     account_risk = dict(zip(account_df["account_id"], account_df["risk_tier"]))
 
@@ -156,24 +171,21 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     customer_accounts = account_df.groupby("customer_id")["account_id"].apply(list).to_dict()
 
     merchant_popularity = dict(zip(merchant_df["merchant_id"], merchant_df["popularity_score"]))
-    active_merchants = merchant_df[merchant_df["is_active"] == True]["merchant_id"].tolist()
+    active_merchants = merchant_df[merchant_df["is_active"]]["merchant_id"].tolist()
 
     # Build counterparty lookup for merchants
     if counterparty_df is not None:
-        merchant_counterparty = dict(zip(
-            counterparty_df[counterparty_df["merchant_id"].notna()]["merchant_id"],
-            counterparty_df[counterparty_df["merchant_id"].notna()]["counterparty_id"],
-        ))
+        merchant_counterparty = dict(
+            zip(
+                counterparty_df[counterparty_df["merchant_id"].notna()]["merchant_id"],
+                counterparty_df[counterparty_df["merchant_id"].notna()]["counterparty_id"],
+            )
+        )
     else:
         merchant_counterparty = {}
 
     # Get time dimension data
-    time_seasonality = dict(zip(time_df["date_key"], time_df["seasonality_factor"]))
-    time_dates = dict(zip(time_df["date_key"], time_df["full_date"]))
-    time_weekday = dict(zip(time_df["date_key"], time_df["day_of_week"]))
-
     # Calculate total transactions to generate
-    num_days = len(time_df)
     base_txns_per_day = cfg.scale.txns_per_day
 
     # Pre-compute merchant selection probabilities based on popularity
@@ -182,7 +194,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     merchant_probs = merchant_pops / merchant_pops.sum()
 
     # Pre-compute active customers and their accounts
-    active_customers = customer_df[customer_df["is_active"] == True]["customer_id"].tolist()
+    active_customers = customer_df[customer_df["is_active"]]["customer_id"].tolist()
 
     rows = []
     for _, time_row in time_df.iterrows():
@@ -203,9 +215,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
 
             # Select customer weighted by activity (long-tail)
             # Use activity scores as weights
-            customer_activities = np.array([
-                customer_activity.get(c, 1.0) for c in active_customers
-            ], dtype=float)
+            customer_activities = np.array(
+                [customer_activity.get(c, 1.0) for c in active_customers], dtype=float
+            )
             customer_probs = customer_activities / customer_activities.sum()
             customer_id = active_customers[rng.choice(len(active_customers), p=customer_probs)]
 
@@ -228,12 +240,18 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             transaction_ts = _generate_transaction_time(rng, base_datetime)
 
             # Generate amount (Pareto distribution)
-            merchant_avg = merchant_df[
-                merchant_df["merchant_id"] == merchant_id
-            ]["avg_transaction_amount"].iloc[0]
+            merchant_avg = merchant_df[merchant_df["merchant_id"] == merchant_id][
+                "avg_transaction_amount"
+            ].iloc[0]
             gross_amount = round(
-                float(ctx.sample_pareto(rng, cfg.distribution.transaction_amount_pareto_alpha, scale=merchant_avg * 0.5)),
-                2
+                float(
+                    ctx.sample_pareto(
+                        rng,
+                        cfg.distribution.transaction_amount_pareto_alpha,
+                        scale=merchant_avg * 0.5,
+                    )
+                ),
+                2,
             )
             # Cap at reasonable maximum
             gross_amount = min(gross_amount, 10000.0)
@@ -251,7 +269,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                 "phone": 0.035,
             }
             base_fee_rate = channel_fee_rates.get(channel, 0.02)
-            
+
             # Risk-tier multiplier for fees (high risk merchants charged more)
             # Get merchant risk tier from merchant_df
             merchant_row = merchant_df[merchant_df["merchant_id"] == merchant_id].iloc[0]
@@ -263,7 +281,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                 "critical": 1.8,
             }
             risk_fee_multiplier = risk_fee_multipliers.get(merchant_risk_tier, 1.0)
-            
+
             # Small random variance in fee
             effective_fee_rate = base_fee_rate * risk_fee_multiplier * (0.95 + rng.random() * 0.1)
             fee_amount = round(gross_amount * effective_fee_rate, 2)

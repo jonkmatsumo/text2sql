@@ -7,7 +7,6 @@ long-tail popularity distributions.
 from __future__ import annotations
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -41,13 +40,39 @@ MCC_CATEGORIES = [
 ]
 
 MERCHANT_NAME_PREFIXES = [
-    "The", "Quick", "Super", "Best", "Prime", "Value", "Express", "Local",
-    "Metro", "City", "Town", "Village", "Corner", "Central", "Main",
+    "The",
+    "Quick",
+    "Super",
+    "Best",
+    "Prime",
+    "Value",
+    "Express",
+    "Local",
+    "Metro",
+    "City",
+    "Town",
+    "Village",
+    "Corner",
+    "Central",
+    "Main",
 ]
 
 MERCHANT_NAME_SUFFIXES = [
-    "Mart", "Store", "Shop", "Center", "Place", "Depot", "World", "Plus",
-    "Pro", "Zone", "Hub", "Point", "Stop", "Corner", "Market",
+    "Mart",
+    "Store",
+    "Shop",
+    "Center",
+    "Place",
+    "Depot",
+    "World",
+    "Plus",
+    "Pro",
+    "Zone",
+    "Hub",
+    "Point",
+    "Stop",
+    "Corner",
+    "Market",
 ]
 
 
@@ -83,9 +108,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     address_df = ctx.get_table("dim_address")
     if address_df is not None and len(address_df) > 0:
         # Prefer commercial addresses for merchants
-        commercial_addresses = address_df[
-            address_df["address_type"].isin(["commercial", "mixed"])
-        ]["address_id"].tolist()
+        commercial_addresses = address_df[address_df["address_type"].isin(["commercial", "mixed"])][
+            "address_id"
+        ].tolist()
         if len(commercial_addresses) < num_merchants:
             # Fall back to all addresses
             commercial_addresses = address_df["address_id"].tolist()
@@ -96,9 +121,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     # Get acquirer institutions
     institution_df = ctx.get_table("dim_institution")
     if institution_df is not None and len(institution_df) > 0:
-        acquirer_ids = institution_df[
-            institution_df["institution_type"] == "acquirer"
-        ]["institution_id"].tolist()
+        acquirer_ids = institution_df[institution_df["institution_type"] == "acquirer"][
+            "institution_id"
+        ].tolist()
     else:
         acquirer_ids = None
 
@@ -160,21 +185,40 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
 
         # Popularity score: Zipf distribution for long-tail
         # Higher score = more transactions will go to this merchant
-        popularity_score = int(ctx.sample_zipf(
-            rng,
-            cfg.distribution.merchant_popularity_zipf_alpha,
-            min_val=1,
-            max_val=1000,
-        ))
+        popularity_score = int(
+            ctx.sample_zipf(
+                rng,
+                cfg.distribution.merchant_popularity_zipf_alpha,
+                min_val=1,
+                max_val=1000,
+            )
+        )
 
         # Average transaction amount (varies by MCC)
         base_amounts = {
-            "5411": 75.0, "5541": 45.0, "5812": 35.0, "5814": 15.0,
-            "5311": 85.0, "5912": 25.0, "7011": 150.0, "4111": 25.0,
-            "5651": 65.0, "5732": 250.0, "5999": 50.0, "7832": 30.0,
-            "7941": 75.0, "5942": 25.0, "5691": 80.0, "5310": 45.0,
-            "5331": 20.0, "5921": 35.0, "7922": 100.0, "5962": 50.0,
-            "5967": 75.0, "7995": 100.0, "5993": 15.0,
+            "5411": 75.0,
+            "5541": 45.0,
+            "5812": 35.0,
+            "5814": 15.0,
+            "5311": 85.0,
+            "5912": 25.0,
+            "7011": 150.0,
+            "4111": 25.0,
+            "5651": 65.0,
+            "5732": 250.0,
+            "5999": 50.0,
+            "7832": 30.0,
+            "7941": 75.0,
+            "5942": 25.0,
+            "5691": 80.0,
+            "5310": 45.0,
+            "5331": 20.0,
+            "5921": 35.0,
+            "7922": 100.0,
+            "5962": 50.0,
+            "5967": 75.0,
+            "7995": 100.0,
+            "5993": 15.0,
         }
         base_avg = base_amounts.get(mcc_code, 50.0)
         # Add some variance
@@ -182,6 +226,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
 
         # Established date (up to 20 years ago)
         from datetime import timedelta
+
         days_ago = rng.integers(0, 20 * 365)
         established_date = cfg.time_window.start_date - timedelta(days=int(days_ago))
 

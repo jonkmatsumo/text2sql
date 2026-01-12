@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -69,7 +68,15 @@ US_STATES = [
 
 # Cities by state (sample major cities)
 CITIES_BY_STATE = {
-    "CA": ["Los Angeles", "San Francisco", "San Diego", "San Jose", "Sacramento", "Oakland", "Fresno"],
+    "CA": [
+        "Los Angeles",
+        "San Francisco",
+        "San Diego",
+        "San Jose",
+        "Sacramento",
+        "Oakland",
+        "Fresno",
+    ],
     "TX": ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth", "El Paso", "Arlington"],
     "FL": ["Miami", "Orlando", "Tampa", "Jacksonville", "Fort Lauderdale", "St. Petersburg"],
     "NY": ["New York", "Buffalo", "Rochester", "Yonkers", "Syracuse", "Albany"],
@@ -83,11 +90,41 @@ CITIES_BY_STATE = {
 
 # Street name components
 STREET_NAMES = [
-    "Main", "Oak", "Maple", "Cedar", "Pine", "Elm", "Washington", "Park",
-    "Lake", "Hill", "River", "Valley", "Sunset", "Highland", "Forest",
-    "Church", "Market", "Center", "Spring", "Mill", "North", "South",
-    "East", "West", "Bridge", "School", "College", "Academy", "Franklin",
-    "Lincoln", "Jefferson", "Madison", "Jackson", "Harrison", "Wilson",
+    "Main",
+    "Oak",
+    "Maple",
+    "Cedar",
+    "Pine",
+    "Elm",
+    "Washington",
+    "Park",
+    "Lake",
+    "Hill",
+    "River",
+    "Valley",
+    "Sunset",
+    "Highland",
+    "Forest",
+    "Church",
+    "Market",
+    "Center",
+    "Spring",
+    "Mill",
+    "North",
+    "South",
+    "East",
+    "West",
+    "Bridge",
+    "School",
+    "College",
+    "Academy",
+    "Franklin",
+    "Lincoln",
+    "Jefferson",
+    "Madison",
+    "Jackson",
+    "Harrison",
+    "Wilson",
 ]
 
 STREET_TYPES = ["St", "Ave", "Blvd", "Dr", "Ln", "Way", "Rd", "Ct", "Pl", "Cir"]

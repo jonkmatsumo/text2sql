@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import pandas as pd
-
+from text2sql_synth import generators, schema
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext, TimeWindowConfig
-from text2sql_synth import generators
-from text2sql_synth import schema
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +50,7 @@ def generate_tables(
 
     # Determine which tables need to be generated
     tables_to_generate = _resolve_dependencies(only)
-    
+
     logger.info(f"Starting synthetic data generation for {len(tables_to_generate)} tables...")
 
     # Generate tables in the predefined order to satisfy dependencies
@@ -65,15 +62,17 @@ def generate_tables(
         generator_func = getattr(generators, generator_name, None)
 
         if not generator_func:
-            logger.warning(f"No generator found for table '{table_name}' (expected '{generator_name}')")
+            logger.warning(
+                f"No generator found for table '{table_name}' (expected '{generator_name}')"
+            )
             continue
 
         logger.info(f"Generating {table_name}...")
         df = generator_func(ctx, cfg)
-        
+
         # Validation
         _validate_table(table_name, df)
-        
+
         # Ensure it's registered (though generators should do this)
         if table_name not in ctx.tables:
             ctx.register_table(table_name, df)
@@ -101,7 +100,7 @@ def _resolve_dependencies(only: list[str] | None) -> set[str]:
         table = to_visit.pop()
         if table in required:
             continue
-            
+
         if table not in schema.DEPENDENCIES:
             # We allow it even if not in dependencies mapping, just won't have dependencies
             logger.debug(f"Table '{table}' not found in dependency map.")
@@ -134,10 +133,10 @@ def _validate_table(table_name: str, df: pd.DataFrame) -> None:
 
     actual = set(df.columns)
     missing = set(expected) - actual
-    
+
     if missing:
         error_msg = f"Table '{table_name}' is missing expected columns: {missing}"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
+
     logger.debug(f"Validated columns for {table_name}")

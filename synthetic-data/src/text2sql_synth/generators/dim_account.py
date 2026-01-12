@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -65,9 +64,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     if institution_df is None or len(institution_df) == 0:
         raise ValueError("dim_institution must be generated before dim_account")
 
-    issuer_ids = institution_df[
-        institution_df["institution_type"] == "issuer"
-    ]["institution_id"].tolist()
+    issuer_ids = institution_df[institution_df["institution_type"] == "issuer"][
+        "institution_id"
+    ].tolist()
 
     if len(issuer_ids) == 0:
         raise ValueError("No issuer institutions found")
@@ -90,9 +89,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             institution_id = issuer_ids[rng.integers(0, len(issuer_ids))]
 
             # Account type
-            account_type = ctx.sample_categorical(
-                rng, ACCOUNT_TYPES, weights=ACCOUNT_TYPE_WEIGHTS
-            )
+            account_type = ctx.sample_categorical(rng, ACCOUNT_TYPES, weights=ACCOUNT_TYPE_WEIGHTS)
 
             # Generate masked account number (last 4 visible)
             last_four = f"{rng.integers(0, 9999):04d}"
@@ -104,9 +101,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             )
 
             # Currency
-            currency = ctx.sample_categorical(
-                rng, CURRENCIES, weights=CURRENCY_WEIGHTS
-            )
+            currency = ctx.sample_categorical(rng, CURRENCIES, weights=CURRENCY_WEIGHTS)
 
             # Opened date (after customer_since, before time window start)
             days_range = (cfg.time_window.start_date - cust_since).days

@@ -5,12 +5,9 @@ Daily balance snapshots for accounts tied to transaction activity.
 
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Dict
 
-import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -71,9 +68,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     if total_rows > 50000:
         # Sample accounts - keep ~50% for MVP, ~20% for larger
         sample_rate = min(1.0, 50000 / total_rows)
-        sampled_accounts = account_df.sample(
-            frac=sample_rate, random_state=cfg.seed
-        )["account_id"].tolist()
+        sampled_accounts = account_df.sample(frac=sample_rate, random_state=cfg.seed)[
+            "account_id"
+        ].tolist()
     else:
         sampled_accounts = account_df["account_id"].tolist()
 
@@ -84,16 +81,23 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         txn_df["txn_date"] = pd.to_datetime(txn_df["transaction_ts"]).dt.date
 
         # Aggregate by account and date
-        daily_txns = txn_df[txn_df["status"] == "approved"].groupby(
-            ["account_id", "txn_date"]
-        ).agg({
-            "gross_amount": "sum",
-            "fee_amount": "sum",
-            "transaction_id": "count",
-        }).reset_index()
+        daily_txns = (
+            txn_df[txn_df["status"] == "approved"]
+            .groupby(["account_id", "txn_date"])
+            .agg(
+                {
+                    "gross_amount": "sum",
+                    "fee_amount": "sum",
+                    "transaction_id": "count",
+                }
+            )
+            .reset_index()
+        )
         daily_txns.columns = ["account_id", "txn_date", "total_debits", "total_fees", "txn_count"]
     else:
-        daily_txns = pd.DataFrame(columns=["account_id", "txn_date", "total_debits", "total_fees", "txn_count"])
+        daily_txns = pd.DataFrame(
+            columns=["account_id", "txn_date", "total_debits", "total_fees", "txn_count"]
+        )
 
     # Pre-compute daily refunds per account
     if refund_df is not None and len(refund_df) > 0:
@@ -106,13 +110,16 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             refund_with_account["refund_processed_ts"]
         ).dt.date
 
-        daily_refunds = refund_with_account[
-            refund_with_account["refund_status"] == "processed"
-        ].groupby(
-            ["account_id", "refund_date"]
-        ).agg({
-            "refund_amount": "sum",
-        }).reset_index()
+        daily_refunds = (
+            refund_with_account[refund_with_account["refund_status"] == "processed"]
+            .groupby(["account_id", "refund_date"])
+            .agg(
+                {
+                    "refund_amount": "sum",
+                }
+            )
+            .reset_index()
+        )
         daily_refunds.columns = ["account_id", "refund_date", "total_credits"]
     else:
         daily_refunds = pd.DataFrame(columns=["account_id", "refund_date", "total_credits"])
@@ -151,9 +158,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             opening_balance = 0.0
         else:
             # Checking/savings have positive balance
-            opening_balance = round(
-                float(ctx.sample_pareto(rng, 1.5, scale=500.0)), 2
-            )
+            opening_balance = round(float(ctx.sample_pareto(rng, 1.5, scale=500.0)), 2)
             opening_balance = min(opening_balance, 100000.0)
 
         current_balance = opening_balance

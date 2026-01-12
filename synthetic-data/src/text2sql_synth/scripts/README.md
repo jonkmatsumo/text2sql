@@ -23,7 +23,7 @@ Each script in `catalog.yaml` is supported by specific features of the synthetic
 
 ### 4. Geography Ambiguity
 - **Tables**: `dim_customer`, `dim_merchant`, `dim_address`
-- **Affordance**: Addresses are shared across customers and merchants. 
+- **Affordance**: Addresses are shared across customers and merchants.
 - **Ambiguity**: Queries for "transactions in California" require the model to resolve whether the location refers to the customer's residence or the merchant's physical location.
 
 ### 5. Time Windows and Seasonality

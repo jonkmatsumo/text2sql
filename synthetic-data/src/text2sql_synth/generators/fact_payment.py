@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -91,9 +89,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         card_network = None
         card_last_four = None
         if payment_method in ["credit_card", "debit_card"]:
-            card_network = ctx.sample_categorical(
-                rng, CARD_NETWORKS, weights=CARD_NETWORK_WEIGHTS
-            )
+            card_network = ctx.sample_categorical(rng, CARD_NETWORKS, weights=CARD_NETWORK_WEIGHTS)
             card_last_four = f"{rng.integers(0, 9999):04d}"
 
         # Auth code (8 char alphanumeric)

@@ -6,10 +6,9 @@ Tracks changes in customer attributes over time.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -75,9 +74,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         if num_changes > 0:
             # Calculate time points for changes
             total_days = (cfg.time_window.start_date - customer_since).days
-            
+
             # Need at least some buffer to generate versions
-            min_days_total = (num_changes + 1) * 10 
+            min_days_total = (num_changes + 1) * 10
             if total_days >= min_days_total:
                 # Use a smaller buffer (10 days) to allow more flexibility with short tenures
                 change_points = sorted(
@@ -103,44 +102,52 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                     if changed_attr == "risk_tier":
                         # Pick a different risk tier
                         old_risk = rng.choice([r for r in risk_options if r != prev_risk])
-                        versions.append({
-                            "risk_tier": old_risk,
-                            "customer_segment": prev_segment,
-                            "is_active": prev_active,
-                            "effective_from": version_start,
-                            "effective_to": version_end,
-                        })
+                        versions.append(
+                            {
+                                "risk_tier": old_risk,
+                                "customer_segment": prev_segment,
+                                "is_active": prev_active,
+                                "effective_from": version_start,
+                                "effective_to": version_end,
+                            }
+                        )
                         prev_risk = old_risk
                     elif changed_attr == "customer_segment":
                         old_segment = rng.choice([s for s in segment_options if s != prev_segment])
-                        versions.append({
-                            "risk_tier": prev_risk,
-                            "customer_segment": old_segment,
-                            "is_active": prev_active,
-                            "effective_from": version_start,
-                            "effective_to": version_end,
-                        })
+                        versions.append(
+                            {
+                                "risk_tier": prev_risk,
+                                "customer_segment": old_segment,
+                                "is_active": prev_active,
+                                "effective_from": version_start,
+                                "effective_to": version_end,
+                            }
+                        )
                         prev_segment = old_segment
                     else:  # is_active
-                        versions.append({
-                            "risk_tier": prev_risk,
-                            "customer_segment": prev_segment,
-                            "is_active": not prev_active,
-                            "effective_from": version_start,
-                            "effective_to": version_end,
-                        })
+                        versions.append(
+                            {
+                                "risk_tier": prev_risk,
+                                "customer_segment": prev_segment,
+                                "is_active": not prev_active,
+                                "effective_from": version_start,
+                                "effective_to": version_end,
+                            }
+                        )
                         prev_active = not prev_active
 
                     version_start = version_end
 
         # Add current version
-        versions.append({
-            "risk_tier": current_risk,
-            "customer_segment": current_segment,
-            "is_active": current_active,
-            "effective_from": version_start,
-            "effective_to": None,
-        })
+        versions.append(
+            {
+                "risk_tier": current_risk,
+                "customer_segment": current_segment,
+                "is_active": current_active,
+                "effective_from": version_start,
+                "effective_to": None,
+            }
+        )
 
         # Create rows for all versions
         for version_num, version in enumerate(versions, start=1):

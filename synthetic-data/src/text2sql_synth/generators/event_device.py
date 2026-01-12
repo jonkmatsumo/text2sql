@@ -5,11 +5,7 @@ Device records with emulator patterns correlated to risk tier.
 
 from __future__ import annotations
 
-from datetime import timedelta
-
-import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -81,13 +77,25 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     ].copy()
 
     # Aggregate to get first/last seen per device
-    device_stats = devices_with_customers.groupby("device_id").agg({
-        "customer_id": "first",
-        "transaction_ts": ["min", "max"],
-        "is_emulator": "first",  # Take the emulator flag from first occurrence
-    }).reset_index()
+    device_stats = (
+        devices_with_customers.groupby("device_id")
+        .agg(
+            {
+                "customer_id": "first",
+                "transaction_ts": ["min", "max"],
+                "is_emulator": "first",  # Take the emulator flag from first occurrence
+            }
+        )
+        .reset_index()
+    )
 
-    device_stats.columns = ["device_id", "customer_id", "first_seen_ts", "last_seen_ts", "is_emulator"]
+    device_stats.columns = [
+        "device_id",
+        "customer_id",
+        "first_seen_ts",
+        "last_seen_ts",
+        "is_emulator",
+    ]
 
     rows = []
     for _, device_row in device_stats.iterrows():
@@ -96,9 +104,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         risk_tier = customer_risk.get(customer_id, "low")
 
         # Device type
-        device_type = ctx.sample_categorical(
-            rng, DEVICE_TYPES, weights=DEVICE_TYPE_WEIGHTS
-        )
+        device_type = ctx.sample_categorical(rng, DEVICE_TYPES, weights=DEVICE_TYPE_WEIGHTS)
 
         # Manufacturer and model based on type
         if "android" in device_type:

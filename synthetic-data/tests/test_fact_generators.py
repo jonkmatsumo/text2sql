@@ -1,11 +1,6 @@
 """Tests for fact table generators."""
 
-from datetime import date
-
-import numpy as np
-import pandas as pd
 import pytest
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 from text2sql_synth.context import TimeWindowConfig as CtxTimeWindowConfig
@@ -204,9 +199,7 @@ class TestFactPayment:
         """Card network and last four populated for card payments."""
         payment_df = context_with_facts.get_table("fact_payment")
 
-        card_payments = payment_df[
-            payment_df["payment_method"].isin(["credit_card", "debit_card"])
-        ]
+        card_payments = payment_df[payment_df["payment_method"].isin(["credit_card", "debit_card"])]
 
         # All card payments should have network and last four
         assert card_payments["card_network"].notna().all()
@@ -244,8 +237,9 @@ class TestFactRefund:
         # Risk modulation and small sample size requires wider tolerance
         lower_bound = max(0, expected_rate * 0.5)
         upper_bound = expected_rate * 2.0
-        
-        # If actual_rate is 0 and expected is small, we might fail, but for 27 txns it should be okay.
+
+        # If actual_rate is 0 and expected is small, we might fail.
+        # For 27 txns it should be ok.
         assert actual_rate >= lower_bound
         assert actual_rate <= upper_bound
 
@@ -296,7 +290,7 @@ class TestFactDispute:
         # ±50% relative error
         lower_bound = max(0, expected_rate * 0.5)
         upper_bound = expected_rate * 2.0
-        
+
         assert actual_rate >= lower_bound
         assert actual_rate <= upper_bound
 
@@ -311,10 +305,14 @@ class TestFactDispute:
         approved_txns = txn_df[txn_df["status"] == "approved"]
 
         # Calculate dispute rate per risk tier
-        dispute_counts = dispute_df.merge(
-            txn_df[["transaction_id", "risk_tier"]],
-            on="transaction_id",
-        ).groupby("risk_tier").size()
+        dispute_counts = (
+            dispute_df.merge(
+                txn_df[["transaction_id", "risk_tier"]],
+                on="transaction_id",
+            )
+            .groupby("risk_tier")
+            .size()
+        )
 
         txn_counts = approved_txns.groupby("risk_tier").size()
 
@@ -328,9 +326,9 @@ class TestFactDispute:
         # Check monotonically increasing (allowing for noise in small samples)
         # At minimum, high+critical should have higher rate than low
         if rates[0] > 0 and (rates[2] > 0 or rates[3] > 0):
-            high_critical_rate = (dispute_counts.get("high", 0) + dispute_counts.get("critical", 0)) / (
-                txn_counts.get("high", 1) + txn_counts.get("critical", 1)
-            )
+            high_critical_rate = (
+                dispute_counts.get("high", 0) + dispute_counts.get("critical", 0)
+            ) / (txn_counts.get("high", 1) + txn_counts.get("critical", 1))
             low_rate = rates[0]
 
             # High/critical combined should have higher rate than low
@@ -447,9 +445,10 @@ class TestDeterminism:
 
     def test_same_seed_produces_identical_content(self, small_config: SynthConfig) -> None:
         """Same seed and config produces identical table hashes."""
+        import io
+
         from text2sql_synth.orchestrator import generate_all
         from text2sql_synth.util.hashing import stable_hash_bytes
-        import io
 
         # Run 1
         ctx1 = generate_all(small_config)

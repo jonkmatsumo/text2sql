@@ -1,10 +1,7 @@
 """Tests for dimension and bridge table generators."""
 
-from datetime import date
-
 import pandas as pd
 import pytest
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 from text2sql_synth.context import TimeWindowConfig as CtxTimeWindowConfig
@@ -87,17 +84,25 @@ class TestDimTime:
         """dim_time has all required columns."""
         df = generate_dim_time(context, small_config)
         required_columns = [
-            "date_key", "full_date", "day_of_week", "day_name",
-            "day_of_month", "day_of_year", "week_of_year", "month",
-            "month_name", "quarter", "year", "is_weekend", "is_holiday",
+            "date_key",
+            "full_date",
+            "day_of_week",
+            "day_name",
+            "day_of_month",
+            "day_of_year",
+            "week_of_year",
+            "month",
+            "month_name",
+            "quarter",
+            "year",
+            "is_weekend",
+            "is_holiday",
             "seasonality_factor",
         ]
         for col in required_columns:
             assert col in df.columns, f"Missing column: {col}"
 
-    def test_date_key_format(
-        self, context: GenerationContext, small_config: SynthConfig
-    ) -> None:
+    def test_date_key_format(self, context: GenerationContext, small_config: SynthConfig) -> None:
         """date_key is in YYYYMMDD format."""
         df = generate_dim_time(context, small_config)
         first_row = df.iloc[0]
@@ -129,17 +134,13 @@ class TestDimInstitution:
 class TestDimAddress:
     """Tests for dim_address generator."""
 
-    def test_row_count_scaled(
-        self, context: GenerationContext, small_config: SynthConfig
-    ) -> None:
+    def test_row_count_scaled(self, context: GenerationContext, small_config: SynthConfig) -> None:
         """dim_address row count is scaled from config."""
         df = generate_dim_address(context, small_config)
         expected = int((small_config.scale.customers + small_config.scale.merchants) * 1.2)
         assert len(df) == expected
 
-    def test_required_columns(
-        self, context: GenerationContext, small_config: SynthConfig
-    ) -> None:
+    def test_required_columns(self, context: GenerationContext, small_config: SynthConfig) -> None:
         """dim_address has required columns."""
         df = generate_dim_address(context, small_config)
         required = ["address_id", "city", "state_code", "postal_code", "country_code"]
@@ -159,9 +160,7 @@ class TestDimCustomer:
         df = generate_dim_customer(context, small_config)
         assert len(df) == small_config.scale.customers
 
-    def test_risk_tiers_valid(
-        self, context: GenerationContext, small_config: SynthConfig
-    ) -> None:
+    def test_risk_tiers_valid(self, context: GenerationContext, small_config: SynthConfig) -> None:
         """risk_tier values are valid."""
         generate_dim_address(context, small_config)
         df = generate_dim_customer(context, small_config)
@@ -309,9 +308,7 @@ class TestBridgeCustomerAddress:
         customers_with_addr = set(
             customer_df[customer_df["primary_address_id"].notna()]["customer_id"]
         )
-        primary_entries = set(
-            bridge_df[bridge_df["address_type"] == "primary"]["customer_id"]
-        )
+        primary_entries = set(bridge_df[bridge_df["address_type"] == "primary"]["customer_id"])
         assert primary_entries == customers_with_addr
 
 
@@ -358,7 +355,7 @@ class TestDimCustomerScd2:
         customer_df = generate_dim_customer(context, small_config)
         scd2_df = generate_dim_customer_scd2(context, small_config)
 
-        current_versions = scd2_df[scd2_df["is_current"] == True]
+        current_versions = scd2_df[scd2_df["is_current"]]
         assert len(current_versions) == len(customer_df)
 
     def test_fk_customer_id_valid(
@@ -384,9 +381,7 @@ class TestDimCustomerScd2:
         scd2_df = generate_dim_customer_scd2(context, small_config)
 
         for customer_id in scd2_df["customer_id"].unique():
-            versions = sorted(
-                scd2_df[scd2_df["customer_id"] == customer_id]["version_number"]
-            )
+            versions = sorted(scd2_df[scd2_df["customer_id"] == customer_id]["version_number"])
             expected = list(range(1, len(versions) + 1))
             assert versions == expected
 
@@ -462,9 +457,15 @@ class TestTableRegistration:
         generate_all_dimensions(context, small_config)
 
         expected_tables = [
-            "dim_time", "dim_institution", "dim_address", "dim_customer",
-            "dim_merchant", "dim_account", "bridge_customer_address",
-            "dim_counterparty", "dim_customer_scd2",
+            "dim_time",
+            "dim_institution",
+            "dim_address",
+            "dim_customer",
+            "dim_merchant",
+            "dim_account",
+            "bridge_customer_address",
+            "dim_counterparty",
+            "dim_customer_scd2",
         ]
         for table_name in expected_tables:
             assert context.get_table(table_name) is not None, f"Table {table_name} not registered"

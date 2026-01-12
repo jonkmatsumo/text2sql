@@ -7,7 +7,6 @@ Links to merchants but provides a unified view for P2P, B2B, etc.
 from __future__ import annotations
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -49,23 +48,41 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
 
     # Sample names for non-merchant counterparties
     individual_names = [
-        "John Smith", "Jane Doe", "Robert Johnson", "Emily Davis",
-        "Michael Brown", "Sarah Wilson", "David Miller", "Jennifer Taylor",
+        "John Smith",
+        "Jane Doe",
+        "Robert Johnson",
+        "Emily Davis",
+        "Michael Brown",
+        "Sarah Wilson",
+        "David Miller",
+        "Jennifer Taylor",
     ]
 
     business_names = [
-        "ABC Corporation", "XYZ Holdings", "Smith & Associates",
-        "Johnson Enterprises", "Metro Services LLC", "Tech Solutions Inc",
+        "ABC Corporation",
+        "XYZ Holdings",
+        "Smith & Associates",
+        "Johnson Enterprises",
+        "Metro Services LLC",
+        "Tech Solutions Inc",
     ]
 
     government_names = [
-        "US Treasury", "State Tax Authority", "City Utilities",
-        "County Services", "Federal Agency", "Municipal Court",
+        "US Treasury",
+        "State Tax Authority",
+        "City Utilities",
+        "County Services",
+        "Federal Agency",
+        "Municipal Court",
     ]
 
     internal_names = [
-        "Internal Transfer", "System Adjustment", "Fee Assessment",
-        "Interest Payment", "Rewards Credit", "Cashback",
+        "Internal Transfer",
+        "System Adjustment",
+        "Fee Assessment",
+        "Interest Payment",
+        "Rewards Credit",
+        "Cashback",
     ]
 
     rows = []
@@ -103,9 +120,7 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             "counterparty_name": name,
             "merchant_id": None,
             "external_id": f"P2P-{rng.integers(10000, 99999)}",
-            "risk_tier": ctx.sample_categorical(
-                rng, ["low", "medium"], weights=[0.9, 0.1]
-            ),
+            "risk_tier": ctx.sample_categorical(rng, ["low", "medium"], weights=[0.9, 0.1]),
             "is_verified": rng.random() < 0.7,
             "country_code": ctx.sample_categorical(
                 rng, ["US", "CA", "MX", "GB"], weights=[0.9, 0.05, 0.03, 0.02]

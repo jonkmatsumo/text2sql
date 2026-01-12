@@ -11,7 +11,7 @@
     - "How many transactions were disputed last quarter?"
     - "How many of those were also refunded?"
   tables: [fact_transaction, fact_dispute, fact_refund]
-  joins: 
+  joins:
     - fact_transaction.transaction_id = fact_dispute.transaction_id
     - fact_transaction.transaction_id = fact_refund.transaction_id
   concepts: [disputes, refunds, overlap_analysis]

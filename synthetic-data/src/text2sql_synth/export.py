@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from text2sql_synth.config import SynthConfig
@@ -60,48 +60,56 @@ def export_to_directory(
 
     for table_name in sorted_tables:
         df = ctx.tables[table_name]
-        
+
         # Export CSV
         if cfg.output.csv:
             csv_file = f"{table_name}.csv"
             csv_path = csv_dir / csv_file
             logger.info("Exporting %s to CSV...", table_name)
             df.to_csv(csv_path, index=False)
-            
+
             # Record metadata
-            file_metadata.append({
-                "table": table_name,
-                "file": f"csv/{csv_file}",
-                "format": "csv",
-                "rows": len(df),
-                "hash": _calculate_file_hash(csv_path) if cfg.output.include_file_hashes else None
-            })
+            file_metadata.append(
+                {
+                    "table": table_name,
+                    "file": f"csv/{csv_file}",
+                    "format": "csv",
+                    "rows": len(df),
+                    "hash": (
+                        _calculate_file_hash(csv_path) if cfg.output.include_file_hashes else None
+                    ),
+                }
+            )
 
         # Export Parquet
         if cfg.output.parquet:
             pq_file = f"{table_name}.parquet"
             pq_path = pq_dir / pq_file
             logger.info("Exporting %s to Parquet...", table_name)
-            
+
             compression = cfg.output.compression
             if compression == "none":
                 compression = None
-                
+
             df.to_parquet(pq_path, index=False, compression=compression)
-            
+
             # Record metadata
-            file_metadata.append({
-                "table": table_name,
-                "file": f"parquet/{pq_file}",
-                "format": "parquet",
-                "rows": len(df),
-                "hash": _calculate_file_hash(pq_path) if cfg.output.include_file_hashes else None
-            })
+            file_metadata.append(
+                {
+                    "table": table_name,
+                    "file": f"parquet/{pq_file}",
+                    "format": "parquet",
+                    "rows": len(df),
+                    "hash": (
+                        _calculate_file_hash(pq_path) if cfg.output.include_file_hashes else None
+                    ),
+                }
+            )
 
     # Generate and save manifest
     manifest = generate_manifest(ctx, cfg, file_metadata)
     manifest_path = out_path / "manifest.json"
-    
+
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
 

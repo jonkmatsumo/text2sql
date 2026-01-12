@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import numpy as np
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -90,27 +88,37 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
     dispute_df = ctx.get_table("fact_dispute")
     if dispute_df is not None and len(dispute_df) > 0:
         # Accounts with disputes
-        disputes_by_account = dispute_df.groupby(
-            dispute_df.merge(
-                ctx.get_table("fact_transaction")[["transaction_id", "account_id"]],
-                on="transaction_id"
-            )["account_id"]
-        ).agg({
-            "dispute_id": "count",
-            "dispute_opened_ts": "max",
-        }).to_dict()
+        disputes_by_account = (
+            dispute_df.groupby(
+                dispute_df.merge(
+                    ctx.get_table("fact_transaction")[["transaction_id", "account_id"]],
+                    on="transaction_id",
+                )["account_id"]
+            )
+            .agg(
+                {
+                    "dispute_id": "count",
+                    "dispute_opened_ts": "max",
+                }
+            )
+            .to_dict()
+        )
     else:
         disputes_by_account = {"dispute_id": {}, "dispute_opened_ts": {}}
 
     # Get fraud-flagged transactions
     transaction_df = ctx.get_table("fact_transaction")
     if transaction_df is not None:
-        fraud_by_account = transaction_df[transaction_df["is_fraud_flagged"] == True].groupby(
-            "account_id"
-        ).agg({
-            "transaction_id": ["count", "first"],
-            "transaction_ts": "max",
-        })
+        fraud_by_account = (
+            transaction_df[transaction_df["is_fraud_flagged"]]
+            .groupby("account_id")
+            .agg(
+                {
+                    "transaction_id": ["count", "first"],
+                    "transaction_ts": "max",
+                }
+            )
+        )
         if len(fraud_by_account) > 0:
             fraud_by_account.columns = ["fraud_count", "first_fraud_txn", "last_fraud_ts"]
             fraud_accounts = fraud_by_account.to_dict("index")
@@ -155,19 +163,21 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             hour=9, minute=rng.integers(0, 60)
         )
 
-        rows.append({
-            "event_id": event_id,
-            "account_id": account_id,
-            "customer_id": customer_id,
-            "previous_status": None,
-            "new_status": "active",
-            "change_ts": opening_ts,
-            "change_reason": "account_opened",
-            "initiated_by": "system",
-            "related_dispute_id": None,
-            "related_transaction_id": None,
-            "notes": None,
-        })
+        rows.append(
+            {
+                "event_id": event_id,
+                "account_id": account_id,
+                "customer_id": customer_id,
+                "previous_status": None,
+                "new_status": "active",
+                "change_ts": opening_ts,
+                "change_reason": "account_opened",
+                "initiated_by": "system",
+                "related_dispute_id": None,
+                "related_transaction_id": None,
+                "notes": None,
+            }
+        )
 
         current_status = "active"
 
@@ -194,13 +204,22 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                     freeze_reason = "dispute_cluster"
                     related_txn = None
                     # Get a dispute ID if available
-                    account_disputes = dispute_df[
-                        dispute_df.merge(
-                            transaction_df[["transaction_id", "account_id"]],
-                            on="transaction_id"
-                        )["account_id"] == account_id
-                    ] if dispute_df is not None else pd.DataFrame()
-                    related_dispute = account_disputes["dispute_id"].iloc[0] if len(account_disputes) > 0 else None
+                    account_disputes = (
+                        dispute_df[
+                            dispute_df.merge(
+                                transaction_df[["transaction_id", "account_id"]],
+                                on="transaction_id",
+                            )["account_id"]
+                            == account_id
+                        ]
+                        if dispute_df is not None
+                        else pd.DataFrame()
+                    )
+                    related_dispute = (
+                        account_disputes["dispute_id"].iloc[0]
+                        if len(account_disputes) > 0
+                        else None
+                    )
                 else:
                     freeze_reason = ctx.sample_categorical(
                         rng,
@@ -210,19 +229,23 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                     related_txn = None
                     related_dispute = None
 
-                rows.append({
-                    "event_id": event_id,
-                    "account_id": account_id,
-                    "customer_id": customer_id,
-                    "previous_status": current_status,
-                    "new_status": "frozen",
-                    "change_ts": freeze_ts,
-                    "change_reason": freeze_reason,
-                    "initiated_by": "system" if freeze_reason != "customer_request" else "customer",
-                    "related_dispute_id": related_dispute,
-                    "related_transaction_id": related_txn,
-                    "notes": f"Automated freeze: {freeze_reason}",
-                })
+                rows.append(
+                    {
+                        "event_id": event_id,
+                        "account_id": account_id,
+                        "customer_id": customer_id,
+                        "previous_status": current_status,
+                        "new_status": "frozen",
+                        "change_ts": freeze_ts,
+                        "change_reason": freeze_reason,
+                        "initiated_by": (
+                            "system" if freeze_reason != "customer_request" else "customer"
+                        ),
+                        "related_dispute_id": related_dispute,
+                        "related_transaction_id": related_txn,
+                        "notes": f"Automated freeze: {freeze_reason}",
+                    }
+                )
 
                 current_status = "frozen"
 
@@ -236,19 +259,21 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                             minute=rng.integers(0, 60),
                         )
 
-                        rows.append({
-                            "event_id": event_id,
-                            "account_id": account_id,
-                            "customer_id": customer_id,
-                            "previous_status": "frozen",
-                            "new_status": "active",
-                            "change_ts": unfreeze_ts,
-                            "change_reason": "review_completed",
-                            "initiated_by": "agent",
-                            "related_dispute_id": None,
-                            "related_transaction_id": None,
-                            "notes": "Account restored after review",
-                        })
+                        rows.append(
+                            {
+                                "event_id": event_id,
+                                "account_id": account_id,
+                                "customer_id": customer_id,
+                                "previous_status": "frozen",
+                                "new_status": "active",
+                                "change_ts": unfreeze_ts,
+                                "change_reason": "review_completed",
+                                "initiated_by": "agent",
+                                "related_dispute_id": None,
+                                "related_transaction_id": None,
+                                "notes": "Account restored after review",
+                            }
+                        )
                         current_status = "active"
 
         # Some accounts have suspension events
@@ -264,19 +289,21 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                 event_id = ctx.stable_id("status")
                 suspend_reason = ctx.sample_categorical(rng, SUSPENSION_REASONS)
 
-                rows.append({
-                    "event_id": event_id,
-                    "account_id": account_id,
-                    "customer_id": customer_id,
-                    "previous_status": current_status,
-                    "new_status": "suspended",
-                    "change_ts": suspend_ts,
-                    "change_reason": suspend_reason,
-                    "initiated_by": "system",
-                    "related_dispute_id": None,
-                    "related_transaction_id": None,
-                    "notes": None,
-                })
+                rows.append(
+                    {
+                        "event_id": event_id,
+                        "account_id": account_id,
+                        "customer_id": customer_id,
+                        "previous_status": current_status,
+                        "new_status": "suspended",
+                        "change_ts": suspend_ts,
+                        "change_reason": suspend_reason,
+                        "initiated_by": "system",
+                        "related_dispute_id": None,
+                        "related_transaction_id": None,
+                        "notes": None,
+                    }
+                )
 
         # Handle closed accounts from dim_account
         if acct_row["account_status"] == "closed" and acct_row["closed_date"] is not None:
@@ -286,19 +313,23 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                 minute=rng.integers(0, 60),
             )
 
-            rows.append({
-                "event_id": event_id,
-                "account_id": account_id,
-                "customer_id": customer_id,
-                "previous_status": current_status,
-                "new_status": "closed",
-                "change_ts": close_ts,
-                "change_reason": "account_closed",
-                "initiated_by": ctx.sample_categorical(rng, ["customer", "system"], weights=[0.7, 0.3]),
-                "related_dispute_id": None,
-                "related_transaction_id": None,
-                "notes": None,
-            })
+            rows.append(
+                {
+                    "event_id": event_id,
+                    "account_id": account_id,
+                    "customer_id": customer_id,
+                    "previous_status": current_status,
+                    "new_status": "closed",
+                    "change_ts": close_ts,
+                    "change_reason": "account_closed",
+                    "initiated_by": ctx.sample_categorical(
+                        rng, ["customer", "system"], weights=[0.7, 0.3]
+                    ),
+                    "related_dispute_id": None,
+                    "related_transaction_id": None,
+                    "notes": None,
+                }
+            )
 
     df = pd.DataFrame(rows)
     ctx.register_table(TABLE_NAME, df)

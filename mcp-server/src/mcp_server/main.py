@@ -28,7 +28,7 @@ async def lifespan(app):
     # Initialize NLP patterns from DB
     try:
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
-        
+
         service = CanonicalizationService.get_instance()
         await service.reload_patterns()
     except Exception as e:

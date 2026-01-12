@@ -32,16 +32,16 @@ def generate_manifest(
     # This hash should be deterministic based on the data produced
     # We use table names, row counts, and file hashes (if available)
     content_parts = []
-    
+
     # Sort files by table name then format for stable hashing
     sorted_files = sorted(files, key=lambda x: (x["table"], x["format"]))
-    
+
     for f in sorted_files:
         part = f"{f['table']}|{f['format']}|{f['rows']}"
         if f.get("hash"):
             part += f"|{f['hash']}"
         content_parts.append(part)
-        
+
     content_hash = stable_hash_str(":".join(content_parts))
 
     return {

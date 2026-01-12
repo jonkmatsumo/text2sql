@@ -1,7 +1,9 @@
 """Canonical multi-turn conversation scripts for synthetic data evaluation."""
 
-import yaml
 from pathlib import Path
+
+import yaml
+
 
 def get_catalog():
     """Load and return the multi-turn script catalog."""

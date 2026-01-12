@@ -6,7 +6,6 @@ Generates financial institution records (banks, processors, issuers).
 from __future__ import annotations
 
 import pandas as pd
-
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
@@ -17,20 +16,49 @@ INSTITUTION_TYPES = ["issuer", "acquirer", "processor", "network"]
 
 INSTITUTION_NAMES = {
     "issuer": [
-        "Chase Bank", "Bank of America", "Wells Fargo", "Citibank", "Capital One",
-        "US Bank", "PNC Bank", "TD Bank", "Truist", "Fifth Third Bank",
-        "Ally Bank", "Discover Bank", "Marcus by Goldman Sachs", "Synchrony Bank",
+        "Chase Bank",
+        "Bank of America",
+        "Wells Fargo",
+        "Citibank",
+        "Capital One",
+        "US Bank",
+        "PNC Bank",
+        "TD Bank",
+        "Truist",
+        "Fifth Third Bank",
+        "Ally Bank",
+        "Discover Bank",
+        "Marcus by Goldman Sachs",
+        "Synchrony Bank",
     ],
     "acquirer": [
-        "Worldpay", "Fiserv", "Global Payments", "TSYS", "Elavon",
-        "Heartland Payment", "Square", "Stripe", "PayPal", "Adyen",
+        "Worldpay",
+        "Fiserv",
+        "Global Payments",
+        "TSYS",
+        "Elavon",
+        "Heartland Payment",
+        "Square",
+        "Stripe",
+        "PayPal",
+        "Adyen",
     ],
     "processor": [
-        "FIS", "Fiserv", "TSYS", "First Data", "Worldline",
-        "ACI Worldwide", "Jack Henry", "Finastra", "NCR",
+        "FIS",
+        "Fiserv",
+        "TSYS",
+        "First Data",
+        "Worldline",
+        "ACI Worldwide",
+        "Jack Henry",
+        "Finastra",
+        "NCR",
     ],
     "network": [
-        "Visa", "Mastercard", "American Express", "Discover Network",
+        "Visa",
+        "Mastercard",
+        "American Express",
+        "Discover Network",
     ],
 }
 
@@ -75,7 +103,9 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
                 # SWIFT: 8 or 11 characters
                 swift_code = "".join(rng.choice(list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), size=4))
                 swift_code += "US"  # Country
-                swift_code += "".join(rng.choice(list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"), size=2))
+                swift_code += "".join(
+                    rng.choice(list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"), size=2)
+                )
 
             row = {
                 "institution_id": institution_id,

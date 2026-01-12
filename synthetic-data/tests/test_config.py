@@ -7,11 +7,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from text2sql_synth.config import (
     DistributionConfig,
-    OutputConfig,
-    RateConfig,
     ScaleConfig,
     ScalePreset,
     SynthConfig,
@@ -178,7 +175,9 @@ class TestYamlLoading:
             config = SynthConfig.from_yaml(temp_path)
             assert config.seed == 123
             assert config.scale.customers == 500
-            assert config.time_window.start_date == date(2024, 1, 15) or config.time_window.start_date == date(2024, 1, 1)
+            assert config.time_window.start_date == date(
+                2024, 1, 15
+            ) or config.time_window.start_date == date(2024, 1, 1)
         finally:
             Path(temp_path).unlink()
 

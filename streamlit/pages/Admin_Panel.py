@@ -246,7 +246,9 @@ def main():
             st.subheader("NLP Patterns")
             st.info("Generate new entity patterns from DB values + LLM synonyms.")
             if st.button("Generate Patterns"):
-                asyncio.run(run_operation("Pattern Generation", OpsService.run_pattern_generation()))
+                asyncio.run(
+                    run_operation("Pattern Generation", OpsService.run_pattern_generation())
+                )
 
         with col2:
             st.subheader("Schema Hydration")
