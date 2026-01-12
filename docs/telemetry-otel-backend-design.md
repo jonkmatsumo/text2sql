@@ -179,10 +179,18 @@ We explicitly avoid "mocking everything". We will use **In-Memory** implementati
 - **Details**:
   - `TELEMETRY_BACKEND` env var supports `mlflow` (default), `otel`, and `dual`.
   - `DualTelemetryBackend` uses `contextlib.ExitStack` for safe multi-backend nesting.
-  - Secondary backend is best-effort (exceptions are logged but suppressed).
-- **Verification**: Tests for selection logic and failure isolation in `agent/tests/test_telemetry.py`.
+- **Verification**: Tests for selection logic and failure isolation.
 
-### Phase 4: Smoke Verification
+### Phase 4: Context Propagation
+- **Status**: Completed (2026-01-11)
+- **Goal**: Ensure trace parity across nodes and tools.
+- **Implemented**:
+  - `telemetry.capture_context()` and `telemetry.use_context()`.
+  - Node wrapping in `graph.py` via `with_telemetry_context`.
+  - Root span expansion in `run_agent_with_tracing`.
+- **Verification**: `agent/tests/test_context_propagation_graph.py` validates parent-child end-to-end.
+
+### Phase 5: Smoke Verification
 - **Status**: Completed (2026-01-11)
 - **Tooling**: Added `scripts/verify_otel_setup.py`.
 - **Usage**:
