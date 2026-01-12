@@ -71,8 +71,8 @@ class TestPgSemanticCache:
 
         mock_conn.execute.assert_called_once()
         args = mock_conn.execute.call_args[0]
-        assert "UPDATE semantic_cache" in args[0]
-        assert args[1] == 123  # Int conversion
+        assert "UPDATE public.query_pairs" in args[0]
+        assert args[1] == "123"  # String signature_key
 
     @pytest.mark.asyncio
     async def test_store(self, cache, mock_db):
@@ -84,7 +84,7 @@ class TestPgSemanticCache:
 
         mock_conn.execute.assert_called_once()
         args = mock_conn.execute.call_args[0]
-        assert "INSERT INTO semantic_cache" in args[0]
+        assert "INSERT INTO public.query_pairs" in args[0]
 
 
 class TestPostgresExampleStore:

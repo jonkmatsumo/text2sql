@@ -66,6 +66,9 @@ class Database:
                 get_schema_store,
             )
 
+            # Ensure operational schema exists
+            await cls.ensure_schema()
+
             cls._cache_store = get_cache_store()
             cls._example_store = get_example_store()
             cls._schema_store = get_schema_store()
@@ -82,6 +85,27 @@ class Database:
         except Exception as e:
             await cls.close()  # Cleanup partials
             raise ConnectionError(f"Failed to initialize databases: {e}")
+
+    @classmethod
+    async def ensure_schema(cls):
+        """Ensure operational schema tables exist."""
+        if cls._pool is None:
+            return
+
+        async with cls._pool.acquire() as conn:
+            # Table for NLP patterns (synonyms -> canonical values)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nlp_patterns (
+                    id TEXT NOT NULL,          -- Canonical ID (e.g., "G")
+                    label TEXT NOT NULL,       -- Entity Label (e.g., "RATING")
+                    pattern TEXT NOT NULL,     -- The pattern/synonym (e.g., "general audiences")
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (label, pattern)
+                );
+                """
+            )
+            print("✓ Operational schema ensured (nlp_patterns)")
 
     @classmethod
     async def close(cls):

@@ -2,9 +2,9 @@
 
 import json
 
-import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -27,9 +27,9 @@ def synthesize_insight_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with synthesized response in messages
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="synthesize_insight",
-        span_type=mlflow.entities.SpanType.CHAT_MODEL,
+        span_type=SpanType.CHAT_MODEL,
     ) as span:
         query_result = state["query_result"]
 

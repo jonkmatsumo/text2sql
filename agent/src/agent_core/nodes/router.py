@@ -8,9 +8,9 @@ This module implements the entry point that:
 
 import json
 
-import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
 from dotenv import load_dotenv
@@ -68,9 +68,9 @@ async def router_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with ambiguity_type and clarification_question (if needed)
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="router",
-        span_type=mlflow.entities.SpanType.CHAIN,
+        span_type=SpanType.CHAIN,
     ) as span:
         messages = state["messages"]
         user_query = messages[-1].content if messages else ""

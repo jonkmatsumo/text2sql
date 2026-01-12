@@ -87,12 +87,13 @@ class RegistryService:
         threshold: float = 0.90,
         limit: int = 5,
         role: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> List[QueryPair]:
         """Search for semantically similar pairs."""
         embedding = await RagEngine.embed_text(question)
         store = get_registry_store()
         return await store.lookup_semantic_candidates(
-            embedding, tenant_id, threshold=threshold, limit=limit, role=role
+            embedding, tenant_id, threshold=threshold, limit=limit, role=role, status=status
         )
 
     @staticmethod

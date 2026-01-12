@@ -45,6 +45,7 @@ CANONICAL_TOOLS: Set[str] = {
     "reject_interaction",
     "export_approved_to_fewshot",
     "list_approved_examples",
+    "recommend_examples",
 }
 
 
@@ -107,6 +108,7 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.interaction.update_interaction import handler as update_interaction
     from mcp_server.tools.list_tables import handler as list_tables
     from mcp_server.tools.lookup_cache import handler as lookup_cache
+    from mcp_server.tools.recommend_examples import handler as recommend_examples
     from mcp_server.tools.resolve_ambiguity import handler as resolve_ambiguity
     from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
     from mcp_server.tools.update_cache import handler as update_cache
@@ -129,6 +131,7 @@ def register_all(mcp: "FastMCP") -> None:
     mcp.tool(name="lookup_cache")(lookup_cache)
     mcp.tool(name="update_cache")(update_cache)
     mcp.tool(name="get_few_shot_examples")(get_few_shot_examples)
+    mcp.tool(name="recommend_examples")(recommend_examples)
 
     # Register conversation tools
     mcp.tool(name="save_conversation_state")(save_conversation_state)

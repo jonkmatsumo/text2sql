@@ -25,6 +25,15 @@ async def lifespan(app):
     # Startup: Initialize database connection pool
     await Database.init()
 
+    # Initialize NLP patterns from DB
+    try:
+        from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
+        
+        service = CanonicalizationService.get_instance()
+        await service.reload_patterns()
+    except Exception as e:
+        print(f"Warning: Failed to load NLP patterns: {e}")
+
     # Maintenance: Prune legacy cache entries
     try:
         from mcp_server.services.cache.service import prune_legacy_entries

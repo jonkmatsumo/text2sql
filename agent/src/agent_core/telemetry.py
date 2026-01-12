@@ -1,0 +1,288 @@
+"""Telemetry service for abstracting tracing and observability.
+
+This module provides a unified interface for tracing, metrics, and metadata
+logging, allowing the agent to be agnostic of the underlying backend (e.g., MLflow, OTEL).
+"""
+
+import abc
+import contextlib
+from enum import Enum
+from typing import Any, Dict, Optional
+
+
+class SpanType(Enum):
+    """Semantic span types mapping to MLflow/OTEL concepts."""
+
+    CHAIN = "CHAIN"
+    TOOL = "TOOL"
+    RETRIEVER = "RETRIEVER"
+    CHAT_MODEL = "CHAT_MODEL"
+    PARSER = "PARSER"
+    UNKNOWN = "UNKNOWN"
+
+
+class TelemetrySpan(abc.ABC):
+    """Abstract interface for a telemetry span."""
+
+    @abc.abstractmethod
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set span inputs."""
+        pass
+
+    @abc.abstractmethod
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set span outputs."""
+        pass
+
+    @abc.abstractmethod
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a single span attribute."""
+        pass
+
+    @abc.abstractmethod
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set multiple span attributes."""
+        pass
+
+    @abc.abstractmethod
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the span."""
+        pass
+
+
+class TelemetryBackend(abc.ABC):
+    """Abstract base class for telemetry backends."""
+
+    @abc.abstractmethod
+    def configure(self, **kwargs) -> None:
+        """Configure the backend (e.g., tracking URI, autologging)."""
+        pass
+
+    @abc.abstractmethod
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start a span as a context manager."""
+        yield None
+
+    @abc.abstractmethod
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update the current active trace with metadata."""
+        pass
+
+
+class MlflowTelemetrySpan(TelemetrySpan):
+    """MLflow implementation of TelemetrySpan."""
+
+    def __init__(self, mlflow_span):
+        """Initialize with an MLflow span object."""
+        self._span = mlflow_span
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set span inputs."""
+        self._span.set_inputs(inputs)
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set span outputs."""
+        self._span.set_outputs(outputs)
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a single span attribute."""
+        self._span.set_attribute(key, value)
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set multiple span attributes."""
+        for k, v in attributes.items():
+            self._span.set_attribute(k, v)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the span."""
+        self._span.add_event(name, attributes)
+
+
+class MlflowTelemetryBackend(TelemetryBackend):
+    """MLflow implementation of TelemetryBackend."""
+
+    def __init__(self):
+        """Initialize both mlflow object and span type map."""
+        self._mlflow = None
+        self._span_type_map = {}
+
+    def _ensure_mlflow(self):
+        if self._mlflow is None:
+            import mlflow
+
+            self._mlflow = mlflow
+            self._span_type_map = {
+                SpanType.CHAIN: mlflow.entities.SpanType.CHAIN,
+                SpanType.TOOL: mlflow.entities.SpanType.TOOL,
+                SpanType.RETRIEVER: mlflow.entities.SpanType.RETRIEVER,
+                SpanType.CHAT_MODEL: mlflow.entities.SpanType.CHAT_MODEL,
+                SpanType.PARSER: mlflow.entities.SpanType.PARSER,
+                SpanType.UNKNOWN: mlflow.entities.SpanType.UNKNOWN,
+            }
+        return self._mlflow
+
+    def configure(self, tracking_uri: Optional[str] = None, autolog: bool = True, **kwargs) -> None:
+        """Configure MLflow tracking and autologging."""
+        mlflow = self._ensure_mlflow()
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        if autolog:
+            import mlflow.langchain
+
+            mlflow.langchain.autolog(**kwargs)
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start an MLflow span as a context manager."""
+        mlflow = self._ensure_mlflow()
+        ml_span_type = self._span_type_map.get(span_type, mlflow.entities.SpanType.UNKNOWN)
+
+        with mlflow.start_span(name=name, span_type=ml_span_type) as ml_span:
+            span = MlflowTelemetrySpan(ml_span)
+            if inputs:
+                span.set_inputs(inputs)
+            if attributes:
+                span.set_attributes(attributes)
+            yield span
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update the current active trace with metadata."""
+        mlflow = self._ensure_mlflow()
+        try:
+            mlflow.update_current_trace(metadata=metadata)
+        except Exception:
+            # Often fails if no active trace, mirroring current graph.py behavior
+            pass
+
+
+class InMemoryTelemetrySpan(TelemetrySpan):
+    """In-memory implementation of TelemetrySpan for testing."""
+
+    def __init__(self, name: str, span_type: SpanType):
+        """Initialize an in-memory span."""
+        self.name = name
+        self.span_type = span_type
+        self.inputs = {}
+        self.outputs = {}
+        self.attributes = {}
+        self.events = []
+        self.is_finished = False
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set span inputs."""
+        self.inputs.update(inputs)
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set span outputs."""
+        self.outputs.update(outputs)
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a single span attribute."""
+        self.attributes[key] = value
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set multiple span attributes."""
+        self.attributes.update(attributes)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the span."""
+        self.events.append({"name": name, "attributes": attributes or {}})
+
+
+class InMemoryTelemetryBackend(TelemetryBackend):
+    """In-memory implementation of TelemetryBackend for testing."""
+
+    def __init__(self):
+        """Initialize with empty storage."""
+        self.spans = []
+        self.trace_metadata = {}
+        self.config = {}
+
+    def configure(self, **kwargs) -> None:
+        """Configure via kwargs."""
+        self.config.update(kwargs)
+
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start a span as a context manager."""
+        span = InMemoryTelemetrySpan(name, span_type)
+        if inputs:
+            span.set_inputs(inputs)
+        if attributes:
+            span.set_attributes(attributes)
+        self.spans.append(span)
+        try:
+            yield span
+        finally:
+            span.is_finished = True
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update current trace metadata."""
+        self.trace_metadata.update(metadata)
+
+
+class TelemetryService:
+    """Public surface for telemetry calls."""
+
+    def __init__(self, backend: Optional[TelemetryBackend] = None):
+        """Initialize the telemetry service.
+
+        Args:
+            backend: The telemetry backend to use. Defaults to MlflowTelemetryBackend.
+        """
+        self._backend = backend or MlflowTelemetryBackend()
+
+    def set_backend(self, backend: TelemetryBackend) -> None:
+        """Switch backend at runtime (useful for testing)."""
+        self._backend = backend
+
+    def configure(self, tracking_uri: Optional[str] = None, autolog: bool = True, **kwargs) -> None:
+        """Configure telemetry settings.
+
+        Args:
+            tracking_uri: MLflow tracking URI.
+            autolog: Whether to enable LangChain autologging.
+            **kwargs: Additional arguments passed to autologging (e.g., run_tracer_inline=True).
+        """
+        self._backend.configure(tracking_uri=tracking_uri, autolog=autolog, **kwargs)
+
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start a new span."""
+        return self._backend.start_span(
+            name=name,
+            span_type=span_type,
+            inputs=inputs,
+            attributes=attributes,
+        )
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update current trace with metadata."""
+        self._backend.update_current_trace(metadata)
+
+
+# Global instance for easy access
+telemetry = TelemetryService()

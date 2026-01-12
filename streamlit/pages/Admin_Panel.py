@@ -26,7 +26,7 @@ def main():
     st.sidebar.header("Navigation")
 
     view = st.sidebar.radio(
-        "View", ["Recent Interactions", "Pending Publication", "Approved Examples"]
+        "View", ["Recent Interactions", "Pending Publication", "Approved Examples", "Operations"]
     )
 
     # Optional Filters for Recent Interactions
@@ -221,6 +221,44 @@ def main():
             )
         else:
             st.info("No approved examples found.")
+
+    elif view == "Operations":
+        # Import here to avoid circulars if any, though top-level is fine usually
+        from service.ops_service import OpsService
+
+        st.header("⚙️ System Operations")
+        st.write("Perform maintenance tasks and update system state.")
+
+        col1, col2, col3 = st.columns(3)
+
+        async def run_operation(name: str, coro_gen):
+            """Run async generator operation and stream logs."""
+            status_container = st.status(f"Running {name}...", expanded=True)
+            try:
+                async for log in coro_gen:
+                    status_container.write(log)
+                status_container.update(label=f"{name} Complete", state="complete")
+            except Exception as e:
+                status_container.write(f"Error: {e}")
+                status_container.update(label=f"{name} Failed", state="error")
+
+        with col1:
+            st.subheader("NLP Patterns")
+            st.info("Generate new entity patterns from DB values + LLM synonyms.")
+            if st.button("Generate Patterns"):
+                asyncio.run(run_operation("Pattern Generation", OpsService.run_pattern_generation()))
+
+        with col2:
+            st.subheader("Schema Hydration")
+            st.info("Sync Postgres schema to Memgraph.")
+            if st.button("Hydrate Schema"):
+                asyncio.run(run_operation("Schema Hydration", OpsService.run_schema_hydration()))
+
+        with col3:
+            st.subheader("Semantic Cache")
+            st.info("Re-index embeddings for cache/retrieval.")
+            if st.button("Re-index Cache"):
+                asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
-import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -14,34 +14,32 @@ llm = get_llm_client(temperature=0)
 
 async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
     """
-    Retrieve relevant few-shot examples via MCP server.
+    Retrieve relevant few-shot examples via the recommendation service.
 
     Args:
         user_query: The user's natural language question
+        tenant_id: Tenant ID for isolation
 
     Returns:
         Formatted string with examples, or empty string if none found
     """
     from agent_core.tools import get_mcp_tools
 
-    # Get MCP tools
     tools = await get_mcp_tools()
     if not tools:
         return ""
 
-    # Find the get_few_shot_examples
-    few_shot_tool = None
-    for tool in tools:
-        if tool.name == "get_few_shot_examples":
-            few_shot_tool = tool
-            break
+    # Prefer 'recommend_examples' over the legacy 'get_few_shot_examples'
+    recommend_tool = next((t for t in tools if t.name == "recommend_examples"), None)
+    legacy_tool = next((t for t in tools if t.name == "get_few_shot_examples"), None)
 
-    if not few_shot_tool:
+    selected_tool = recommend_tool or legacy_tool
+    if not selected_tool:
         return ""
 
     try:
-        # Call the tool with standardized 'query'
-        result = await few_shot_tool.ainvoke(
+        # recommend_examples uses 'query', get_few_shot_examples uses 'query'
+        result = await selected_tool.ainvoke(
             {"query": user_query, "tenant_id": tenant_id, "limit": 3}
         )
         if not result:
@@ -49,18 +47,34 @@ async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
 
         from agent_core.utils.parsing import parse_tool_output
 
-        examples = parse_tool_output(result)
+        output = parse_tool_output(result)
+
+        # parse_tool_output returns a list of chunks.
+        # recommend_examples returns a dict with 'examples'.
+        # legacy returns a flat list of dicts.
+        if (
+            output
+            and isinstance(output, list)
+            and isinstance(output[0], dict)
+            and "examples" in output[0]
+        ):
+            examples = output[0]["examples"]
+        else:
+            examples = output
 
         formatted = []
         for ex in examples:
             if isinstance(ex, dict):
-                formatted.append(f"- Question: {ex.get('question')}\n  SQL: {ex.get('sql')}")
+                # Both structures have question/sql or question/sql_query
+                q = ex.get("question")
+                s = ex.get("sql") or ex.get("sql_query")
+                if q and s:
+                    formatted.append(f"- Question: {q}\n  SQL: {s}")
 
         return "\n\n".join(formatted)
 
     except Exception as e:
         print(f"Warning: Could not retrieve few-shot examples: {e}")
-        return ""
 
 
 async def generate_sql_node(state: AgentState) -> dict:
@@ -76,9 +90,9 @@ async def generate_sql_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with current_sql populated and from_cache flag
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="generate_sql",
-        span_type=mlflow.entities.SpanType.CHAT_MODEL,
+        span_type=SpanType.CHAT_MODEL,
     ) as span:
         messages = state["messages"]
         context = state.get("schema_context", "")

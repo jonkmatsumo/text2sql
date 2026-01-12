@@ -9,9 +9,9 @@ This module implements the "Plan-Then-Generate" pattern:
 
 import json
 
-import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -96,9 +96,9 @@ async def plan_sql_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with procedural_plan, clause_map, and schema_ingredients
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="plan_sql",
-        span_type=mlflow.entities.SpanType.CHAIN,
+        span_type=SpanType.CHAIN,
     ) as span:
         messages = state["messages"]
         schema_context = state.get("schema_context", "")

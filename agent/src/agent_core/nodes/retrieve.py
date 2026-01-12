@@ -1,7 +1,7 @@
 """Context retrieval node for RAG-based schema lookup with MLflow tracing."""
 
-import mlflow
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.graph_formatter import format_graph_to_markdown
 
@@ -18,9 +18,9 @@ async def retrieve_context_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with schema_context and table_names populated
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="retrieve_context",
-        span_type=mlflow.entities.SpanType.RETRIEVER,
+        span_type=SpanType.RETRIEVER,
     ) as span:
         # Extract query: use active_query from state (set by router), or fallback
         active_query = state.get("active_query")
