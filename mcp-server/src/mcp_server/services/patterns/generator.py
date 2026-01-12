@@ -7,6 +7,16 @@ This script introspects the database to generate dynamic patterns for:
 - Other enumerated values
 
 It uses an LLM to generate colloquial synonyms for these values.
+
+Configuration (Environment Variables):
+- ENUM_CARDINALITY_THRESHOLD: Max distinct values to treat as enum (default 10).
+- ENUM_CARDINALITY_SAMPLE_ROWS: Number of rows to sample for detection (default 10000).
+- ENUM_CARDINALITY_QUERY_TIMEOUT_MS: Timeout for detection queries (default 2000).
+- ENUM_VALUE_ALLOWLIST: Comma-separated list of patterns to force include
+  (e.g. "users.status, *.type").
+- ENUM_VALUE_DENYLIST: Comma-separated list of patterns to force exclude
+  (e.g. "users.secret, *.uuid").
+- OPENAI_API_KEY: Required for LLM enrichment.
 """
 
 import asyncio
@@ -259,11 +269,19 @@ async def generate_entity_patterns() -> list[dict]:
     introspector = Database.get_schema_introspector()
 
     # Initialize Detector
-    # Config/Env reading will be refined in Phase 5, using basic defaults for now or existing envs
     threshold = int(os.getenv("ENUM_CARDINALITY_THRESHOLD", "10"))
+
+    # Parse Allow/Deny Lists
+    allowlist_str = os.getenv("ENUM_VALUE_ALLOWLIST", "")
+    denylist_str = os.getenv("ENUM_VALUE_DENYLIST", "")
+
+    allowlist = [s.strip() for s in allowlist_str.split(",") if s.strip()]
+    denylist = [s.strip() for s in denylist_str.split(",") if s.strip()]
+
     detector = EnumLikeColumnDetector(
         threshold=threshold,
-        # allowlist/denylist loading from config TODO
+        allowlist=allowlist,
+        denylist=denylist,
     )
 
     try:

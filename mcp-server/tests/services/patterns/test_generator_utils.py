@@ -85,59 +85,17 @@ def test_generate_column_patterns():
     assert "first name" in values
 
 
-def test_should_scan_column():
-    """Test value scan heuristics."""
-    from mcp_server.services.patterns.generator import should_scan_column
-
-    # Enum-like types
-    assert (
-        should_scan_column(ColumnDef(name="some_enum", data_type="USER-DEFINED", is_nullable=True))
-        is True
-    )
-
-    # Whitelisted names (text)
-    assert should_scan_column(ColumnDef(name="status", data_type="text", is_nullable=True)) is True
-    assert (
-        should_scan_column(ColumnDef(name="order_status", data_type="varchar", is_nullable=True))
-        is True
-    )
-    assert should_scan_column(ColumnDef(name="genre", data_type="text", is_nullable=True)) is True
-
-    # Ignored names
-    assert (
-        should_scan_column(ColumnDef(name="description", data_type="text", is_nullable=True))
-        is False
-    )
-    assert should_scan_column(ColumnDef(name="email", data_type="text", is_nullable=True)) is False
-
-    # Ignored types (even if name matches)
-    assert (
-        should_scan_column(ColumnDef(name="status_id", data_type="integer", is_nullable=True))
-        is False
-    )
-
-
 @pytest.mark.asyncio
-async def test_fetch_distinct_values():
-    """Test distinct value fetching."""
-    from unittest.mock import AsyncMock, MagicMock
+async def test_fetch_distinct_values_replacement():
+    """Test sample_distinct_values fetching."""
+    from unittest.mock import AsyncMock
 
-    from mcp_server.services.patterns.generator import fetch_distinct_values
+    from mcp_server.services.patterns.generator import sample_distinct_values
 
     mock_conn = AsyncMock()
-    # Mock row objects (subscriptable)
-    mock_conn.fetch.return_value = [
-        MagicMock(getitem=lambda self, x: "Active"),
-        MagicMock(getitem=lambda self, x: "Inactive"),
-    ]
-
-    # Override getitem to behave like list/tuple/dict
-    # Actually asyncpg Record behaves like a mapping + sequence
-    # Let's just return tuples for simple mocking? asyncpg fetch returns Record objects.
-    # The code does `row[0]`.
     mock_conn.fetch.return_value = [["Active"], ["Inactive"]]
 
-    values = await fetch_distinct_values(mock_conn, "users", "status")
+    values = await sample_distinct_values(mock_conn, "users", "status", threshold=10)
 
     assert "Active" in values
     assert "Inactive" in values
