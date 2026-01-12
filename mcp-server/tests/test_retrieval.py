@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.services.ingestion.vector_indexes.protocol import SearchResult
-from mcp_server.services.retrieval_service import get_relevant_examples
+from mcp_server.services.rag.retrieval import get_relevant_examples
 
 
 class TestRetrieval:

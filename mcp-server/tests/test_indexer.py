@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
-from mcp_server.services.indexer_service import index_all_tables
+from mcp_server.services.rag.indexer import index_all_tables
 
 # ... (skipping lines 4-101)
 # We could check the arguments passed to embed_text if we want to be strict

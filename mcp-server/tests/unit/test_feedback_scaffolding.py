@@ -1,7 +1,17 @@
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from fixtures.feedback_fixtures import sample_feedback_payload, sample_interaction_row
+
+# Ensure tests/ is in sys.path for fixtures import
+# (In case conftest.py hasn't run or propagated yet)
+try:
+    from fixtures.feedback_fixtures import sample_feedback_payload, sample_interaction_row
+except ImportError:
+    # Fallback: add parent-parent dir (mcp-server/tests) to path
+    sys.path.append(str(Path(__file__).parent.parent.absolute()))
+    from fixtures.feedback_fixtures import sample_feedback_payload, sample_interaction_row
 
 
 def test_interaction_row_structure():
