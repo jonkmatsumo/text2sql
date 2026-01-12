@@ -165,6 +165,37 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(s2.status.description, "failed_check")
         self.assertEqual(s2.attributes["telemetry.error"], "failed_check")
 
+    def test_context_propagation(self):
+        """Test that context can be captured and restored in OTEL."""
+        provider = TracerProvider()
+        tracer = provider.get_tracer("test")
+        exporter = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+        backend = OTELTelemetryBackend()
+        service = TelemetryService(backend=backend)
+
+        # 1. Start a parent span and capture context
+        with patch("opentelemetry.trace.get_tracer", return_value=tracer):
+            with service.start_span("root"):
+                ctx = service.capture_context()
+                self.assertIsNotNone(ctx.otel_context)
+
+            # 2. Start a child span using the captured context
+            with service.use_context(ctx):
+                with service.start_span("child"):
+                    pass
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 2)
+
+        # spans are returned in finish order: child, then root
+        root = next(s for s in spans if s.name == "root")
+        child = next(s for s in spans if s.name == "child")
+
+        self.assertEqual(child.parent.span_id, root.context.span_id)
+        self.assertEqual(child.context.trace_id, root.context.trace_id)
+
     def test_backend_selection(self):
         """Test that the service selects the correct backend based on env var."""
         with patch.dict("os.environ", {"TELEMETRY_BACKEND": "otel"}):

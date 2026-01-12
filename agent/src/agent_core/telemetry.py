@@ -9,10 +9,11 @@ import contextlib
 import json
 import logging
 import os
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
-from opentelemetry import trace
+from opentelemetry import context, trace
 from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,14 @@ class SpanType(Enum):
     CHAT_MODEL = "CHAT_MODEL"
     PARSER = "PARSER"
     UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class TelemetryContext:
+    """Opaque container for tracing context."""
+
+    otel_context: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class TelemetrySpan(abc.ABC):
@@ -82,6 +91,17 @@ class TelemetryBackend(abc.ABC):
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update the current active trace with metadata."""
         pass
+
+    @abc.abstractmethod
+    def capture_context(self) -> TelemetryContext:
+        """Capture the current tracing context."""
+        pass
+
+    @abc.abstractmethod
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use a previously captured context as active."""
+        yield
 
 
 class MlflowTelemetrySpan(TelemetrySpan):
@@ -175,6 +195,15 @@ class MlflowTelemetryBackend(TelemetryBackend):
             # Often fails if no active trace, mirroring current graph.py behavior
             pass
 
+    def capture_context(self) -> TelemetryContext:
+        """Capture MLflow context (currently minimal)."""
+        return TelemetryContext()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Apply MLflow context (no-op for now)."""
+        yield
+
 
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
@@ -263,6 +292,22 @@ class OTELTelemetryBackend(TelemetryBackend):
             current_span.set_attributes(metadata)
         else:
             logger.debug("update_current_trace: No recording span in context")
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture current OTEL context."""
+        return TelemetryContext(otel_context=context.get_current())
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Restore active OTEL context."""
+        token = None
+        if ctx.otel_context:
+            token = context.attach(ctx.otel_context)
+        try:
+            yield
+        finally:
+            if token:
+                context.detach(token)
 
 
 class DualTelemetrySpan(TelemetrySpan):
@@ -367,6 +412,21 @@ class DualTelemetryBackend(TelemetryBackend):
         except Exception:
             logger.warning("Secondary backend update_current_trace failed", exc_info=True)
 
+    def capture_context(self) -> TelemetryContext:
+        """Capture context from both backends."""
+        return self.primary.capture_context()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use context for both backends."""
+        with self.primary.use_context(ctx):
+            try:
+                with self.secondary.use_context(ctx):
+                    yield
+            except Exception:
+                logger.warning("Secondary backend use_context failed", exc_info=True)
+                yield
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -439,6 +499,15 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         """Update current trace metadata."""
         self.trace_metadata.update(metadata)
 
+    def capture_context(self) -> TelemetryContext:
+        """Capture in-memory context."""
+        return TelemetryContext()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use in-memory context."""
+        yield
+
 
 class TelemetryService:
     """Public surface for telemetry calls."""
@@ -495,6 +564,26 @@ class TelemetryService:
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update current trace with metadata."""
         self._backend.update_current_trace(metadata)
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture current tracing context."""
+        return self._backend.capture_context()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use a previously captured context."""
+        with self._backend.use_context(ctx):
+            yield
+
+    def run_with_context(self, ctx: TelemetryContext, func: Callable, *args, **kwargs):
+        """Run a function under a specific context."""
+        with self.use_context(ctx):
+            return func(*args, **kwargs)
+
+    async def arun_with_context(self, ctx: TelemetryContext, func: Callable, *args, **kwargs):
+        """Run an async function under a specific context."""
+        with self.use_context(ctx):
+            return await func(*args, **kwargs)
 
 
 # Global instance for easy access
