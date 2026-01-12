@@ -1,4 +1,9 @@
-"""Unit tests for Streamlit AgentService."""
+"""Unit tests for Streamlit AgentService.
+
+NOTE:
+Renamed from test_agent.py to avoid pytest import collisions with
+agent/test_agent.py during repo-root test collection.
+"""
 
 import os
 import sys
@@ -15,7 +20,7 @@ sys.modules["langchain_mcp_adapters"] = MagicMock()
 sys.modules["langchain_mcp_adapters.client"] = MagicMock()
 sys.modules["mlflow"] = MagicMock()
 
-from service.agent import AgentService  # noqa: E402
+from streamlit.service.agent import AgentService  # noqa: E402
 
 
 class TestRunAgent:

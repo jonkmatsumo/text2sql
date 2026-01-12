@@ -68,8 +68,8 @@ class TestRetrieveContextNode:
         with patch(
             "agent_core.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock
         ) as mock_get_tools:
-            with patch("agent_core.nodes.retrieve.mlflow") as mock_mlflow:
-                # Setup mock for mlflow span
+            with patch("agent_core.nodes.retrieve.telemetry") as mock_mlflow:
+                # Setup mock for telemetry span
                 mock_span = MagicMock()
                 mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
                 mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"
@@ -107,7 +107,7 @@ class TestRetrieveContextNode:
         with patch(
             "agent_core.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock
         ) as mock_get_tools:
-            with patch("agent_core.nodes.retrieve.mlflow") as mock_mlflow:
+            with patch("agent_core.nodes.retrieve.telemetry") as mock_mlflow:
                 mock_span = MagicMock()
                 mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
                 mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"
@@ -127,7 +127,7 @@ class TestRetrieveContextNode:
         with patch(
             "agent_core.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock
         ) as mock_get_tools:
-            with patch("agent_core.nodes.retrieve.mlflow") as mock_mlflow:
+            with patch("agent_core.nodes.retrieve.telemetry") as mock_mlflow:
                 mock_span = MagicMock()
                 mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
                 mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"

@@ -1,6 +1,6 @@
 """Tests for save_conversation_state tool."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from mcp_server.tools.conversation.save_conversation_state import TOOL_NAME, handler
@@ -20,8 +20,13 @@ class TestSaveConversationState:
         with patch(
             "mcp_server.tools.conversation.save_conversation_state.get_conversation_store"
         ) as mock_get_store:
-            mock_store = AsyncMock()
-            mock_store.save_state_async = AsyncMock()
+            calls = []
+
+            async def save_state_async(conversation_id, user_id, state_json, version, ttl_minutes):
+                calls.append((conversation_id, user_id, state_json, version, ttl_minutes))
+
+            mock_store = MagicMock()
+            mock_store.save_state_async = save_state_async
             mock_get_store.return_value = mock_store
 
             result = await handler(
@@ -33,9 +38,7 @@ class TestSaveConversationState:
             )
 
             assert result == "OK"
-            mock_store.save_state_async.assert_called_once_with(
-                "conv-1", "user-1", {"tables": ["users"]}, 1, 30
-            )
+            assert calls == [("conv-1", "user-1", {"tables": ["users"]}, 1, 30)]
 
     @pytest.mark.asyncio
     async def test_save_conversation_state_default_ttl(self):
@@ -43,11 +46,16 @@ class TestSaveConversationState:
         with patch(
             "mcp_server.tools.conversation.save_conversation_state.get_conversation_store"
         ) as mock_get_store:
-            mock_store = AsyncMock()
-            mock_store.save_state_async = AsyncMock()
+            calls = []
+
+            async def save_state_async(conversation_id, user_id, state_json, version, ttl_minutes):
+                calls.append((conversation_id, user_id, state_json, version, ttl_minutes))
+
+            mock_store = MagicMock()
+            mock_store.save_state_async = save_state_async
             mock_get_store.return_value = mock_store
 
             await handler(conversation_id="conv-1", user_id="user-1", state_json={}, version=1)
 
             # Default ttl_minutes=60
-            mock_store.save_state_async.assert_called_once_with("conv-1", "user-1", {}, 1, 60)
+            assert calls == [("conv-1", "user-1", {}, 1, 60)]

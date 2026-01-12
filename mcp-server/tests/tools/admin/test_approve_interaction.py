@@ -1,6 +1,6 @@
 """Tests for approve_interaction tool."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from mcp_server.tools.admin.approve_interaction import TOOL_NAME, handler
@@ -20,8 +20,13 @@ class TestApproveInteraction:
         with patch(
             "mcp_server.tools.admin.approve_interaction.get_feedback_store"
         ) as mock_get_store:
-            mock_store = AsyncMock()
-            mock_store.update_review_status = AsyncMock()
+            calls = {}
+
+            async def update_review_status(**kwargs):
+                calls.update(kwargs)
+
+            mock_store = MagicMock()
+            mock_store.update_review_status = update_review_status
             mock_get_store.return_value = mock_store
 
             result = await handler(
@@ -29,12 +34,10 @@ class TestApproveInteraction:
             )
 
             assert result == "OK"
-            mock_store.update_review_status.assert_called_once()
-            call_kwargs = mock_store.update_review_status.call_args[1]
-            assert call_kwargs["interaction_id"] == "int-1"
-            assert call_kwargs["status"] == "APPROVED"
-            assert call_kwargs["resolution_type"] == "FIXED"
-            assert call_kwargs["corrected_sql"] == "SELECT 1"
+            assert calls["interaction_id"] == "int-1"
+            assert calls["status"] == "APPROVED"
+            assert calls["resolution_type"] == "FIXED"
+            assert calls["corrected_sql"] == "SELECT 1"
 
     @pytest.mark.asyncio
     async def test_approve_interaction_default_resolution(self):
@@ -42,11 +45,15 @@ class TestApproveInteraction:
         with patch(
             "mcp_server.tools.admin.approve_interaction.get_feedback_store"
         ) as mock_get_store:
-            mock_store = AsyncMock()
-            mock_store.update_review_status = AsyncMock()
+            calls = {}
+
+            async def update_review_status(**kwargs):
+                calls.update(kwargs)
+
+            mock_store = MagicMock()
+            mock_store.update_review_status = update_review_status
             mock_get_store.return_value = mock_store
 
             await handler(interaction_id="int-1")
 
-            call_kwargs = mock_store.update_review_status.call_args[1]
-            assert call_kwargs["resolution_type"] == "APPROVED_AS_IS"
+            assert calls["resolution_type"] == "APPROVED_AS_IS"

@@ -1,7 +1,8 @@
 """Tests for semantic subgraph retrieval tool."""
 
 import json
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.tools.get_semantic_subgraph import TOOL_NAME
@@ -10,6 +11,25 @@ from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgr
 
 class TestGetSemanticSubgraph:
     """Unit tests for get_semantic_subgraph tool."""
+
+    def _mock_introspector(self):
+        table_def = SimpleNamespace(
+            description="",
+            columns=[
+                SimpleNamespace(name="id", data_type="integer", is_nullable=False),
+            ],
+            foreign_keys=[
+                SimpleNamespace(
+                    column_name="id",
+                    foreign_table_name="orders",
+                    foreign_column_name="id",
+                )
+            ],
+        )
+
+        introspector = MagicMock()
+        introspector.get_table_def = AsyncMock(return_value=table_def)
+        return introspector
 
     def test_tool_name_no_suffix(self):
         """Verify TOOL_NAME does not end with '_tool'."""
@@ -22,7 +42,9 @@ class TestGetSemanticSubgraph:
         mock_indexer = MagicMock()
 
         # Tables-first: returns table hits
-        mock_indexer.search_nodes.return_value = [{"node": {"name": "customers"}, "score": 0.9}]
+        mock_indexer.search_nodes = AsyncMock(
+            return_value=[{"node": {"name": "customers"}, "score": 0.9}]
+        )
 
         # Mock store and session
         mock_store = MagicMock()
@@ -78,9 +100,14 @@ class TestGetSemanticSubgraph:
             return_value=mock_store,
         ):
             with patch(
-                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=self._mock_introspector(),
             ):
-                result_json = await get_semantic_subgraph("find customers")
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                    return_value=mock_indexer,
+                ):
+                    result_json = await get_semantic_subgraph("find customers")
                 result = json.loads(result_json)
 
                 assert "nodes" in result
@@ -96,16 +123,21 @@ class TestGetSemanticSubgraph:
     async def test_get_semantic_subgraph_no_seeds(self):
         """Test handling no search results."""
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes.return_value = []
+        mock_indexer.search_nodes = AsyncMock(return_value=[])
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
             return_value=MagicMock(),
         ):
             with patch(
-                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=self._mock_introspector(),
             ):
-                result = await get_semantic_subgraph("query")
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                    return_value=mock_indexer,
+                ):
+                    result = await get_semantic_subgraph("query")
                 data = json.loads(result)
                 assert data["nodes"] == []
                 assert data["relationships"] == []
@@ -114,16 +146,21 @@ class TestGetSemanticSubgraph:
     async def test_get_semantic_subgraph_error(self):
         """Test error handling."""
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes.side_effect = Exception("Search failed")
+        mock_indexer.search_nodes = AsyncMock(side_effect=Exception("Search failed"))
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
             return_value=MagicMock(),
         ):
             with patch(
-                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=self._mock_introspector(),
             ):
-                result = await get_semantic_subgraph("query")
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                    return_value=mock_indexer,
+                ):
+                    result = await get_semantic_subgraph("query")
                 data = json.loads(result)
                 assert "error" in data
                 assert "Search failed" in data["error"]
@@ -139,16 +176,21 @@ class TestGetSemanticSubgraph:
             call_order.append(label)
             return []
 
-        mock_indexer.search_nodes.side_effect = track_calls
+        mock_indexer.search_nodes = AsyncMock(side_effect=track_calls)
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
             return_value=MagicMock(),
         ):
             with patch(
-                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=self._mock_introspector(),
             ):
-                await get_semantic_subgraph("test query")
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                    return_value=mock_indexer,
+                ):
+                    await get_semantic_subgraph("test query")
 
                 # Should search tables first
                 assert call_order[0] == "Table"

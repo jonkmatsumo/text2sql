@@ -1,3 +1,10 @@
+"""Test that environment variables override defaults.
+
+NOTE:
+Renamed from test_config.py to avoid pytest import collisions with other
+test_config.py modules in the monorepo when running tests from repo root.
+"""
+
 import importlib
 import os
 from unittest.mock import patch

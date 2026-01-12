@@ -47,7 +47,7 @@ class TestRetrieveContextNode:
         }
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_success(self, mock_get_mcp_tools, mock_start_span):
         """Test successful context retrieval."""
@@ -107,7 +107,7 @@ class TestRetrieveContextNode:
         assert "payment" in result["table_names"]
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_extracts_query(self, mock_get_mcp_tools, mock_start_span):
         """Test that query is extracted from last message."""
@@ -138,7 +138,7 @@ class TestRetrieveContextNode:
         mock_subgraph_tool.ainvoke.assert_called_once_with({"query": test_query})
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_formatting(self, mock_get_mcp_tools, mock_start_span):
         """Test context string formatting."""
@@ -177,7 +177,7 @@ class TestRetrieveContextNode:
         assert "**table3**" in result["schema_context"]
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_empty_results(self, mock_get_mcp_tools, mock_start_span):
         """Test handling of empty search results."""
@@ -208,7 +208,7 @@ class TestRetrieveContextNode:
         assert result["table_names"] == []
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_multiple_messages(
         self, mock_get_mcp_tools, mock_start_span
@@ -245,7 +245,7 @@ class TestRetrieveContextNode:
         mock_subgraph_tool.ainvoke.assert_called_once_with({"query": "Second query"})
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_error_handling(self, mock_get_mcp_tools, mock_start_span):
         """Test error handling when MCP tools raise an exception."""
@@ -269,7 +269,7 @@ class TestRetrieveContextNode:
         assert "Error retrieving context" in result["schema_context"]
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_single_result(self, mock_get_mcp_tools, mock_start_span):
         """Test context retrieval with a single result."""
@@ -303,7 +303,7 @@ class TestRetrieveContextNode:
         assert "single_table" in result["table_names"]
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_max_results(self, mock_get_mcp_tools, mock_start_span):
         """Test retrieval with multiple tables."""
@@ -338,7 +338,7 @@ class TestRetrieveContextNode:
             assert f"table{i + 1}" in result["table_names"]
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.retrieve.mlflow.start_span")
+    @patch("agent_core.nodes.retrieve.telemetry.start_span")
     @patch("agent_core.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_tool_not_found(self, mock_get_mcp_tools, mock_start_span):
         """Test handling when subgraph tool is not found."""

@@ -1,3 +1,12 @@
+"""Test suite for Schema Indexer.
+
+NOTE:
+This file was renamed from test_indexer.py to test_rag_indexer.py to avoid
+pytest import collisions under default import mode. The monorepo contains
+multiple test_indexer.py files, which can cause 'import file mismatch'
+errors during test collection from the repo root.
+"""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest

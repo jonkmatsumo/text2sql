@@ -1,10 +1,15 @@
-"""Unit tests for RAG engine module."""
+"""Unit tests for RAG engine module.
 
-from unittest.mock import AsyncMock, MagicMock, patch
+NOTE:
+Renamed from test_rag.py to avoid pytest import collisions with
+mcp-server/scripts/test_rag.py and to clarify this file tests the RAG engine.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from mcp_server.dal.postgres import PostgresSchemaStore
 from mcp_server.services.rag import RagEngine, search_similar_tables
 from mcp_server.services.rag.engine import format_vector_for_postgres, generate_schema_document
 
@@ -16,48 +21,52 @@ class TestRagEngine:
         """Reset the model before each test."""
         RagEngine._model = None
 
-    def test_model_lazy_loading(self):
+    @pytest.mark.asyncio
+    async def test_model_lazy_loading(self):
         """Test that model loads on first use and reuses on subsequent calls."""
         mock_model = MagicMock()
         mock_embedding1 = np.array([0.1] * 384)
         mock_embedding2 = np.array([0.2] * 384)
         mock_model.embed.side_effect = [iter([mock_embedding1]), iter([mock_embedding2])]
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
             # First call should load the model
-            embedding1 = RagEngine.embed_text("test text")
+            embedding1 = await RagEngine.embed_text("test text")
             assert RagEngine._model is not None
             assert mock_model.embed.call_count == 1
             assert len(embedding1) == 384
 
             # Second call should reuse the same model
-            embedding2 = RagEngine.embed_text("another text")
+            embedding2 = await RagEngine.embed_text("another text")
             assert RagEngine._model is mock_model
             assert mock_model.embed.call_count == 2
             assert len(embedding2) == 384
 
-    def test_embed_text_dimension(self):
+    @pytest.mark.asyncio
+    async def test_embed_text_dimension(self):
         """Test that embedding is 384 dimensions."""
         mock_model = MagicMock()
         mock_embedding = np.array([0.1] * 384)
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
-            embedding = RagEngine.embed_text("test table with customer data")
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
+            embedding = await RagEngine.embed_text("test table with customer data")
             assert len(embedding) == 384
 
-    def test_embed_text_type(self):
+    @pytest.mark.asyncio
+    async def test_embed_text_type(self):
         """Test that return type is list[float]."""
         mock_model = MagicMock()
         mock_embedding = np.array([0.1, 0.2, 0.3] * 128)  # 384 elements
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
-            embedding = RagEngine.embed_text("test")
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
+            embedding = await RagEngine.embed_text("test")
             assert isinstance(embedding, list)
             assert all(isinstance(x, float) for x in embedding)
 
-    def test_embed_batch(self):
+    @pytest.mark.asyncio
+    async def test_embed_batch(self):
         """Test batch embedding with multiple texts."""
         mock_model = MagicMock()
         mock_embeddings = [
@@ -67,31 +76,33 @@ class TestRagEngine:
         ]
         mock_model.embed.return_value = iter(mock_embeddings)
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
             texts = ["text1", "text2", "text3"]
-            embeddings = RagEngine.embed_batch(texts)
+            embeddings = await RagEngine.embed_batch(texts)
 
             assert len(embeddings) == 3
             assert all(len(emb) == 384 for emb in embeddings)
             assert all(isinstance(emb, list) for emb in embeddings)
 
-    def test_embed_batch_empty(self):
+    @pytest.mark.asyncio
+    async def test_embed_batch_empty(self):
         """Test empty batch handling."""
         mock_model = MagicMock()
         mock_model.embed.return_value = iter([])
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
-            embeddings = RagEngine.embed_batch([])
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
+            embeddings = await RagEngine.embed_batch([])
             assert embeddings == []
 
-    def test_embed_text_empty_string(self):
+    @pytest.mark.asyncio
+    async def test_embed_text_empty_string(self):
         """Test empty string handling."""
         mock_model = MagicMock()
         mock_embedding = np.array([0.0] * 384)
         mock_model.embed.return_value = iter([mock_embedding])
 
-        with patch("mcp_server.rag.TextEmbedding", return_value=mock_model):
-            embedding = RagEngine.embed_text("")
+        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
+            embedding = await RagEngine.embed_text("")
             assert len(embedding) == 384
 
 
@@ -275,110 +286,77 @@ class TestSearchSimilarTables:
     @pytest.fixture(autouse=True)
     async def reset_schema_index(self):
         """Reset the singleton schema index before each test."""
-        import mcp_server.rag
+        from mcp_server.services.rag import engine as rag_engine
 
-        mcp_server.rag._schema_index = None
+        rag_engine._schema_index = None
         yield
-        mcp_server.rag._schema_index = None
+        rag_engine._schema_index = None
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_success(self):
         """Test successful search with results."""
-        mock_conn = AsyncMock()
-        mock_rows = [
-            {
-                "table_name": "customer",
-                "schema_text": "Table: customer. Columns: id, name",
-                "distance": 0.1,
-                "embedding": [0.1] * 384,
-            },
-            {
-                "table_name": "order",
-                "schema_text": "Table: order. Columns: id, customer_id",
-                "distance": 0.2,
-                "embedding": [0.2] * 384,
-            },
+        mock_index = MagicMock()
+        mock_index.search.return_value = [
+            SimpleNamespace(
+                id="customer",
+                score=0.9,
+                metadata={"schema_text": "Table: customer. Columns: id, name"},
+            ),
+            SimpleNamespace(
+                id="order",
+                score=0.8,
+                metadata={"schema_text": "Table: order. Columns: id, customer_id"},
+            ),
         ]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        async def _fake_get_schema_index():
+            return mock_index
 
-        with patch("mcp_server.config.database.Database.get_connection", mock_get), patch(
-            "mcp_server.config.database.Database.get_schema_store",
-            return_value=PostgresSchemaStore(),
-        ):
+        with patch("mcp_server.services.rag.engine._get_schema_index", new=_fake_get_schema_index):
             query_embedding = [0.1] * 384
             results = await search_similar_tables(query_embedding, limit=5)
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
 
             # Verify results
             assert len(results) == 2
             assert results[0]["table_name"] == "customer"
-            assert pytest.approx(results[0]["distance"], abs=1e-5) == 0.0
+            assert pytest.approx(results[0]["distance"], abs=1e-5) == 0.1
             assert results[1]["table_name"] == "order"
-            assert pytest.approx(results[1]["distance"], abs=1e-5) == 0.0
+            assert pytest.approx(results[1]["distance"], abs=1e-5) == 0.2
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_empty_result(self):
         """Test empty result handling."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
+        mock_index = MagicMock()
+        mock_index.search.return_value = []
 
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        async def _fake_get_schema_index():
+            return mock_index
 
-        with patch("mcp_server.config.database.Database.get_connection", mock_get), patch(
-            "mcp_server.config.database.Database.get_schema_store",
-            return_value=PostgresSchemaStore(),
-        ):
+        with patch("mcp_server.services.rag.engine._get_schema_index", new=_fake_get_schema_index):
             query_embedding = [0.1] * 384
             results = await search_similar_tables(query_embedding, limit=5)
 
             assert results == []
-            mock_get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_search_similar_tables_limit(self):
         """Test limit parameter."""
-        mock_conn = AsyncMock()
-        mock_rows = [
-            {
-                "table_name": f"table_{i}",
-                "schema_text": f"text_{i}",
-                "distance": float(i),
-                "embedding": [0.1] * 384,
-            }
-            for i in range(10)
+        mock_index = MagicMock()
+        mock_index.search.side_effect = lambda _query_vector, k: [
+            SimpleNamespace(
+                id=f"table_{i}",
+                score=0.9,
+                metadata={"schema_text": f"text_{i}"},
+            )
+            for i in range(k)
         ]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        # Setup async context manager mock
-        mock_get_cm = AsyncMock()
-        mock_get_cm.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_get_cm.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_get_cm)
+        async def _fake_get_schema_index():
+            return mock_index
 
-        with patch("mcp_server.config.database.Database.get_connection", mock_get), patch(
-            "mcp_server.config.database.Database.get_schema_store",
-            return_value=PostgresSchemaStore(),
-        ):
+        with patch("mcp_server.services.rag.engine._get_schema_index", new=_fake_get_schema_index):
             query_embedding = [0.1] * 384
             results = await search_similar_tables(query_embedding, limit=3)
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
-
-            # Verify connection was acquired (context manager called)
-            mock_get.assert_called_once()
 
             # Results should be limited (via index search logic)
             assert len(results) == 3

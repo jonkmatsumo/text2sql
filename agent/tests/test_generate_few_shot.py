@@ -7,7 +7,7 @@ from agent_core.state import AgentState
 
 
 @pytest.mark.asyncio
-@patch("agent_core.nodes.generate.mlflow.start_span")
+@patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.nodes.generate.llm")
 @patch("agent_core.nodes.generate.ChatPromptTemplate")
 @patch("agent_core.tools.get_mcp_tools")

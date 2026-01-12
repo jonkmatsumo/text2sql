@@ -40,11 +40,9 @@ class TestSeederCli:
     """Tests for Seeder CLI functions."""
 
     @pytest.mark.asyncio
-    @patch("mcp_server.seeding.cli.Database")
-    @patch("mcp_server.seeding.cli.RagEngine")
-    @patch("mcp_server.seeding.cli.format_vector_for_postgres")
-    @patch("mcp_server.seeding.cli.load_from_directory")
-    async def test_main_processing(self, mock_load, mock_format, mock_rag, mock_db):
+    @patch("mcp_server.services.seeding.cli.load_from_directory")
+    @patch("mcp_server.services.seeding.cli.RegistryService.register_pair", new_callable=AsyncMock)
+    async def test_main_processing(self, mock_register, mock_load):
         """Test unified processing of seed items."""
         mock_load.return_value = [
             {
@@ -55,31 +53,11 @@ class TestSeederCli:
             }
         ]
 
-        mock_rag.embed_text.return_value = [0.1]
-        mock_format.return_value = "[0.1]"
+        await cli._process_seed_data(Path("/app/queries"))
 
-        mock_conn = AsyncMock()
-        mock_db.get_connection.return_value.__aenter__.return_value = mock_conn
-
-        # Override base path
-        # main() uses Path("/app/seeds"). We should mock load_from_directory to ignore path.
-
-        # We can't easily test main() because of hardcoded path,
-        # so we test the helper or refactor main.
-        # But for now, let's just invoke the helpers.
-
-        await cli._upsert_sql_example(mock_conn, mock_load.return_value[0])
-        await cli._upsert_golden_record(mock_conn, mock_load.return_value[0])
-
-        # Verify SQL Examples insert
-        assert mock_conn.execute.call_count == 2
-
-        # Call 1: SQL Example
-        args1 = mock_conn.execute.call_args_list[0][0]
-        assert "INSERT INTO sql_examples" in args1[0]
-        assert args1[1] == "Q1"
-
-        # Call 2: Golden Dataset
-        args2 = mock_conn.execute.call_args_list[1][0]
-        assert "INSERT INTO golden_dataset" in args2[0]
-        assert args2[6] == "hard"
+        mock_register.assert_awaited_once()
+        call_kwargs = mock_register.call_args.kwargs
+        assert call_kwargs["question"] == "Q1"
+        assert call_kwargs["sql_query"] == "SELECT 1"
+        assert call_kwargs["roles"] == ["example", "golden"]
+        assert call_kwargs["status"] == "verified"

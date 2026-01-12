@@ -5,13 +5,13 @@ from unittest.mock import patch
 import pytest
 
 try:
-    from service.ops_service import OpsService
+    from streamlit.service.ops_service import OpsService
 except ImportError:
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from service.ops_service import OpsService
+    from streamlit.service.ops_service import OpsService
 
 
 @pytest.mark.asyncio

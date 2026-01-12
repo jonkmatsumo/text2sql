@@ -61,7 +61,13 @@ jobs:
           echo "✓ Control-plane database initialized"
 
       - name: Run tests (excluding LLM-dependent tests)
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: control_plane
+          DB_USER: postgres
+          DB_PASS: test_password
         run: |
           # Run tests from root with import-mode=importlib
           # Exclude tests that require LLM API keys (test_correct, test_generate, test_graph, test_synthesize)
-          pytest --import-mode=importlib -v --ignore=agent/tests/test_correct.py --ignore=agent/tests/test_generate.py --ignore=agent/tests/test_graph.py --ignore=agent/tests/test_synthesize.py
+          pytest -v -m "not integration" --ignore=agent/tests/test_correct.py --ignore=agent/tests/test_generate.py --ignore=agent/tests/test_graph.py --ignore=agent/tests/test_synthesize.py

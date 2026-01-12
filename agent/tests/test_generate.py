@@ -18,7 +18,7 @@ class TestGenerateSqlNode:
         return mock_span
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_success(self, mock_prompt_class, mock_llm, mock_start_span):
@@ -66,7 +66,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT COUNT(*) FROM film"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_markdown_sql_block(
@@ -100,7 +100,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT * FROM film"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_markdown_block(
@@ -134,7 +134,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT * FROM film"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_no_markdown(
@@ -168,7 +168,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT * FROM film"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_empty_schema_context(
@@ -206,7 +206,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT 1"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_multiple_messages(
@@ -248,7 +248,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT * FROM customer"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_whitespace_handling(
@@ -282,7 +282,7 @@ class TestGenerateSqlNode:
         assert result["current_sql"] == "SELECT * FROM film"
 
     @pytest.mark.asyncio
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_complex_markdown(

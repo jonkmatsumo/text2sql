@@ -9,6 +9,8 @@ from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgr
 TEST_QUERY = "Integration Test: Show me the hierarchy of the payment system"
 TENANT_ID = 1
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_cache_write_through():

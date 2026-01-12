@@ -1,77 +1,48 @@
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.services.ingestion.vector_indexes.protocol import SearchResult
 from mcp_server.services.rag.retrieval import get_relevant_examples
 
 
 class TestRetrieval:
     """Test suite for retrieval module."""
 
-    @pytest.fixture(autouse=True)
-    def reset_index(self):
-        """Reset global index before each test."""
-        # We need to access the module-level variable to reset it
-        # Since it's local to the module, we might need to rely on reloading or a backdoor.
-        # But we can patch _get_index or patch the global in a setup.
-        # Actually, let's just patch `mcp_server.services.retrieval_service._index`
-        with patch("mcp_server.services.retrieval_service._index", None):
-            yield
-
     @pytest.mark.asyncio
     async def test_get_relevant_examples(self):
-        """Test retrieving examples via vector index."""
-        mock_index = MagicMock()
-        mock_search_result = SearchResult(
-            id=1, score=0.9, metadata={"question": "Q1", "sql": "SELECT 1"}
-        )
-        mock_index.search.return_value = [mock_search_result]
+        """Test retrieving examples via RegistryService."""
+        mock_example = MagicMock()
+        mock_example.question = "Q1"
+        mock_example.sql_query = "SELECT 1"
+        mock_example.signature_key = "abcdef123456"
 
-        mock_loader = AsyncMock()
+        async def _fake_get_examples(_user_query, _tenant_id, limit=3):
+            return [mock_example]
 
         with patch(
-            "mcp_server.services.retrieval_service.create_vector_index", return_value=mock_index
+            "mcp_server.services.registry.RegistryService.get_few_shot_examples",
+            new=_fake_get_examples,
         ):
-            with patch(
-                "mcp_server.services.retrieval_service.ExampleLoader", return_value=mock_loader
-            ):
-                with patch(
-                    "mcp_server.services.retrieval_service.RagEngine.embed_text",
-                    return_value=[0.1] * 384,
-                ):
 
-                    result_json = await get_relevant_examples("query")
+            result_json = await get_relevant_examples("query")
 
-                    # Verify loader usage
-                    mock_loader.load_examples.assert_called_once_with(mock_index)
-
-                    # Verify search call
-                    mock_index.search.assert_called_once()
-
-                    # Verify result format
-                    results = json.loads(result_json)
-                    assert len(results) == 1
-                    assert results[0]["question"] == "Q1"
-                    assert results[0]["sql"] == "SELECT 1"
-                    assert results[0]["similarity"] == 0.9
+            results = json.loads(result_json)
+            assert len(results) == 1
+            assert results[0]["question"] == "Q1"
+            assert results[0]["sql"] == "SELECT 1"
+            assert results[0]["signature"] == "abcdef12"
 
     @pytest.mark.asyncio
     async def test_get_relevant_examples_no_results(self):
         """Test when search returns nothing."""
-        mock_index = MagicMock()
-        mock_index.search.return_value = []
-        mock_loader = AsyncMock()
+
+        async def _fake_get_examples(_user_query, _tenant_id, limit=3):
+            return []
 
         with patch(
-            "mcp_server.services.retrieval_service.create_vector_index", return_value=mock_index
+            "mcp_server.services.registry.RegistryService.get_few_shot_examples",
+            new=_fake_get_examples,
         ):
-            with patch(
-                "mcp_server.services.retrieval_service.ExampleLoader", return_value=mock_loader
-            ):
-                with patch(
-                    "mcp_server.services.retrieval_service.RagEngine.embed_text",
-                    return_value=[0.1] * 384,
-                ):
-                    result = await get_relevant_examples("query")
-                    assert result == ""
+
+            result = await get_relevant_examples("query")
+            assert result == ""

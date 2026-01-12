@@ -23,6 +23,14 @@ class MockCacheStore:
         """Mock lookup."""
         return None
 
+    async def lookup_by_fingerprint(
+        self,
+        fingerprint_key: str,
+        tenant_id: int,
+    ) -> Optional[CacheLookupResult]:
+        """Mock lookup_by_fingerprint."""
+        return None
+
     async def record_hit(self, cache_id: str, tenant_id: int) -> None:
         """Mock record_hit."""
         pass
@@ -36,6 +44,22 @@ class MockCacheStore:
     ) -> None:
         """Mock store."""
         pass
+
+    async def delete_entry(self, user_query: str, tenant_id: int) -> None:
+        """Mock delete_entry."""
+        pass
+
+    async def prune_legacy_entries(self) -> int:
+        """Mock prune_legacy_entries."""
+        return 0
+
+    async def tombstone_entry(self, cache_id: str, tenant_id: int, reason: str) -> bool:
+        """Mock tombstone_entry."""
+        return False
+
+    async def prune_tombstoned_entries(self, older_than_days: int = 30) -> int:
+        """Mock prune_tombstoned_entries."""
+        return 0
 
 
 class MockGraphStore:

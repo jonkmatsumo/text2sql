@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage  # noqa: E402
 class TestGenerateSchema(unittest.IsolatedAsyncioTestCase):
     """Unit tests for structured schema handling in generate_sql_node."""
 
-    @patch("agent_core.nodes.generate.mlflow.start_span")
+    @patch("agent_core.nodes.generate.telemetry.start_span")
     @patch("agent_core.nodes.generate.llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     @patch("agent_core.nodes.generate.get_few_shot_examples", new_callable=AsyncMock)

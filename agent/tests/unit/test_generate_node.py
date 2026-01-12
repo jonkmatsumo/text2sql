@@ -34,9 +34,9 @@ class TestGenerateSqlNode:
         mock_tools = [mock_schema_tool]
 
         with patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            with patch("agent_core.nodes.generate.mlflow") as mock_mlflow:
+            with patch("agent_core.nodes.generate.telemetry") as mock_mlflow:
                 with patch("agent_core.nodes.generate.llm") as mock_llm:
-                    # Setup mlflow span mock
+                    # Setup telemetry span mock
                     mock_span = MagicMock()
                     mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
                     mock_mlflow.entities.SpanType.CHAT_MODEL = "CHAT_MODEL"

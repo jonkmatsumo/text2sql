@@ -25,6 +25,7 @@ htmlcov/
 
 # Environment variables
 .env
+AGENTS.md
 .env.local
 agent/.env
 

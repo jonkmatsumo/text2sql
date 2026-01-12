@@ -66,31 +66,40 @@ class TestTelemetryService(unittest.TestCase):
         self.assertTrue(backend.config["autolog"])
         self.assertTrue(backend.config["run_tracer_inline"])
 
-    @patch("mlflow.start_span")
-    @patch("mlflow.set_tracking_uri")
-    @patch("mlflow.update_current_trace")
-    def test_mlflow_backend(self, mock_update, mock_set_uri, mock_start_span):
+    def test_mlflow_backend(self):
         """Test the MlflowTelemetryBackend delegates to mlflow correctly."""
-        # Mock MLflow span context manager
+        fake_mlflow = MagicMock()
+        fake_span_types = MagicMock()
+        fake_span_types.CHAIN = "CHAIN"
+        fake_span_types.TOOL = "TOOL"
+        fake_span_types.RETRIEVER = "RETRIEVER"
+        fake_span_types.CHAT_MODEL = "CHAT_MODEL"
+        fake_span_types.PARSER = "PARSER"
+        fake_span_types.UNKNOWN = "UNKNOWN"
+        fake_mlflow.entities.SpanType = fake_span_types
+
         mock_ml_span = MagicMock()
-        mock_start_span.return_value.__enter__.return_value = mock_ml_span
+        fake_mlflow.start_span.return_value.__enter__.return_value = mock_ml_span
 
-        # Mock mlflow.langchain
-        mock_langchain = MagicMock()
-        mock_autolog = mock_langchain.autolog
+        fake_langchain = MagicMock()
+        fake_mlflow.langchain = fake_langchain
 
-        with patch.dict("sys.modules", {"mlflow.langchain": mock_langchain}):
+        with patch.dict(
+            "sys.modules",
+            {
+                "mlflow": fake_mlflow,
+                "mlflow.langchain": fake_langchain,
+            },
+        ):
             backend = MlflowTelemetryBackend()
             service = TelemetryService(backend=backend)
 
-            # Test configure
             service.configure(
                 tracking_uri="http://mlflow:5000", autolog=True, run_tracer_inline=True
             )
-            mock_set_uri.assert_called_once_with("http://mlflow:5000")
-            mock_autolog.assert_called_once_with(run_tracer_inline=True)
+            fake_mlflow.set_tracking_uri.assert_called_once_with("http://mlflow:5000")
+            fake_langchain.autolog.assert_called_once_with(run_tracer_inline=True)
 
-            # Test start_span
             with service.start_span(
                 name="ml_span",
                 span_type=SpanType.TOOL,
@@ -100,18 +109,16 @@ class TestTelemetryService(unittest.TestCase):
                 span.set_attribute("attr", "3")
                 span.add_event("event", {"e": "4"})
 
-            mock_start_span.assert_called_once()
-            call_args = mock_start_span.call_args
+            fake_mlflow.start_span.assert_called_once()
+            call_args = fake_mlflow.start_span.call_args
             self.assertEqual(call_args.kwargs["name"], "ml_span")
-            # We don't strictly check span_type here as it involves mapping lookup logic
-            # that we trust, but we could if needed.
             mock_ml_span.set_inputs.assert_called_with({"in": "1"})
             mock_ml_span.set_outputs.assert_called_with({"out": "2"})
             mock_ml_span.set_attribute.assert_any_call("attr", "3")
             mock_ml_span.add_event.assert_called_with("event", {"e": "4"})
 
             service.update_current_trace({"m": "n"})
-            mock_update.assert_called_once_with(metadata={"m": "n"})
+            fake_mlflow.update_current_trace.assert_called_once_with(metadata={"m": "n"})
 
     def test_otel_backend(self):
         """Test the OTELTelemetryBackend produces correct spans and attributes."""

@@ -1,5 +1,10 @@
 """Unit tests for MCP tool functions.
 
+NOTE:
+Renamed from test_tools.py to test_mcp_tools.py to avoid pytest module
+name collisions with agent/tests/test_tools.py when running tests
+from the repo root.
+
 This module contains comprehensive tests for the core database tools.
 Tests import from the new per-tool modules.
 """

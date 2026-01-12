@@ -1,4 +1,9 @@
-"""Tests for configuration schema and loading."""
+"""Tests for configuration schema and loading.
+
+NOTE:
+Renamed from test_config.py to avoid pytest import collisions with other
+test_config.py modules in the monorepo when running tests from repo root.
+"""
 
 import json
 import tempfile

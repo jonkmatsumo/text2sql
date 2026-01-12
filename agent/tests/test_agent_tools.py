@@ -1,4 +1,10 @@
-"""Unit tests for MCP server tool integration."""
+"""Unit tests for MCP server tool integration.
+
+NOTE:
+Renamed from test_tools.py to test_agent_tools.py to avoid pytest module
+name collisions with mcp-server/tests/test_tools.py when running tests
+from the repo root.
+"""
 
 import os
 from unittest.mock import AsyncMock, MagicMock, patch

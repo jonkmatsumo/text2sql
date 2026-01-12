@@ -29,14 +29,15 @@ if str(agent_src) not in sys.path:
     sys.path.insert(0, str(agent_src))
     print(f"conftest.py: Added {agent_src} to sys.path")
 
-# Add mcp-server/tests to sys.path to allow importing fixtures
-mcp_server_tests = ROOT_DIR / "mcp-server" / "tests"
-if str(mcp_server_tests) not in sys.path:
-    sys.path.insert(0, str(mcp_server_tests))
-    print(f"conftest.py: Added {mcp_server_tests} to sys.path")
+inserted_paths = []
+for path in (mcp_server_src, agent_src):
+    path_str = str(path)
+    if path_str not in sys.path:
+        sys.path.insert(0, path_str)
+        inserted_paths.append(path_str)
+        print(f"conftest.py: Added {path_str} to sys.path")
 
-# Add streamlit directory to sys.path to allow importing service modules
-streamlit_dir = ROOT_DIR / "streamlit"
-if str(streamlit_dir) not in sys.path:
-    sys.path.insert(0, str(streamlit_dir))
-    print(f"conftest.py: Added {streamlit_dir} to sys.path")
+if inserted_paths:
+    assert not any(
+        "/tests" in path for path in inserted_paths
+    ), "conftest.py: tests paths must not be added to sys.path"

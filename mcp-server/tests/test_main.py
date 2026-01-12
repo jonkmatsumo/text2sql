@@ -42,18 +42,18 @@ class TestMain:
     def test_tool_functions_available(self):
         """Test that all tool functions are available in the tools package."""
         from mcp_server.tools import (
-            execute_sql_query,
-            get_semantic_definitions,
-            get_table_schema,
-            list_tables,
-            search_relevant_tables,
+            execute_sql_query_handler,
+            get_semantic_definitions_handler,
+            get_table_schema_handler,
+            list_tables_handler,
+            search_relevant_tables_handler,
         )
 
-        assert callable(list_tables)
-        assert callable(get_table_schema)
-        assert callable(execute_sql_query)
-        assert callable(get_semantic_definitions)
-        assert callable(search_relevant_tables)
+        assert callable(list_tables_handler)
+        assert callable(get_table_schema_handler)
+        assert callable(execute_sql_query_handler)
+        assert callable(get_semantic_definitions_handler)
+        assert callable(search_relevant_tables_handler)
 
     def test_load_dotenv_called(self):
         """Test that load_dotenv is imported."""
@@ -85,7 +85,7 @@ class TestMain:
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
             with patch.object(Database, "get_connection", mock_get):
                 with patch(
-                    "mcp_server.services.indexer_service.index_all_tables", new_callable=AsyncMock
+                    "mcp_server.services.rag.index_all_tables", new_callable=AsyncMock
                 ) as mock_index:
                     # Replicate init_database logic
                     await mock_init()
@@ -125,7 +125,7 @@ class TestMain:
         with patch.object(Database, "init", new_callable=AsyncMock) as mock_init:
             with patch.object(Database, "get_connection", mock_get):
                 with patch(
-                    "mcp_server.services.indexer_service.index_all_tables", new_callable=AsyncMock
+                    "mcp_server.services.rag.index_all_tables", new_callable=AsyncMock
                 ) as mock_index:
                     # Replicate init_database logic
                     await mock_init()
