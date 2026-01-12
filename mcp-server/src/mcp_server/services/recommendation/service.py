@@ -111,8 +111,55 @@ class RecommendationService:
     def _apply_diversity_policy(
         candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
     ) -> List[QueryPair]:
-        """Apply diversity selection policy. No-op passthrough for now."""
-        return candidates
+        """Apply diversity selection policy."""
+        if not config or not config.get("diversity_enabled", False):
+            return candidates
+
+        max_per_source = config.get("diversity_max_per_source", -1)
+        min_verified = config.get("diversity_min_verified", 0)
+
+        selected: List[QueryPair] = []
+        source_counts = {"approved": 0, "seeded": 0, "fallback": 0}
+        selected_fingerprints = set()
+
+        def get_source(cp: QueryPair) -> str:
+            if cp.status == "verified":
+                return "approved"
+            if cp.status == "seeded":
+                return "seeded"
+            return "fallback"
+
+        # Pass A: Verified Floor
+        for cp in candidates:
+            source = get_source(cp)
+            if source == "approved":
+                if source_counts["approved"] < min_verified:
+                    # Check cap (if applicable, though unlikely to hit cap while meeting min floor
+                    # unless config is conflicting)
+                    if max_per_source == -1 or source_counts["approved"] < max_per_source:
+                        selected.append(cp)
+                        source_counts["approved"] += 1
+                        selected_fingerprints.add(cp.fingerprint)
+
+        # Pass B: Fill Remaining
+        for cp in candidates:
+            if len(selected) >= limit:
+                break
+
+            if cp.fingerprint in selected_fingerprints:
+                continue
+
+            source = get_source(cp)
+
+            # Check cap (if applicable)
+            if max_per_source != -1 and source_counts.get(source, 0) >= max_per_source:
+                continue
+
+            selected.append(cp)
+            source_counts[source] = source_counts.get(source, 0) + 1
+            selected_fingerprints.add(cp.fingerprint)
+
+        return selected
 
     @staticmethod
     def _select_top_n(candidates: List[QueryPair], limit: int) -> List[RecommendedExample]:
