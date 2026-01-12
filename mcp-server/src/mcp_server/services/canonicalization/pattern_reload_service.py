@@ -22,19 +22,22 @@ class PatternReloadService:
     """Service to handle reloading of NLP patterns."""
 
     @staticmethod
-    async def reload() -> ReloadResult:
+    async def reload(source: str = "service") -> ReloadResult:
         """
         Reload NLP patterns from the database via the CanonicalizationService.
+
+        Args:
+            source: Trigger source identifier (e.g. "admin_tool").
 
         Returns:
             ReloadResult containing success status, timestamp, count, and error details.
         """
-        logger.info("Starting pattern reload via PatternReloadService")
+        logger.info(f"Starting pattern reload via PatternReloadService (source={source})")
         try:
             service = CanonicalizationService.get_instance()
             count = await service.reload_patterns()
 
-            logger.info(f"Pattern reload completed successfully. Count: {count}")
+            logger.info(f"Pattern reload completed successfully (source={source}). Count: {count}")
             return ReloadResult(
                 success=True,
                 error=None,
