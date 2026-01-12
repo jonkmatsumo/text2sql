@@ -40,7 +40,11 @@ class RecommendationService:
 
         # 2. Rank and Deduplicate
         all_candidates = approved + seeded
-        recommended = RecommendationService._rank_and_deduplicate(all_candidates, limit)
+        # Centralized filtering hook
+        filtered_candidates = RecommendationService._filter_invalid_candidates(
+            all_candidates, RECO_CONFIG
+        )
+        recommended = RecommendationService._rank_and_deduplicate(filtered_candidates, limit)
 
         fallback_used = False
         # 3. Fallback Path (enabled by both arg AND config)
@@ -60,27 +64,42 @@ class RecommendationService:
             )
 
             if history:
-                fallback_used = True
-                # Deduplicate history against already picked
-                picked_fingerprints = {
-                    ex.canonical_group_id for ex in recommended if ex.canonical_group_id
-                }
-                for h in history:
-                    if len(recommended) >= limit:
-                        break
-                    if h.fingerprint not in picked_fingerprints:
-                        recommended.append(
-                            RecommendedExample(
-                                question=h.question,
-                                sql=h.sql_query,
-                                score=1.0,  # Placeholder score
-                                source="fallback",
-                                canonical_group_id=h.fingerprint,
+                # Filter fallback candidates too
+                filtered_history = RecommendationService._filter_invalid_candidates(
+                    history, RECO_CONFIG
+                )
+
+                if filtered_history:
+                    fallback_used = True
+                    # Deduplicate history against already picked
+                    picked_fingerprints = {
+                        ex.canonical_group_id for ex in recommended if ex.canonical_group_id
+                    }
+                    for h in filtered_history:
+                        if len(recommended) >= limit:
+                            break
+                        if h.fingerprint not in picked_fingerprints:
+                            recommended.append(
+                                RecommendedExample(
+                                    question=h.question,
+                                    sql=h.sql_query,
+                                    score=1.0,  # Placeholder score
+                                    source="fallback",
+                                    canonical_group_id=h.fingerprint,
+                                )
                             )
-                        )
-                        picked_fingerprints.add(h.fingerprint)
+                            picked_fingerprints.add(h.fingerprint)
 
         return RecommendationResult(examples=recommended, fallback_used=fallback_used)
+
+    @staticmethod
+    def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
+        """Filter out invalid candidates based on config rules.
+
+        Currently a no-op passthrough.
+        """
+        # Phase 0: No-op
+        return candidates
 
     @staticmethod
     def _rank_and_deduplicate(
