@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import Any, Dict, List
 
 from mcp_server.models import QueryPair
 from mcp_server.services.recommendation.interface import RecommendationResult, RecommendedExample
@@ -74,11 +74,18 @@ class RecommendationService:
         return RecommendationResult(examples=recommended, fallback_used=fallback_used)
 
     @staticmethod
-    def _rank_and_deduplicate(candidates: List[QueryPair], limit: int) -> List[RecommendedExample]:
+    def _rank_and_deduplicate(
+        candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
+    ) -> List[RecommendedExample]:
         """Rank candidates and enforce diversity (one per canonical group)."""
-        # Sort by status priority (verified > seeded) and similarity (if available)
-        # QueryPair doesn't explicitly store similarity from lookup_semantic in its model,
-        # but the DAL returns them in that order.
+        ranked = RecommendationService._rank_candidates(candidates)
+        deduped = RecommendationService._dedupe_by_fingerprint(ranked)
+        diversified = RecommendationService._apply_diversity_policy(deduped, limit, config)
+        return RecommendationService._select_top_n(diversified, limit)
+
+    @staticmethod
+    def _rank_candidates(candidates: List[QueryPair]) -> List[QueryPair]:
+        """Rank candidates by status priority and existing order (similarity)."""
 
         def sort_key(cp: QueryPair):
             # Status priority: verified (0) > seeded (1) > others (2)
@@ -87,25 +94,41 @@ class RecommendationService:
 
         # Candidates from lookup_semantic are already sorted by similarity.
         # We'll use a stable sort to keep similarity ordering for same status.
-        sorted_candidates = sorted(candidates, key=sort_key)
+        return sorted(candidates, key=sort_key)
 
-        recommended: List[RecommendedExample] = []
+    @staticmethod
+    def _dedupe_by_fingerprint(candidates: List[QueryPair]) -> List[QueryPair]:
+        """Deduplicate candidates by fingerprint, keeping the first occurrence."""
         seen_fingerprints = set()
+        deduped = []
+        for cp in candidates:
+            if cp.fingerprint not in seen_fingerprints:
+                deduped.append(cp)
+                seen_fingerprints.add(cp.fingerprint)
+        return deduped
 
-        for cp in sorted_candidates:
+    @staticmethod
+    def _apply_diversity_policy(
+        candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
+    ) -> List[QueryPair]:
+        """Apply diversity selection policy. No-op passthrough for now."""
+        return candidates
+
+    @staticmethod
+    def _select_top_n(candidates: List[QueryPair], limit: int) -> List[RecommendedExample]:
+        """Select top N candidates and convert to RecommendedExample."""
+        recommended = []
+        for cp in candidates:
             if len(recommended) >= limit:
                 break
 
-            if cp.fingerprint not in seen_fingerprints:
-                recommended.append(
-                    RecommendedExample(
-                        question=cp.question,
-                        sql=cp.sql_query,
-                        score=1.0,  # Placeholder
-                        source="approved" if cp.status == "verified" else "seeded",
-                        canonical_group_id=cp.fingerprint,
-                    )
+            recommended.append(
+                RecommendedExample(
+                    question=cp.question,
+                    sql=cp.sql_query,
+                    score=1.0,  # Placeholder
+                    source="approved" if cp.status == "verified" else "seeded",
+                    canonical_group_id=cp.fingerprint,
                 )
-                seen_fingerprints.add(cp.fingerprint)
-
+            )
         return recommended
