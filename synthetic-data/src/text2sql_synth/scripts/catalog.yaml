@@ -1,0 +1,105 @@
+- id: ever_frozen_accounts
+  turns:
+    - "Show me all accounts that are currently active."
+    - "Of those, which ones have ever been frozen in the past?"
+  tables: [dim_account, event_account_status_change]
+  joins: [dim_account.account_id = event_account_status_change.account_id]
+  concepts: [current_status, status_history, ever_frozen]
+
+- id: refund_vs_dispute_overlap
+  turns:
+    - "How many transactions were disputed last quarter?"
+    - "How many of those were also refunded?"
+  tables: [fact_transaction, fact_dispute, fact_refund]
+  joins: 
+    - fact_transaction.transaction_id = fact_dispute.transaction_id
+    - fact_transaction.transaction_id = fact_refund.transaction_id
+  concepts: [disputes, refunds, overlap_analysis]
+
+- id: gross_vs_net_volume
+  turns:
+    - "What was the total transaction volume in December?"
+    - "Show me the net volume after subtracting fees."
+  tables: [fact_transaction, dim_time]
+  joins: [fact_transaction.time_id = dim_time.date_key]
+  concepts: [gross_amount, net_amount, fee_deduction]
+
+- id: geography_ambiguity_customer_merchant
+  turns:
+    - "Find all transactions where the transaction was in California."
+    - "Actually, I mean where the customer lives in California, but the merchant is outside the US."
+  tables: [fact_transaction, dim_customer, dim_merchant, dim_address]
+  joins:
+    - fact_transaction.customer_id = dim_customer.customer_id
+    - dim_customer.primary_address_id = dim_address.address_id
+    - fact_transaction.merchant_id = dim_merchant.merchant_id
+    - dim_merchant.address_id = dim_address.address_id
+  concepts: [location_ambiguity, cross_border_transactions]
+
+- id: weekly_seasonality_patterns
+  turns:
+    - "What is the average daily transaction count?"
+    - "Break this down by day of the week to see weekend patterns."
+  tables: [fact_transaction, dim_time]
+  joins: [fact_transaction.time_id = dim_time.date_key]
+  concepts: [daily_average, day_of_week_seasonality]
+
+- id: risk_tier_rule_decisions
+  turns:
+    - "Which risk tier has the highest count of transactions?"
+    - "For the 'critical' tier, what are the top 3 reasons they were blocked by the rule engine?"
+  tables: [fact_transaction, event_rule_decision]
+  joins: [fact_transaction.transaction_id = event_rule_decision.event_id]
+  concepts: [risk_tier_distribution, block_reasons, rule_engine_correlation]
+
+- id: customer_segment_spending
+  turns:
+    - "Compare the average spend of 'retail' vs 'premium' customers."
+    - "Filter this for transactions over $500 only."
+  tables: [fact_transaction, dim_customer]
+  joins: [fact_transaction.customer_id = dim_customer.customer_id]
+  concepts: [segmentation_analysis, high_value_filters]
+
+- id: merchant_category_dispute_rates
+  turns:
+    - "List all merchant categories (MCC) and their total transaction counts."
+    - "Which of these have a dispute rate higher than 2%?"
+  tables: [fact_transaction, dim_merchant, fact_dispute]
+  joins:
+    - fact_transaction.merchant_id = dim_merchant.merchant_id
+    - fact_transaction.transaction_id = fact_dispute.transaction_id
+  concepts: [mcc_performance, dispute_rate_by_category]
+
+- id: account_status_change_velocity
+  turns:
+    - "How many accounts were opened last month?"
+    - "How many of those were suspended within 7 days of opening?"
+  tables: [dim_account, event_account_status_change]
+  joins: [dim_account.account_id = event_account_status_change.account_id]
+  concepts: [onboarding_velocity, early_attrition, suspension_patterns]
+
+- id: device_emulator_fraud_correlation
+  turns:
+    - "Show the percentage of transactions using an emulator."
+    - "How strongly does this correlate with 'is_fraud_flagged' status?"
+  tables: [fact_transaction]
+  joins: []
+  concepts: [emulator_usage, fraud_correlation]
+
+- id: scd2_customer_history
+  turns:
+    - "What is the current risk tier for customer 'cust_123'?"
+    - "Has their risk tier ever changed? Show their history."
+  tables: [dim_customer, dim_customer_scd2]
+  joins: [dim_customer.customer_id = dim_customer_scd2.customer_id]
+  concepts: [point_in_time_lookup, scd2_history, versioning]
+
+- id: login_failure_leads_to_block
+  turns:
+    - "Identify customers with more than 3 failed login attempts yesterday."
+    - "Did any of these customers subsequently have a blocked transaction today?"
+  tables: [event_login, event_rule_decision, fact_transaction]
+  joins:
+    - event_login.customer_id = fact_transaction.customer_id
+    - fact_transaction.transaction_id = event_rule_decision.event_id
+  concepts: [authentication_failure, subsequent_block, cross_event_correlation]

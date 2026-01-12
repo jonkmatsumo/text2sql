@@ -1,0 +1,74 @@
+counterparty_id,counterparty_type,counterparty_name,merchant_id,external_id,risk_tier,is_verified,country_code
+cpty_000001,merchant,Central Value Market #000001,merch_000001,5411,low,True,US
+cpty_000002,merchant,Best Plus #000002,merch_000002,7941,low,True,US
+cpty_000003,merchant,Quick Mart #000003,merch_000003,5812,low,True,US
+cpty_000004,merchant,Central Best Depot #000004,merch_000004,5651,medium,True,US
+cpty_000005,merchant,Value Plus #000005,merch_000005,7941,medium,True,US
+cpty_000006,merchant,Value Store #000006,merch_000006,5411,low,True,US
+cpty_000007,merchant,Local World #000007,merch_000007,5814,low,True,US
+cpty_000008,merchant,Main Mart #000008,merch_000008,5651,low,True,US
+cpty_000009,merchant,Village Place #000009,merch_000009,5411,low,True,US
+cpty_000010,merchant,North Corner Zone #000010,merch_000010,4111,low,True,US
+cpty_000011,merchant,Local Mart #000011,merch_000011,5812,low,True,US
+cpty_000012,merchant,Westside Quick Mart #000012,merch_000012,4111,low,True,US
+cpty_000013,merchant,Prime Mart #000013,merch_000013,5541,low,True,US
+cpty_000014,merchant,The Center #000014,merch_000014,4111,low,True,US
+cpty_000015,merchant,Corner Corner #000015,merch_000015,5411,low,True,US
+cpty_000016,merchant,Westside Value Store #000016,merch_000016,5691,low,True,US
+cpty_000017,merchant,Central World #000017,merch_000017,5814,low,True,US
+cpty_000018,merchant,Prime Store #000018,merch_000018,4111,medium,True,US
+cpty_000019,merchant,Downtown Metro World #000019,merch_000019,5691,low,True,US
+cpty_000020,merchant,Metro Store #000020,merch_000020,5812,low,True,US
+cpty_000021,merchant,Village Prime Plus #000021,merch_000021,5999,low,True,US
+cpty_000022,merchant,Value Shop #000022,merch_000022,5967,high,True,US
+cpty_000023,merchant,Town Point #000023,merch_000023,7832,low,True,US
+cpty_000024,merchant,Main Hub #000024,merch_000024,5732,low,True,US
+cpty_000025,merchant,Value Depot #000025,merch_000025,5912,low,True,US
+cpty_000026,merchant,North Express Store #000026,merch_000026,5812,low,True,US
+cpty_000027,merchant,Downtown Corner World #000027,merch_000027,5411,low,True,US
+cpty_000028,merchant,City Center #000028,merch_000028,5310,low,True,US
+cpty_000029,merchant,Corner Hub #000029,merch_000029,5311,low,True,US
+cpty_000030,merchant,Town Depot #000030,merch_000030,5999,low,True,US
+cpty_000031,merchant,Corner Store #000031,merch_000031,5651,low,True,US
+cpty_000032,merchant,Prime Corner #000032,merch_000032,4111,low,True,US
+cpty_000033,merchant,Eastside Super Depot #000033,merch_000033,5812,medium,True,US
+cpty_000034,merchant,Metro Mart #000034,merch_000034,5812,low,True,US
+cpty_000035,merchant,Value Stop #000035,merch_000035,7995,medium,True,US
+cpty_000036,merchant,Local Mart #000036,merch_000036,5921,low,True,US
+cpty_000037,merchant,The Point #000037,merch_000037,5814,low,True,US
+cpty_000038,merchant,The Plus #000038,merch_000038,5912,low,True,US
+cpty_000039,merchant,Value Mart #000039,merch_000039,5812,low,True,US
+cpty_000040,merchant,Town Pro #000040,merch_000040,5541,low,True,US
+cpty_000041,merchant,Central Town World #000041,merch_000041,5411,low,True,US
+cpty_000042,merchant,Prime Corner #000042,merch_000042,5812,low,True,US
+cpty_000043,merchant,South Local Stop #000043,merch_000043,5691,low,True,US
+cpty_000044,merchant,Express Store #000044,merch_000044,5541,low,True,US
+cpty_000045,merchant,Town Center #000045,merch_000045,5812,low,True,US
+cpty_000046,merchant,Village Mart #000046,merch_000046,5311,low,True,US
+cpty_000047,merchant,Corner Market #000047,merch_000047,5411,low,True,US
+cpty_000048,merchant,Downtown City Plus #000048,merch_000048,7011,medium,True,US
+cpty_000049,merchant,City Store #000049,merch_000049,5999,low,True,US
+cpty_000050,merchant,Westside Corner Market #000050,merch_000050,5411,low,True,US
+cpty_000051,individual,John Smith (000051),,P2P-99409,low,True,US
+cpty_000052,individual,Jane Doe (000052),,P2P-69470,medium,False,US
+cpty_000053,individual,Robert Johnson (000053),,P2P-91296,low,True,US
+cpty_000054,individual,Emily Davis (000054),,P2P-65573,low,False,US
+cpty_000055,individual,Michael Brown (000055),,P2P-23714,low,True,US
+cpty_000056,individual,Sarah Wilson (000056),,P2P-13859,medium,True,US
+cpty_000057,individual,David Miller (000057),,P2P-14030,low,False,US
+cpty_000058,individual,Jennifer Taylor (000058),,P2P-40487,low,True,US
+cpty_000059,individual,John Smith (000059),,P2P-77446,low,True,US
+cpty_000060,individual,Jane Doe (000060),,P2P-49727,low,True,US
+cpty_000061,business,ABC Corporation (000061),,B2B-18163,medium,True,US
+cpty_000062,business,XYZ Holdings (000062),,B2B-46381,low,True,US
+cpty_000063,business,Smith & Associates (000063),,B2B-98801,low,True,US
+cpty_000064,business,Johnson Enterprises (000064),,B2B-40378,high,True,US
+cpty_000065,business,Metro Services LLC (000065),,B2B-51577,low,True,US
+cpty_000066,government,US Treasury,,GOV-5827,low,True,US
+cpty_000067,government,State Tax Authority,,GOV-5906,low,True,US
+cpty_000068,internal,Internal Transfer,,INT-001,low,True,US
+cpty_000069,internal,System Adjustment,,INT-002,low,True,US
+cpty_000070,internal,Fee Assessment,,INT-003,low,True,US
+cpty_000071,internal,Interest Payment,,INT-004,low,True,US
+cpty_000072,internal,Rewards Credit,,INT-005,low,True,US
+cpty_000073,internal,Cashback,,INT-006,low,True,US

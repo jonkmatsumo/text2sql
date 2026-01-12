@@ -17,6 +17,11 @@ GENERATION_ORDER = [
     "fact_payment",
     "fact_refund",
     "fact_dispute",
+    "event_login",
+    "event_device",
+    "event_account_status_change",
+    "event_rule_decision",
+    "event_account_balance_daily",
 ]
 
 # Explicit dependencies for each table.
@@ -34,6 +39,11 @@ DEPENDENCIES = {
     "fact_payment": ["fact_transaction"],
     "fact_refund": ["fact_transaction"],
     "fact_dispute": ["fact_transaction"],
+    "event_login": ["dim_customer", "dim_account", "dim_time"],
+    "event_device": ["dim_customer", "fact_transaction"],
+    "event_account_status_change": ["dim_account", "dim_customer", "fact_dispute", "fact_transaction", "dim_time"],
+    "event_rule_decision": ["fact_transaction", "event_login", "dim_account"],
+    "event_account_balance_daily": ["dim_account", "dim_time", "fact_transaction"],
 }
 
 # Expected columns for each table to enable immediate validation after generation.
@@ -86,5 +96,20 @@ EXPECTED_COLUMNS = {
     ],
     "fact_dispute": [
         "dispute_id", "transaction_id", "dispute_reason", "dispute_status", "dispute_amount", "dispute_opened_ts", "dispute_resolved_ts", "resolution_outcome", "is_chargeback", "merchant_responded", "evidence_submitted", "days_to_resolution"
+    ],
+    "event_login": [
+        "login_id", "customer_id", "account_id", "device_id", "login_ts", "login_outcome", "login_channel", "ip_address", "location_country", "location_city", "session_duration_seconds", "mfa_method"
+    ],
+    "event_device": [
+        "device_id", "customer_id", "device_type", "device_manufacturer", "device_model", "os_version", "app_version", "is_emulator", "is_rooted", "first_seen_ts", "last_seen_ts", "risk_score"
+    ],
+    "event_account_status_change": [
+        "event_id", "account_id", "customer_id", "previous_status", "new_status", "change_ts", "change_reason", "initiated_by", "related_dispute_id", "related_transaction_id", "notes"
+    ],
+    "event_rule_decision": [
+        "decision_id", "event_type", "event_id", "account_id", "customer_id", "decision_ts", "decision_outcome", "rules_triggered", "rule_scores", "model_score", "decision_reason", "review_queue", "review_completed", "final_outcome"
+    ],
+    "event_account_balance_daily": [
+        "balance_id", "account_id", "balance_date", "opening_balance", "closing_balance", "daily_credits", "daily_debits", "daily_net_change", "transaction_count", "available_credit", "pending_amount"
     ],
 }

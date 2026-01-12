@@ -23,6 +23,19 @@ from text2sql_synth.generators.dim_institution import (
 from text2sql_synth.generators.dim_merchant import generate as generate_dim_merchant
 from text2sql_synth.generators.dim_time import generate as generate_dim_time
 
+# Event generators
+from text2sql_synth.generators.event_account_balance_daily import (
+    generate as generate_event_account_balance_daily,
+)
+from text2sql_synth.generators.event_account_status_change import (
+    generate as generate_event_account_status_change,
+)
+from text2sql_synth.generators.event_device import generate as generate_event_device
+from text2sql_synth.generators.event_login import generate as generate_event_login
+from text2sql_synth.generators.event_rule_decision import (
+    generate as generate_event_rule_decision,
+)
+
 # Fact generators
 from text2sql_synth.generators.fact_dispute import generate as generate_fact_dispute
 from text2sql_synth.generators.fact_payment import generate as generate_fact_payment
@@ -47,4 +60,10 @@ __all__ = [
     "generate_fact_payment",
     "generate_fact_refund",
     "generate_fact_dispute",
+    # Events
+    "generate_event_login",
+    "generate_event_device",
+    "generate_event_account_status_change",
+    "generate_event_rule_decision",
+    "generate_event_account_balance_daily",
 ]

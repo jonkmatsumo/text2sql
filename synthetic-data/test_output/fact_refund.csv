@@ -1,0 +1,34 @@
+refund_id,transaction_id,refund_amount,refund_reason,refund_status,refund_requested_ts,refund_processed_ts,is_partial,refund_method,processing_fee_refunded
+ref_000001,txn_000022,13.37,order_cancelled,processed,2024-01-26 15:02:04.391653,2024-01-31 15:02:04.391653,False,original_payment,False
+ref_000002,txn_000042,198.47,customer_request,pending,2024-01-24 18:04:51.933668,,True,original_payment,False
+ref_000003,txn_000056,88.23,order_cancelled,processed,2024-01-23 09:03:52.384782,2024-01-26 09:03:52.384782,False,check,False
+ref_000004,txn_000069,27.24,price_adjustment,processed,2024-01-07 16:32:18.258131,2024-01-10 16:32:18.258131,False,original_payment,False
+ref_000005,txn_000103,18.38,customer_request,processed,2024-01-04 08:03:42.064542,2024-01-09 08:03:42.064542,True,original_payment,False
+ref_000006,txn_000113,26.02,price_adjustment,processed,2024-01-31 10:41:01.230104,2024-02-06 10:41:01.230104,False,original_payment,False
+ref_000007,txn_000164,24.83,customer_request,approved,2024-01-11 08:44:36.996396,,False,store_credit,False
+ref_000008,txn_000200,34.76,customer_request,processed,2024-01-31 18:32:34.012090,2024-02-02 18:32:34.012090,True,store_credit,False
+ref_000009,txn_000240,18.99,wrong_item,processed,2024-01-11 15:02:11.871299,2024-01-16 15:02:11.871299,False,original_payment,False
+ref_000010,txn_000284,37.12,duplicate_charge,processed,2024-01-24 18:27:41.913686,2024-01-25 18:27:41.913686,False,original_payment,False
+ref_000011,txn_000349,33.79,service_unsatisfactory,processed,2024-01-12 22:12:04.972720,2024-01-19 22:12:04.972720,False,original_payment,False
+ref_000012,txn_000374,55.6,customer_request,processed,2024-01-27 23:03:24.698891,2024-02-01 23:03:24.698891,False,original_payment,False
+ref_000013,txn_000425,27.49,customer_request,processed,2024-01-14 09:51:12.057871,2024-01-15 09:51:12.057871,False,check,False
+ref_000014,txn_000551,20.5,product_defective,pending,2024-01-10 19:00:12.800979,,False,original_payment,False
+ref_000015,txn_000642,35.14,service_unsatisfactory,processed,2024-01-06 14:45:14.026044,2024-01-12 14:45:14.026044,False,original_payment,False
+ref_000016,txn_000720,30.79,customer_request,processed,2024-02-03 13:20:27.532545,2024-02-07 13:20:27.532545,False,store_credit,False
+ref_000017,txn_000789,666.46,wrong_item,processed,2024-01-25 18:44:21.882837,2024-01-31 18:44:21.882837,False,original_payment,True
+ref_000018,txn_000896,146.14,order_cancelled,processed,2024-01-07 19:29:07.651854,2024-01-08 19:29:07.651854,True,original_payment,True
+ref_000019,txn_000988,9.81,order_cancelled,rejected,2024-02-02 21:43:20.623698,,True,store_credit,False
+ref_000020,txn_001139,25.11,duplicate_charge,rejected,2024-01-20 09:57:58.892497,,False,original_payment,False
+ref_000021,txn_001145,4.44,price_adjustment,processed,2024-01-13 15:12:23.116582,2024-01-14 15:12:23.116582,True,original_payment,True
+ref_000022,txn_001148,168.32,order_cancelled,processed,2024-01-06 15:16:08.572845,2024-01-12 15:16:08.572845,False,store_credit,False
+ref_000023,txn_001155,28.22,service_unsatisfactory,processed,2024-01-23 05:18:59.372170,2024-01-27 05:18:59.372170,False,original_payment,False
+ref_000024,txn_001201,37.67,product_defective,processed,2024-02-04 11:44:03.133728,2024-02-11 11:44:03.133728,False,original_payment,True
+ref_000025,txn_001233,59.69,duplicate_charge,processed,2024-02-01 00:09:07.647688,2024-02-03 00:09:07.647688,False,original_payment,False
+ref_000026,txn_001284,23.09,price_adjustment,processed,2024-01-18 10:50:55.869247,2024-01-20 10:50:55.869247,False,original_payment,False
+ref_000027,txn_001299,40.93,price_adjustment,processed,2024-01-21 19:56:31.250972,2024-01-25 19:56:31.250972,False,original_payment,False
+ref_000028,txn_001403,42.66,duplicate_charge,processed,2024-01-21 10:05:44.767094,2024-01-27 10:05:44.767094,False,original_payment,False
+ref_000029,txn_001527,883.47,product_defective,processed,2024-01-11 12:35:41.699639,2024-01-12 12:35:41.699639,False,original_payment,False
+ref_000030,txn_001609,22.54,item_not_received,processed,2024-02-03 16:37:10.514012,2024-02-06 16:37:10.514012,False,original_payment,False
+ref_000031,txn_001698,68.67,duplicate_charge,processed,2024-01-22 06:38:47.553696,2024-01-23 06:38:47.553696,False,original_payment,False
+ref_000032,txn_001722,28.87,customer_request,processed,2024-01-21 10:09:09.455287,2024-01-25 10:09:09.455287,False,check,False
+ref_000033,txn_001723,45.66,price_adjustment,processed,2024-01-25 20:53:39.057248,2024-01-29 20:53:39.057248,False,original_payment,False

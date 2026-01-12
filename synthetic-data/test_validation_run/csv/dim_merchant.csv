@@ -1,0 +1,51 @@
+merchant_id,merchant_name,mcc_code,mcc_description,address_id,acquirer_id,risk_tier,is_active,popularity_score,avg_transaction_amount,established_date
+merch_000001,Central Value Market #000001,5411,Grocery Stores,addr_000173,inst_000016,low,True,1,107.06,2016-10-11
+merch_000002,Best Plus #000002,7941,Sports Events,addr_000049,inst_000024,low,True,1,44.69,2018-12-21
+merch_000003,Quick Mart #000003,5812,Restaurants,addr_000164,inst_000021,low,True,3,34.32,2022-04-10
+merch_000004,Central Best Depot #000004,5651,Clothing Stores,addr_000054,inst_000022,medium,True,1,79.49,2013-11-08
+merch_000005,Value Plus #000005,7941,Sports Events,addr_000051,inst_000019,medium,True,2,73.48,2020-11-15
+merch_000006,Value Store #000006,5411,Grocery Stores,addr_000106,inst_000024,low,True,1,61.09,2019-08-29
+merch_000007,Local World #000007,5814,Fast Food,addr_000028,inst_000024,low,True,3,17.67,2014-03-02
+merch_000008,Main Mart #000008,5651,Clothing Stores,addr_000163,inst_000023,low,True,6,39.26,2009-07-25
+merch_000009,Village Place #000009,5411,Grocery Stores,addr_000138,inst_000019,low,True,1,38.7,2004-08-24
+merch_000010,North Corner Zone #000010,4111,Transportation,addr_000099,inst_000016,low,True,135,33.71,2022-04-22
+merch_000011,Local Mart #000011,5812,Restaurants,addr_000058,inst_000023,low,True,4,29.22,2009-11-08
+merch_000012,Westside Quick Mart #000012,4111,Transportation,addr_000103,inst_000018,low,True,1,17.7,2007-03-23
+merch_000013,Prime Mart #000013,5541,Gas Stations,addr_000086,inst_000020,low,True,1,53.75,2020-05-07
+merch_000014,The Center #000014,4111,Transportation,addr_000095,inst_000022,low,True,1,29.15,2019-06-15
+merch_000015,Corner Corner #000015,5411,Grocery Stores,addr_000130,inst_000017,low,True,1,63.29,2020-06-02
+merch_000016,Westside Value Store #000016,5691,Mens/Womens Clothing,addr_000080,inst_000018,low,True,12,47.28,2005-07-02
+merch_000017,Central World #000017,5814,Fast Food,addr_000104,inst_000019,low,True,2,17.55,2019-05-13
+merch_000018,Prime Store #000018,4111,Transportation,addr_000071,inst_000016,medium,True,1,29.53,2012-09-28
+merch_000019,Downtown Metro World #000019,5691,Mens/Womens Clothing,addr_000141,inst_000019,low,False,2,66.56,2016-07-17
+merch_000020,Metro Store #000020,5812,Restaurants,addr_000102,inst_000018,low,True,1,18.1,2009-01-31
+merch_000021,Village Prime Plus #000021,5999,Misc Retail,addr_000131,inst_000017,low,True,18,54.92,2007-12-31
+merch_000022,Value Shop #000022,5967,Direct Marketing,addr_000010,inst_000023,high,True,5,90.43,2009-04-25
+merch_000023,Town Point #000023,7832,Movie Theaters,addr_000099,inst_000021,low,True,1,34.64,2014-03-09
+merch_000024,Main Hub #000024,5732,Electronics Stores,addr_000102,inst_000020,low,True,7,145.29,2013-06-20
+merch_000025,Value Depot #000025,5912,Drug Stores,addr_000004,inst_000015,low,True,3,25.82,2009-10-09
+merch_000026,North Express Store #000026,5812,Restaurants,addr_000036,inst_000016,low,True,28,29.25,2019-04-05
+merch_000027,Downtown Corner World #000027,5411,Grocery Stores,addr_000073,inst_000022,low,True,1,94.42,2021-08-05
+merch_000028,City Center #000028,5310,Discount Stores,addr_000068,inst_000015,low,True,1,51.31,2019-02-17
+merch_000029,Corner Hub #000029,5311,Department Stores,addr_000117,inst_000016,low,True,5,107.35,2015-11-21
+merch_000030,Town Depot #000030,5999,Misc Retail,addr_000065,inst_000022,low,True,5,46.93,2023-08-25
+merch_000031,Corner Store #000031,5651,Clothing Stores,addr_000119,inst_000016,low,True,14,56.03,2015-11-26
+merch_000032,Prime Corner #000032,4111,Transportation,addr_000058,inst_000017,low,True,1,36.1,2011-08-03
+merch_000033,Eastside Super Depot #000033,5812,Restaurants,addr_000026,inst_000024,medium,True,22,21.48,2009-12-15
+merch_000034,Metro Mart #000034,5812,Restaurants,addr_000057,inst_000021,low,True,1,48.42,2012-10-31
+merch_000035,Value Stop #000035,7995,Gambling,addr_000164,inst_000018,medium,True,1,148.99,2009-02-23
+merch_000036,Local Mart #000036,5921,Liquor Stores,addr_000062,inst_000020,low,False,491,42.56,2008-04-10
+merch_000037,The Point #000037,5814,Fast Food,addr_000124,inst_000021,low,True,28,17.38,2023-07-15
+merch_000038,The Plus #000038,5912,Drug Stores,addr_000045,inst_000019,low,True,2,31.6,2021-02-26
+merch_000039,Value Mart #000039,5812,Restaurants,addr_000047,inst_000017,low,True,1,44.68,2009-12-26
+merch_000040,Town Pro #000040,5541,Gas Stations,addr_000028,inst_000015,low,True,480,43.7,2006-05-16
+merch_000041,Central Town World #000041,5411,Grocery Stores,addr_000059,inst_000015,low,True,6,97.84,2014-12-14
+merch_000042,Prime Corner #000042,5812,Restaurants,addr_000121,inst_000018,low,True,1,30.98,2021-06-23
+merch_000043,South Local Stop #000043,5691,Mens/Womens Clothing,addr_000110,inst_000018,low,False,1,77.2,2004-04-13
+merch_000044,Express Store #000044,5541,Gas Stations,addr_000087,inst_000021,low,True,2,32.94,2004-09-13
+merch_000045,Town Center #000045,5812,Restaurants,addr_000163,inst_000023,low,True,4,40.12,2009-11-25
+merch_000046,Village Mart #000046,5311,Department Stores,addr_000035,inst_000024,low,True,1,50.57,2023-02-03
+merch_000047,Corner Market #000047,5411,Grocery Stores,addr_000148,inst_000018,low,True,2,51.29,2004-09-30
+merch_000048,Downtown City Plus #000048,7011,Hotels/Motels,addr_000157,inst_000016,medium,True,17,103.4,2015-09-03
+merch_000049,City Store #000049,5999,Misc Retail,addr_000105,inst_000017,low,True,2,43.4,2010-09-11
+merch_000050,Westside Corner Market #000050,5411,Grocery Stores,addr_000143,inst_000022,low,True,14,49.34,2020-07-25

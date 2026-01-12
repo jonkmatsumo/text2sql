@@ -1,0 +1,38 @@
+institution_id,institution_name,institution_type,country_code,is_active,routing_number,swift_code
+inst_000001,Chase Bank,issuer,US,True,867214099,
+inst_000002,Bank of America,issuer,US,True,215528630,DDYUUSV5
+inst_000003,Wells Fargo,issuer,US,True,413102437,
+inst_000004,Citibank,issuer,US,True,519444290,BTUKUSFW
+inst_000005,Capital One,issuer,US,True,160586686,WPHPUS9J
+inst_000006,US Bank,issuer,US,True,165630009,
+inst_000007,PNC Bank,issuer,US,True,925351034,
+inst_000008,TD Bank,issuer,US,True,385362011,
+inst_000009,Truist,issuer,US,True,859670055,
+inst_000010,Fifth Third Bank,issuer,US,True,800215899,
+inst_000011,Ally Bank,issuer,US,True,821352573,AGMKUS3O
+inst_000012,Discover Bank,issuer,US,True,605474625,WQONUSV6
+inst_000013,Marcus by Goldman Sachs,issuer,US,True,536557905,CELMUS98
+inst_000014,Synchrony Bank,issuer,US,True,250380959,
+inst_000015,Worldpay,acquirer,US,True,,
+inst_000016,Fiserv,acquirer,US,True,,
+inst_000017,Global Payments,acquirer,US,True,,
+inst_000018,TSYS,acquirer,US,True,,
+inst_000019,Elavon,acquirer,US,True,,
+inst_000020,Heartland Payment,acquirer,US,True,,QEFMUSBS
+inst_000021,Square,acquirer,US,True,,
+inst_000022,Stripe,acquirer,US,True,,GFYDUS9M
+inst_000023,PayPal,acquirer,US,True,,
+inst_000024,Adyen,acquirer,US,True,,
+inst_000025,FIS,processor,US,True,,TJWRUSEN
+inst_000026,Fiserv,processor,US,True,,
+inst_000027,TSYS,processor,US,True,,OCOIUS04
+inst_000028,First Data,processor,US,True,,
+inst_000029,Worldline,processor,US,True,,
+inst_000030,ACI Worldwide,processor,US,True,,PCKZUSYX
+inst_000031,Jack Henry,processor,US,True,,YBYAUSRV
+inst_000032,Finastra,processor,US,True,,
+inst_000033,NCR,processor,US,True,,
+inst_000034,Visa,network,US,True,,JLBDUSW8
+inst_000035,Mastercard,network,US,True,,NUVBUSKR
+inst_000036,American Express,network,US,True,,PCIKUSKX
+inst_000037,Discover Network,network,US,True,,NQDRUS8M

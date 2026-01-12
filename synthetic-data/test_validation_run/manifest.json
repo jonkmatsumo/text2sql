@@ -1,0 +1,456 @@
+{
+  "manifest_version": "1.0",
+  "generator_version": "0.1.0",
+  "generation_timestamp": "2026-01-11T20:35:32.101000",
+  "content_hash": "755bea0f03241a5f2abc3bcb00827c17512c6e97f06c46123fc0927b532e266a",
+  "seed": 42,
+  "schema_snapshot_id": "f87e85185c46aa2b586960130caa7a4684ee5a1d4dd09ac50d3c522dababcaf9",
+  "time_window": {
+    "start": "2024-01-01",
+    "end": "2024-01-07"
+  },
+  "config": {
+    "seed": 42,
+    "scale": {
+      "customers": 100,
+      "accounts_per_customer_min": 1,
+      "accounts_per_customer_max": 2,
+      "merchants": 50,
+      "txns_per_day": 200,
+      "cards_per_account_min": 1,
+      "cards_per_account_max": 2
+    },
+    "time_window": {
+      "start_date": "2024-01-01",
+      "end_date": "2024-01-07"
+    },
+    "distribution": {
+      "seasonality_strength": 0.2,
+      "long_tail_alpha": 2.0,
+      "risk_tier_weights": [
+        0.7,
+        0.2,
+        0.08,
+        0.02
+      ],
+      "transaction_amount_pareto_alpha": 1.5,
+      "merchant_popularity_zipf_alpha": 1.5
+    },
+    "rates": {
+      "dispute_rate": 0.01,
+      "refund_rate": 0.02,
+      "decline_rate": 0.03,
+      "fraud_rate": 0.002,
+      "emulator_rate": 0.05,
+      "freeze_rate": 0.002,
+      "chargeback_rate": 0.005
+    },
+    "output": {
+      "csv": true,
+      "parquet": true,
+      "include_row_hashes": true,
+      "include_file_hashes": true,
+      "compression": "snappy"
+    }
+  },
+  "tables": {
+    "bridge_customer_address": {
+      "rows": 283,
+      "columns": [
+        "bridge_id",
+        "customer_id",
+        "address_id",
+        "address_type",
+        "is_current",
+        "effective_from",
+        "effective_to"
+      ]
+    },
+    "dim_account": {
+      "rows": 155,
+      "columns": [
+        "account_id",
+        "customer_id",
+        "institution_id",
+        "account_type",
+        "account_number",
+        "account_status",
+        "currency",
+        "opened_date",
+        "closed_date",
+        "credit_limit",
+        "risk_tier"
+      ]
+    },
+    "dim_address": {
+      "rows": 180,
+      "columns": [
+        "address_id",
+        "address_line1",
+        "address_line2",
+        "city",
+        "state_code",
+        "state_name",
+        "postal_code",
+        "country_code",
+        "latitude",
+        "longitude",
+        "address_type"
+      ]
+    },
+    "dim_counterparty": {
+      "rows": 73,
+      "columns": [
+        "counterparty_id",
+        "counterparty_type",
+        "counterparty_name",
+        "merchant_id",
+        "external_id",
+        "risk_tier",
+        "is_verified",
+        "country_code"
+      ]
+    },
+    "dim_customer": {
+      "rows": 100,
+      "columns": [
+        "customer_id",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "date_of_birth",
+        "customer_since",
+        "risk_tier",
+        "customer_segment",
+        "is_active",
+        "activity_score",
+        "primary_address_id"
+      ]
+    },
+    "dim_customer_scd2": {
+      "rows": 112,
+      "columns": [
+        "scd_id",
+        "customer_id",
+        "first_name",
+        "last_name",
+        "email",
+        "risk_tier",
+        "customer_segment",
+        "is_active",
+        "effective_from",
+        "effective_to",
+        "is_current",
+        "version_number"
+      ]
+    },
+    "dim_institution": {
+      "rows": 37,
+      "columns": [
+        "institution_id",
+        "institution_name",
+        "institution_type",
+        "country_code",
+        "is_active",
+        "routing_number",
+        "swift_code"
+      ]
+    },
+    "dim_merchant": {
+      "rows": 50,
+      "columns": [
+        "merchant_id",
+        "merchant_name",
+        "mcc_code",
+        "mcc_description",
+        "address_id",
+        "acquirer_id",
+        "risk_tier",
+        "is_active",
+        "popularity_score",
+        "avg_transaction_amount",
+        "established_date"
+      ]
+    },
+    "dim_time": {
+      "rows": 7,
+      "columns": [
+        "date_key",
+        "full_date",
+        "day_of_week",
+        "day_name",
+        "day_of_month",
+        "day_of_year",
+        "week_of_year",
+        "month",
+        "month_name",
+        "quarter",
+        "year",
+        "is_weekend",
+        "is_holiday",
+        "is_month_start",
+        "is_month_end",
+        "is_quarter_start",
+        "is_quarter_end",
+        "seasonality_factor"
+      ]
+    },
+    "fact_dispute": {
+      "rows": 10,
+      "columns": [
+        "dispute_id",
+        "transaction_id",
+        "dispute_reason",
+        "dispute_status",
+        "dispute_amount",
+        "dispute_opened_ts",
+        "dispute_resolved_ts",
+        "resolution_outcome",
+        "is_chargeback",
+        "merchant_responded",
+        "evidence_submitted",
+        "days_to_resolution"
+      ]
+    },
+    "fact_payment": {
+      "rows": 1723,
+      "columns": [
+        "payment_id",
+        "transaction_id",
+        "payment_method",
+        "card_network",
+        "card_last_four",
+        "auth_code",
+        "settlement_status",
+        "settlement_ts",
+        "ach_return_code",
+        "ach_return_reason",
+        "processing_fee",
+        "interchange_fee"
+      ]
+    },
+    "fact_refund": {
+      "rows": 33,
+      "columns": [
+        "refund_id",
+        "transaction_id",
+        "refund_amount",
+        "refund_reason",
+        "refund_status",
+        "refund_requested_ts",
+        "refund_processed_ts",
+        "is_partial",
+        "refund_method",
+        "processing_fee_refunded"
+      ]
+    },
+    "fact_transaction": {
+      "rows": 1743,
+      "columns": [
+        "transaction_id",
+        "account_id",
+        "customer_id",
+        "merchant_id",
+        "counterparty_id",
+        "institution_id",
+        "time_id",
+        "transaction_ts",
+        "gross_amount",
+        "fee_amount",
+        "net_amount",
+        "currency",
+        "channel",
+        "status",
+        "risk_tier",
+        "device_id",
+        "is_emulator",
+        "is_fraud_flagged"
+      ]
+    }
+  },
+  "files": [
+    {
+      "table": "bridge_customer_address",
+      "file": "csv/bridge_customer_address.csv",
+      "format": "csv",
+      "rows": 283,
+      "hash": "a3d777d6dfe0ca7302b26514111ab891fcee424a8d5addcceed98687e4ea402d"
+    },
+    {
+      "table": "bridge_customer_address",
+      "file": "parquet/bridge_customer_address.parquet",
+      "format": "parquet",
+      "rows": 283,
+      "hash": "6e8de4126d8eb01fc67c60eccdb4b1375a9253d7c58edb248ac2a15014fdbe48"
+    },
+    {
+      "table": "dim_account",
+      "file": "csv/dim_account.csv",
+      "format": "csv",
+      "rows": 155,
+      "hash": "4399df4f63b8754f299629b567d4c314379259dc0800f91563e0a57c84e0d724"
+    },
+    {
+      "table": "dim_account",
+      "file": "parquet/dim_account.parquet",
+      "format": "parquet",
+      "rows": 155,
+      "hash": "f9103a4e5f58541e4b06336d43655d0755771c810dc4873bd85a739b37841a35"
+    },
+    {
+      "table": "dim_address",
+      "file": "csv/dim_address.csv",
+      "format": "csv",
+      "rows": 180,
+      "hash": "c7c3181ddd22fd79dad4eb07d982ac07762571b764911be9c1486b4f229a7327"
+    },
+    {
+      "table": "dim_address",
+      "file": "parquet/dim_address.parquet",
+      "format": "parquet",
+      "rows": 180,
+      "hash": "303808361ad0d8e41772ea325a1c728bf82290a3a23549a8f2403c7003e8c18b"
+    },
+    {
+      "table": "dim_counterparty",
+      "file": "csv/dim_counterparty.csv",
+      "format": "csv",
+      "rows": 73,
+      "hash": "3def2eacbf8d78fcb99ffca85d73f3881fc9e6a6aa828bf4aa7eff6e03e67f50"
+    },
+    {
+      "table": "dim_counterparty",
+      "file": "parquet/dim_counterparty.parquet",
+      "format": "parquet",
+      "rows": 73,
+      "hash": "a39aa9833087536ecda2efe37ac18a7e44b139f3f722f632aa74898d6fca31b0"
+    },
+    {
+      "table": "dim_customer",
+      "file": "csv/dim_customer.csv",
+      "format": "csv",
+      "rows": 100,
+      "hash": "ef7afe2fa881d1ae9f080df2fbfc376fe9f9a2042219adedee3c08621829859a"
+    },
+    {
+      "table": "dim_customer",
+      "file": "parquet/dim_customer.parquet",
+      "format": "parquet",
+      "rows": 100,
+      "hash": "a8aff71241d1e5413ed41d13963da8444535187c0acdb02a54f9a89578937e1c"
+    },
+    {
+      "table": "dim_customer_scd2",
+      "file": "csv/dim_customer_scd2.csv",
+      "format": "csv",
+      "rows": 112,
+      "hash": "116faa18f1cbe007c00233afe6c592befef45923628e36b17bf5ece1ab786d17"
+    },
+    {
+      "table": "dim_customer_scd2",
+      "file": "parquet/dim_customer_scd2.parquet",
+      "format": "parquet",
+      "rows": 112,
+      "hash": "a4022ea71d9316afbb0330ce6a6a4717abb657191e37895d25ca8e9730fa1147"
+    },
+    {
+      "table": "dim_institution",
+      "file": "csv/dim_institution.csv",
+      "format": "csv",
+      "rows": 37,
+      "hash": "6aa5aa129fd393d8b430c28808517037435922b30d44513306692e78ae319d65"
+    },
+    {
+      "table": "dim_institution",
+      "file": "parquet/dim_institution.parquet",
+      "format": "parquet",
+      "rows": 37,
+      "hash": "bb819118452b0fd362df2cc77bb01cc6fde28290037431e573ddf0095317e9eb"
+    },
+    {
+      "table": "dim_merchant",
+      "file": "csv/dim_merchant.csv",
+      "format": "csv",
+      "rows": 50,
+      "hash": "e4e41d70c2ad157e248107e634ab6e61d9620587403332bec50395f76680698f"
+    },
+    {
+      "table": "dim_merchant",
+      "file": "parquet/dim_merchant.parquet",
+      "format": "parquet",
+      "rows": 50,
+      "hash": "af3874e8fa46cf2c4203d3f2a9255322b5f9ae91a6f97b118c452dbece7b50ba"
+    },
+    {
+      "table": "dim_time",
+      "file": "csv/dim_time.csv",
+      "format": "csv",
+      "rows": 7,
+      "hash": "43623f2c260951aaab5cf4414f537976d40bc3546186a777d0f4c0617a58956b"
+    },
+    {
+      "table": "dim_time",
+      "file": "parquet/dim_time.parquet",
+      "format": "parquet",
+      "rows": 7,
+      "hash": "30fd91d6e6fe444e14ccdd09688859247288f8426e05a9fc1e6dc23db6a2d536"
+    },
+    {
+      "table": "fact_dispute",
+      "file": "csv/fact_dispute.csv",
+      "format": "csv",
+      "rows": 10,
+      "hash": "c0a4f3ff6e4fbac9aa130d383ce7a67341d4ca8390c6f66ad6db6791fc5c9d82"
+    },
+    {
+      "table": "fact_dispute",
+      "file": "parquet/fact_dispute.parquet",
+      "format": "parquet",
+      "rows": 10,
+      "hash": "b27b9e56bb9c2ff2c78466a0d70083004172d6b7178329e0b529a4e099a241d4"
+    },
+    {
+      "table": "fact_payment",
+      "file": "csv/fact_payment.csv",
+      "format": "csv",
+      "rows": 1723,
+      "hash": "7efe28edca2048af07aa41b6bf26a44b83761ff22035afd1bc0cc8fe13992f91"
+    },
+    {
+      "table": "fact_payment",
+      "file": "parquet/fact_payment.parquet",
+      "format": "parquet",
+      "rows": 1723,
+      "hash": "0a9c1a6c1049ade617ca80e15e3f245aa08a23b6c4ead6214e28fc529727f85c"
+    },
+    {
+      "table": "fact_refund",
+      "file": "csv/fact_refund.csv",
+      "format": "csv",
+      "rows": 33,
+      "hash": "5924a4f78715fe3d3515bc01e18e49d6551384958203fa16666e3b26525d1d3a"
+    },
+    {
+      "table": "fact_refund",
+      "file": "parquet/fact_refund.parquet",
+      "format": "parquet",
+      "rows": 33,
+      "hash": "579bfe795d2ded6788a2f8d50f1e012e801ae5a24c7ace52b1b15fce38b93400"
+    },
+    {
+      "table": "fact_transaction",
+      "file": "csv/fact_transaction.csv",
+      "format": "csv",
+      "rows": 1743,
+      "hash": "9acae61dbfc7a09859e5914e033dd60058140da3e93b53de5cd4bbcbf7b4e7be"
+    },
+    {
+      "table": "fact_transaction",
+      "file": "parquet/fact_transaction.parquet",
+      "format": "parquet",
+      "rows": 1743,
+      "hash": "deff33c1a5646228b82b68b8af878f8f8119167d7d57b1fbfc1317f464327d14"
+    }
+  ]
+}
