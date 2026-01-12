@@ -18,6 +18,7 @@ from typing import Dict, List
 from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
 from mcp_server.models import ColumnDef
+from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
 from openai import AsyncOpenAI
 
 logging.basicConfig(level=logging.INFO)
@@ -108,8 +109,6 @@ def generate_column_patterns(table_name: str, column: ColumnDef) -> List[Dict[st
     for v in variations:
         patterns.append({"label": "COLUMN", "pattern": v.lower(), "id": canonical_id})
 
-    return patterns
-
 
 async def get_openai_client() -> AsyncOpenAI:
     """Get AsyncOpenAI client."""
@@ -193,14 +192,53 @@ async def enrich_values_with_llm(
     return patterns
 
 
+async def sample_distinct_values(
+    conn,
+    table_name: str,
+    column_name: str,
+    threshold: int,
+    sample_rows: int = 10000,
+    timeout_ms: int = 2000,
+) -> List[str]:
+    """Fetch distinct values from a sample of rows with early stop."""
+    try:
+        # DB-agnostic-ish SQL (Postgres compatible)
+        # WITH sample AS (SELECT col FROM table LIMIT sample_rows)
+        # SELECT DISTINCT col FROM sample WHERE col IS NOT NULL LIMIT threshold + 1
+        query = (
+            f'WITH sample AS (SELECT "{column_name}" FROM "{table_name}" LIMIT {sample_rows}) '
+            f'SELECT DISTINCT "{column_name}" FROM sample '
+            f'WHERE "{column_name}" IS NOT NULL '
+            f"LIMIT {threshold + 1}"
+        )
+
+        # Attempt to set local timeout if supported (asyncpg/postgres)
+        try:
+            await conn.execute(f"SET LOCAL statement_timeout = '{timeout_ms}ms'")
+        except Exception:
+            pass  # Ignore if not supported or not a transaction
+
+        rows = await conn.fetch(query)
+        return [str(row[0]) for row in rows if row[0] is not None]
+    except Exception as e:
+        logger.warning(f"Failed to sample values for {table_name}.{column_name}: {e}")
+        return []
+
+
 async def generate_entity_patterns() -> list[dict]:
     """Generate entity patterns from database introspection."""
     # Initialize DB (assumes already running or managed by caller/main)
-    # But for safety in standalone we rely on main, in service we rely on service init.
-
     patterns = []
     client = await get_openai_client()
     introspector = Database.get_schema_introspector()
+
+    # Initialize Detector
+    # Config/Env reading will be refined in Phase 5, using basic defaults for now or existing envs
+    threshold = int(os.getenv("ENUM_CARDINALITY_THRESHOLD", "10"))
+    detector = EnumLikeColumnDetector(
+        threshold=threshold,
+        # allowlist/denylist loading from config TODO
+    )
 
     try:
         target_tables = await get_target_tables(introspector)
@@ -223,9 +261,30 @@ async def generate_entity_patterns() -> list[dict]:
                     patterns.extend(generate_column_patterns(table_name, col))
 
                     # 4. Value Discovery
-                    if should_scan_column(col):
-                        logger.info(f"Scanning values for {table_name}.{col.name}...")
-                        values = await fetch_distinct_values(conn, table_name, col.name)
+                    if detector.is_candidate(table_name, col):
+                        logger.info(f"Scanning values for {table_name}.{col.name} (Candidate)...")
+                        values = await sample_distinct_values(
+                            conn,
+                            table_name,
+                            col.name,
+                            threshold=detector.threshold,
+                            sample_rows=int(os.getenv("ENUM_CARDINALITY_SAMPLE_ROWS", "10000")),
+                            timeout_ms=int(os.getenv("ENUM_CARDINALITY_QUERY_TIMEOUT_MS", "2000")),
+                        )
+
+                        # Threshold Check
+                        if len(values) > detector.threshold:
+                            logger.info(
+                                f"Skipping {table_name}.{col.name}: High cardinality "
+                                f"({len(values)} > {detector.threshold})"
+                            )
+                            continue
+
+                        if not values:
+                            continue
+
+                        # Canonicalize
+                        values = detector.canonicalize_values(values)
 
                         # Use column name as Label (e.g. status -> STATUS)
                         label = col.name.upper()
@@ -234,7 +293,6 @@ async def generate_entity_patterns() -> list[dict]:
                         for v in values:
                             # Basic pattern: value itself
                             patterns.append({"label": label, "pattern": v.lower(), "id": v})
-                            # Should we add exact case ID? Yes, `v` is exact.
 
                         # LLM Enrichment
                         if client and values:
@@ -244,67 +302,9 @@ async def generate_entity_patterns() -> list[dict]:
 
     except Exception as e:
         logger.error(f"Error in pattern generation: {e}")
-        # Don't crash entirely, return what we have? OR re-raise?
-        # Re-raising is probably better to signal failure.
         raise e
 
     return patterns
-
-
-def should_scan_column(column: ColumnDef) -> bool:
-    """Determine if a column should be scanned for distinct values."""
-    # 1. User-defined types (Enums)
-    if column.data_type == "USER-DEFINED":
-        return True
-
-    # 2. Textual types only for heuristics
-    # (avoid scanning blovs, arrays, numerics unless specific)
-    text_types = {"text", "character varying", "varchar", "char", "character", "string"}
-    if column.data_type.lower() not in text_types:
-        return False
-
-    # 3. Name Heuristics (Whitelist)
-    SCAN_KEYWORDS = {
-        "status",
-        "type",
-        "category",
-        "genre",
-        "rating",
-        "payment_method",
-        "frequency",
-        "kind",
-        "level",
-        "tier",
-        "mode",
-    }
-
-    # Check exact match or suffix match (e.g. "payment_status")
-    name_lower = column.name.lower()
-    if name_lower in SCAN_KEYWORDS:
-        return True
-
-    for kw in SCAN_KEYWORDS:
-        if name_lower.endswith(f"_{kw}"):
-            return True
-
-    return False
-
-
-async def fetch_distinct_values(
-    conn, table_name: str, column_name: str, limit: int = 50
-) -> List[str]:
-    """Fetch distinct values for a column."""
-    try:
-        # Safe quoting
-        query = (
-            f'SELECT DISTINCT "{column_name}" FROM "{table_name}" '
-            f'WHERE "{column_name}" IS NOT NULL LIMIT $1'
-        )
-        rows = await conn.fetch(query, limit)
-        return [str(row[0]) for row in rows if row[0] is not None]
-    except Exception as e:
-        logger.warning(f"Failed to fetch values for {table_name}.{column_name}: {e}")
-        return []
 
 
 async def main() -> None:
