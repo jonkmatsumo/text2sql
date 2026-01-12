@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 from otel_worker.config import settings
@@ -10,14 +11,25 @@ logger = logging.getLogger(__name__)
 # Using a single engine for simplicity in the worker
 engine = create_engine(settings.POSTGRES_URL)
 
+# Get target schema from environment, default to 'otel'
+TARGET_SCHEMA = os.getenv("OTEL_DB_SCHEMA", "otel")
+
+
+def get_table_name(table: str) -> str:
+    """Return table name with optional schema prefix."""
+    if TARGET_SCHEMA:
+        return f"{TARGET_SCHEMA}.{table}"
+    return table
+
 
 def init_db():
-    """Validate that the otel schema and tables exist via migrations."""
+    """Validate that the schema and tables exist via migrations."""
+    table_name = get_table_name("traces")
     try:
         with engine.connect() as conn:
             # Check for one of the core tables
-            conn.execute(text("SELECT 1 FROM otel.traces LIMIT 1;"))
-        logger.info("OTEL database schema validated")
+            conn.execute(text(f"SELECT 1 FROM {table_name} LIMIT 1;"))
+        logger.info(f"OTEL database table '{table_name}' validated")
     except Exception as e:
         logger.error(
             "OTEL schema validation failed. Ensure migrations are applied: `alembic upgrade head`"
@@ -61,10 +73,11 @@ def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict],
 
     with engine.begin() as conn:
         # Upsert Trace
+        traces_table = get_table_name("traces")
         conn.execute(
             text(
-                """
-            INSERT INTO otel.traces (
+                f"""
+            INSERT INTO {traces_table} (
                 trace_id, start_time, end_time, duration_ms, service_name,
                 environment, tenant_id, interaction_id, status,
                 error_count, span_count, raw_blob_url,
@@ -81,7 +94,8 @@ def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict],
                 error_count = EXCLUDED.error_count,
                 span_count = EXCLUDED.span_count,
                 raw_blob_url = EXCLUDED.raw_blob_url,
-                trace_attributes = otel.traces.trace_attributes || EXCLUDED.trace_attributes;
+                trace_attributes = {traces_table}.trace_attributes
+                    || EXCLUDED.trace_attributes;
         """
             ),
             {
@@ -110,10 +124,11 @@ def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict],
                 int(s["end_time_unix_nano"]) - int(s["start_time_unix_nano"])
             ) // 1_000_000
 
+            spans_table = get_table_name("spans")
             conn.execute(
                 text(
-                    """
-                INSERT INTO otel.spans (
+                    f"""
+                INSERT INTO {spans_table} (
                     span_id, trace_id, parent_span_id, name, kind,
                     start_time, end_time, duration_ms, status_code,
                     status_message, span_attributes, events
@@ -141,3 +156,112 @@ def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict],
                 },
             )
     logger.info(f"Saved trace {trace_id} with {len(summaries)} spans to Postgres")
+
+
+def list_traces(
+    service: str = None,
+    trace_id: str = None,
+    start_time_gte: datetime = None,
+    start_time_lte: datetime = None,
+    limit: int = 50,
+    offset: int = 0,
+    order: str = "desc",
+):
+    """List traces from Postgres with filtering and pagination."""
+    traces_table = get_table_name("traces")
+    query = f"""
+        SELECT trace_id, service_name, start_time, end_time,
+               duration_ms, span_count, status, raw_blob_url
+        FROM {traces_table}
+        WHERE 1=1
+    """
+    params = {"limit": limit, "offset": offset}
+
+    if service:
+        query += " AND service_name = :service"
+        params["service"] = service
+    if trace_id:
+        query += " AND trace_id = :trace_id"
+        params["trace_id"] = trace_id
+    if start_time_gte:
+        query += " AND start_time >= :start_time_gte"
+        params["start_time_gte"] = start_time_gte
+    if start_time_lte:
+        query += " AND start_time <= :start_time_lte"
+        params["start_time_lte"] = start_time_lte
+
+    query += f" ORDER BY start_time {order.upper()}"
+    query += " LIMIT :limit OFFSET :offset"
+
+    with engine.connect() as conn:
+        result = conn.execute(text(query), params)
+        return [dict(row._mapping) for row in result]
+
+
+def get_trace(trace_id: str, include_attributes: bool = False):
+    """Fetch a single trace by ID."""
+    traces_table = get_table_name("traces")
+    query = f"""
+        SELECT trace_id, service_name, start_time, end_time, duration_ms, span_count,
+               status, raw_blob_url, resource_attributes, trace_attributes
+        FROM {traces_table}
+        WHERE trace_id = :trace_id
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(query), {"trace_id": trace_id})
+        row = result.fetchone()
+        if not row:
+            return None
+
+        data = dict(row._mapping)
+
+        # Handle string JSON (e.g. from SQLite)
+        for key in ["resource_attributes", "trace_attributes"]:
+            val = data.get(key)
+            if isinstance(val, str) and val.strip():
+                try:
+                    data[key] = json.loads(val)
+                except Exception:
+                    pass
+
+        if not include_attributes:
+            data.pop("resource_attributes", None)
+            data.pop("trace_attributes", None)
+        return data
+
+
+def list_spans_for_trace(
+    trace_id: str, limit: int = 200, offset: int = 0, include_attributes: bool = False
+):
+    """Fetch spans for a specific trace with pagination."""
+    spans_table = get_table_name("spans")
+    query = f"""
+        SELECT span_id, trace_id, parent_span_id, name, kind, status_code,
+               status_message, start_time, end_time, duration_ms, span_attributes, events
+        FROM {spans_table}
+        WHERE trace_id = :trace_id
+        ORDER BY start_time ASC
+        LIMIT :limit OFFSET :offset
+    """
+    params = {"trace_id": trace_id, "limit": limit, "offset": offset}
+
+    with engine.connect() as conn:
+        result = conn.execute(text(query), params)
+        spans = []
+        for row in result:
+            data = dict(row._mapping)
+
+            # Handle string JSON
+            for key in ["span_attributes", "events"]:
+                val = data.get(key)
+                if isinstance(val, str) and val.strip():
+                    try:
+                        data[key] = json.loads(val)
+                    except Exception:
+                        pass
+
+            if not include_attributes:
+                data.pop("span_attributes", None)
+                data.pop("events", None)
+            spans.append(data)
+        return spans

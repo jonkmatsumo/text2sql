@@ -3,6 +3,7 @@ import io
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from minio import Minio
 from otel_worker.config import settings
@@ -55,3 +56,31 @@ def upload_trace_blob(trace_id: str, service_name: str, payload_dict: dict) -> s
 
     logger.info(f"Uploaded trace blob to MinIO: {object_name}")
     return f"s3://{settings.MINIO_BUCKET}/{object_name}"
+
+
+def get_trace_blob(trace_id: str, service_name: str, date: datetime = None) -> Optional[bytes]:
+    """Fetch and decompress gzipped trace payload from MinIO."""
+    if not date:
+        # If no date is provided, we'd need to search or have stored the path.
+        # For a simplified MVP, we'll try current date and a few recent ones if needed,
+        # but the API caller should ideally know the date or we should have stored
+        # the path in Postgres.
+        # Since we only store the full URL in Postgres, we'll try to parse it
+        # or just try 'today'.
+        date = datetime.now(timezone.utc)
+
+    date_path = date.strftime("%Y-%m-%d")
+    object_name = f"{settings.OTEL_ENVIRONMENT}/{service_name}/{date_path}/{trace_id}.json.gz"
+
+    try:
+        response = client.get_object(settings.MINIO_BUCKET, object_name)
+        try:
+            gzipped_data = response.read()
+            with gzip.GzipFile(fileobj=io.BytesIO(gzipped_data), mode="rb") as f:
+                return f.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as e:
+        logger.warning(f"Failed to fetch trace blob {object_name} from MinIO: {e}")
+        return None
