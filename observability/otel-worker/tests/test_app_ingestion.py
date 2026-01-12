@@ -23,8 +23,24 @@ class TestOTELWorkerIngestion(unittest.TestCase):
             "/v1/traces", content="{}", headers={"Content-Type": "application/json"}
         )
 
+        # Empty summaries return 200 OK
         self.assertEqual(response.status_code, 200)
         mock_parse.assert_called_once()
+
+    @patch("otel_worker.app.parse_otlp_json_traces")
+    @patch("otel_worker.app.extract_trace_summaries")
+    @patch("otel_worker.app.coordinator.enqueue")
+    def test_receive_json_traces_enqueued(self, mock_enqueue, mock_extract, mock_parse):
+        """Verify that non-empty JSON traces return 202 Accepted."""
+        mock_parse.return_value = {"resourceSpans": []}
+        mock_extract.return_value = [{"trace_id": "123", "service_name": "test"}]
+
+        response = self.client.post(
+            "/v1/traces", content="{}", headers={"Content-Type": "application/json"}
+        )
+
+        self.assertEqual(response.status_code, 202)
+        mock_enqueue.assert_called_once()
 
     @patch("otel_worker.app.parse_otlp_traces")
     @patch("otel_worker.app.extract_trace_summaries")
@@ -37,6 +53,7 @@ class TestOTELWorkerIngestion(unittest.TestCase):
             "/v1/traces", content=b"\x00", headers={"Content-Type": "application/x-protobuf"}
         )
 
+        # Empty summaries return 200 OK
         self.assertEqual(response.status_code, 200)
         mock_parse.assert_called_once()
 

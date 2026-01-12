@@ -1,30 +1,35 @@
-import base64
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, status
-from otel_worker.export.mlflow_exporter import export_to_mlflow
+from otel_worker.ingestion.processor import coordinator
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
     parse_otlp_json_traces,
     parse_otlp_traces,
 )
-from otel_worker.storage.minio import init_minio, upload_trace_blob
-from otel_worker.storage.postgres import init_db, save_trace_and_spans
+from otel_worker.storage.minio import init_minio
+from otel_worker.storage.postgres import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="OTEL Dual-Write Worker")
 
-
-@app.on_event("startup")
-def startup_event():
-    """Initialize storage on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager for storage and background workers."""
     try:
         init_db()
         init_minio()
     except Exception as e:
         logger.error(f"Failed to initialize storage: {e}")
+
+    await coordinator.start()
+    yield
+    await coordinator.stop()
+
+
+app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -63,26 +68,10 @@ async def receive_traces(request: Request):
         if not summaries:
             return Response(status_code=status.HTTP_200_OK)
 
-        # Process each trace separately for storage
-        trace_ids = set(s["trace_id"] for s in summaries)
-        for tid_b64 in trace_ids:
-            # tid_b64 is base64 encoded by MessageToDict
-            tid_bytes = base64.b64decode(tid_b64)
-            trace_id = tid_bytes.hex()
+        # Enqueue for background persistence
+        await coordinator.enqueue(parsed_data, summaries)
 
-            trace_summaries = [s for s in summaries if s["trace_id"] == tid_b64]
-            service_name = trace_summaries[0]["service_name"]
-
-            # 1. Upload to MinIO
-            raw_blob_url = upload_trace_blob(trace_id, service_name, parsed_data)
-
-            # 2. Save to Postgres
-            save_trace_and_spans(trace_id, parsed_data, trace_summaries, raw_blob_url)
-
-            # 3. Dual-write to MLflow
-            export_to_mlflow(trace_id, service_name, trace_summaries, parsed_data)
-
-        return Response(status_code=status.HTTP_200_OK)
+        return Response(status_code=status.HTTP_202_ACCEPTED)
     except ValueError as e:
         logger.error(f"Validation failed: {e}")
         return Response(
