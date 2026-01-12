@@ -15,6 +15,8 @@ class RecommendationConfig:
     fallback_enabled: bool
     fallback_threshold: float
     status_priority: List[str]
+    exclude_tombstoned: bool
+    stale_max_age_days: float
 
 
 def load_recommendation_config() -> RecommendationConfig:
@@ -84,12 +86,27 @@ def load_recommendation_config() -> RecommendationConfig:
     else:
         status_priority = DEFAULT_STATUS_PRIORITY
 
+    # 6. Exclude Tombstoned
+    # Default is true
+    exclude_tombstoned_val = os.environ.get("RECO_EXCLUDE_TOMBSTONED", "true")
+    exclude_tombstoned = exclude_tombstoned_val.lower() in ("true", "1", "yes", "on")
+
+    # 7. Stale Max Age Days
+    # Default is 0 (disabled)
+    try:
+        stale_max_age_days = float(os.environ.get("RECO_STALE_MAX_AGE_DAYS", "0"))
+    except ValueError:
+        logger.warning("Invalid RECO_STALE_MAX_AGE_DAYS format, using 0 (disabled)")
+        stale_max_age_days = 0.0
+
     return RecommendationConfig(
         limit_default=limit_default,
         candidate_multiplier=candidate_multiplier,
         fallback_enabled=fallback_enabled,
         fallback_threshold=fallback_threshold,
         status_priority=status_priority,
+        exclude_tombstoned=exclude_tombstoned,
+        stale_max_age_days=stale_max_age_days,
     )
 
 

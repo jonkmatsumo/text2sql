@@ -253,6 +253,8 @@ async def test_config_override_integration(mock_registry):
         fallback_enabled=True,
         fallback_threshold=0.85,
         status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,  # New
+        stale_max_age_days=0,  # New
     )
 
     with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config):
@@ -275,6 +277,8 @@ async def test_config_override_integration(mock_registry):
         fallback_enabled=False,  # Disabled via config
         fallback_threshold=0.1,
         status_priority=["verified"],
+        exclude_tombstoned=True,  # New
+        stale_max_age_days=0,  # New
     )
 
     with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config_disabled):
@@ -295,6 +299,8 @@ async def test_config_override_integration(mock_registry):
         fallback_enabled=True,
         fallback_threshold=0.99,
         status_priority=["verified"],
+        exclude_tombstoned=True,  # New
+        stale_max_age_days=0,  # New
     )
 
     with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config_threshold):
@@ -318,6 +324,8 @@ async def test_config_override_integration(mock_registry):
         fallback_enabled=True,
         fallback_threshold=0.85,
         status_priority=["seeded", "verified"],  # Seeded (0) > Verified (1)
+        exclude_tombstoned=True,  # New
+        stale_max_age_days=0,  # New
     )
 
     # We test _rank_candidates directly or via public API
@@ -329,3 +337,68 @@ async def test_config_override_integration(mock_registry):
         # Seeded should be first
         assert ranked[0].status == "seeded"
         assert ranked[1].status == "verified"
+
+
+# --- Phase 1: Validity Filtering Tests ---
+
+
+@pytest.mark.asyncio
+async def test_recommendation_excludes_tombstoned(mock_registry):
+    """Test that tombstoned candidates are filtered out."""
+    # 1. Verified Tombstoned
+    tomb_ex = make_qp("f1", "tombstoned")
+    valid_ex = make_qp("f2", "verified")
+
+    mock_registry.lookup_semantic.side_effect = [[tomb_ex, valid_ex], [], []]
+
+    result = await RecommendationService.recommend_examples("test", 1)
+
+    assert len(result.examples) == 1
+    assert result.examples[0].canonical_group_id == "f2"
+
+    # 2. Fallback Tombstoned
+    mock_registry.lookup_semantic.reset_mock()
+    # Primaries empty, fallback has one tombstoned, one valid
+    mock_registry.lookup_semantic.side_effect = [[], [], [tomb_ex, valid_ex]]
+
+    result = await RecommendationService.recommend_examples("test", 1, enable_fallback=True)
+
+    # Only valid fallback should be used
+    assert len(result.examples) == 1
+    assert result.examples[0].canonical_group_id == "f2"
+    assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_recommendation_excludes_invalid_fields(mock_registry):
+    """Test that candidates missing required fields are filtered out."""
+    # Missing fingerprint
+    no_fp = make_qp("fp_missing", "verified")
+    no_fp.fingerprint = None
+
+    # Missing SQL
+    no_sql = make_qp("sql_missing", "verified")
+    no_sql.sql_query = ""
+
+    # Missing Question
+    no_q = make_qp("q_missing", "verified")
+    no_q.question = None
+
+    # Valid
+    valid = make_qp("valid", "verified")
+
+    mock_registry.lookup_semantic.return_value = [no_fp, no_sql, no_q, valid]
+
+    # Note: seeded will be empty due to return_value behavior if not side_effect with multiple calls
+    # but simplest is just return valid list for all calls
+    mock_registry.lookup_semantic.side_effect = None
+    mock_registry.lookup_semantic.return_value = [no_fp, no_sql, no_q, valid]
+
+    # We expect fetch limit * 2 calls or similar, but what matters is the result
+    # It will fetch for verified, then seeded. Both return the mixed bag.
+    # deduping will happen. valid(verified) + valid(seeded) -> deduped to 1 valid
+
+    result = await RecommendationService.recommend_examples("test", 1)
+
+    assert len(result.examples) == 1
+    assert result.examples[0].canonical_group_id == "valid"

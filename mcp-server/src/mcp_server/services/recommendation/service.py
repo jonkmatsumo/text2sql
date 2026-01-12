@@ -94,12 +94,26 @@ class RecommendationService:
 
     @staticmethod
     def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
-        """Filter out invalid candidates based on config rules.
+        if not candidates:
+            return []
 
-        Currently a no-op passthrough.
-        """
-        # Phase 0: No-op
-        return candidates
+        filtered = []
+        exclude_tombstoned = config.exclude_tombstoned if config else True
+
+        for cp in candidates:
+            # 1. Check Tombstone
+            if exclude_tombstoned and cp.status == "tombstoned":
+                continue
+
+            # 2. Check Required Fields
+            # question, sql_query, fingerprint must be non-empty
+            if not cp.question or not cp.sql_query or not cp.fingerprint:
+                # Debug log could go here, but keeping silent to avoid spam
+                continue
+
+            filtered.append(cp)
+
+        return filtered
 
     @staticmethod
     def _rank_and_deduplicate(
