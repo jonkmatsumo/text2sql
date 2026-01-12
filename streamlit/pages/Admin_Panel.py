@@ -250,6 +250,16 @@ def main():
                     run_operation("Pattern Generation", OpsService.run_pattern_generation())
                 )
 
+            st.divider()
+            st.subheader("Reload Patterns")
+            st.info("Reload NLP patterns from database without restart.")
+            if st.button("Reload NLP Patterns"):
+                with st.spinner("Reloading patterns..."):
+                    result = asyncio.run(OpsService.reload_patterns())
+                    # Minimal UI for Phase 2 - wiring only
+                    # We will enhance display in Phase 3
+                    st.write(result)
+
         with col2:
             st.subheader("Schema Hydration")
             st.info("Sync Postgres schema to Memgraph.")
