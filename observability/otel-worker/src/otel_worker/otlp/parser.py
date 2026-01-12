@@ -38,10 +38,16 @@ def extract_trace_summaries(parsed_data: dict) -> list[dict]:
     resource_spans = parsed_data.get("resourceSpans", [])
     for rs in resource_spans:
         resource = rs.get("resource", {})
-        attributes = {
-            attr["key"]: attr["value"].get("stringValue") for attr in resource.get("attributes", [])
+        resource_attributes = {
+            attr["key"]: str(
+                attr["value"].get(
+                    "stringValue",
+                    attr["value"].get("intValue", attr["value"].get("boolValue", "")),
+                )
+            )
+            for attr in resource.get("attributes", [])
         }
-        service_name = attributes.get("service.name", "unknown")
+        service_name = resource_attributes.get("service.name", "unknown")
 
         scope_spans = rs.get("scopeSpans", [])
         for ss in scope_spans:
@@ -51,13 +57,16 @@ def extract_trace_summaries(parsed_data: dict) -> list[dict]:
                 summaries.append(
                     {
                         "service_name": service_name,
+                        "resource_attributes": resource_attributes,
                         "trace_id": span.get("traceId"),
                         "span_id": span.get("spanId"),
                         "parent_span_id": span.get("parentSpanId"),
                         "name": span.get("name"),
+                        "kind": span.get("kind"),
                         "start_time_unix_nano": span.get("startTimeUnixNano"),
                         "end_time_unix_nano": span.get("endTimeUnixNano"),
                         "status": span.get("status", {}).get("code", "STATUS_CODE_UNSET"),
+                        "status_message": span.get("status", {}).get("message"),
                         "attributes": {
                             attr["key"]: str(
                                 attr["value"].get(
