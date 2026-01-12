@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -402,3 +403,59 @@ async def test_recommendation_excludes_invalid_fields(mock_registry):
 
     assert len(result.examples) == 1
     assert result.examples[0].canonical_group_id == "valid"
+
+
+@pytest.mark.asyncio
+async def test_recommendation_staleness(mock_registry):
+    """Test time-based staleness filtering."""
+    from mcp_server.services.recommendation.config import RecommendationConfig
+
+    now = datetime.now(timezone.utc)
+    one_day = timedelta(days=1)
+
+    # max_age = 5 days
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=5,
+    )
+
+    # 1. Fresh (1 day old)
+    fresh = make_qp("fresh", "verified")
+    fresh.updated_at = now - one_day
+
+    # 2. Stale (6 days old)
+    stale = make_qp("stale", "verified")
+    stale.updated_at = now - timedelta(days=6)
+
+    # 3. Missing updated_at (should be excluded if staleness enabled)
+    unknown = make_qp("unknown", "verified")
+    unknown.updated_at = None
+
+    mock_registry.lookup_semantic.return_value = [fresh, stale, unknown]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 3)
+
+        assert len(result.examples) == 1
+        assert result.examples[0].canonical_group_id == "fresh"
+
+    # 4. Disable staleness (max_age = 0)
+    config_disabled = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+    )
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config_disabled):
+        result = await RecommendationService.recommend_examples("test", 3)
+        # Should include stale and unknown now
+        # Note: deduping happens, but they have diff fingerprints
+        assert len(result.examples) == 3

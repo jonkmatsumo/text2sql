@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from mcp_server.models import QueryPair
@@ -110,6 +111,27 @@ class RecommendationService:
             if not cp.question or not cp.sql_query or not cp.fingerprint:
                 # Debug log could go here, but keeping silent to avoid spam
                 continue
+
+            # 3. Check Staleness
+            stale_days = config.stale_max_age_days if config else 0
+            if stale_days > 0:
+                if not cp.updated_at:
+                    continue
+
+                # Ensure updated_at is timezone-aware or assume proper comparison
+                # QueryPair.updated_at is likely typically naive or aware depending on DB driver.
+                # We'll use utcnow for comparison.
+                now = datetime.now(timezone.utc)
+
+                # Handle timezone awareness of cp.updated_at
+                ex_time = cp.updated_at
+                if ex_time.tzinfo is None:
+                    # If naive, assume UTC (standard practice in this project)
+                    ex_time = ex_time.replace(tzinfo=timezone.utc)
+
+                age = now - ex_time
+                if age.total_seconds() > (stale_days * 86400):
+                    continue
 
             filtered.append(cp)
 
