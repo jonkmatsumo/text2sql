@@ -161,33 +161,30 @@ We explicitly avoid "mocking everything". We will use **In-Memory** implementati
 
 ## 7. Phased Implementation Blueprint
 
+### Phase 1: Stabilize MLflow Backend
+- **Status**: Completed (2026-01-11)
+- **Action**: Cleanly encapsulated MLflow backend and fixed existing `InMemoryTelemetryBackend` generators.
+
 ### Phase 2: Native OTEL Implementation
 - **Status**: Completed (2026-01-11)
 - **Implemented**: `OTELTelemetryBackend` and `OTELTelemetrySpan`.
 - **Details**:
   - `telemetry.inputs_json` and `telemetry.outputs_json` recorded as JSON strings.
   - Automatic `StatusCode.ERROR` mapping if `error` key present in outputs.
-  - Best-effort metadata tagging on current span.
-- **Verification**: New unit tests in `agent/tests/test_telemetry.py` using `InMemorySpanExporter`.
-2.  Create `OTELTelemetryBackend(TelemetryBackend)` in `telemetry.py`.
-    - Implement mapping logic.
-    - Implement `configure` (env-var driven).
-3.  Create `OTELTelemetrySpan(TelemetrySpan)`.
+- **Verification**: Unit tests in `agent/tests/test_telemetry.py` using `InMemorySpanExporter`.
 
-### Phase 2: Dual Backend & Safety
-1.  Create `DualTelemetryBackend` in `telemetry.py`.
-2.  Create `DualTelemetrySpan`.
-3.  Add rigorous unit tests for dual-write failure isolation.
+### Phase 3: Backend Selection & Dual-Write
+- **Status**: Completed (2026-01-11)
+- **Implemented**: `DualTelemetryBackend`, `DualTelemetrySpan`, and `TELEMETRY_BACKEND` selection logic.
+- **Details**:
+  - `TELEMETRY_BACKEND` env var supports `mlflow` (default), `otel`, and `dual`.
+  - `DualTelemetryBackend` uses `contextlib.ExitStack` for safe multi-backend nesting.
+  - Secondary backend is best-effort (exceptions are logged but suppressed).
+- **Verification**: Tests for selection logic and failure isolation in `agent/tests/test_telemetry.py`.
 
-### Phase 3: Wiring (Config Flag)
-1.  Modify `agent_core/graph.py` initialization logic.
-    - Read `ENABLE_OTEL=true` env var.
-    - If true, wrap `MlflowTelemetryBackend` in `DualTelemetryBackend` (or switch entirely).
-    - `telemetry.set_backend(...)`.
-
-### Phase 4: Verification
-1.  Run agent locally with local OTEL collector (Jaeger).
-2.  Verify trace waterfall visualization matches MLflow.
+### Phase 4: Smoke Verification
+- **Status**: Pending
+- **Goal**: Manual verification against a live OTEL collector.
 
 ---
 

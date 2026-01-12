@@ -8,6 +8,7 @@ import abc
 import contextlib
 import json
 import logging
+import os
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -264,6 +265,109 @@ class OTELTelemetryBackend(TelemetryBackend):
             logger.debug("update_current_trace: No recording span in context")
 
 
+class DualTelemetrySpan(TelemetrySpan):
+    """Composite span that forwards calls to two backends."""
+
+    def __init__(self, primary: TelemetrySpan, secondary: Optional[TelemetrySpan]):
+        """Initialize with primary and optional secondary span."""
+        self.primary = primary
+        self.secondary = secondary
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set inputs on both spans, secondary is best-effort."""
+        self.primary.set_inputs(inputs)
+        if self.secondary:
+            try:
+                self.secondary.set_inputs(inputs)
+            except Exception:
+                logger.warning("Secondary backend set_inputs failed", exc_info=True)
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set outputs on both spans, secondary is best-effort."""
+        self.primary.set_outputs(outputs)
+        if self.secondary:
+            try:
+                self.secondary.set_outputs(outputs)
+            except Exception:
+                logger.warning("Secondary backend set_outputs failed", exc_info=True)
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set attribute on both spans, secondary is best-effort."""
+        self.primary.set_attribute(key, value)
+        if self.secondary:
+            try:
+                self.secondary.set_attribute(key, value)
+            except Exception:
+                logger.warning("Secondary backend set_attribute failed", exc_info=True)
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set attributes on both spans, secondary is best-effort."""
+        self.primary.set_attributes(attributes)
+        if self.secondary:
+            try:
+                self.secondary.set_attributes(attributes)
+            except Exception:
+                logger.warning("Secondary backend set_attributes failed", exc_info=True)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add event to both spans, secondary is best-effort."""
+        self.primary.add_event(name, attributes)
+        if self.secondary:
+            try:
+                self.secondary.add_event(name, attributes)
+            except Exception:
+                logger.warning("Secondary backend add_event failed", exc_info=True)
+
+
+class DualTelemetryBackend(TelemetryBackend):
+    """Composite backend that writes to two backends simultaneously."""
+
+    def __init__(self, primary: TelemetryBackend, secondary: TelemetryBackend):
+        """Initialize with primary and secondary backends."""
+        self.primary = primary
+        self.secondary = secondary
+
+    def configure(self, **kwargs) -> None:
+        """Configure both backends, secondary is best-effort."""
+        self.primary.configure(**kwargs)
+        try:
+            self.secondary.configure(**kwargs)
+        except Exception:
+            logger.warning("Secondary backend configure failed", exc_info=True)
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start span on both backends using ExitStack for safe nesting."""
+        with contextlib.ExitStack() as stack:
+            # Primary is strict, errors here bubble up
+            p_cm = self.primary.start_span(name, span_type, inputs, attributes)
+            p_span = stack.enter_context(p_cm)
+
+            # Secondary is best-effort
+            s_span = None
+            try:
+                s_cm = self.secondary.start_span(name, span_type, inputs, attributes)
+                s_span = stack.enter_context(s_cm)
+            except Exception:
+                logger.warning("Secondary backend start_span failed", exc_info=True)
+
+            yield DualTelemetrySpan(p_span, s_span)
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update current trace on both backends, secondary is best-effort."""
+        self.primary.update_current_trace(metadata)
+        try:
+            self.secondary.update_current_trace(metadata)
+        except Exception:
+            logger.warning("Secondary backend update_current_trace failed", exc_info=True)
+
+
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
 
@@ -343,9 +447,21 @@ class TelemetryService:
         """Initialize the telemetry service.
 
         Args:
-            backend: The telemetry backend to use. Defaults to MlflowTelemetryBackend.
+            backend: The telemetry backend to use. If not provided,
+                    defaults to TELEMETRY_BACKEND env var.
         """
-        self._backend = backend or MlflowTelemetryBackend()
+        if backend:
+            self._backend = backend
+        else:
+            backend_type = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+            if backend_type == "otel":
+                self._backend = OTELTelemetryBackend()
+            elif backend_type == "dual":
+                self._backend = DualTelemetryBackend(
+                    primary=MlflowTelemetryBackend(), secondary=OTELTelemetryBackend()
+                )
+            else:
+                self._backend = MlflowTelemetryBackend()
 
     def set_backend(self, backend: TelemetryBackend) -> None:
         """Switch backend at runtime (useful for testing)."""

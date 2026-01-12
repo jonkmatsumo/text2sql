@@ -3,10 +3,12 @@ from unittest.mock import MagicMock, patch
 
 # Add src to path if needed (depending on test runner config)
 from agent_core.telemetry import (
+    DualTelemetryBackend,
     InMemoryTelemetryBackend,
     MlflowTelemetryBackend,
     OTELTelemetryBackend,
     SpanType,
+    TelemetryBackend,
     TelemetryService,
 )
 from opentelemetry.sdk.trace import TracerProvider
@@ -162,6 +164,49 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(s2.status.status_code, StatusCode.ERROR)
         self.assertEqual(s2.status.description, "failed_check")
         self.assertEqual(s2.attributes["telemetry.error"], "failed_check")
+
+    def test_backend_selection(self):
+        """Test that the service selects the correct backend based on env var."""
+        with patch.dict("os.environ", {"TELEMETRY_BACKEND": "otel"}):
+            service = TelemetryService()
+            self.assertIsInstance(service._backend, OTELTelemetryBackend)
+
+        with patch.dict("os.environ", {"TELEMETRY_BACKEND": "dual"}):
+            service = TelemetryService()
+            self.assertIsInstance(service._backend, DualTelemetryBackend)
+
+    def test_dual_write_success(self):
+        """Test that DualTelemetryBackend writes to both backends."""
+        p = InMemoryTelemetryBackend()
+        s = InMemoryTelemetryBackend()
+        backend = DualTelemetryBackend(p, s)
+        service = TelemetryService(backend=backend)
+
+        with service.start_span("dual_test") as span:
+            span.set_attribute("k", "v")
+
+        self.assertEqual(len(p.spans), 1)
+        self.assertEqual(len(s.spans), 1)
+        self.assertEqual(p.spans[0].attributes["k"], "v")
+        self.assertEqual(s.spans[0].attributes["k"], "v")
+
+    def test_dual_write_secondary_failure_isolation(self):
+        """Test that DualTelemetryBackend survives secondary backend failure."""
+        p = InMemoryTelemetryBackend()
+        s = MagicMock(spec=TelemetryBackend)
+        # Mock start_span to return a context manager that fails or just fail directly
+        s.start_span.side_effect = Exception("Secondary Crash")
+
+        backend = DualTelemetryBackend(p, s)
+        service = TelemetryService(backend=backend)
+
+        # This should NOT raise
+        with service.start_span("isolate_test") as span:
+            span.set_attribute("k", "v")
+
+        self.assertEqual(len(p.spans), 1)
+        self.assertEqual(p.spans[0].attributes["k"], "v")
+        self.assertTrue(p.spans[0].is_finished)
 
 
 if __name__ == "__main__":
