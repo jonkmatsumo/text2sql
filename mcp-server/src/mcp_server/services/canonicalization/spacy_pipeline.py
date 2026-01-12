@@ -32,6 +32,14 @@ class CanonicalizationService:
     _instance: Optional["CanonicalizationService"] = None
     _initialized: bool = False
 
+    class PipelineState:
+        """Immutable container for thread-safe atomic swapping."""
+
+        def __init__(self, nlp, matcher):
+            """Initialize pipeline state."""
+            self.nlp = nlp
+            self.matcher = matcher
+
     def __init__(self, model: str = "en_core_web_sm"):
         """Initialize SpaCy pipeline with EntityRuler and DependencyMatcher.
 
@@ -41,26 +49,45 @@ class CanonicalizationService:
         if CanonicalizationService._initialized:
             return
 
-        try:
-            import spacy
-        except ImportError:
-            logger.warning("SpaCy not installed. Canonicalization disabled.")
-            self.nlp = None
-            return
+        self.model = model
+        self._state: Optional[CanonicalizationService.PipelineState] = None
 
         try:
-            self.nlp = spacy.load(model)
+            import spacy  # noqa: F401
+        except ImportError:
+            logger.warning("SpaCy not installed. Canonicalization disabled.")
+            return
+
+        self._state = self._build_pipeline(model)
+
+        CanonicalizationService._initialized = True
+        if self._state:
+            logger.info(f"CanonicalizationService initialized with model: {model}")
+
+    def _build_pipeline(self, model: str, extra_patterns: list = None) -> Optional[PipelineState]:
+        """Build a fresh pipeline state.
+
+        Args:
+            model: Name of spacy model to load
+            extra_patterns: Optional list of patterns to add to EntityRuler
+
+        Returns:
+            PipelineState or None if loading fails
+        """
+        import spacy
+
+        try:
+            nlp = spacy.load(model)
         except OSError:
             logger.warning(
                 f"SpaCy model '{model}' not found. Run: python -m spacy download {model}"
             )
-            self.nlp = None
-            return
+            return None
 
-        self._setup_entity_ruler()
-        self._setup_dependency_matcher()
-        CanonicalizationService._initialized = True
-        logger.info(f"CanonicalizationService initialized with model: {model}")
+        self._setup_entity_ruler(nlp, extra_patterns)
+        matcher = self._setup_dependency_matcher(nlp)
+
+        return self.PipelineState(nlp, matcher)
 
     @classmethod
     def get_instance(cls) -> "CanonicalizationService":
@@ -75,13 +102,10 @@ class CanonicalizationService:
         cls._instance = None
         cls._initialized = False
 
-    def _setup_entity_ruler(self) -> None:
-        """Load entity patterns from JSONL files."""
-        if self.nlp is None:
-            return
-
+    def _setup_entity_ruler(self, nlp, extra_patterns: list = None) -> None:
+        """Load entity patterns from JSONL files and optional extra patterns."""
         # Add entity ruler before NER
-        ruler = self.nlp.add_pipe("entity_ruler", before="ner")
+        ruler = nlp.add_pipe("entity_ruler", before="ner")
 
         # Load patterns from files
         # Priority: Env Var -> /app/patterns -> local dev project paths -> package path
@@ -120,15 +144,17 @@ class CanonicalizationService:
 
             if all_patterns:
                 ruler.add_patterns(all_patterns)
-                logger.info(f"Total entity patterns loaded: {len(all_patterns)}")
+                logger.info(f"Total file entity patterns loaded: {len(all_patterns)}")
         else:
             logger.warning(f"Patterns directory not found at {patterns_dir}")
 
-    def _setup_dependency_matcher(self) -> None:
-        """Register structural patterns for constraint extraction."""
-        if self.nlp is None:
-            return
+        # Add extra patterns (e.g. from DB)
+        if extra_patterns:
+            ruler.add_patterns(extra_patterns)
+            logger.info(f"Added {len(extra_patterns)} extra patterns")
 
+    def _setup_dependency_matcher(self, nlp):
+        """Register structural patterns for constraint extraction."""
         from mcp_server.services.canonicalization.dependency_patterns import (
             ENTITY_PATTERNS,
             LIMIT_PATTERNS,
@@ -136,15 +162,16 @@ class CanonicalizationService:
         )
         from spacy.matcher import DependencyMatcher
 
-        self.matcher = DependencyMatcher(self.nlp.vocab)
-        self.matcher.add("RATING_CONSTRAINT", RATING_PATTERNS)
-        self.matcher.add("LIMIT_CONSTRAINT", LIMIT_PATTERNS)
-        self.matcher.add("ENTITY_CONSTRAINT", ENTITY_PATTERNS)
+        matcher = DependencyMatcher(nlp.vocab)
+        matcher.add("RATING_CONSTRAINT", RATING_PATTERNS)
+        matcher.add("LIMIT_CONSTRAINT", LIMIT_PATTERNS)
+        matcher.add("ENTITY_CONSTRAINT", ENTITY_PATTERNS)
+        return matcher
 
-    async def reload_patterns(self) -> None:
-        """Reload entity patterns from the database."""
-        if self.nlp is None:
-            return
+    async def reload_patterns(self) -> int:
+        """Reload entity patterns from the database and atomic swap pipeline."""
+        if not SPACY_ENABLED:
+            return 0
 
         from mcp_server.config.database import Database
 
@@ -167,41 +194,22 @@ class CanonicalizationService:
                     }
                 )
 
-        if patterns:
-            # Get existing ruler
-            if "entity_ruler" in self.nlp.pipe_names:
-                ruler = self.nlp.get_pipe("entity_ruler")
-                # We can't easily "remove" patterns from a compiled ruler without resetting
-                # But we can add new ones.
-                # If we want to fully reload, we might need to remove and re-add the pipe.
-                self.nlp.remove_pipe("entity_ruler")
+        # Build NEW pipeline with DB patterns
+        # This is the "Atomic Swap" preparation - heavy lifting done on local var
+        new_state = self._build_pipeline(self.model, extra_patterns=patterns)
 
-            ruler = self.nlp.add_pipe("entity_ruler", before="ner")
-
-            # Re-load static patterns + new DB patterns
-            # This is a bit expensive but correct.
-            # Ideally we merge them.
-            # For now, let's just add DB patterns to existing ruler if possible?
-            # SpaCy documentation says we can add_patterns.
-            # If we want to replace, we must remove pipe.
-            # Let's assume we want to APPEND (or overwrite if collision? SpaCy
-            # handles overlaps by order).
-
-            # To be safe and support "Reload" fully, re-run _setup_entity_ruler()
-            # then add DB patterns.
-            self._setup_entity_ruler()  # Re-adds pipe and static patterns
-            ruler = self.nlp.get_pipe("entity_ruler")
-            ruler.add_patterns(patterns)
-
-            logger.info(f"Loaded {len(patterns)} patterns from database.")
+        if new_state:
+            # Atomic swap
+            self._state = new_state
+            logger.info(f"Swapped pipeline with {len(patterns)} DB patterns.")
             return len(patterns)
         else:
-            logger.info("No patterns found in database.")
-            return 0
+            logger.error("Failed to build new pipeline during reload.")
+            raise RuntimeError("Failed to build pipeline")
 
     def is_available(self) -> bool:
         """Check if SpaCy is properly initialized."""
-        return self.nlp is not None and SPACY_ENABLED
+        return self._state is not None and SPACY_ENABLED
 
     def extract_constraints(self, query: str) -> dict:
         """Extract constraints from natural language query.
@@ -221,10 +229,12 @@ class CanonicalizationService:
             "confidence": 0.0,
         }
 
-        if not self.is_available():
+        # Local atomic reference
+        state = self._state
+        if not state or not SPACY_ENABLED:
             return constraints
 
-        doc = self.nlp(query)
+        doc = state.nlp(query)
 
         # Extract from named entities (EntityRuler)
         for ent in doc.ents:
@@ -242,10 +252,10 @@ class CanonicalizationService:
                 constraints["confidence"] += 0.2
 
         # Extract from dependency patterns
-        if hasattr(self, "matcher"):
-            matches = self.matcher(doc)
+        if state.matcher:
+            matches = state.matcher(doc)
             for match_id, token_ids in matches:
-                pattern_name = self.nlp.vocab.strings[match_id]
+                pattern_name = state.nlp.vocab.strings[match_id]
 
                 if pattern_name == "LIMIT_CONSTRAINT":
                     for idx in token_ids:
