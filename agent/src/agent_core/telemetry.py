@@ -6,8 +6,15 @@ logging, allowing the agent to be agnostic of the underlying backend (e.g., MLfl
 
 import abc
 import contextlib
+import json
+import logging
 from enum import Enum
 from typing import Any, Dict, Optional
+
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+logger = logging.getLogger(__name__)
 
 
 class SpanType(Enum):
@@ -166,6 +173,95 @@ class MlflowTelemetryBackend(TelemetryBackend):
         except Exception:
             # Often fails if no active trace, mirroring current graph.py behavior
             pass
+
+
+class OTELTelemetrySpan(TelemetrySpan):
+    """OpenTelemetry implementation of TelemetrySpan."""
+
+    def __init__(self, otel_span):
+        """Initialize with an OTEL span object."""
+        self._span = otel_span
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set span inputs as JSON attribute."""
+        self._span.set_attribute("telemetry.inputs_json", json.dumps(inputs))
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set span outputs as JSON attribute and handle error status."""
+        self._span.set_attribute("telemetry.outputs_json", json.dumps(outputs))
+
+        # Check for error in outputs
+        error = outputs.get("error")
+        if error:
+            self._span.set_attribute("telemetry.error", str(error))
+            self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a single span attribute."""
+        self._span.set_attribute(key, value)
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set multiple span attributes."""
+        self._span.set_attributes(attributes)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the span."""
+        self._span.add_event(name, attributes or {})
+
+
+class OTELTelemetryBackend(TelemetryBackend):
+    """OpenTelemetry implementation of TelemetryBackend."""
+
+    def __init__(self, tracer_name: str = "text2sql-agent"):
+        """Initialize the OTEL backend."""
+        self.tracer_name = tracer_name
+        self._tracer = None
+
+    def _ensure_tracer(self):
+        if self._tracer is None:
+            self._tracer = trace.get_tracer(self.tracer_name)
+        return self._tracer
+
+    def configure(self, **kwargs) -> None:
+        """Configure OTEL.
+
+        Note: Actual SDK configuration (exporters, etc.) is usually handled
+        externally or via env vars, but we provide a hook here.
+        """
+        # Ensure tracer is initialized
+        self._ensure_tracer()
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start an OTEL span as a context manager."""
+        tracer = self._ensure_tracer()
+
+        # Map span_type to attribute as OTEL SpanKind is usually INTERNAL for these
+        base_attrs = {"span.type": span_type.value}
+        if attributes:
+            base_attrs.update(attributes)
+
+        with tracer.start_as_current_span(
+            name=name, kind=trace.SpanKind.INTERNAL, attributes=base_attrs
+        ) as otel_span:
+            span = OTELTelemetrySpan(otel_span)
+            if inputs:
+                span.set_inputs(inputs)
+            yield span
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update the current active span with metadata (best effort)."""
+        current_span = trace.get_current_span()
+        if current_span.is_recording():
+            current_span.set_attributes(metadata)
+        else:
+            logger.debug("update_current_trace: No recording span in context")
 
 
 class InMemoryTelemetrySpan(TelemetrySpan):

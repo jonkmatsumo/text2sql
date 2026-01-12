@@ -5,9 +5,14 @@ from unittest.mock import MagicMock, patch
 from agent_core.telemetry import (
     InMemoryTelemetryBackend,
     MlflowTelemetryBackend,
+    OTELTelemetryBackend,
     SpanType,
     TelemetryService,
 )
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 
 class TestTelemetryService(unittest.TestCase):
@@ -103,9 +108,60 @@ class TestTelemetryService(unittest.TestCase):
             mock_ml_span.set_attribute.assert_any_call("attr", "3")
             mock_ml_span.add_event.assert_called_with("event", {"e": "4"})
 
-            # Test update_current_trace
             service.update_current_trace({"m": "n"})
             mock_update.assert_called_once_with(metadata={"m": "n"})
+
+    def test_otel_backend(self):
+        """Test the OTELTelemetryBackend produces correct spans and attributes."""
+        # Setup in-memory OTEL SDK
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+        # We need to ensure OTELTelemetryBackend uses this provider
+        with patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
+            # Re-implementing a bit of the SDK logic to ensure our test uses the provider
+            mock_get_tracer.side_effect = lambda name: provider.get_tracer(name)
+
+            backend = OTELTelemetryBackend()
+            service = TelemetryService(backend=backend)
+
+            # Test span creation and attributes
+            with service.start_span(
+                name="otel_test",
+                span_type=SpanType.RETRIEVER,
+                inputs={"query": "sql"},
+                attributes={"custom": "val"},
+            ) as span:
+                span.set_outputs({"status": "ok"})
+                span.add_event("event_done", {"p": 1})
+
+            # Test error status
+            with service.start_span(name="otel_error") as span:
+                span.set_outputs({"error": "failed_check"})
+
+        spans = exporter.get_finished_spans()
+        self.assertEqual(len(spans), 2)
+
+        # Verify first span
+        s1 = spans[0]
+        self.assertEqual(s1.name, "otel_test")
+        self.assertEqual(s1.attributes["span.type"], SpanType.RETRIEVER.value)
+        self.assertEqual(s1.attributes["custom"], "val")
+        # Inputs are JSON stringified
+        import json
+
+        self.assertEqual(json.loads(s1.attributes["telemetry.inputs_json"]), {"query": "sql"})
+        self.assertEqual(json.loads(s1.attributes["telemetry.outputs_json"]), {"status": "ok"})
+        self.assertEqual(len(s1.events), 1)
+        self.assertEqual(s1.events[0].name, "event_done")
+
+        # Verify second span (Error)
+        s2 = spans[1]
+        self.assertEqual(s2.name, "otel_error")
+        self.assertEqual(s2.status.status_code, StatusCode.ERROR)
+        self.assertEqual(s2.status.description, "failed_check")
+        self.assertEqual(s2.attributes["telemetry.error"], "failed_check")
 
 
 if __name__ == "__main__":
