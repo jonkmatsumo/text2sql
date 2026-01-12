@@ -4,7 +4,6 @@ import json
 import os
 import uuid
 
-import mlflow
 from agent_core.nodes.cache_lookup import cache_lookup_node
 from agent_core.nodes.clarify import clarify_node
 from agent_core.nodes.correct import correct_sql_node
@@ -16,17 +15,14 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
+from agent_core.telemetry import telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-# Configure MLflow tracking URI
+# Configure Telemetry tracking URI and autologging
 # Default to localhost for local dev, but use container name in Docker
-mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-mlflow.set_tracking_uri(mlflow_tracking_uri)
-
-# Enable LangChain autologging with inline tracer for proper async context propagation
-# This captures the entire graph execution as a hierarchical trace
-mlflow.langchain.autolog(run_tracer_inline=True)
+telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
 
 
 def route_after_router(state: AgentState) -> str:
@@ -348,7 +344,7 @@ async def run_agent_with_tracing(
         if user_id:
             metadata["mlflow.trace.user"] = user_id
 
-        mlflow.update_current_trace(metadata=metadata)
+        telemetry.update_current_trace(metadata=metadata)
     except Exception:
         # Trace context may not be available outside the invoke
         pass
