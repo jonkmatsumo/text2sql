@@ -215,6 +215,7 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         """Configure via kwargs."""
         self.config.update(kwargs)
 
+    @contextlib.contextmanager
     def start_span(
         self,
         name: str,

@@ -94,6 +94,10 @@ class TestTelemetryService(unittest.TestCase):
                 span.add_event("event", {"e": "4"})
 
             mock_start_span.assert_called_once()
+            call_args = mock_start_span.call_args
+            self.assertEqual(call_args.kwargs["name"], "ml_span")
+            # We don't strictly check span_type here as it involves mapping lookup logic
+            # that we trust, but we could if needed.
             mock_ml_span.set_inputs.assert_called_with({"in": "1"})
             mock_ml_span.set_outputs.assert_called_with({"out": "2"})
             mock_ml_span.set_attribute.assert_any_call("attr", "3")
