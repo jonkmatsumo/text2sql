@@ -4,14 +4,15 @@ This module provides a domain-agnostic sanitizer for strings,
 implementing strict normalization, length checks, and character allowlisting.
 """
 
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
 from typing import List, Optional
 
 # Configuration Defaults
-DEFAULT_MIN_LEN = 2
-DEFAULT_MAX_LEN = 64
+DEFAULT_MIN_LEN = int(os.getenv("SANITIZER_MIN_LEN", "2"))
+DEFAULT_MAX_LEN = int(os.getenv("SANITIZER_MAX_LEN", "64"))
 
 # Regex Metacharacters to explicitly reject
 REGEX_META_CHARS = set("*?|{}[]^$\\")
