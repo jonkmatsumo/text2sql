@@ -142,6 +142,60 @@ class PatternValidator:
                     )
                 continue
 
+            # 4. Short Pattern Check
+            if len(sanitized) <= 3:
+                failures.append(
+                    ValidationFailure(
+                        raw,
+                        sanitized,
+                        "RISKY_SHORT_PATTERN",
+                        "Pattern is too short (<=3 chars)",
+                    )
+                )
+                continue
+
+            # 5. Overlap Detection
+            found_overlap = False
+
+            # Check against Existing
+            for k_pat in known_patterns:
+                if sanitized == k_pat:
+                    continue
+                if self._is_overlapping(sanitized, k_pat):
+                    ex_lbl = known_patterns[k_pat][0]
+                    failures.append(
+                        ValidationFailure(
+                            raw,
+                            sanitized,
+                            "OVERLAP_CONFLICT",
+                            f"Overlaps with existing pattern '{k_pat}' ({ex_lbl})",
+                        )
+                    )
+                    found_overlap = True
+                    break
+
+            if found_overlap:
+                continue
+
+            # Check against Batch
+            for s_pat in seen_in_batch:
+                if sanitized == s_pat:
+                    continue
+                if self._is_overlapping(sanitized, s_pat):
+                    failures.append(
+                        ValidationFailure(
+                            raw,
+                            sanitized,
+                            "OVERLAP_CONFLICT",
+                            f"Overlaps with batch pattern '{s_pat}'",
+                        )
+                    )
+                    found_overlap = True
+                    break
+
+            if found_overlap:
+                continue
+
             # Success
             seen_in_batch[sanitized] = (label, pid)
             # Create a clean copy with sanitized pattern
@@ -150,3 +204,21 @@ class PatternValidator:
             valid.append(new_p)
 
         return valid, failures
+
+    def _is_overlapping(self, p1: str, p2: str) -> bool:
+        """Check if p1 overlaps p2 on token boundaries."""
+        t1 = p1.split()
+        t2 = p2.split()
+
+        n1, n2 = len(t1), len(t2)
+        if n1 == 0 or n2 == 0:
+            return False
+
+        longer, shorter = (t1, t2) if n1 >= n2 else (t2, t1)
+
+        # Check if shorter is a sub-sequence of longer
+        len_l, len_s = len(longer), len(shorter)
+        for i in range(len_l - len_s + 1):
+            if longer[i : i + len_s] == shorter:
+                return True
+        return False
