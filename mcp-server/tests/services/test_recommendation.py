@@ -619,4 +619,117 @@ async def test_recommendation_diversity_disabled_fallback(mock_registry):
 
         # Expected: [v1, v2, f3] as diversity is disabled
         assert len(result.examples) == 3
+        assert len(result.examples) == 3
         assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_diversity_across_sources_including_fallback(mock_registry, diversity_pool):
+    """Test that diversity caps apply across primary and fallback sources."""
+    # RECO_DIVERSITY_MAX_PER_SOURCE = 1
+    # limit = 3
+    # v1, v2 (verified)
+    # s1, s2 (seeded)
+    # f1, f2 (fallback)
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=1,
+        diversity_min_verified=0,
+    )
+
+    mock_registry.lookup_semantic.side_effect = [
+        [diversity_pool["v1"]],  # Only 1 verified (F1)
+        [diversity_pool["s1"]],  # Only 1 seeded (S1)
+        [diversity_pool["f1"], diversity_pool["f2"]],  # Fallback
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=3)
+
+        # Expected: 1 approved, 1 seeded, 1 fallback
+        assert len(result.examples) == 3
+        sources = [ex.source for ex in result.examples]
+        assert sources.count("approved") == 1
+        assert sources.count("seeded") == 1
+        assert sources.count("fallback") == 1
+        assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_diversity_verified_priority_preserved(mock_registry, diversity_pool):
+    """Test that verified floor and priority are preserved under diversity selection."""
+    # RECO_DIVERSITY_MIN_VERIFIED = 1
+    # limit = 2
+    # s1, s2 (seeded)
+    # v1 (verified) - at the end of primary list
+    config = RecommendationConfig(
+        limit_default=2,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=2,
+        diversity_min_verified=1,
+    )
+
+    # Note: lookup_semantic returns verified then seeded.
+    mock_registry.lookup_semantic.side_effect = [
+        [diversity_pool["v1"]],
+        [diversity_pool["s1"], diversity_pool["s2"]],
+        [],
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=2)
+
+        assert len(result.examples) == 2
+        # First one should be approved due to status priority AND floor logic
+        assert result.examples[0].source == "approved"
+        assert result.examples[1].source == "seeded"
+
+
+@pytest.mark.asyncio
+async def test_diversity_fingerprint_uniqueness_enforced(mock_registry, diversity_pool):
+    """Test that fingerprint uniqueness is never violated across sources."""
+    # limit = 3
+    # v1 (F1)
+    # dup_v1 (F1)
+    # f1 (F4)
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=5,  # High enough to not be the bottleneck
+        diversity_min_verified=0,
+    )
+
+    mock_registry.lookup_semantic.side_effect = [
+        [diversity_pool["v1"], diversity_pool["dup_v1"]],
+        [],
+        [diversity_pool["f1"]],
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=3)
+
+        # Expected: [v1, f1] (dup_v1 skipped)
+        assert len(result.examples) == 2
+        fingerprints = [ex.canonical_group_id for ex in result.examples]
+        assert len(set(fingerprints)) == len(fingerprints)
+        assert "F1" in fingerprints
+        assert "F4" in fingerprints
