@@ -238,16 +238,39 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
             # Cap at reasonable maximum
             gross_amount = min(gross_amount, 10000.0)
 
-            # Fee (typically 2-3% for card transactions)
-            fee_rate = 0.02 + rng.random() * 0.01
-            fee_amount = round(gross_amount * fee_rate, 2)
+            # Channel
+            channel = ctx.sample_categorical(rng, CHANNELS, weights=CHANNEL_WEIGHTS)
+
+            # Fee (varies by channel and merchant risk tier)
+            # Base rates by channel
+            channel_fee_rates = {
+                "online": 0.029,
+                "pos": 0.015,
+                "mobile": 0.025,
+                "atm": 0.01,
+                "phone": 0.035,
+            }
+            base_fee_rate = channel_fee_rates.get(channel, 0.02)
+            
+            # Risk-tier multiplier for fees (high risk merchants charged more)
+            # Get merchant risk tier from merchant_df
+            merchant_row = merchant_df[merchant_df["merchant_id"] == merchant_id].iloc[0]
+            merchant_risk_tier = merchant_row.get("risk_tier", "medium")
+            risk_fee_multipliers = {
+                "low": 0.9,
+                "medium": 1.0,
+                "high": 1.3,
+                "critical": 1.8,
+            }
+            risk_fee_multiplier = risk_fee_multipliers.get(merchant_risk_tier, 1.0)
+            
+            # Small random variance in fee
+            effective_fee_rate = base_fee_rate * risk_fee_multiplier * (0.95 + rng.random() * 0.1)
+            fee_amount = round(gross_amount * effective_fee_rate, 2)
             net_amount = round(gross_amount - fee_amount, 2)
 
             # Currency
             currency = ctx.sample_categorical(rng, CURRENCIES, weights=CURRENCY_WEIGHTS)
-
-            # Channel
-            channel = ctx.sample_categorical(rng, CHANNELS, weights=CHANNEL_WEIGHTS)
 
             # Status - apply risk-correlated decline rate
             base_decline_rate = cfg.rates.decline_rate

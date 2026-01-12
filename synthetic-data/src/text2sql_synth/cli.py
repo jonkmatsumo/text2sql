@@ -2,9 +2,19 @@
 
 import argparse
 import sys
+import logging
 from pathlib import Path
 
 from text2sql_synth.config import ScalePreset, SynthConfig
+from text2sql_synth.orchestrator import generate_all
+from text2sql_synth.export import export_to_directory
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 def resolve_config(args: argparse.Namespace) -> SynthConfig:
@@ -54,14 +64,21 @@ def cmd_generate(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    # Print resolved configuration
-    print("Resolved configuration:")
-    print(config.to_json())
-    print()
-
-    print(f"Output directory: {args.out}")
-    print("NOT IMPLEMENTED")
-    return 1
+    logger.info("Configuration resolved.")
+    
+    try:
+        # Run generation
+        ctx = generate_all(config)
+        
+        # Export results
+        manifest_path = export_to_directory(ctx, config, args.out)
+        
+        logger.info("Generation and export successful!")
+        logger.info("Manifest: %s", manifest_path)
+        return 0
+    except Exception as e:
+        logger.exception("Failed to generate data: %s", e)
+        return 1
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
