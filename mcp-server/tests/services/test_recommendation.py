@@ -512,3 +512,88 @@ async def test_recommendation_filtering_regression(mock_registry):
     assert len(result.examples) == 1
     assert result.examples[0].canonical_group_id == "f2"
     assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_recommendation_diversity_with_fallback(mock_registry):
+    """Test diversity policy across primary and fallback sources."""
+    # Scenario:
+    # - limit = 3
+    # - diversity_max_per_source = 1
+    # - Primary has two verified (F1, F2)
+    # - Fallback has one unverified (F3)
+
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=1,
+        diversity_min_verified=0,
+    )
+
+    v1 = make_qp("f1", "verified")
+    v2 = make_qp("f2", "verified")
+    f3 = make_qp("f3", "unverified")
+    f3.roles = ["interaction"]
+
+    # Primaries: [v1, v2]
+    # Fallback: [f3]
+    mock_registry.lookup_semantic.side_effect = [
+        [v1, v2],  # verified
+        [],  # seeded
+        [f3],  # fallback
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=3)
+
+        # Expected:
+        # - v1 selected (approved count=1)
+        # - v2 skipped (approved count=1 >= max 1)
+        # - f3 selected (fallback count=1)
+        # Note: Even though limit is 3, we only get 2 because of diversity caps.
+        assert len(result.examples) == 2
+        sources = [ex.source for ex in result.examples]
+        assert "approved" in sources
+        assert "fallback" in sources
+        assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_recommendation_diversity_disabled_fallback(mock_registry):
+    """Test that fallback behavior is unchanged when diversity is disabled."""
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=False,
+        diversity_max_per_source=1,  # Should be ignored
+        diversity_min_verified=0,
+    )
+
+    v1 = make_qp("f1", "verified")
+    v2 = make_qp("f2", "verified")
+    f3 = make_qp("f3", "unverified")
+    f3.roles = ["interaction"]
+
+    mock_registry.lookup_semantic.side_effect = [
+        [v1, v2],  # verified
+        [],  # seeded
+        [f3],  # fallback
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=3)
+
+        # Expected: [v1, v2, f3] as diversity is disabled
+        assert len(result.examples) == 3
+        assert result.fallback_used is True
