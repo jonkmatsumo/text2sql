@@ -260,6 +260,15 @@ class RecommendationService:
            seeded, fallback).
 
         Note: If diversity is disabled or config is invalid, this is a passthrough.
+
+        Future-Proofing & Extensions:
+        - SQL-structure diversity is currently OUT OF SCOPE. This would require
+          SQL parsing/fingerprinting beyond canonical GIDs.
+        - Tests (Issue #111) should assert source distribution but NOT strict
+          similarity ordering, as diversity floors (Pass A) explicitly break
+          pure similarity preference to ensure mix.
+        - New heuristics (e.g. schema overlap, keyword diversity) should plug in
+          as additional passes between Pass A and Pass B.
         """
         if not config or not getattr(config, "diversity_enabled", False):
             return candidates
