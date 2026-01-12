@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from mcp_server.models import QueryPair
+from mcp_server.services.recommendation.config import RecommendationConfig
 from mcp_server.services.recommendation.service import RecommendationService
 
 
@@ -122,11 +123,11 @@ async def test_recommend_fallback(mock_registry):
 def make_qp(fingerprint, status):
     """Create a dummy QueryPair for testing."""
     return QueryPair(
-        signature_key="sig",
+        signature_key=f"sig_{fingerprint}_{status}",
         tenant_id=1,
         fingerprint=fingerprint,
-        question="q",
-        sql_query="s",
+        question=f"q_{fingerprint}",
+        sql_query=f"s_{fingerprint}",
         status=status,
         roles=["example"],
     )
@@ -150,6 +151,28 @@ def create_config(**kwargs):
     }
     defaults.update(kwargs)
     return RecommendationConfig(**defaults)
+
+
+def make_interaction_qp(fingerprint):
+    """Create a dummy interaction QueryPair for testing."""
+    qp = make_qp(fingerprint, "unverified")
+    qp.roles = ["interaction"]
+    return qp
+
+
+@pytest.fixture
+def diversity_pool():
+    """Return a controlled pool of QueryPairs for diversity testing."""
+    return {
+        "v1": make_qp("F1", "verified"),
+        "v2": make_qp("F2", "verified"),
+        "v3": make_qp("F3", "verified"),
+        "s1": make_qp("S1", "seeded"),
+        "s2": make_qp("S2", "seeded"),
+        "f1": make_interaction_qp("F4"),
+        "f2": make_interaction_qp("F5"),
+        "dup_v1": make_qp("F1", "verified"),  # Shares fingerprint with F1
+    }
 
 
 def test_diversity_policy_disabled():
