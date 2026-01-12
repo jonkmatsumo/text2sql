@@ -2,6 +2,7 @@ import base64
 import logging
 
 from fastapi import FastAPI, Request, Response, status
+from otel_worker.export.mlflow_exporter import export_to_mlflow
 from otel_worker.otlp.parser import extract_trace_summaries, parse_otlp_traces
 from otel_worker.storage.minio import init_minio, upload_trace_blob
 from otel_worker.storage.postgres import init_db, save_trace_and_spans
@@ -59,7 +60,8 @@ async def receive_traces(request: Request):
                 # 2. Save to Postgres
                 save_trace_and_spans(trace_id, parsed_data, trace_summaries, raw_blob_url)
 
-                # 3. Dual-write to MLflow (Phase 4)
+                # 3. Dual-write to MLflow
+                export_to_mlflow(trace_id, service_name, trace_summaries, parsed_data)
 
             return Response(status_code=status.HTTP_200_OK)
         except Exception as e:
