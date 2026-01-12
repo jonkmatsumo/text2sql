@@ -67,14 +67,37 @@ def cmd_generate(args: argparse.Namespace) -> int:
     logger.info("Configuration resolved.")
     
     try:
+        # Process --only to handle commas if provided
+        only_tables = None
+        if args.only:
+            only_tables = []
+            for item in args.only:
+                if "," in item:
+                    only_tables.extend(i.strip() for i in item.split(",") if i.strip())
+                else:
+                    only_tables.append(item.strip())
+        
         # Run generation
-        ctx, tables = generate_tables(config, only=args.only)
+        ctx, tables = generate_tables(config, only=only_tables)
         
         # Export results
         manifest_path = export_to_directory(ctx, config, args.out)
         
         logger.info("Generation and export successful!")
-        logger.info("Manifest: %s", manifest_path)
+        
+        # Print summary
+        print("\n" + "="*40)
+        print("SYNTHETIC DATA GENERATION SUMMARY")
+        print("="*40)
+        print(f"Output Directory: {args.out}")
+        print(f"Manifest:         {manifest_path}")
+        print(f"Seed:             {config.seed}")
+        print(f"Tables Generated: {len(tables)}")
+        print("-"*40)
+        for table_name, df in sorted(tables.items()):
+            print(f"- {table_name:25} {len(df):>8} rows")
+        print("="*40 + "\n")
+        
         return 0
     except Exception as e:
         logger.exception("Failed to generate data: %s", e)

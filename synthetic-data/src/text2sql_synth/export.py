@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from text2sql_synth.config import SynthConfig
     from text2sql_synth.context import GenerationContext
 
-from text2sql_synth.util.hashing import stable_hash_bytes
 from text2sql_synth.util.manifest import generate_manifest
 
 logger = logging.getLogger(__name__)
+
+
+def _calculate_file_hash(file_path: Path) -> str:
+    """Calculate SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        # Read in chunks of 4K
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
 
 
 def export_to_directory(
@@ -35,29 +45,42 @@ def export_to_directory(
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
+    csv_dir = out_path / "csv"
+    pq_dir = out_path / "parquet"
+
+    if cfg.output.csv:
+        csv_dir.mkdir(exist_ok=True)
+    if cfg.output.parquet:
+        pq_dir.mkdir(exist_ok=True)
+
     file_metadata = []
 
-    for table_name, df in ctx.tables.items():
+    # Sort table names for deterministic output order
+    sorted_tables = sorted(ctx.tables.keys())
+
+    for table_name in sorted_tables:
+        df = ctx.tables[table_name]
+        
         # Export CSV
         if cfg.output.csv:
             csv_file = f"{table_name}.csv"
-            csv_path = out_path / csv_file
+            csv_path = csv_dir / csv_file
             logger.info("Exporting %s to CSV...", table_name)
             df.to_csv(csv_path, index=False)
             
             # Record metadata
             file_metadata.append({
                 "table": table_name,
-                "file": csv_file,
+                "file": f"csv/{csv_file}",
                 "format": "csv",
                 "rows": len(df),
-                "hash": stable_hash_bytes(csv_path.read_bytes()) if cfg.output.include_file_hashes else None
+                "hash": _calculate_file_hash(csv_path) if cfg.output.include_file_hashes else None
             })
 
         # Export Parquet
         if cfg.output.parquet:
             pq_file = f"{table_name}.parquet"
-            pq_path = out_path / pq_file
+            pq_path = pq_dir / pq_file
             logger.info("Exporting %s to Parquet...", table_name)
             
             compression = cfg.output.compression
@@ -69,10 +92,10 @@ def export_to_directory(
             # Record metadata
             file_metadata.append({
                 "table": table_name,
-                "file": pq_file,
+                "file": f"parquet/{pq_file}",
                 "format": "parquet",
                 "rows": len(df),
-                "hash": stable_hash_bytes(pq_path.read_bytes()) if cfg.output.include_file_hashes else None
+                "hash": _calculate_file_hash(pq_path) if cfg.output.include_file_hashes else None
             })
 
     # Generate and save manifest
