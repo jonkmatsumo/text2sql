@@ -183,8 +183,14 @@ We explicitly avoid "mocking everything". We will use **In-Memory** implementati
 - **Verification**: Tests for selection logic and failure isolation in `agent/tests/test_telemetry.py`.
 
 ### Phase 4: Smoke Verification
-- **Status**: Pending
-- **Goal**: Manual verification against a live OTEL collector.
+- **Status**: Completed (2026-01-11)
+- **Tooling**: Added `scripts/verify_otel_setup.py`.
+- **Usage**:
+  ```bash
+  export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+  python scripts/verify_otel_setup.py
+  ```
+- **Goal**: Allow manual end-to-end verification against a live OTEL collector/Jaeger without running the full agent.
 
 ---
 
