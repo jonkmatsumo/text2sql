@@ -23,6 +23,7 @@ class PatternValidator:
         self,
         patterns: List[Dict[str, str]],
         existing_patterns: Optional[List[Dict[str, str]]] = None,
+        allow_short: bool = False,
     ) -> Tuple[List[Dict[str, str]], List[ValidationFailure]]:
         """Validate a batch of patterns.
 
@@ -143,7 +144,7 @@ class PatternValidator:
                 continue
 
             # 4. Short Pattern Check
-            if len(sanitized) <= 3:
+            if not allow_short and len(sanitized) <= 3:
                 failures.append(
                     ValidationFailure(
                         raw,

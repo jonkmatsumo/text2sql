@@ -265,7 +265,8 @@ async def sample_distinct_values(
 async def generate_entity_patterns() -> list[dict]:
     """Generate entity patterns from database introspection."""
     # Initialize DB (assumes already running or managed by caller/main)
-    patterns = []
+    trusted_patterns = []
+    untrusted_patterns = []
     client = await get_openai_client()
     introspector = Database.get_schema_introspector()
 
@@ -292,7 +293,7 @@ async def generate_entity_patterns() -> list[dict]:
         async with Database.get_connection(tenant_id=1) as conn:
             for table_name in target_tables:
                 # 1. Table Patterns
-                patterns.extend(generate_table_patterns(table_name))
+                trusted_patterns.extend(generate_table_patterns(table_name))
 
                 # 2. Inspect Table
                 try:
@@ -303,7 +304,7 @@ async def generate_entity_patterns() -> list[dict]:
 
                 for col in table_def.columns:
                     # 3. Column Patterns
-                    patterns.extend(generate_column_patterns(table_name, col))
+                    trusted_patterns.extend(generate_column_patterns(table_name, col))
 
                     # 4. Value Discovery
                     if detector.is_candidate(table_name, col):
@@ -353,27 +354,40 @@ async def generate_entity_patterns() -> list[dict]:
                         # Add patterns for values
                         for v in values:
                             # Basic pattern: value itself
-                            patterns.append({"label": label, "pattern": v.lower(), "id": v})
+                            trusted_patterns.append({"label": label, "pattern": v.lower(), "id": v})
 
                         # LLM Enrichment
                         if client and values and len(values) <= detector.threshold * 2:
                             logger.info(f"Enriching {label} with LLM...")
                             synonyms = await enrich_values_with_llm(client, label, values)
-                            patterns.extend(synonyms)
+                            untrusted_patterns.extend(synonyms)
 
         # Validation Stage
-        logger.info(f"Validating {len(patterns)} candidate patterns...")
         validator = PatternValidator()
-        valid_patterns, failures = validator.validate_batch(patterns)
 
-        if failures:
-            logger.warning(f"Validation dropped {len(failures)} patterns:")
-            for f in failures:
+        # 1. Validate Trusted (Allow Short)
+        logger.info(f"Validating {len(trusted_patterns)} trusted patterns...")
+        valid_trusted, failures_t = validator.validate_batch(trusted_patterns, allow_short=True)
+        if failures_t:
+            logger.warning(f"Dropped {len(failures_t)} trusted patterns:")
+            for f in failures_t:
                 logger.warning(
                     f"  [{f.reason}] '{f.raw_pattern}' -> '{f.sanitized_pattern}' : {f.details}"
                 )
 
-        patterns = valid_patterns
+        # 2. Validate Untrusted (Reject Short, Check Overlaps against Trusted)
+        logger.info(f"Validating {len(untrusted_patterns)} untrusted patterns...")
+        valid_untrusted, failures_u = validator.validate_batch(
+            untrusted_patterns, existing_patterns=valid_trusted, allow_short=False
+        )
+        if failures_u:
+            logger.warning(f"Dropped {len(failures_u)} untrusted patterns:")
+            for f in failures_u:
+                logger.warning(
+                    f"  [{f.reason}] '{f.raw_pattern}' -> '{f.sanitized_pattern}' : {f.details}"
+                )
+
+        patterns = valid_trusted + valid_untrusted
         logger.info(f"Retained {len(patterns)} valid patterns.")
 
     except Exception as e:
