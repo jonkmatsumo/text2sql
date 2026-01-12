@@ -19,3 +19,7 @@ build/
 # IDE
 .idea/
 .vscode/
+
+# Generated artifacts
+test_output/
+test_validation_run/

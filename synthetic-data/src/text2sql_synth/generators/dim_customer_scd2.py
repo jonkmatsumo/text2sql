@@ -75,9 +75,13 @@ def generate(ctx: GenerationContext, cfg: SynthConfig) -> pd.DataFrame:
         if num_changes > 0:
             # Calculate time points for changes
             total_days = (cfg.time_window.start_date - customer_since).days
-            if total_days > num_changes * 30:  # Need at least 30 days per version
+            
+            # Need at least some buffer to generate versions
+            min_days_total = (num_changes + 1) * 10 
+            if total_days >= min_days_total:
+                # Use a smaller buffer (10 days) to allow more flexibility with short tenures
                 change_points = sorted(
-                    rng.choice(range(30, total_days - 30), size=num_changes, replace=False)
+                    rng.choice(range(10, total_days - 10), size=num_changes, replace=False)
                 )
 
                 # Build versions from oldest to newest
