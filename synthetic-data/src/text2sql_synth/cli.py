@@ -118,6 +118,24 @@ def cmd_load_postgres(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_load_postgres(args: argparse.Namespace) -> int:
+    """Load generated data into a Postgres database."""
+    from text2sql_synth.loaders.postgres import load_from_manifest
+    
+    try:
+        load_from_manifest(
+            args.manifest,
+            args.dsn,
+            target_schema=args.schema,
+            table_prefix=args.prefix,
+            truncate=not args.no_truncate,
+        )
+        return 0
+    except Exception as e:
+        logger.exception("Failed to load data into Postgres: %s", e)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
@@ -155,6 +173,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only generate specific tables and their dependencies",
     )
     gen_parser.set_defaults(func=cmd_generate)
+
+    # load-postgres subcommand
+    load_parser = subparsers.add_parser(
+        "load-postgres",
+        help="Load generated data into a Postgres database",
+    )
+    load_parser.add_argument(
+        "--manifest",
+        required=True,
+        metavar="PATH",
+        help="Path to the manifest.json file",
+    )
+    load_parser.add_argument(
+        "--dsn",
+        required=True,
+        metavar="DSN",
+        help="Postgres connection string (DSN)",
+    )
+    load_parser.add_argument(
+        "--schema",
+        default="public",
+        metavar="NAME",
+        help="Target schema in Postgres (default: public)",
+    )
+    load_parser.add_argument(
+        "--prefix",
+        default="",
+        metavar="STR",
+        help="Optional prefix for table names",
+    )
+    load_parser.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="Disable truncation of tables before loading",
+    )
+    load_parser.set_defaults(func=cmd_load_postgres)
 
     # validate subcommand
     val_parser = subparsers.add_parser(
