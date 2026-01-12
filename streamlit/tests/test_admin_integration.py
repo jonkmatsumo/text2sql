@@ -48,7 +48,7 @@ async def test_admin_panel_reload_button_logic():
     # Since we've mocked streamlit globally, importing Admin_Panel won't error out on st.* calls
 
     with patch(
-        "streamlit.service.ops_service.OpsService.reload_patterns", new_callable=AsyncMock
+        "service.ops_service.OpsService.reload_patterns", new_callable=AsyncMock
     ) as mock_service_reload:
         mock_service_reload.return_value = {"success": True}
 
@@ -69,7 +69,7 @@ async def test_admin_panel_reload_button_logic():
 @pytest.mark.asyncio
 async def test_admin_ops_integration_sanity():
     """Sanity check that OpsService methods are exposed correctly for UI."""
-    from streamlit.service.ops_service import OpsService
+    from service.ops_service import OpsService
 
     # Ensure method exists
     assert hasattr(OpsService, "reload_patterns")
