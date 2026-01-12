@@ -239,3 +239,93 @@ def test_diversity_invalid_config(caplog):
 
     assert len(result) == 2
     assert "Invalid diversity_min_verified" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_config_override_integration(mock_registry):
+    """Test config overrides on service behavior."""
+    from mcp_server.services.recommendation.config import RecommendationConfig
+
+    # 1. Test Multiplier
+    custom_config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=10,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+    )
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config):
+        mock_registry.lookup_semantic.return_value = []
+        await RecommendationService.recommend_examples("test", 1, limit=5)
+
+        # Check calls to registry
+        # Expected limit = 5 * 10 = 50
+        calls = mock_registry.lookup_semantic.call_args_list
+        # Verified lookup
+        assert calls[0].kwargs["limit"] == 50
+        # Seeded lookup
+        assert calls[1].kwargs["limit"] == 50
+
+    # 2. Test Fallback Threshold & Enabled
+    # Case: Fallback enabled=False
+    custom_config_disabled = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=False,  # Disabled via config
+        fallback_threshold=0.1,
+        status_priority=["verified"],
+    )
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config_disabled):
+        mock_registry.lookup_semantic.reset_mock()
+        mock_registry.lookup_semantic.return_value = (
+            []
+        )  # Return empty to trigger fallback logic if enabled
+
+        await RecommendationService.recommend_examples("test", 1, limit=5, enable_fallback=True)
+
+        # Should NOT call fallback (verified + seeded = 2 calls)
+        assert mock_registry.lookup_semantic.call_count == 2
+
+    # Case: Fallback threshold
+    custom_config_threshold = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.99,
+        status_priority=["verified"],
+    )
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config_threshold):
+        mock_registry.lookup_semantic.reset_mock()
+        # Primaries empty
+        mock_registry.lookup_semantic.side_effect = [[], [], []]
+
+        await RecommendationService.recommend_examples("test", 1, limit=5, enable_fallback=True)
+
+        # Should call fallback with threshold 0.99
+        calls = mock_registry.lookup_semantic.call_args_list
+        assert len(calls) == 3
+        assert calls[2].kwargs["threshold"] == 0.99
+        assert calls[2].kwargs["role"] == "interaction"
+
+    # 3. Test Status Priority
+    # Change priority to favor seeded over verified
+    custom_config_priority = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["seeded", "verified"],  # Seeded (0) > Verified (1)
+    )
+
+    # We test _rank_candidates directly or via public API
+    v_ex = make_qp("F1", "verified")
+    s_ex = make_qp("F2", "seeded")
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", custom_config_priority):
+        ranked = RecommendationService._rank_candidates([v_ex, s_ex])
+        # Seeded should be first
+        assert ranked[0].status == "seeded"
+        assert ranked[1].status == "verified"
