@@ -15,7 +15,7 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
-from agent_core.telemetry import telemetry
+from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -23,6 +23,20 @@ from langgraph.graph import END, StateGraph
 # Default to localhost for local dev, but use container name in Docker
 telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
 telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
+
+
+def with_telemetry_context(node_func):
+    """Wrap a node function to restore telemetry context."""
+
+    async def wrapped_node(state: AgentState):
+        ctx = state.get("telemetry_context")
+        if ctx:
+            with telemetry.use_context(ctx):
+                return await node_func(state)
+        return await node_func(state)
+
+    wrapped_node.__name__ = node_func.__name__
+    return wrapped_node
 
 
 def route_after_router(state: AgentState) -> str:
@@ -116,17 +130,17 @@ def create_workflow() -> StateGraph:
     """
     workflow = StateGraph(AgentState)
 
-    # Add all nodes
-    workflow.add_node("cache_lookup", cache_lookup_node)
-    workflow.add_node("router", router_node)
-    workflow.add_node("clarify", clarify_node)
-    workflow.add_node("retrieve", retrieve_context_node)
-    workflow.add_node("plan", plan_sql_node)
-    workflow.add_node("generate", generate_sql_node)
-    workflow.add_node("validate", validate_sql_node)
-    workflow.add_node("execute", validate_and_execute_node)
-    workflow.add_node("correct", correct_sql_node)
-    workflow.add_node("synthesize", synthesize_insight_node)
+    # Add all nodes with telemetry context wrapping
+    workflow.add_node("cache_lookup", with_telemetry_context(cache_lookup_node))
+    workflow.add_node("router", with_telemetry_context(router_node))
+    workflow.add_node("clarify", with_telemetry_context(clarify_node))
+    workflow.add_node("retrieve", with_telemetry_context(retrieve_context_node))
+    workflow.add_node("plan", with_telemetry_context(plan_sql_node))
+    workflow.add_node("generate", with_telemetry_context(generate_sql_node))
+    workflow.add_node("validate", with_telemetry_context(validate_sql_node))
+    workflow.add_node("execute", with_telemetry_context(validate_and_execute_node))
+    workflow.add_node("correct", with_telemetry_context(correct_sql_node))
+    workflow.add_node("synthesize", with_telemetry_context(synthesize_insight_node))
 
     # Set entry point - Cache Lookup first
     workflow.set_entry_point("cache_lookup")
@@ -277,15 +291,19 @@ async def run_agent_with_tracing(
     # Initialize result with inputs in case workflow crashes immediately
     result = inputs.copy()
 
-    try:
-        result = await app.ainvoke(inputs, config=config)
-    except Exception as execute_err:
-        print(f"Critical Error in Agent Workflow: {execute_err}")
-        result["error"] = str(execute_err)
-        result["error_category"] = "SYSTEM_CRASH"
-        # Ensure we don't return a result that looks like success but has no messages
-        if "messages" not in result:
-            result["messages"] = []
+    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN):
+        # Capture the context AFTER starting our internal root span
+        inputs["telemetry_context"] = telemetry.capture_context()
+
+        try:
+            result = await app.ainvoke(inputs, config=config)
+        except Exception as execute_err:
+            print(f"Critical Error in Agent Workflow: {execute_err}")
+            result["error"] = str(execute_err)
+            result["error_category"] = "SYSTEM_CRASH"
+            # Ensure we don't return a result that looks like success but has no messages
+            if "messages" not in result:
+                result["messages"] = []
 
     # 2. Update Interaction Logging (Post-execution)
     # We execute this regardless of workflow success/failure
