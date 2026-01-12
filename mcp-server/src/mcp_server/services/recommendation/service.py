@@ -95,45 +95,67 @@ class RecommendationService:
 
     @staticmethod
     def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
+        """Filter out candidates based on validity and staleness rules.
+
+        Contract:
+        - Exclude tombstoned examples (if configured).
+        - Exclude incomplete examples (missing question, sql, or fingerprint).
+        - Exclude stale examples (if staleness filtering enabled).
+        - Applied uniformly to ALL candidate sources (verified, seeded, fallback).
+        - Fail-safe: Returns valid subset, never raises.
+        """
         if not candidates:
             return []
 
         filtered = []
-        exclude_tombstoned = config.exclude_tombstoned if config else True
+        try:
+            # Safe access to config attributes
+            exclude_tombstoned = getattr(config, "exclude_tombstoned", True)
+            stale_max_age_days = getattr(config, "stale_max_age_days", 0)
 
-        for cp in candidates:
-            # 1. Check Tombstone
-            if exclude_tombstoned and cp.status == "tombstoned":
-                continue
-
-            # 2. Check Required Fields
-            # question, sql_query, fingerprint must be non-empty
-            if not cp.question or not cp.sql_query or not cp.fingerprint:
-                # Debug log could go here, but keeping silent to avoid spam
-                continue
-
-            # 3. Check Staleness
-            stale_days = config.stale_max_age_days if config else 0
-            if stale_days > 0:
-                if not cp.updated_at:
+            for cp in candidates:
+                # 1. Check Tombstone
+                if exclude_tombstoned and cp.status == "tombstoned":
+                    logger.debug(f"Filtering tombstoned candidate: {cp.fingerprint}")
                     continue
 
-                # Ensure updated_at is timezone-aware or assume proper comparison
-                # QueryPair.updated_at is likely typically naive or aware depending on DB driver.
-                # We'll use utcnow for comparison.
-                now = datetime.now(timezone.utc)
-
-                # Handle timezone awareness of cp.updated_at
-                ex_time = cp.updated_at
-                if ex_time.tzinfo is None:
-                    # If naive, assume UTC (standard practice in this project)
-                    ex_time = ex_time.replace(tzinfo=timezone.utc)
-
-                age = now - ex_time
-                if age.total_seconds() > (stale_days * 86400):
+                # 2. Check Required Fields
+                # question, sql_query, fingerprint must be non-empty
+                if not cp.question or not cp.sql_query or not cp.fingerprint:
+                    logger.debug(f"Filtering incomplete candidate: {cp.fingerprint}")
                     continue
 
-            filtered.append(cp)
+                # 3. Check Staleness
+                if stale_max_age_days > 0:
+                    if not cp.updated_at:
+                        logger.debug(
+                            "Filtering candidate missing updated_at (staleness enabled): "
+                            f"{cp.fingerprint}"
+                        )
+                        continue
+
+                    # Ensure updated_at is timezone-aware or assume proper comparison
+                    now = datetime.now(timezone.utc)
+
+                    # Handle timezone awareness of cp.updated_at
+                    ex_time = cp.updated_at
+                    if ex_time.tzinfo is None:
+                        # If naive, assume UTC (standard practice in this project)
+                        ex_time = ex_time.replace(tzinfo=timezone.utc)
+
+                    age = now - ex_time
+                    if age.total_seconds() > (stale_max_age_days * 86400):
+                        logger.debug(
+                            f"Filtering stale candidate ({age.days} days old): " f"{cp.fingerprint}"
+                        )
+                        continue
+
+                filtered.append(cp)
+        except Exception as e:
+            # Guardrail: filtering must never raise exceptions
+            logger.error(f"Unexpected error during validity filtering: {e}", exc_info=True)
+            # In case of error, we return the candidates that were already successfully filtered
+            pass
 
         return filtered
 

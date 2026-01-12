@@ -459,3 +459,34 @@ async def test_recommendation_staleness(mock_registry):
         # Should include stale and unknown now
         # Note: deduping happens, but they have diff fingerprints
         assert len(result.examples) == 3
+
+
+@pytest.mark.asyncio
+async def test_recommendation_filtering_regression(mock_registry):
+    """Regression: All primaries filtered, fallback still filtered and returned."""
+    # 1. Primaries are all tombstoned
+    p1 = make_qp("p1", "verified")
+    p1.status = "tombstoned"
+    p2 = make_qp("p2", "seeded")
+    p2.status = "tombstoned"
+
+    # 2. Fallback has one tombstoned, one valid
+    f1 = make_qp("f1", "unverified")
+    f1.status = "tombstoned"
+    f1.roles = ["interaction"]
+
+    f2 = make_qp("f2", "unverified")
+    f2.roles = ["interaction"]
+
+    mock_registry.lookup_semantic.side_effect = [
+        [p1],  # verified
+        [p2],  # seeded
+        [f1, f2],  # fallback
+    ]
+
+    result = await RecommendationService.recommend_examples("test", 1, limit=1)
+
+    # Result should only contain f2
+    assert len(result.examples) == 1
+    assert result.examples[0].canonical_group_id == "f2"
+    assert result.fallback_used is True
