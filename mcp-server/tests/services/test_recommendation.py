@@ -733,3 +733,72 @@ async def test_diversity_fingerprint_uniqueness_enforced(mock_registry, diversit
         assert len(set(fingerprints)) == len(fingerprints)
         assert "F1" in fingerprints
         assert "F4" in fingerprints
+
+
+@pytest.mark.asyncio
+async def test_diversity_disabled_preserves_legacy_behavior(mock_registry, diversity_pool):
+    """Test that all candidates up to limit are returned when diversity is disabled."""
+    # limit = 4
+    # v1, v2, v3 (verified)
+    # s1, s2 (seeded)
+    # Total distinct = 5.
+    config = RecommendationConfig(
+        limit_default=4,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=False,
+        diversity_max_per_source=1,  # Should be ignored
+        diversity_min_verified=0,
+    )
+
+    mock_registry.lookup_semantic.side_effect = [
+        [diversity_pool["v1"], diversity_pool["v2"], diversity_pool["v3"]],
+        [diversity_pool["s1"], diversity_pool["s2"]],
+        [],
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=4)
+
+        # Expected: [v1, v2, v3, s1] (all top 4 candidates)
+        assert len(result.examples) == 4
+        sources = [ex.source for ex in result.examples]
+        assert sources.count("approved") == 3
+        assert sources.count("seeded") == 1
+
+
+@pytest.mark.asyncio
+async def test_diversity_invalid_config_fails_safe(mock_registry, diversity_pool):
+    """Test that invalid diversity config safely falls back to diversity disabled."""
+    # limit = 3
+    # diversity_max_per_source = -2 (Invalid, should disable diversity)
+    config = RecommendationConfig(
+        limit_default=3,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=-2,
+        diversity_min_verified=0,
+    )
+
+    mock_registry.lookup_semantic.side_effect = [
+        [diversity_pool["v1"], diversity_pool["v2"], diversity_pool["v3"]],
+        [],
+        [],
+    ]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("test", 1, limit=3)
+
+        # Expected: all 3 approved (v1, v2, v3) because diversity is safely disabled
+        assert len(result.examples) == 3
+        sources = [ex.source for ex in result.examples]
+        assert sources.count("approved") == 3
