@@ -109,6 +109,8 @@ def generate_column_patterns(table_name: str, column: ColumnDef) -> List[Dict[st
     for v in variations:
         patterns.append({"label": "COLUMN", "pattern": v.lower(), "id": canonical_id})
 
+    return patterns
+
 
 async def get_openai_client() -> AsyncOpenAI:
     """Get AsyncOpenAI client."""
@@ -183,13 +185,37 @@ async def enrich_values_with_llm(
         for item in generated:
             if "pattern" in item and "id" in item:
                 patterns.append(
-                    {"label": label, "pattern": item["pattern"].lower(), "id": item["id"]}
+                    {
+                        "label": label,
+                        "pattern": item["pattern"].lower(),
+                        "id": item["id"],
+                    }
                 )
 
     except Exception as e:
         logger.error(f"Error generating synonyms for {label}: {e}")
 
     return patterns
+
+
+async def get_native_enum_values(conn, table_name: str, column_name: str) -> List[str]:
+    """Fetch values for a native ENUM column from system catalog."""
+    try:
+        # Postgres catalog query
+        query = """
+            SELECT e.enumlabel
+            FROM pg_catalog.pg_enum e
+            JOIN pg_catalog.pg_type t ON e.enumtypid = t.oid
+            JOIN pg_catalog.pg_attribute a ON t.oid = a.atttypid
+            JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
+            WHERE c.relname = $1 AND a.attname = $2
+            ORDER BY e.enumsortorder
+        """
+        rows = await conn.fetch(query, table_name, column_name)
+        return [str(row[0]) for row in rows]
+    except Exception as e:
+        logger.warning(f"Failed to fetch native enum values for {table_name}.{column_name}: {e}")
+        return []
 
 
 async def sample_distinct_values(
@@ -262,23 +288,39 @@ async def generate_entity_patterns() -> list[dict]:
 
                     # 4. Value Discovery
                     if detector.is_candidate(table_name, col):
-                        logger.info(f"Scanning values for {table_name}.{col.name} (Candidate)...")
-                        values = await sample_distinct_values(
-                            conn,
-                            table_name,
-                            col.name,
-                            threshold=detector.threshold,
-                            sample_rows=int(os.getenv("ENUM_CARDINALITY_SAMPLE_ROWS", "10000")),
-                            timeout_ms=int(os.getenv("ENUM_CARDINALITY_QUERY_TIMEOUT_MS", "2000")),
-                        )
+                        values = []
+                        is_native = False
 
-                        # Threshold Check
-                        if len(values) > detector.threshold:
+                        # 4a. Native Enum Check
+                        if col.data_type == "USER-DEFINED":
+                            values = await get_native_enum_values(conn, table_name, col.name)
+                            if values:
+                                is_native = True
+                                logger.info(f"Found native enum values for {table_name}.{col.name}")
+
+                        # 4b. Low Cardinality Detection (Scanning)
+                        if not values and not is_native:
                             logger.info(
-                                f"Skipping {table_name}.{col.name}: High cardinality "
-                                f"({len(values)} > {detector.threshold})"
+                                f"Scanning values for {table_name}.{col.name} (Candidate)..."
                             )
-                            continue
+                            values = await sample_distinct_values(
+                                conn,
+                                table_name,
+                                col.name,
+                                threshold=detector.threshold,
+                                sample_rows=int(os.getenv("ENUM_CARDINALITY_SAMPLE_ROWS", "10000")),
+                                timeout_ms=int(
+                                    os.getenv("ENUM_CARDINALITY_QUERY_TIMEOUT_MS", "2000")
+                                ),
+                            )
+
+                            # Threshold Check (scanned only)
+                            if len(values) > detector.threshold:
+                                logger.info(
+                                    f"Skipping {table_name}.{col.name}: High cardinality "
+                                    f"({len(values)} > {detector.threshold})"
+                                )
+                                continue
 
                         if not values:
                             continue
@@ -295,7 +337,7 @@ async def generate_entity_patterns() -> list[dict]:
                             patterns.append({"label": label, "pattern": v.lower(), "id": v})
 
                         # LLM Enrichment
-                        if client and values:
+                        if client and values and len(values) <= detector.threshold * 2:
                             logger.info(f"Enriching {label} with LLM...")
                             synonyms = await enrich_values_with_llm(client, label, values)
                             patterns.extend(synonyms)

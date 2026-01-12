@@ -62,6 +62,11 @@ async def test_high_cardinality_exclusion_regression():
         status_patterns = [p for p in patterns if p.get("label") == "STATUS"]
         assert len(status_patterns) == 3, "Expected 3 patterns for 'status' column"
 
+        # Check TABLE patterns (should exist - regression check)
+        table_patterns = [p for p in patterns if p.get("label") == "TABLE"]
+        assert len(table_patterns) > 0
+        assert any(p["pattern"] == "users" for p in table_patterns)
+
         # Check USER_TYPE patterns (should NOT exist because 15 > threshold)
         user_type_patterns = [p for p in patterns if p.get("label") == "USER_TYPE"]
         assert (
