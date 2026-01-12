@@ -3,10 +3,10 @@
 Enhanced with error taxonomy for targeted correction strategies.
 """
 
-import mlflow
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
+from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -35,9 +35,9 @@ def correct_sql_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with corrected SQL, error_category, and incremented retry_count
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="correct_sql",
-        span_type=mlflow.entities.SpanType.CHAIN,
+        span_type=SpanType.CHAIN,
     ) as span:
         error = state.get("error")
         current_sql = state.get("current_sql")

@@ -4,7 +4,6 @@ import json
 import os
 import uuid
 
-import mlflow
 from agent_core.nodes.cache_lookup import cache_lookup_node
 from agent_core.nodes.clarify import clarify_node
 from agent_core.nodes.correct import correct_sql_node
@@ -16,17 +15,14 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
+from agent_core.telemetry import telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-# Configure MLflow tracking URI
+# Configure Telemetry tracking URI and autologging
 # Default to localhost for local dev, but use container name in Docker
-mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-mlflow.set_tracking_uri(mlflow_tracking_uri)
-
-# Enable LangChain autologging with inline tracer for proper async context propagation
-# This captures the entire graph execution as a hierarchical trace
-mlflow.langchain.autolog(run_tracer_inline=True)
+telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
 
 
 def route_after_router(state: AgentState) -> str:
@@ -256,6 +252,7 @@ async def run_agent_with_tracing(
 
     # 1. Start Interaction Logging (Pre-execution)
     interaction_id = None
+    tools = []
     try:
         from agent_core.tools import get_mcp_tools
 
@@ -277,17 +274,45 @@ async def run_agent_with_tracing(
         print(f"Warning: Failed to create interaction log: {e}")
 
     # Execute workflow - autologger will create the root trace
-    result = await app.ainvoke(inputs, config=config)
+    # Initialize result with inputs in case workflow crashes immediately
+    result = inputs.copy()
+
+    try:
+        result = await app.ainvoke(inputs, config=config)
+    except Exception as execute_err:
+        print(f"Critical Error in Agent Workflow: {execute_err}")
+        result["error"] = str(execute_err)
+        result["error_category"] = "SYSTEM_CRASH"
+        # Ensure we don't return a result that looks like success but has no messages
+        if "messages" not in result:
+            result["messages"] = []
 
     # 2. Update Interaction Logging (Post-execution)
+    # We execute this regardless of workflow success/failure
     if interaction_id:
         try:
             update_tool = next((t for t in tools if t.name == "update_interaction"), None)
             if update_tool:
                 # Determine status
-                status = "SUCCESS" if not result.get("error") else "FAILURE"
+                status = "SUCCESS"
+                if result.get("error"):
+                    status = "FAILURE"
+                elif result.get("ambiguity_type"):
+                    status = "CLARIFICATION_REQUIRED"
+
                 # Get last message as response
-                last_msg = result["messages"][-1].content if result.get("messages") else ""
+                last_msg = ""
+                if result.get("messages") and len(result["messages"]) > 0:
+                    last_message_obj = result["messages"][-1]
+                    # formatting check: verify it works for both string and object
+                    if hasattr(last_message_obj, "content"):
+                        last_msg = last_message_obj.content
+                    else:
+                        last_msg = str(last_message_obj)
+
+                # If we have an error and no response message, use error as text
+                if not last_msg and result.get("error"):
+                    last_msg = f"System Error: {result['error']}"
 
                 await update_tool.ainvoke(
                     {
@@ -319,7 +344,7 @@ async def run_agent_with_tracing(
         if user_id:
             metadata["mlflow.trace.user"] = user_id
 
-        mlflow.update_current_trace(metadata=metadata)
+        telemetry.update_current_trace(metadata=metadata)
     except Exception:
         # Trace context may not be available outside the invoke
         pass

@@ -2,8 +2,8 @@
 
 import logging
 
-import mlflow
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
 
@@ -18,9 +18,9 @@ async def cache_lookup_node(state: AgentState) -> dict:
     2. Tool handles extraction, exact-match, and deterministic validation.
     3. Returns cached SQL if valid, or miss if not.
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="cache_lookup",
-        span_type=mlflow.entities.SpanType.RETRIEVER,
+        span_type=SpanType.RETRIEVER,
     ) as span:
         messages = state["messages"]
         user_query = messages[-1].content if messages else ""

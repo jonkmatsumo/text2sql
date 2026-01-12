@@ -1,7 +1,7 @@
-"""SQL validation node using AST analysis before execution."""
+"""SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
-import mlflow
 from agent_core.state import AgentState
+from agent_core.telemetry import SpanType, telemetry
 from agent_core.validation.ast_validator import validate_sql
 
 
@@ -21,9 +21,9 @@ async def validate_sql_node(state: AgentState) -> dict:
     Returns:
         dict: Updated state with validation result and metadata
     """
-    with mlflow.start_span(
+    with telemetry.start_span(
         name="validate_sql",
-        span_type=mlflow.entities.SpanType.CHAIN,
+        span_type=SpanType.CHAIN,
     ) as span:
         sql_query = state.get("current_sql")
 

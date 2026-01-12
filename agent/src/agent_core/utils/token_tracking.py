@@ -3,10 +3,10 @@
 
 def log_token_usage(span, input_tokens: int, output_tokens: int, model: str = None):
     """
-    Log token usage to MLflow span.
+    Log token usage to telemetry span.
 
     Args:
-        span: MLflow span object
+        span: TelemetrySpan object
         input_tokens: Number of input tokens
         output_tokens: Number of output tokens
         model: Model name (optional)
