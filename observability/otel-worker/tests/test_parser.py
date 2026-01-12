@@ -32,6 +32,57 @@ class TestOTLPParser(unittest.TestCase):
             summaries[0]["trace_id"], "MTIzNDU2NzgxMjM0NTY3OA=="
         )  # Base64 encoded by MessageToDict
 
+    def test_parse_json(self):
+        """Verify that OTLP JSON can be parsed and summarized."""
+        json_payload = """
+        {
+          "resourceSpans": [
+            {
+              "resource": {
+                "attributes": [
+                  { "key": "service.name", "value": { "stringValue": "json-service" } }
+                ]
+              },
+              "scopeSpans": [
+                {
+                  "spans": [
+                    {
+                      "traceId": "MTIzNDU2NzgxMjM0NTY3OA==",
+                      "spanId": "MTIzNDU2Nzg=",
+                      "name": "json-span",
+                      "startTimeUnixNano": "1000",
+                      "endTimeUnixNano": "2000"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        from otel_worker.otlp.parser import parse_otlp_json_traces
+
+        parsed = parse_otlp_json_traces(json_payload.encode())
+        summaries = extract_trace_summaries(parsed)
+
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0]["service_name"], "json-service")
+        self.assertEqual(summaries[0]["name"], "json-span")
+
+    def test_parse_invalid_proto(self):
+        """Verify that invalid protobuf fails with ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            parse_otlp_traces(b"not a protobuf")
+        self.assertIn("Invalid OTLP protobuf payload", str(cm.exception))
+
+    def test_parse_invalid_json(self):
+        """Verify that invalid JSON fails with ValueError."""
+        from otel_worker.otlp.parser import parse_otlp_json_traces
+
+        with self.assertRaises(ValueError) as cm:
+            parse_otlp_json_traces(b"{malformed json")
+        self.assertIn("Invalid OTLP JSON payload", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

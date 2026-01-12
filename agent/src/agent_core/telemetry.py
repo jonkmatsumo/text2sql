@@ -6,8 +6,17 @@ logging, allowing the agent to be agnostic of the underlying backend (e.g., MLfl
 
 import abc
 import contextlib
+import json
+import logging
+import os
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+
+from opentelemetry import context, trace
+from opentelemetry.trace import Status, StatusCode
+
+logger = logging.getLogger(__name__)
 
 
 class SpanType(Enum):
@@ -19,6 +28,14 @@ class SpanType(Enum):
     CHAT_MODEL = "CHAT_MODEL"
     PARSER = "PARSER"
     UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class TelemetryContext:
+    """Opaque container for tracing context."""
+
+    otel_context: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class TelemetrySpan(abc.ABC):
@@ -74,6 +91,17 @@ class TelemetryBackend(abc.ABC):
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update the current active trace with metadata."""
         pass
+
+    @abc.abstractmethod
+    def capture_context(self) -> TelemetryContext:
+        """Capture the current tracing context."""
+        pass
+
+    @abc.abstractmethod
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use a previously captured context as active."""
+        yield
 
 
 class MlflowTelemetrySpan(TelemetrySpan):
@@ -167,6 +195,238 @@ class MlflowTelemetryBackend(TelemetryBackend):
             # Often fails if no active trace, mirroring current graph.py behavior
             pass
 
+    def capture_context(self) -> TelemetryContext:
+        """Capture MLflow context (currently minimal)."""
+        return TelemetryContext()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Apply MLflow context (no-op for now)."""
+        yield
+
+
+class OTELTelemetrySpan(TelemetrySpan):
+    """OpenTelemetry implementation of TelemetrySpan."""
+
+    def __init__(self, otel_span):
+        """Initialize with an OTEL span object."""
+        self._span = otel_span
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set span inputs as JSON attribute."""
+        self._span.set_attribute("telemetry.inputs_json", json.dumps(inputs))
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set span outputs as JSON attribute and handle error status."""
+        self._span.set_attribute("telemetry.outputs_json", json.dumps(outputs))
+
+        # Check for error in outputs
+        error = outputs.get("error")
+        if error:
+            self._span.set_attribute("telemetry.error", str(error))
+            self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a single span attribute."""
+        self._span.set_attribute(key, value)
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set multiple span attributes."""
+        self._span.set_attributes(attributes)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the span."""
+        self._span.add_event(name, attributes or {})
+
+
+class OTELTelemetryBackend(TelemetryBackend):
+    """OpenTelemetry implementation of TelemetryBackend."""
+
+    def __init__(self, tracer_name: str = "text2sql-agent"):
+        """Initialize the OTEL backend."""
+        self.tracer_name = tracer_name
+        self._tracer = None
+
+    def _ensure_tracer(self):
+        if self._tracer is None:
+            self._tracer = trace.get_tracer(self.tracer_name)
+        return self._tracer
+
+    def configure(self, **kwargs) -> None:
+        """Configure OTEL.
+
+        Note: Actual SDK configuration (exporters, etc.) is usually handled
+        externally or via env vars, but we provide a hook here.
+        """
+        # Ensure tracer is initialized
+        self._ensure_tracer()
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start an OTEL span as a context manager."""
+        tracer = self._ensure_tracer()
+
+        # Map span_type to attribute as OTEL SpanKind is usually INTERNAL for these
+        base_attrs = {"span.type": span_type.value}
+        if attributes:
+            base_attrs.update(attributes)
+
+        with tracer.start_as_current_span(
+            name=name, kind=trace.SpanKind.INTERNAL, attributes=base_attrs
+        ) as otel_span:
+            span = OTELTelemetrySpan(otel_span)
+            if inputs:
+                span.set_inputs(inputs)
+            yield span
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update the current active span with metadata (best effort)."""
+        current_span = trace.get_current_span()
+        if current_span.is_recording():
+            current_span.set_attributes(metadata)
+        else:
+            logger.debug("update_current_trace: No recording span in context")
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture current OTEL context."""
+        return TelemetryContext(otel_context=context.get_current())
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Restore active OTEL context."""
+        token = None
+        if ctx.otel_context:
+            token = context.attach(ctx.otel_context)
+        try:
+            yield
+        finally:
+            if token:
+                context.detach(token)
+
+
+class DualTelemetrySpan(TelemetrySpan):
+    """Composite span that forwards calls to two backends."""
+
+    def __init__(self, primary: TelemetrySpan, secondary: Optional[TelemetrySpan]):
+        """Initialize with primary and optional secondary span."""
+        self.primary = primary
+        self.secondary = secondary
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set inputs on both spans, secondary is best-effort."""
+        self.primary.set_inputs(inputs)
+        if self.secondary:
+            try:
+                self.secondary.set_inputs(inputs)
+            except Exception:
+                logger.warning("Secondary backend set_inputs failed", exc_info=True)
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set outputs on both spans, secondary is best-effort."""
+        self.primary.set_outputs(outputs)
+        if self.secondary:
+            try:
+                self.secondary.set_outputs(outputs)
+            except Exception:
+                logger.warning("Secondary backend set_outputs failed", exc_info=True)
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set attribute on both spans, secondary is best-effort."""
+        self.primary.set_attribute(key, value)
+        if self.secondary:
+            try:
+                self.secondary.set_attribute(key, value)
+            except Exception:
+                logger.warning("Secondary backend set_attribute failed", exc_info=True)
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set attributes on both spans, secondary is best-effort."""
+        self.primary.set_attributes(attributes)
+        if self.secondary:
+            try:
+                self.secondary.set_attributes(attributes)
+            except Exception:
+                logger.warning("Secondary backend set_attributes failed", exc_info=True)
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add event to both spans, secondary is best-effort."""
+        self.primary.add_event(name, attributes)
+        if self.secondary:
+            try:
+                self.secondary.add_event(name, attributes)
+            except Exception:
+                logger.warning("Secondary backend add_event failed", exc_info=True)
+
+
+class DualTelemetryBackend(TelemetryBackend):
+    """Composite backend that writes to two backends simultaneously."""
+
+    def __init__(self, primary: TelemetryBackend, secondary: TelemetryBackend):
+        """Initialize with primary and secondary backends."""
+        self.primary = primary
+        self.secondary = secondary
+
+    def configure(self, **kwargs) -> None:
+        """Configure both backends, secondary is best-effort."""
+        self.primary.configure(**kwargs)
+        try:
+            self.secondary.configure(**kwargs)
+        except Exception:
+            logger.warning("Secondary backend configure failed", exc_info=True)
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start span on both backends using ExitStack for safe nesting."""
+        with contextlib.ExitStack() as stack:
+            # Primary is strict, errors here bubble up
+            p_cm = self.primary.start_span(name, span_type, inputs, attributes)
+            p_span = stack.enter_context(p_cm)
+
+            # Secondary is best-effort
+            s_span = None
+            try:
+                s_cm = self.secondary.start_span(name, span_type, inputs, attributes)
+                s_span = stack.enter_context(s_cm)
+            except Exception:
+                logger.warning("Secondary backend start_span failed", exc_info=True)
+
+            yield DualTelemetrySpan(p_span, s_span)
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update current trace on both backends, secondary is best-effort."""
+        self.primary.update_current_trace(metadata)
+        try:
+            self.secondary.update_current_trace(metadata)
+        except Exception:
+            logger.warning("Secondary backend update_current_trace failed", exc_info=True)
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture context from both backends."""
+        return self.primary.capture_context()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use context for both backends."""
+        with self.primary.use_context(ctx):
+            try:
+                with self.secondary.use_context(ctx):
+                    yield
+            except Exception:
+                logger.warning("Secondary backend use_context failed", exc_info=True)
+                yield
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -215,6 +475,7 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         """Configure via kwargs."""
         self.config.update(kwargs)
 
+    @contextlib.contextmanager
     def start_span(
         self,
         name: str,
@@ -238,6 +499,15 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         """Update current trace metadata."""
         self.trace_metadata.update(metadata)
 
+    def capture_context(self) -> TelemetryContext:
+        """Capture in-memory context."""
+        return TelemetryContext()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use in-memory context."""
+        yield
+
 
 class TelemetryService:
     """Public surface for telemetry calls."""
@@ -246,9 +516,21 @@ class TelemetryService:
         """Initialize the telemetry service.
 
         Args:
-            backend: The telemetry backend to use. Defaults to MlflowTelemetryBackend.
+            backend: The telemetry backend to use. If not provided,
+                    defaults to TELEMETRY_BACKEND env var.
         """
-        self._backend = backend or MlflowTelemetryBackend()
+        if backend:
+            self._backend = backend
+        else:
+            backend_type = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+            if backend_type == "otel":
+                self._backend = OTELTelemetryBackend()
+            elif backend_type == "dual":
+                self._backend = DualTelemetryBackend(
+                    primary=MlflowTelemetryBackend(), secondary=OTELTelemetryBackend()
+                )
+            else:
+                self._backend = MlflowTelemetryBackend()
 
     def set_backend(self, backend: TelemetryBackend) -> None:
         """Switch backend at runtime (useful for testing)."""
@@ -282,6 +564,26 @@ class TelemetryService:
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update current trace with metadata."""
         self._backend.update_current_trace(metadata)
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture current tracing context."""
+        return self._backend.capture_context()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """Use a previously captured context."""
+        with self._backend.use_context(ctx):
+            yield
+
+    def run_with_context(self, ctx: TelemetryContext, func: Callable, *args, **kwargs):
+        """Run a function under a specific context."""
+        with self.use_context(ctx):
+            return func(*args, **kwargs)
+
+    async def arun_with_context(self, ctx: TelemetryContext, func: Callable, *args, **kwargs):
+        """Run an async function under a specific context."""
+        with self.use_context(ctx):
+            return await func(*args, **kwargs)
 
 
 # Global instance for easy access

@@ -59,12 +59,12 @@ flowchart TB
         MLflow["MLflow Tracking Server<br/>Traces & Metrics"]
         MLflowDB[("MLflow DB")]
         MinIO[("MinIO Artifacts")]
+        OTEL["OpenTelemetry Collector<br/>(OTEL)"]
 
+        OTEL --> MLflow
         MLflow --> MLflowDB
         MLflow --> MinIO
     end
-
-
 
     subgraph MCPServer["🔧 MCP Server (FastMCP)"]
         MCPTools["MCP Tools<br/>mcp-server/src/mcp_server/tools/"]
@@ -80,9 +80,12 @@ flowchart TB
 
         VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
         Canonicalizer["Linguistic Canonicalization<br/>(SpaCy + EntityRuler)"]
+        PatternGen["Pattern Generator<br/>(LLM + Strict Validator)"]
         RegistryService["Unified Registry Service<br/>(Unified Lifecycle)"]
         PolicyEnforcer["Runtime Policy Enforcer<br/>AST-based Query Guardrail"]
         TenantRewriter["Tenant Rewriter<br/>AST-based RLS Injection"]
+
+        PatternGen -->|"Updates"| Canonicalizer
     end
 
     subgraph ControlDB["🛡️ Control-Plane (Postgres)"]
@@ -105,9 +108,8 @@ flowchart TB
     ExecuteNode -->|"Call Tool"| MCPTools
 
     %% Observability Connections
-    Agent --> Observability
-    AgentState -.->|"Auto-log"| MLflow
-    MCPServer -.->|"Traces"| MLflow
+    Agent --> OTEL
+    MCPServer --> OTEL
 
     %% MCP Server Internal Connections
     MCPTools --> DAL
@@ -116,6 +118,7 @@ flowchart TB
     Impl_PG --> SchemaEmbeddings
     Impl_PG --> Tenants
     Impl_PG --> PagilaDB
+    Impl_PG -.-> PatternGen
 
     Impl_MG --> SchemaGraph
 
@@ -145,6 +148,7 @@ flowchart TB
 
 ### 🚀 Unified NLQ↔SQL Registry & Semantic Caching
 *   **Canonical Identifiers**: Every query pair is anchored by a **SpaCy-generated signature key**, ensuring that semantically identical questions share a single source of truth.
+*   **Automated Pattern Discovery**: A dedicated **Pattern Generation Agent** introspects the database and uses an LLM to generate colloquial synonyms for domain-specific values (e.g., "active" → "live", "running"), normalized and validated before being compiled into the SpaCy EntityRuler.
 *   **Multi-Role Lifecycle**: A single entry in the `query_pairs` registry can serve multiple roles:
     *   **Cache**: Fast runtime lookups for repeating queries.
     *   **Example**: High-quality few-shot examples for LLM guidance.
@@ -160,7 +164,8 @@ flowchart TB
 *   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
 ### 📡 Observability & Performance
-*   **End-to-End Tracing**: Integrated MLflow tracking provides full visibility into the agent's reasoning steps, tool calls, and registry decisions.
+*   **OpenTelemetry Integration**: Standardized tracing via OpenTelemetry (OTEL), ensuring vendor-neutral observability that exports seamlessly to MLflow or other APM backends.
+*   **End-to-End Tracing**: Integrated MLflow connection provides full visibility into the agent's reasoning steps, tool calls, and registry decisions.
 *   **Unified Monitoring**: Captures signature hits, misses, and guardrail rejections as structured metadata in the trace.
 
 ## Project Structure

@@ -15,7 +15,7 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
-from agent_core.telemetry import telemetry
+from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -23,6 +23,20 @@ from langgraph.graph import END, StateGraph
 # Default to localhost for local dev, but use container name in Docker
 telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
 telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
+
+
+def with_telemetry_context(node_func):
+    """Wrap a node function to restore telemetry context."""
+
+    async def wrapped_node(state: AgentState):
+        ctx = state.get("telemetry_context")
+        if ctx:
+            with telemetry.use_context(ctx):
+                return await node_func(state)
+        return await node_func(state)
+
+    wrapped_node.__name__ = node_func.__name__
+    return wrapped_node
 
 
 def route_after_router(state: AgentState) -> str:
@@ -116,17 +130,17 @@ def create_workflow() -> StateGraph:
     """
     workflow = StateGraph(AgentState)
 
-    # Add all nodes
-    workflow.add_node("cache_lookup", cache_lookup_node)
-    workflow.add_node("router", router_node)
-    workflow.add_node("clarify", clarify_node)
-    workflow.add_node("retrieve", retrieve_context_node)
-    workflow.add_node("plan", plan_sql_node)
-    workflow.add_node("generate", generate_sql_node)
-    workflow.add_node("validate", validate_sql_node)
-    workflow.add_node("execute", validate_and_execute_node)
-    workflow.add_node("correct", correct_sql_node)
-    workflow.add_node("synthesize", synthesize_insight_node)
+    # Add all nodes with telemetry context wrapping
+    workflow.add_node("cache_lookup", with_telemetry_context(cache_lookup_node))
+    workflow.add_node("router", with_telemetry_context(router_node))
+    workflow.add_node("clarify", with_telemetry_context(clarify_node))
+    workflow.add_node("retrieve", with_telemetry_context(retrieve_context_node))
+    workflow.add_node("plan", with_telemetry_context(plan_sql_node))
+    workflow.add_node("generate", with_telemetry_context(generate_sql_node))
+    workflow.add_node("validate", with_telemetry_context(validate_sql_node))
+    workflow.add_node("execute", with_telemetry_context(validate_and_execute_node))
+    workflow.add_node("correct", with_telemetry_context(correct_sql_node))
+    workflow.add_node("synthesize", with_telemetry_context(synthesize_insight_node))
 
     # Set entry point - Cache Lookup first
     workflow.set_entry_point("cache_lookup")
@@ -207,146 +221,127 @@ async def run_agent_with_tracing(
     user_id: str = None,
     thread_id: str = None,
 ) -> dict:
-    """
-    Run agent workflow with MLflow tracing.
-
-    The LangChain autologger automatically creates a root trace when the graph
-    is invoked. This function enriches that trace with user/session metadata.
-
-    Args:
-        question: Natural language question
-        tenant_id: Tenant identifier
-        session_id: Session identifier for multi-turn conversations
-        user_id: User identifier for attribution
-        thread_id: Thread identifier for checkpointer state persistence
-                   (required for interrupt/resume functionality)
-
-    Returns:
-        Agent state after workflow completion
-    """
+    """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
 
-    # Prepare initial state
-    inputs = {
-        "messages": [HumanMessage(content=question)],
-        "schema_context": "",
-        "current_sql": None,
-        "query_result": None,
-        "error": None,
-        "retry_count": 0,
-        # Reset state fields that shouldn't persist across turns
-        "active_query": None,
-        "procedural_plan": None,
-        "rejected_cache_context": None,
-        "clause_map": None,
-        "tenant_id": tenant_id,
-        "from_cache": False,
-    }
+    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN):
+        # Capture context for nodes to use later
+        telemetry_context = telemetry.capture_context()
 
-    # Generate thread_id if not provided (required for checkpointer)
-    if thread_id is None:
-        thread_id = session_id or str(uuid.uuid4())
+        # Prepare initial state
+        inputs = {
+            "messages": [HumanMessage(content=question)],
+            "schema_context": "",
+            "current_sql": None,
+            "query_result": None,
+            "error": None,
+            "retry_count": 0,
+            # Reset state fields that shouldn't persist across turns
+            "active_query": None,
+            "procedural_plan": None,
+            "rejected_cache_context": None,
+            "clause_map": None,
+            "tenant_id": tenant_id,
+            "from_cache": False,
+            "telemetry_context": telemetry_context,
+        }
 
-    # Config with thread_id for checkpointer
-    config = {"configurable": {"thread_id": thread_id}}
+        # Generate thread_id if not provided (required for checkpointer)
+        if thread_id is None:
+            thread_id = session_id or str(uuid.uuid4())
 
-    # 1. Start Interaction Logging (Pre-execution)
-    interaction_id = None
-    tools = []
-    try:
-        from agent_core.tools import get_mcp_tools
+        # Config with thread_id for checkpointer
+        config = {"configurable": {"thread_id": thread_id}}
 
-        tools = await get_mcp_tools()
-        create_tool = next((t for t in tools if t.name == "create_interaction"), None)
-        if create_tool:
-            interaction_id = await create_tool.ainvoke(
-                {
-                    "conversation_id": session_id or thread_id,
-                    "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
-                    "user_nlq_text": question,
-                    "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
-                    "prompt_version": "v1.0",
-                    "trace_id": thread_id,
-                }
-            )
-            inputs["interaction_id"] = interaction_id
-    except Exception as e:
-        print(f"Warning: Failed to create interaction log: {e}")
-
-    # Execute workflow - autologger will create the root trace
-    # Initialize result with inputs in case workflow crashes immediately
-    result = inputs.copy()
-
-    try:
-        result = await app.ainvoke(inputs, config=config)
-    except Exception as execute_err:
-        print(f"Critical Error in Agent Workflow: {execute_err}")
-        result["error"] = str(execute_err)
-        result["error_category"] = "SYSTEM_CRASH"
-        # Ensure we don't return a result that looks like success but has no messages
-        if "messages" not in result:
-            result["messages"] = []
-
-    # 2. Update Interaction Logging (Post-execution)
-    # We execute this regardless of workflow success/failure
-    if interaction_id:
+        # 1. Start Interaction Logging (Pre-execution)
+        interaction_id = None
+        tools = []
         try:
-            update_tool = next((t for t in tools if t.name == "update_interaction"), None)
-            if update_tool:
-                # Determine status
-                status = "SUCCESS"
-                if result.get("error"):
-                    status = "FAILURE"
-                elif result.get("ambiguity_type"):
-                    status = "CLARIFICATION_REQUIRED"
+            from agent_core.tools import get_mcp_tools
 
-                # Get last message as response
-                last_msg = ""
-                if result.get("messages") and len(result["messages"]) > 0:
-                    last_message_obj = result["messages"][-1]
-                    # formatting check: verify it works for both string and object
-                    if hasattr(last_message_obj, "content"):
-                        last_msg = last_message_obj.content
-                    else:
-                        last_msg = str(last_message_obj)
-
-                # If we have an error and no response message, use error as text
-                if not last_msg and result.get("error"):
-                    last_msg = f"System Error: {result['error']}"
-
-                await update_tool.ainvoke(
+            tools = await get_mcp_tools()
+            create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+            if create_tool:
+                interaction_id = await create_tool.ainvoke(
                     {
-                        "interaction_id": interaction_id,
-                        "generated_sql": result.get("current_sql"),
-                        "response_payload": json.dumps(
-                            {"text": last_msg, "error": result.get("error")}
-                        ),
-                        "execution_status": status,
-                        "error_type": result.get("error_category"),
-                        "tables_used": result.get("table_names", []),
+                        "conversation_id": session_id or thread_id,
+                        "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
+                        "user_nlq_text": question,
+                        "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
+                        "prompt_version": "v1.0",
+                        "trace_id": thread_id,
                     }
                 )
+                inputs["interaction_id"] = interaction_id
         except Exception as e:
-            print(f"Warning: Failed to update interaction log: {e}")
+            print(f"Warning: Failed to create interaction log: {e}")
 
-    # Enrich the trace with user/session metadata after invocation
-    # Note: update_current_trace must be called within the trace context
-    try:
-        metadata = {
-            "tenant_id": str(tenant_id),
-            "environment": os.getenv("ENVIRONMENT", "development"),
-            "deployment": os.getenv("DEPLOYMENT", "development"),
-            "version": "2.0.0",  # Updated for new architecture
-            "thread_id": thread_id,
-        }
-        if session_id:
-            metadata["mlflow.trace.session"] = session_id
-        if user_id:
-            metadata["mlflow.trace.user"] = user_id
+        # Execute workflow
+        result = inputs.copy()
+        try:
+            result = await app.ainvoke(inputs, config=config)
+        except Exception as execute_err:
+            print(f"Critical Error in Agent Workflow: {execute_err}")
+            result["error"] = str(execute_err)
+            result["error_category"] = "SYSTEM_CRASH"
+            if "messages" not in result:
+                result["messages"] = []
 
-        telemetry.update_current_trace(metadata=metadata)
-    except Exception:
-        # Trace context may not be available outside the invoke
-        pass
+        # 2. Update Interaction Logging (Post-execution)
+        if interaction_id:
+            try:
+                update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+                if update_tool:
+                    # Determine status
+                    status = "SUCCESS"
+                    if result.get("error"):
+                        status = "FAILURE"
+                    elif result.get("ambiguity_type"):
+                        status = "CLARIFICATION_REQUIRED"
+
+                    # Get last message as response
+                    last_msg = ""
+                    if result.get("messages") and len(result["messages"]) > 0:
+                        last_message_obj = result["messages"][-1]
+                        if hasattr(last_message_obj, "content"):
+                            last_msg = last_message_obj.content
+                        else:
+                            last_msg = str(last_message_obj)
+
+                    if not last_msg and result.get("error"):
+                        last_msg = f"System Error: {result['error']}"
+
+                    await update_tool.ainvoke(
+                        {
+                            "interaction_id": interaction_id,
+                            "generated_sql": result.get("current_sql"),
+                            "response_payload": json.dumps(
+                                {"text": last_msg, "error": result.get("error")}
+                            ),
+                            "execution_status": status,
+                            "error_type": result.get("error_category"),
+                            "tables_used": result.get("table_names", []),
+                        }
+                    )
+            except Exception as e:
+                print(f"Warning: Failed to update interaction log: {e}")
+
+        # Enrich the trace with user/session metadata
+        try:
+            metadata = {
+                "tenant_id": str(tenant_id),
+                "environment": os.getenv("ENVIRONMENT", "development"),
+                "deployment": os.getenv("DEPLOYMENT", "development"),
+                "version": "2.0.0",
+                "thread_id": thread_id,
+            }
+            if session_id:
+                metadata["mlflow.trace.session"] = session_id
+            if user_id:
+                metadata["mlflow.trace.user"] = user_id
+
+            telemetry.update_current_trace(metadata=metadata)
+        except Exception:
+            pass
 
     return result
