@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from text2sql_synth.config import ScalePreset, SynthConfig
-from text2sql_synth.orchestrator import generate_all
+from text2sql_synth.orchestrator import generate_tables
 from text2sql_synth.export import export_to_directory
 
 # Configure logging
@@ -68,7 +68,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     
     try:
         # Run generation
-        ctx = generate_all(config)
+        ctx, tables = generate_tables(config, only=args.only)
         
         # Export results
         manifest_path = export_to_directory(ctx, config, args.out)
@@ -124,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="DIR",
         help="Output directory for generated data",
+    )
+    gen_parser.add_argument(
+        "--only",
+        nargs="+",
+        metavar="TABLE",
+        help="Only generate specific tables and their dependencies",
     )
     gen_parser.set_defaults(func=cmd_generate)
 
