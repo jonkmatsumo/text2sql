@@ -11,6 +11,7 @@ from .feedback_store import FeedbackStore
 from .graph_store import GraphStore
 from .interaction_store import InteractionStore
 from .metadata_store import MetadataStore
+from .pattern_run_store import PatternRunStore
 from .registry_store import RegistryStore
 from .schema_introspector import SchemaIntrospector
 from .schema_store import SchemaStore
@@ -24,6 +25,7 @@ __all__ = [
     "GraphStore",
     "InteractionStore",
     "MetadataStore",
+    "PatternRunStore",
     "RegistryStore",
     "SchemaIntrospector",
     "SchemaStore",

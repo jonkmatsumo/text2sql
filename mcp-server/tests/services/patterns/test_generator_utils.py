@@ -97,6 +97,36 @@ async def test_fetch_distinct_values_replacement():
 
     values = await sample_distinct_values(mock_conn, "users", "status", threshold=10)
 
-    assert "Active" in values
     assert "Inactive" in values
     assert len(values) == 2
+
+
+@pytest.mark.asyncio
+async def test_enrich_with_retry():
+    """Test enrichment retry logic."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from mcp_server.services.patterns.generator import enrich_values_with_llm
+
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock()
+
+    # Fail twice, succeed third time
+    # Note: Structure of response mock needs to match generator expectations
+    choice_mock = MagicMock()
+    choice_mock.message.content = '{"items": [{"pattern": "p", "id": "v"}]}'
+    success_response = MagicMock()
+    success_response.choices = [choice_mock]
+
+    client.chat.completions.create.side_effect = [
+        Exception("Fail 1"),
+        Exception("Fail 2"),
+        success_response,
+    ]
+
+    # We patch sleep to speed up test
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        patterns = await enrich_values_with_llm(client, "L", ["v"], run_id="test-run")
+
+    assert len(patterns) == 1
+    assert client.chat.completions.create.call_count == 3

@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
@@ -133,15 +133,16 @@ async def get_openai_client() -> AsyncOpenAI:
 
 
 async def enrich_values_with_llm(
-    client: AsyncOpenAI, label: str, values: List[str]
+    client: AsyncOpenAI, label: str, values: List[str], run_id: Optional[str] = None
 ) -> List[Dict[str, str]]:
-    """Generate synonyms for values using LLM."""
+    """Generate synonyms for values using LLM with retry."""
     if not client:
         return []
 
     patterns = []
+    max_retries = 3
+    base_delay = 1.0
 
-    # We process in batches if needed, but for now assuming small list
     prompt = f"""
     You are an expert at generating colloquial synonyms for database values for NLP
     entity recognition.
@@ -165,46 +166,59 @@ async def enrich_values_with_llm(
     Lowercase all patterns.
     """
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",  # Use a cheap/fast model
-            messages=[
-                {"role": "system", "content": "You are a helpful data assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-        )
-        content = response.choices[0].message.content
-        data = json.loads(content)
+    for attempt in range(max_retries):
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",  # Use a cheap/fast model
+                messages=[
+                    {"role": "system", "content": "You are a helpful data assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+            )
+            content = response.choices[0].message.content
+            data = json.loads(content)
 
-        # Handle cases where LLM might wrap result in a key
-        if isinstance(data, dict):
-            # look for a list value
-            for key, val in data.items():
-                if isinstance(val, list):
-                    generated = val
-                    break
+            # Handle cases where LLM might wrap result in a key
+            if isinstance(data, dict):
+                # look for a list value
+                for key, val in data.items():
+                    if isinstance(val, list):
+                        generated = val
+                        break
+                else:
+                    generated = []
+            elif isinstance(data, list):
+                generated = data
             else:
                 generated = []
-        elif isinstance(data, list):
-            generated = data
-        else:
-            generated = []
 
-        # Validate and add label
-        for item in generated:
-            if "pattern" in item and "id" in item:
-                patterns.append(
-                    {
-                        "label": label,
-                        "pattern": item["pattern"].lower(),
-                        "id": item["id"],
-                    }
-                )
+            # Validate and add label
+            for item in generated:
+                if "pattern" in item and "id" in item:
+                    patterns.append(
+                        {
+                            "label": label,
+                            "pattern": item["pattern"].lower(),
+                            "id": item["id"],
+                        }
+                    )
 
-    except Exception as e:
-        logger.error(f"Error generating synonyms for {label}: {e}")
+            # If successful, break retry loop
+            if attempt > 0:
+                logger.info(f"[{run_id}] Retry validation successful for {label}")
+            break
+
+        except Exception as e:
+            logger.warning(
+                f"[{run_id}] Error generating synonyms for {label} "
+                f"(Attempt {attempt + 1}/{max_retries}): {e}"
+            )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2**attempt))
+            else:
+                logger.error(f"[{run_id}] Failed to generate synonyms for {label} after retries.")
 
     return patterns
 
@@ -262,7 +276,7 @@ async def sample_distinct_values(
         return []
 
 
-async def generate_entity_patterns() -> list[dict]:
+async def generate_entity_patterns(run_id: Optional[str] = None) -> list[dict]:
     """Generate entity patterns from database introspection."""
     # Initialize DB (assumes already running or managed by caller/main)
     trusted_patterns = []
@@ -359,7 +373,9 @@ async def generate_entity_patterns() -> list[dict]:
                         # LLM Enrichment
                         if client and values and len(values) <= detector.threshold * 2:
                             logger.info(f"Enriching {label} with LLM...")
-                            synonyms = await enrich_values_with_llm(client, label, values)
+                            synonyms = await enrich_values_with_llm(
+                                client, label, values, run_id=run_id
+                            )
                             untrusted_patterns.extend(synonyms)
 
         # Validation Stage
