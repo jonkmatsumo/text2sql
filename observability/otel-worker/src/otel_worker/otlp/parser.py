@@ -1,6 +1,6 @@
 import logging
 
-from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import MessageToDict, Parse, ParseError
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 logger = logging.getLogger(__name__)
@@ -9,8 +9,26 @@ logger = logging.getLogger(__name__)
 def parse_otlp_traces(body: bytes) -> dict:
     """Parse OTLP binary protobuf trace request into a dictionary."""
     request = ExportTraceServiceRequest()
-    request.ParseFromString(body)
-    return MessageToDict(request)
+    try:
+        request.ParseFromString(body)
+        return MessageToDict(request)
+    except Exception as e:
+        logger.error(f"Failed to parse OTLP protobuf: {e}")
+        raise ValueError(f"Invalid OTLP protobuf payload: {e}")
+
+
+def parse_otlp_json_traces(body: bytes) -> dict:
+    """Parse OTLP JSON trace request into a dictionary."""
+    request = ExportTraceServiceRequest()
+    try:
+        Parse(body, request, ignore_unknown_fields=True)
+        return MessageToDict(request)
+    except ParseError as e:
+        logger.error(f"Failed to parse OTLP JSON: {e}")
+        raise ValueError(f"Invalid OTLP JSON payload: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error parsing OTLP JSON: {e}")
+        raise ValueError(f"Malformed JSON payload: {e}")
 
 
 def extract_trace_summaries(parsed_data: dict) -> list[dict]:
