@@ -19,8 +19,8 @@ def mock_canonicalizer():
 @pytest.fixture
 def mock_rag_engine():
     """Mock the RagEngine embedding function."""
-    with patch("mcp_server.rag.RagEngine.embed_text") as mock:
-        mock.return_value = [0.1] * 384
+    with patch("mcp_server.services.rag.RagEngine.embed_text") as mock:
+        mock.return_value = [0.1] * 1536  # Standard embedding size
         yield mock
 
 

@@ -92,11 +92,23 @@ class PostgresRegistryStore(RegistryStore):
         threshold: float = 0.90,
         limit: int = 5,
         role: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> List[QueryPair]:
-        """Search for semantically similar pairs with optional role filtering."""
+        """Search for semantically similar pairs with optional role and status filtering."""
         pg_vector = _format_vector(embedding)
 
-        role_filter = "AND $4 = ANY(roles)" if role else ""
+        filters = ["(1 - (embedding <=> $1)) >= $2"]
+        args = [pg_vector, threshold, limit]
+
+        if role:
+            args.append(role)
+            filters.append(f"${len(args)} = ANY(roles)")
+
+        if status:
+            args.append(status)
+            filters.append(f"status = ${len(args)}")
+
+        where_clause = " WHERE " + " AND ".join(filters)
 
         query = f"""
             SELECT signature_key, tenant_id, fingerprint, question,
@@ -104,16 +116,12 @@ class PostgresRegistryStore(RegistryStore):
                    created_at, updated_at,
                    (1 - (embedding <=> $1)) as similarity
             FROM public.query_pairs
-            WHERE (1 - (embedding <=> $1)) >= $2
-            {role_filter}
+            {where_clause}
             ORDER BY similarity DESC
             LIMIT $3
         """
 
         async with self._get_connection(tenant_id) as conn:
-            args = [pg_vector, threshold, limit]
-            if role:
-                args.append(role)
             rows = await conn.fetch(query, *args)
 
         return [self._row_to_model(row) for row in rows]

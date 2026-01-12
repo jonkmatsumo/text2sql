@@ -22,8 +22,9 @@ class RegistryStore(Protocol):
         threshold: float = 0.90,
         limit: int = 5,
         role: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> List[QueryPair]:
-        """Search for semantically similar pairs with optional role filtering."""
+        """Search for semantically similar pairs with optional role and status filtering."""
         ...
 
     async def fetch_by_role(
