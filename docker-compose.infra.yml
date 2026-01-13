@@ -18,7 +18,7 @@ services:
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d pagila" ]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pagila"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -39,7 +39,7 @@ services:
     ports:
       - "5433:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d agent_control" ]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent_control"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -84,7 +84,13 @@ services:
       - text2sql_net
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -104,7 +110,7 @@ services:
     networks:
       - text2sql_net
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 5s
       retries: 5
