@@ -64,6 +64,16 @@ class CanonicalizationService:
         if self._state:
             logger.info(f"CanonicalizationService initialized with model: {model}")
 
+    @property
+    def nlp(self):
+        """Access SpaCy NLP object from current state."""
+        return self._state.nlp if self._state else None
+
+    @property
+    def matcher(self):
+        """Access DependencyMatcher from current state."""
+        return self._state.matcher if self._state else None
+
     def _build_pipeline(self, model: str, extra_patterns: list = None) -> Optional[PipelineState]:
         """Build a fresh pipeline state.
 
