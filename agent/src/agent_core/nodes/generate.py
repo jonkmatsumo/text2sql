@@ -1,5 +1,7 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
+from typing import Any, Optional
+
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
@@ -12,7 +14,9 @@ load_dotenv()
 llm = get_llm_client(temperature=0)
 
 
-async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
+async def get_few_shot_examples(
+    user_query: str, tenant_id: int = 1, span: Optional[Any] = None
+) -> str:
     """
     Retrieve relevant few-shot examples via the recommendation service.
 
@@ -72,19 +76,27 @@ async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
 
             telemetry_attrs = {
                 "recommendation.used": True,
-                "recommendation.fallback_used": fallback_used,
-                "recommendation.truncated": reco_metadata.get("truncated", False),
-                "recommendation.count.total": reco_metadata.get("count_total", 0),
-                "recommendation.count.verified": reco_metadata.get("count_approved", 0),
-                "recommendation.count.seeded": reco_metadata.get("count_seeded", 0),
-                "recommendation.count.fallback": reco_metadata.get("count_fallback", 0),
+                "recommendation.fallback_used": bool(fallback_used),
+                "recommendation.truncated": bool(reco_metadata.get("truncated", False)),
+                "recommendation.count.total": int(reco_metadata.get("count_total", 0)),
+                "recommendation.count.verified": int(reco_metadata.get("count_approved", 0)),
+                "recommendation.count.seeded": int(reco_metadata.get("count_seeded", 0)),
+                "recommendation.count.fallback": int(reco_metadata.get("count_fallback", 0)),
                 "recommendation.selected.fingerprints": json.dumps(
-                    reco_metadata.get("fingerprints", [])
+                    reco_metadata.get("fingerprints", [])[:10]
                 ),
-                "recommendation.selected.sources": json.dumps(reco_metadata.get("sources", [])),
-                "recommendation.selected.statuses": json.dumps(reco_metadata.get("statuses", [])),
-                "recommendation.selected.positions": json.dumps(reco_metadata.get("positions", [])),
+                "recommendation.selected.sources": json.dumps(
+                    reco_metadata.get("sources", [])[:10]
+                ),
+                "recommendation.selected.statuses": json.dumps(
+                    reco_metadata.get("statuses", [])[:10]
+                ),
+                "recommendation.selected.positions": json.dumps(
+                    reco_metadata.get("positions", [])[:10]
+                ),
             }
+            # Attach to child span and parent trace
+            span.set_attributes(telemetry_attrs)
             telemetry.update_current_trace(metadata=telemetry_attrs)
         except Exception as tel_e:
             # Telemetry should never crash the main flow
@@ -103,6 +115,7 @@ async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
 
     except Exception as e:
         print(f"Warning: Could not retrieve few-shot examples: {e}")
+        return ""
 
 
 async def generate_sql_node(state: AgentState) -> dict:
@@ -147,7 +160,7 @@ async def generate_sql_node(state: AgentState) -> dict:
         # Retrieve few-shot examples
         few_shot_examples = ""
         try:
-            few_shot_examples = await get_few_shot_examples(user_query, tenant_id or 1)
+            few_shot_examples = await get_few_shot_examples(user_query, tenant_id or 1, span=span)
         except Exception as e:
             print(f"Warning: Could not retrieve few-shot examples: {e}")
 
