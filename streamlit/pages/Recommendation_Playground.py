@@ -106,13 +106,22 @@ if "reco_result" in st.session_state:
     if not examples:
         st.info("No examples returned.")
     else:
+        # Enforce UI-side bounding (Safety #119 prep)
+        safe_limit = 20
+        rendered_count = 0
+
         for i, ex in enumerate(examples):
+            if rendered_count >= safe_limit:
+                st.caption(f"... {len(examples) - rendered_count} more hidden for safety ...")
+                break
+
+            rendered_count += 1
             ex_meta = ex.get("metadata", {})
 
             # Safe Preview (Bound & Sanitize)
             raw_q = ex.get("question", "") or ""
             safe_q = raw_q.replace("\n", " ").strip()
-            # Remove control chars (simple ASCII range check or keep text)
+            # Remove control chars
             safe_q = "".join(ch for ch in safe_q if ch.isprintable())
             if len(safe_q) > 120:
                 safe_q = safe_q[:117] + "..."
