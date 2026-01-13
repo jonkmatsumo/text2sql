@@ -19,15 +19,15 @@ flowchart TB
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
 
         %% Nodes
-        RouterNode["Router Node<br/>(LLM)<br/>agent_core/nodes/router.py"]
-        ClarifyNode["Clarify Node<br/>(Human Input)<br/>agent_core/nodes/clarify.py"]
-        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>agent_core/nodes/retrieve.py"]
-        PlanNode["Plan SQL Node<br/>(LLM)<br/>agent_core/nodes/plan.py"]
-        GenerateNode["Generate SQL Node<br/>(LLM)<br/>agent_core/nodes/generate.py"]
-        ValidateNode["Validate SQL Node<br/>(Logic)<br/>agent_core/nodes/validate.py"]
-        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>agent_core/nodes/execute.py"]
-        CorrectNode["Correct SQL Node<br/>(LLM)<br/>agent_core/nodes/correct.py"]
-        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>agent_core/nodes/synthesize.py"]
+        RouterNode["Router Node<br/>(LLM)<br/>agent/src/agent_core/nodes/router.py"]
+        ClarifyNode["Clarify Node<br/>(Human Input)<br/>agent/src/agent_core/nodes/clarify.py"]
+        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>agent/src/agent_core/nodes/retrieve.py"]
+        PlanNode["Plan SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/plan.py"]
+        GenerateNode["Generate SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/generate.py"]
+        ValidateNode["Validate SQL Node<br/>(Logic)<br/>agent/src/agent_core/nodes/validate.py"]
+        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>agent/src/agent_core/nodes/execute.py"]
+        CorrectNode["Correct SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/correct.py"]
+        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>agent/src/agent_core/nodes/synthesize.py"]
         Response["Natural Language Response"]
 
         %% Flow
@@ -55,18 +55,18 @@ flowchart TB
         ExecuteNode -->|"Max Retries"| Response
     end
 
-    subgraph Observability["📡 Observability"]
+    subgraph Observability["📡 Observability (Default: MLflow, Optional: OTEL)"]
         MLflow["MLflow Tracking Server<br/>Traces & Metrics"]
-        MLflowDB[("MLflow DB")]
+        MLflowDB[("Postgres (postgres-db)<br/>MLflow backend")]
         MinIO[("MinIO Artifacts")]
-        OTEL["OpenTelemetry Collector<br/>(OTEL)"]
+        OTEL["OpenTelemetry Stack (Optional)"]
 
-        OTEL --> MLflow
         MLflow --> MLflowDB
         MLflow --> MinIO
+        Agent -.->|"Optional (TELEMETRY_BACKEND=otel/dual)"| OTEL
     end
 
-    subgraph MCPServer["🔧 MCP Server (FastMCP)"]
+    subgraph MCPServer["🔧 MCP Server (FastMCP, /messages SSE)"]
         MCPTools["MCP Tools<br/>mcp-server/src/mcp_server/tools/"]
 
         subgraph DAL["🛡️ Data Abstraction Layer"]
@@ -88,7 +88,7 @@ flowchart TB
         PatternGen -->|"Updates"| Canonicalizer
     end
 
-    subgraph ControlDB["🛡️ Control-Plane (Postgres)"]
+    subgraph ControlDB["🛡️ Control-Plane (Postgres, optional)"]
         QueryRegistry["Query Registry (query_pairs)<br/>Cache + Examples + Golden<br/>pgvector index"]
         SchemaEmbeddings["Schema Embeddings<br/>Table/Column context"]
         Tenants["Tenant Registry<br/>RLS & Policies"]
@@ -106,10 +106,6 @@ flowchart TB
     %% Agent to MCP Server
     RetrieveNode -->|"Call Tool"| MCPTools
     ExecuteNode -->|"Call Tool"| MCPTools
-
-    %% Observability Connections
-    Agent --> OTEL
-    MCPServer --> OTEL
 
     %% MCP Server Internal Connections
     MCPTools --> DAL
@@ -140,7 +136,7 @@ flowchart TB
 
 ## Key Features & Architecture
 
-### 🔍 Approximate Nearest Neighbors (ANN) Based Retrieval Augmented Generation (RAG)
+### 🔍 Retrieval Augmented Generation (RAG) Using Approximate Nearest Neighbors (ANN)
 *   **Dense Schema Linking**: Uses a **Triple-Filter Strategy** (Structural Backbone, Value Spy, Semantic Reranker) to intelligently prune relevant tables and columns, resolving "Context Starvation".
 *   **Scalable Vector Search**: Implements **HNSW (Hierarchical Navigable Small Worlds)** via `hnswlib` for millisecond-latency search across schema embeddings and few-shot examples.
 *   **Graph-Aware RAG**: Integrates Memgraph to traverse database relationships (Foreign Keys), ensuring retrieved contexts maintain relational integrity.
@@ -158,15 +154,16 @@ flowchart TB
 
 ### 🛡️ Extensible Foundation: Multi-Provider LLM & Multi-Engine Database Support
 *   **Extensible Tooling**: Built on the **Model Context Protocol (MCP)**, making database tools accessible to any MCP-compliant agent or client.
-*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`RegistryStore`, `GraphStore`), allowing the system to easily extend to other database types (e.g., MySQL, Snowflake).
-*   **Runtime Policy Enforcement**: Uses a **Dual-Database Architecture** to separate sensitive control-plane data (tenants, keys, registry) from the query-target data.
+*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`RegistryStore`, `GraphStore`) and pluggable provider adapters where implemented. Today, Postgres (registry / metadata) and Memgraph (graph traversal) are the supported backends. Planned extensions to additional data sources (e.g. MySQL and other analytical backends) are tracked in **Issue #62** and are not yet implemented.
+*   **Runtime Policy Enforcement**: Supports an optional **dual-database architecture** to separate sensitive control-plane data (tenants, keys, registry) from the query-target data.
 *   **AST-Based Security**: Employs `sqlglot` for AST traversal to strictly enforce read-only access and inject tenant isolation predicates at runtime.
 *   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
 ### 📡 Observability & Performance
-*   **OpenTelemetry Integration**: Standardized tracing via OpenTelemetry (OTEL), ensuring vendor-neutral observability that exports seamlessly to MLflow or other APM backends.
-*   **End-to-End Tracing**: Integrated MLflow connection provides full visibility into the agent's reasoning steps, tool calls, and registry decisions.
-*   **Unified Monitoring**: Captures signature hits, misses, and guardrail rejections as structured metadata in the trace.
+*   **TelemetryService Emission**: The agent emits telemetry via `TelemetryService`, with backend selection controlled by `TELEMETRY_BACKEND`.
+*   **MLflow by Default**: `TELEMETRY_BACKEND=mlflow` by default, and the agent writes directly to MLflow (see `agent/src/agent_core/telemetry.py` and `agent/src/agent_core/graph.py`).
+*   **Optional OTEL Backend**: `TELEMETRY_BACKEND=otel` or `dual` enables OTEL span emission; the OTEL stack must be running (see `observability/docker-compose.observability.yml`).
+*   **OTLP Configuration Caveat**: Although an OTEL backend exists in code, OTLP exporter configuration is not wired by default and requires explicit environment configuration (see `observability/.env.example`).
 
 ## Project Structure
 
@@ -184,8 +181,11 @@ text2sql/
 ├── database/                   # Seed assets
 │   ├── query-target/           # Target DB schema, data, and patterns
 │   └── control-plane/          # App metadata, RLS, and cache schema
-├── streamlit/                  # Web interface
-└── docker-compose.yml          # Service orchestration
+├── streamlit/                  # Streamlit packaging + Docker assets
+├── streamlit_app/              # Streamlit UI entrypoint (Text_2_SQL_Agent.py)
+├── observability/              # Optional OTEL stack
+├── docker-compose.yml          # Service orchestration
+└── docker-compose.test.yml     # Test DB compose file
 ```
 
 ## Quick Start
@@ -194,37 +194,87 @@ text2sql/
 *   Docker & Docker Compose
 *   Python 3.12+ (for local development)
 
+### Environment Configuration (Non-Telemetry)
+
+Create a local `.env` from the template:
+```bash
+cp .env.example .env
+```
+
+Do not rely on hardcoded defaults for passwords or secrets; set them explicitly.
+
+Environment variables are grouped by category (not exhaustive):
+*   **Core DB connection**: Postgres host/port/name/user/password used by DAL-backed stores.
+*   **MCP connectivity**: MCP server URL and transport for agent/UI calls.
+*   **LLM provider selection**: Provider + model settings and provider API key.
+*   **DAL provider selectors**: Optional overrides to choose storage backends.
+
 ### Setup & Run
 
-1.  **Initialize Data**: Generate pattern files and prepare the environment.
-    ```bash
-    ./scripts/seed_graph.sh
-    ```
-
-2.  **Configure Environment**: Set your API keys in `.env`:
-    ```bash
-    OPENAI_API_KEY=your_key
-    LLM_PROVIDER=openai      # Options: openai, anthropic, google
-    LLM_MODEL=gpt-5.2        # Or: claude-sonnet-4-20250514, gemini-2.5-pro-preview-05-06
-    ```
-
-3.  **Start Services**:
+1.  **Configure Environment**: Create a `.env` file for local development.
+2.  **Start Services**:
     ```bash
     docker compose up -d --build
     ```
+3.  **Initialize Data**: Run the seed script after services are running.
+    ```bash
+    ./scripts/seed_graph.sh
+    ```
+    This runs inside the `seeder` container via `docker compose exec seeder`.
 
 ### Access Points
+
+#### Primary / User-Facing Services
 
 | Service | URL | Description |
 |---------|-----|-------------|
 | **Web UI** | `http://localhost:8501` | Streamlit interface |
-| **MCP Server** | `http://localhost:8000/mcp` | FastMCP tool server |
-| **MLflow UI** | `http://localhost:5001` | Traces and metrics |
-| **MinIO** | `http://localhost:9001` | Artifact storage (user: minioadmin / pass: minioadmin) |
+| **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
+| **MLflow UI** | `http://localhost:5001` | Telemetry traces and metrics (default backend) |
+| **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
+
+#### Optional / Advanced Observability Services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **OTEL Worker (Optional)** | `http://localhost:4320` | OpenTelemetry ingestion and trace query API (no user-facing UI) |
+
+Most users do not need to interact with the OTEL worker directly. It exists to support advanced observability workflows and custom trace storage.
 
 ## Testing
 
-Run the full suite:
-```bash
-pytest agent/tests mcp-server/tests
+Unit tests can be run locally with `pytest`.
+Integration tests may require running services and relevant environment variables.
+Use `docker-compose.test.yml` to spin up a test Postgres instance when needed.
+
+## MCP Server Endpoint & Transport
+
+The MCP server uses SSE under the hood and exposes tools at:
 ```
+http://localhost:8000/messages
+```
+`/mcp` is not a valid endpoint. Transport behavior is controlled by `MCP_TRANSPORT`,
+but `/messages` remains the exposed path (see `mcp-server/src/mcp_server/main.py`
+and `agent/src/agent_core/tools.py`).
+
+## Control-Plane Isolation (Feature-Gated)
+
+Control-plane isolation is disabled by default and gated by `DB_ISOLATION_ENABLED`.
+When enabled, it requires the control-plane DB variables (e.g. `CONTROL_DB_HOST`,
+`CONTROL_DB_USER`, `CONTROL_DB_PASSWORD`) to be configured. See
+`mcp-server/src/mcp_server/config/control_plane.py`.
+
+## Provider Selectors (Advanced)
+
+Several environment variables exist to select storage backends when alternative providers
+are implemented (e.g. `GRAPH_STORE_PROVIDER`, `CACHE_STORE_PROVIDER`). These are optional
+and default to Postgres or Memgraph for local development.
+
+## Optional Observability Stack (OTEL)
+
+An optional OpenTelemetry stack is provided in `observability/docker-compose.observability.yml`.
+It includes `otel-collector` and `otel-worker`, and expects the primary stack to be running
+with the external `text2sql_net` network.
+
+MLflow is the default telemetry backend; OTEL is only used if explicitly enabled via
+`TELEMETRY_BACKEND` and the OTEL stack is started.

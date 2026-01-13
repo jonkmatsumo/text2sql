@@ -25,7 +25,6 @@ htmlcov/
 
 # Environment variables
 .env
-AGENTS.md
 .env.local
 agent/.env
 
@@ -49,12 +48,6 @@ node_modules/
 
 # SQLite/test databases
 *.db
-
-# Database initialization - large generated files
-# Keep: *.example.sql (templates), download_data.sh
-# Ignore: actual schema and data files (can be regenerated)
-# Ignore schema/data in old location
-database/init-scripts/02-data.sql
 
 # Query Target (Dataset Agnostic)
 database/query-target/*
