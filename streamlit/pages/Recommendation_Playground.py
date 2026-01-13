@@ -69,8 +69,66 @@ if st.button("Run Recommendations", type="primary"):
         except Exception as e:
             st.error(f"Playground Error: {e}")
 
-# --- Result Rendering (Placeholder for Phase 3) ---
+# --- Result Rendering ---
 if "reco_result" in st.session_state:
     st.divider()
     res = st.session_state.reco_result
-    st.json(res)  # Temporary raw dump
+    meta = res.get("metadata", {})
+    examples = res.get("examples", [])
+
+    # 1. Selection Summary
+    st.markdown("### Selection Summary")
+
+    # Metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Selected", meta.get("count_total", 0))
+    m2.metric("Verified", meta.get("count_approved", 0))
+    m3.metric("Seeded", meta.get("count_seeded", 0))
+    m4.metric("Fallback", meta.get("count_fallback", 0))
+
+    # Flags
+    flags = []
+    if res.get("fallback_used"):
+        flags.append("⚠️ Fallback Pool Used")
+    if meta.get("truncated"):
+        flags.append("✂️ Truncated by Limit")
+
+    if flags:
+        st.warning(" | ".join(flags))
+    else:
+        st.success("✅ Standard Selection Plan")
+
+    st.divider()
+
+    # 2. Example Cards
+    st.markdown(f"### Selected Examples ({len(examples)})")
+
+    if not examples:
+        st.info("No examples returned.")
+    else:
+        for i, ex in enumerate(examples):
+            ex_meta = ex.get("metadata", {})
+
+            # Safe Preview (Bound & Sanitize)
+            raw_q = ex.get("question", "") or ""
+            safe_q = raw_q.replace("\n", " ").strip()
+            # Remove control chars (simple ASCII range check or keep text)
+            safe_q = "".join(ch for ch in safe_q if ch.isprintable())
+            if len(safe_q) > 120:
+                safe_q = safe_q[:117] + "..."
+
+            cols = st.columns([1, 4])
+            with cols[0]:
+                st.caption(f"Rank {i+1}")
+                st.code(ex_meta.get("fingerprint", "N/A")[:8], language="text")
+
+            with cols[1]:
+                # Metadata Badge Line
+                source = ex.get("source", "unknown").upper()
+                status = ex_meta.get("status", "unknown").upper()
+
+                badges = f"**{source}** • *{status}*"
+                st.markdown(badges)
+                st.text(safe_q)
+
+            st.divider()
