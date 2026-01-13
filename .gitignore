@@ -68,3 +68,4 @@ database/query-target/corpus/*
 # (Optional: Add example for corpus if needed, currently just ignoring all actual corpus data)
 
 !database/query-target/README.md
+local-data/

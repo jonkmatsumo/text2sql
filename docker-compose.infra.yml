@@ -1,3 +1,6 @@
+# Infrastructure Services
+# Data is persisted to ./local-data/ on the host.
+
 services:
   postgres-db:
     # Upgrade to pgvector image to support vector extension
@@ -11,7 +14,7 @@ services:
       # Mount initialization scripts (Schema -> Data -> Permissions)
       # They execute in alphanumeric order of filenames
       - ./database/query-target:/docker-entrypoint-initdb.d
-      - pg_data:/var/lib/postgresql/data
+      - ./local-data/postgres-db:/var/lib/postgresql/data
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
     healthcheck:
@@ -32,7 +35,7 @@ services:
       POSTGRES_DB: agent_control
     volumes:
       - ./database/control-plane:/docker-entrypoint-initdb.d
-      - control_pg_data:/var/lib/postgresql/data
+      - ./local-data/agent-control-db:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     healthcheck:
@@ -53,7 +56,7 @@ services:
     networks:
       - text2sql_net
     volumes:
-      - memgraph_data:/var/lib/memgraph
+      - ./local-data/memgraph:/var/lib/memgraph
 
   mlflow-server:
     build: ./mlflow-server
@@ -94,7 +97,7 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - mlflow_artifacts:/data
+      - ./local-data/minio:/data
     command: server /data --console-address ":9001"
     networks:
       - text2sql_net
@@ -103,13 +106,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-volumes:
-  pg_data:
-  control_pg_data:
-  mlflow_artifacts:
-  memgraph_data:
-
 
 networks:
   text2sql_net:

@@ -1,0 +1,66 @@
+# Local Docker Persistence
+
+As of **Phase 3** of the Docker Optimization effort, persistent infrastructure data (Postgres, MinIO, Memgraph) is no longer stored in hidden Docker volumes.
+
+Data is now persisted to the host filesystem at:
+
+```
+./local-data/
+  ├── postgres-db/      # pagila query target data
+  ├── agent-control-db/ # agent control plane data
+  ├── minio/            # MLflow artifacts
+  └── memgraph/         # graph db data
+```
+
+This directory is `.gitignore`d, so your local data remains private and is not committed.
+
+## Why this change?
+
+1. **Visibility**: You can easily inspect, backup, or delete data files.
+2. **Stability**: Docker VM disk usage is reduced; large data lives on your Mac filesystem.
+3. **Reset**: To completely reset your environment, you can simply `rm -rf local-data/*` and restart (which will re-initialize schemas).
+
+## Setup
+
+Before running `docker compose up`, run the bootstrap script to create the directories with correct permissions:
+
+```bash
+./scripts/bootstrap_local_data.sh
+```
+
+## Migration (Optional)
+
+If you have valuable data in the old Docker volumes (`text2sql_pg_data`, etc.), you can migrate it manually.
+
+**Example Migration for Postgres:**
+
+```bash
+# 1. Stop containers
+docker compose down
+
+# 2. Bootstrap directories
+./scripts/bootstrap_local_data.sh
+
+# 3. Copy data from old volume to new bind mount
+docker run --rm \
+  -v text2sql_pg_data:/from \
+  -v $(pwd)/local-data/postgres-db:/to \
+  alpine sh -c "cp -a /from/. /to/"
+
+# 4. Start infra
+docker compose -f docker-compose.infra.yml up -d
+```
+
+Repeate for `text2sql_control_pg_data`, `text2sql_mlflow_artifacts`, etc.
+
+## Troubleshooting
+
+### Persistence Errors (Permission Denied)
+If you see "Permission denied" errors in Docker logs:
+
+1. Ensure you ran `./scripts/bootstrap_local_data.sh`.
+2. Check permissions: `ls -la local-data/`.
+3. If necessary, allow generic write access (safe for local dev):
+   ```bash
+   chmod -R 777 local-data/
+   ```
