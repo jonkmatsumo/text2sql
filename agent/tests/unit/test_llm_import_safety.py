@@ -19,14 +19,23 @@ def no_api_keys(monkeypatch):
 
 def test_llm_client_import_safe(no_api_keys):
     """Verify that importing agent_core.llm_client is safe without API keys."""
-    # Ensure it's not already imported in a way that affects this test
-    # We want to simulate a fresh import
+    # Ensure we are reloading actual modules, not mocks from other tests
+    import sys
+
+    if "agent_core.llm_client" in sys.modules and not isinstance(
+        sys.modules["agent_core.llm_client"], type(sys)
+    ):
+        del sys.modules["agent_core.llm_client"]
+
     import agent_core.llm_client
 
     importlib.reload(agent_core.llm_client)
 
-    # Also check the graph module, which imports all nodes
-    # This verifies that NO node module eagerly instantiates an LLM
+    if "agent_core.graph" in sys.modules and not isinstance(
+        sys.modules["agent_core.graph"], type(sys)
+    ):
+        del sys.modules["agent_core.graph"]
+
     import agent_core.graph
 
     importlib.reload(agent_core.graph)
@@ -35,6 +44,13 @@ def test_llm_client_import_safe(no_api_keys):
 def test_llm_accessor_lazy_init(no_api_keys):
     """Verify that get_llm() initializes lazily and raises error only on access."""
     # Reload to ensure cache is empty and it sees the no_api_keys env
+    import sys
+
+    if "agent_core.llm_client" in sys.modules and not isinstance(
+        sys.modules["agent_core.llm_client"], type(sys)
+    ):
+        del sys.modules["agent_core.llm_client"]
+
     import agent_core.llm_client
 
     importlib.reload(agent_core.llm_client)
