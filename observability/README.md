@@ -18,12 +18,15 @@ This directory contains the OpenTelemetry (OTEL) infrastructure for the Text2SQL
 -   Existing MinIO
 -   Existing MLflow Tracking Server
 
-### Running Locally
+### Running Locally (current)
 
-1.  Copy `.env.example` to `.env` (if not already managed by root compose).
-2.  Start the observability stack using the override:
+1.  **Bring up the stack**:
     ```bash
-    docker compose -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml up -d otel-collector otel-worker
+    make otel-up
+    ```
+2.  **Run Migrations (Manual Step)**:
+    ```bash
+    make otel-migrate
     ```
 
 ### Instrumented Services

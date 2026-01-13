@@ -2,13 +2,22 @@
 
 COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml
 
-.PHONY: help docker-clean docker-clean-deep docker-nuke
+.PHONY: help docker-clean docker-clean-deep docker-nuke otel-migrate otel-up
 
 help:
 	@echo "Available targets:"
 	@echo "  make docker-clean       - Safe cleanup (stops containers, removes dangling images)"
 	@echo "  make docker-clean-deep  - Deep cleanup (reclaims disk: unused images, build cache)"
 	@echo "  make docker-nuke        - DESTRUCTIVE: Removes all volumes and local persistent data"
+	@echo "  make otel-migrate       - Run database migrations for the OTEL worker"
+	@echo "  make otel-up            - Bring up the observability stack (collector + worker)"
+
+# OTEL Scaffolding (Issue D/F)
+otel-migrate:
+	docker compose $(COMPOSE_FILES) exec otel-worker alembic upgrade head
+
+otel-up:
+	docker compose $(COMPOSE_FILES) up -d otel-collector otel-worker
 
 # Safe cleanup (default)
 # Stops containers, removes stopped containers, prunes dangling images and builder cache

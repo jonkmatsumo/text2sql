@@ -18,6 +18,11 @@ from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger(__name__)
 
+# OTEL Configuration Defaults (Issue A/B Scaffolding)
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-agent")
+
 
 class SpanType(Enum):
     """Semantic span types mapping to MLflow/OTEL concepts."""
