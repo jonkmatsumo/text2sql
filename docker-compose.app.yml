@@ -1,4 +1,16 @@
 services:
+  otel-worker:
+    build:
+      context: ./observability/otel-worker
+    container_name: otel_worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
+    depends_on:
+      - agent-control-db
+    networks:
+      - text2sql_net
+
   seeder:
     image: text2sql-mcp-server:latest
     container_name: text2sql_seeder

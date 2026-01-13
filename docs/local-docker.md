@@ -28,27 +28,30 @@ Before running `docker compose up`, run the bootstrap script to create the direc
 ./scripts/bootstrap_local_data.sh
 ```
 
-## Migration (Optional)
+## Running the Environment
 
-If you have valuable data in the old Docker volumes (`text2sql_pg_data`, etc.), you can migrate it manually.
+### 1. Infrastructure (Pull-and-Run)
 
-**Example Migration for Postgres:**
+Start infrastructure services. This **does not require building** and uses pinned images.
 
 ```bash
-# 1. Stop containers
-docker compose down
-
-# 2. Bootstrap directories
-./scripts/bootstrap_local_data.sh
-
-# 3. Copy data from old volume to new bind mount
-docker run --rm \
-  -v text2sql_pg_data:/from \
-  -v $(pwd)/local-data/postgres-db:/to \
-  alpine sh -c "cp -a /from/. /to/"
-
-# 4. Start infra
 docker compose -f docker-compose.infra.yml up -d
+```
+
+### 2. Application (Build)
+
+Start application services (including API server, Streamlit app, and workers). This **rebuilds** local code changes.
+
+```bash
+docker compose -f docker-compose.infra.yml -f docker-compose.app.yml up -d --build
+```
+
+### 3. Observability (Optional)
+
+To enable the observability stack (OTEL Collector):
+
+```bash
+docker compose -f docker-compose.infra.yml -f observability/docker-compose.observability.yml up -d
 ```
 
 Repeate for `text2sql_control_pg_data`, `text2sql_mlflow_artifacts`, etc.
