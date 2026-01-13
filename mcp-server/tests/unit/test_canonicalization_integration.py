@@ -21,6 +21,7 @@ async def test_reload_patterns_integration():
     with patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True), patch(
         "mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx
     ):
+        CanonicalizationService.reset_instance()
         service = CanonicalizationService.get_instance()
 
         # Ensure we have a mock NLP if spacy is missing or to isolate
