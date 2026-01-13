@@ -9,7 +9,9 @@ Environment Variables:
     EXAMPLE_STORE_PROVIDER: Provider for ExampleStore (default: "postgres")
     SCHEMA_STORE_PROVIDER: Provider for SchemaStore (default: "postgres")
     SCHEMA_INTROSPECTOR_PROVIDER: Provider for SchemaIntrospector (default: "postgres")
+    SCHEMA_INTROSPECTOR_PROVIDER: Provider for SchemaIntrospector (default: "postgres")
     METADATA_STORE_PROVIDER: Provider for MetadataStore (default: "postgres")
+    PATTERN_RUN_STORE_PROVIDER: Provider for PatternRunStore (default: "postgres")
 
 Canonical Provider IDs:
     - "postgres": PostgreSQL-based implementations
@@ -33,6 +35,7 @@ from mcp_server.dal.interfaces import (
     GraphStore,
     InteractionStore,
     MetadataStore,
+    PatternRunStore,
     RegistryStore,
     SchemaIntrospector,
     SchemaStore,
@@ -45,6 +48,7 @@ from mcp_server.dal.postgres import (
     PostgresFeedbackStore,
     PostgresInteractionStore,
     PostgresMetadataStore,
+    PostgresPatternRunStore,
     PostgresRegistryStore,
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
@@ -81,6 +85,10 @@ METADATA_STORE_PROVIDERS: dict[str, type[MetadataStore]] = {
     "postgres": PostgresMetadataStore,
 }
 
+PATTERN_RUN_STORE_PROVIDERS: dict[str, type[PatternRunStore]] = {
+    "postgres": PostgresPatternRunStore,
+}
+
 REGISTRY_STORE_PROVIDERS: dict[str, type[RegistryStore]] = {
     "postgres": PostgresRegistryStore,
 }
@@ -110,8 +118,10 @@ _schema_introspector: Optional[SchemaIntrospector] = None
 _metadata_store: Optional[MetadataStore] = None
 _registry_store: Optional[RegistryStore] = None
 _conversation_store: Optional[ConversationStore] = None
+
 _feedback_store: Optional[FeedbackStore] = None
 _interaction_store: Optional[InteractionStore] = None
+_pattern_run_store: Optional[PatternRunStore] = None
 
 
 # =============================================================================
@@ -315,6 +325,30 @@ def get_metadata_store() -> MetadataStore:
     return _metadata_store
 
 
+def get_pattern_run_store() -> PatternRunStore:
+    """Get or create the singleton PatternRunStore instance.
+
+    Provider is selected via PATTERN_RUN_STORE_PROVIDER env var.
+    Default: "postgres" (PostgresPatternRunStore)
+
+    Returns:
+        The singleton PatternRunStore instance.
+    """
+    global _pattern_run_store
+    if _pattern_run_store is None:
+        provider = get_provider_env(
+            "PATTERN_RUN_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(PATTERN_RUN_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing PatternRunStore with provider: {provider}")
+
+        store_cls = PATTERN_RUN_STORE_PROVIDERS[provider]
+        _pattern_run_store = store_cls()
+
+    return _pattern_run_store
+
+
 # =============================================================================
 # Testing Utilities
 # =============================================================================
@@ -328,7 +362,7 @@ def reset_singletons() -> None:
     """
     global _graph_store, _cache_store, _example_store, _registry_store
     global _schema_store, _schema_introspector, _metadata_store
-    global _conversation_store, _feedback_store, _interaction_store
+    global _conversation_store, _feedback_store, _interaction_store, _pattern_run_store
 
     _graph_store = None
     _cache_store = None
@@ -340,6 +374,7 @@ def reset_singletons() -> None:
     _conversation_store = None
     _feedback_store = None
     _interaction_store = None
+    _pattern_run_store = None
 
 
 def get_conversation_store() -> ConversationStore:

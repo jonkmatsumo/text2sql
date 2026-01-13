@@ -107,6 +107,46 @@ class Database:
             )
             print("✓ Operational schema ensured (nlp_patterns)")
 
+            # Table for Pattern Generation Runs
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nlp_pattern_runs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMPTZ,
+                    status TEXT NOT NULL,
+                    target_table TEXT,
+                    config_snapshot JSONB DEFAULT '{}'::jsonb,
+                    error_message TEXT,
+                    metrics JSONB DEFAULT '{}'::jsonb,
+                    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED'))
+                );
+                """
+            )
+
+            # Table for Run-Pattern Association
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nlp_pattern_run_items (
+                    run_id UUID NOT NULL REFERENCES nlp_pattern_runs(id),
+                    pattern_id TEXT NOT NULL,
+                    -- pattern_id is the "Canonical Value".
+                    -- We link via (label, pattern) which is the PK of nlp_patterns.
+                    pattern_label TEXT NOT NULL,
+                    pattern_text TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    CHECK (
+                        action IN ('CREATED', 'UPDATED', 'UNCHANGED', 'DELETED')
+                    ),
+                    FOREIGN KEY (
+                        pattern_label, pattern_text
+                    ) REFERENCES nlp_patterns(label, pattern),
+                    PRIMARY KEY (run_id, pattern_label, pattern_text)
+                );
+                """
+            )
+            print("✓ Operational schema ensured (nlp_pattern_runs, nlp_pattern_run_items)")
+
     @classmethod
     async def close(cls):
         """Close connection pools."""

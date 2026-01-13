@@ -8,6 +8,7 @@ from .example_store import PostgresExampleStore
 from .feedback_store import PostgresFeedbackStore
 from .interaction_store import PostgresInteractionStore
 from .metadata_store import PostgresMetadataStore
+from .pattern_run_store import PostgresPatternRunStore
 from .registry_store import PostgresRegistryStore
 from .schema_introspector import PostgresSchemaIntrospector
 from .schema_store import PostgresSchemaStore
@@ -19,6 +20,7 @@ __all__ = [
     "PostgresFeedbackStore",
     "PostgresInteractionStore",
     "PostgresMetadataStore",
+    "PostgresPatternRunStore",
     "PostgresRegistryStore",
     "PostgresSchemaIntrospector",
     "PostgresSchemaStore",

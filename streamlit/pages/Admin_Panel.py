@@ -250,6 +250,24 @@ def main():
                     run_operation("Pattern Generation", OpsService.run_pattern_generation())
                 )
 
+            st.divider()
+            st.subheader("Reload Patterns")
+            st.info("Reload NLP patterns from database without restart.")
+            if st.button("Reload NLP Patterns"):
+                with st.spinner("Reloading patterns..."):
+                    result = asyncio.run(OpsService.reload_patterns())
+                    if result.get("success"):
+                        st.success(f"✅ {result.get('message')}")
+                        st.metric("Patterns Loaded", result.get("pattern_count"))
+                        st.caption(
+                            f"Duration: {result.get('duration_ms')}ms "
+                            f"(ID: {result.get('reload_id')})"
+                        )
+                    else:
+                        st.error(f"❌ {result.get('message')}")
+                        if result.get("reload_id"):
+                            st.caption(f"Error ID: {result.get('reload_id')}")
+
         with col2:
             st.subheader("Schema Hydration")
             st.info("Sync Postgres schema to Memgraph.")

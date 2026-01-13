@@ -46,6 +46,7 @@ CANONICAL_TOOLS: Set[str] = {
     "export_approved_to_fewshot",
     "list_approved_examples",
     "recommend_examples",
+    "reload_patterns",
 }
 
 
@@ -85,6 +86,7 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.admin.list_approved_examples import handler as list_approved_examples
     from mcp_server.tools.admin.list_interactions import handler as list_interactions
     from mcp_server.tools.admin.reject_interaction import handler as reject_interaction
+    from mcp_server.tools.admin.reload_patterns import handler as reload_patterns
 
     # Conversation tools
     from mcp_server.tools.conversation.load_conversation_state import (
@@ -151,5 +153,6 @@ def register_all(mcp: "FastMCP") -> None:
     mcp.tool(name="reject_interaction")(reject_interaction)
     mcp.tool(name="export_approved_to_fewshot")(export_approved_to_fewshot)
     mcp.tool(name="list_approved_examples")(list_approved_examples)
+    mcp.tool(name="reload_patterns")(reload_patterns)
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")
