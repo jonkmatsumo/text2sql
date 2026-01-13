@@ -7,11 +7,14 @@ This pool is completely isolated from the query-target database to ensure
 LLM-generated SQL never accesses control-plane data.
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 
 class ControlPlaneDatabase:
@@ -60,6 +63,8 @@ class ControlPlaneDatabase:
                 server_settings={"application_name": "agent_control_plane"},
             )
             print(f"✓ Control-plane pool established: {db_user}@{db_host}/{db_name}")
+            await cls.ensure_pinned_recommendations_schema()
+            logger.info("Ensured pinned_recommendations schema exists in control-plane DB")
         except Exception as e:
             msg = f"✗ Failed to connect to control-plane DB: {e}"
             print(msg)
@@ -78,6 +83,68 @@ class ControlPlaneDatabase:
             except ValueError:
                 pass
             cls._pool = None
+
+    @classmethod
+    async def ensure_pinned_recommendations_schema(cls) -> None:
+        """Ensure pinned_recommendations schema exists in control-plane DB."""
+        if cls._pool is None:
+            return
+
+        async with cls._pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pinned_recommendations (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    tenant_id INT NOT NULL,
+                    match_type VARCHAR(20) NOT NULL CHECK (match_type IN ('exact', 'contains')),
+                    match_value TEXT NOT NULL,
+                    registry_example_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    priority INT NOT NULL DEFAULT 0,
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+                """
+            )
+
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_pinned_recos_tenant
+                ON pinned_recommendations(tenant_id);
+                """
+            )
+
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_pinned_recos_enabled
+                ON pinned_recommendations(enabled);
+                """
+            )
+
+            await conn.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgname = 'update_pinned_recos_modtime'
+                    ) THEN
+                        DROP TRIGGER update_pinned_recos_modtime
+                        ON pinned_recommendations;
+                    END IF;
+                END
+                $$;
+                """
+            )
+
+            await conn.execute(
+                """
+                CREATE TRIGGER update_pinned_recos_modtime
+                    BEFORE UPDATE ON pinned_recommendations
+                    FOR EACH ROW
+                    EXECUTE PROCEDURE update_modified_column();
+                """
+            )
 
     @classmethod
     def is_configured(cls) -> bool:
