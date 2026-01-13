@@ -9,7 +9,7 @@ from agent_core.state import AgentState
 class TestCorrectSqlNode:
     """Unit tests for correct_sql_node function."""
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_success(self, mock_prompt_class, mock_llm):
         """Test successful SQL correction."""
@@ -55,7 +55,7 @@ class TestCorrectSqlNode:
         # Verify error reset
         assert result["error"] is None
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_retry_count_increment(self, mock_prompt_class, mock_llm):
         """Test that retry_count is incremented."""
@@ -82,7 +82,7 @@ class TestCorrectSqlNode:
 
         assert result["retry_count"] == 3
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_error_reset(self, mock_prompt_class, mock_llm):
         """Test that error is reset to None."""
@@ -109,7 +109,7 @@ class TestCorrectSqlNode:
 
         assert result["error"] is None
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_markdown_removal(self, mock_prompt_class, mock_llm):
         """Test markdown code block removal from corrected SQL."""
@@ -136,7 +136,7 @@ class TestCorrectSqlNode:
 
         assert result["current_sql"] == "SELECT * FROM film"
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_empty_schema_context(self, mock_prompt_class, mock_llm):
         """Test correction with empty schema_context."""
@@ -167,7 +167,7 @@ class TestCorrectSqlNode:
 
         assert result["current_sql"] == "SELECT 1"
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_missing_retry_count(self, mock_prompt_class, mock_llm):
         """Test that retry_count defaults to 0 if missing."""
@@ -197,7 +197,7 @@ class TestCorrectSqlNode:
         # Should increment from 0 to 1
         assert result["retry_count"] == 1
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_column_name_error(self, mock_prompt_class, mock_llm):
         """Test correction of column name errors."""
@@ -226,7 +226,7 @@ class TestCorrectSqlNode:
         assert result["retry_count"] == 1
         assert result["error"] is None
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_syntax_error(self, mock_prompt_class, mock_llm):
         """Test correction of syntax errors."""
@@ -254,7 +254,7 @@ class TestCorrectSqlNode:
         assert result["current_sql"] == "SELECT * FROM film WHERE rating = 'PG'"
         assert result["retry_count"] == 1
 
-    @patch("agent_core.nodes.correct.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_complex_markdown(self, mock_prompt_class, mock_llm):
         """Test SQL extraction from complex markdown format."""
