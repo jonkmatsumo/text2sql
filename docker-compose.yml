@@ -1,3 +1,4 @@
+# This file will be deprecated after Phase 0 of docker-local-optimization.
 services:
   postgres-db:
     # Upgrade to pgvector image to support vector extension

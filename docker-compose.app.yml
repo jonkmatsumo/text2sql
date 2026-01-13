@@ -1,0 +1,112 @@
+services:
+  seeder:
+    image: text2sql-mcp-server:latest
+    container_name: text2sql_seeder
+    command: sleep infinity
+    build: ./mcp-server
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      agent-control-db:
+        condition: service_started
+      memgraph:
+        condition: service_started
+    environment:
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: pagila
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
+      SPACY_ENABLED: "true"
+      MEMGRAPH_URI: bolt://memgraph:7687
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      - ./database/query-target/queries:/app/queries:ro
+      - ./database/query-target/01-schema.sql:/app/schema.sql:ro
+      - ./database/query-target/patterns:/app/patterns:ro
+    networks:
+      - text2sql_net
+
+  mcp-server:
+    build: ./mcp-server
+    container_name: text2sql_core
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      agent-control-db:
+        condition: service_started
+    environment:
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: pagila
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
+      MEMGRAPH_URI: bolt://memgraph:7687
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MCP_TRANSPORT: "streamable-http"
+      SPACY_ENABLED: "true"
+    ports:
+      - "8000:8000"
+    networks:
+      - text2sql_net
+    volumes:
+      - ./database/query-target/patterns:/app/patterns:ro
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: streamlit/Dockerfile
+    container_name: text2sql_streamlit
+    depends_on:
+      mcp-server:
+        condition: service_started
+      mlflow-server:
+        condition: service_started
+      agent-control-db:
+        condition: service_started
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
+      MCP_SERVER_URL: http://mcp-server:8000/messages
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: pagila
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
+      DB_ISOLATION_ENABLED: "true"
+      MLFLOW_TRACKING_URI: http://mlflow-server:5000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount for development (hot reload)
+      - ./streamlit:/app/streamlit
+      - ./agent:/app/agent
+    networks:
+      - text2sql_net
+    restart: unless-stopped
