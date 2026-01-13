@@ -119,6 +119,36 @@ def _extract_limit_regex(sql: str) -> Optional[int]:
     return None
 
 
+def extract_order_direction_from_sql(sql: str) -> Optional[str]:
+    """Extract first ORDER BY direction (ASC/DESC) from SQL."""
+    try:
+        ast = sqlglot.parse_one(sql, dialect="postgres")
+    except Exception:
+        return _extract_order_regex(sql)
+
+    order = ast.find(exp.Order)
+    if order and order.expressions:
+        first_expr = order.expressions[0]
+        # sqlglot Order expressions are usually [Ordered(...)]
+        if hasattr(first_expr, "args"):
+            desc = first_expr.args.get("desc")
+            if desc is True:
+                return "DESC"
+            if desc is False:
+                return "ASC"
+
+    return _extract_order_regex(sql)
+
+
+def _extract_order_regex(sql: str) -> Optional[str]:
+    """Regex fallback for order direction."""
+    if re.search(r"\bORDER\s+BY\s+.*?\bDESC\b", sql, re.IGNORECASE | re.DOTALL):
+        return "DESC"
+    if re.search(r"\bORDER\s+BY\s+.*?\bASC\b", sql, re.IGNORECASE | re.DOTALL):
+        return "ASC"
+    return None
+
+
 def validate_sql_constraints(sql: str, constraints: QueryConstraints) -> ValidationResult:
     """Validate that a SQL query satisfies the given constraints."""
     mismatches = []
@@ -129,7 +159,7 @@ def validate_sql_constraints(sql: str, constraints: QueryConstraints) -> Validat
         extracted["rating"] = sql_rating
 
         if sql_rating is None:
-            msg = f"Expected rating '{constraints.rating}' but " "no rating predicate found in SQL"
+            msg = f"Expected rating '{constraints.rating}' but no rating predicate found in SQL"
             mismatches.append(
                 ConstraintMismatch(
                     constraint_type="rating",
@@ -163,6 +193,24 @@ def validate_sql_constraints(sql: str, constraints: QueryConstraints) -> Validat
                         message=f"Limit mismatch: expected {constraints.limit}, found {sql_limit}",
                     )
                 )
+
+    if constraints.sort_direction:
+        sql_sort = extract_order_direction_from_sql(sql)
+        extracted["sort_direction"] = sql_sort
+
+        if sql_sort and sql_sort != constraints.sort_direction:
+            msg = (
+                f"Sort direction mismatch: expected {constraints.sort_direction}, "
+                f"found {sql_sort}"
+            )
+            mismatches.append(
+                ConstraintMismatch(
+                    constraint_type="sort_direction",
+                    expected=constraints.sort_direction,
+                    found=sql_sort,
+                    message=msg,
+                )
+            )
 
     return ValidationResult(
         is_valid=len(mismatches) == 0,

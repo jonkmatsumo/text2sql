@@ -318,6 +318,8 @@ class CanonicalizationService:
             parts.append(f"AGG:{constraints['metric']}")
         if constraints.get("limit"):
             parts.append(f"LIMIT:{constraints['limit']}")
+        if constraints.get("sort_direction"):
+            parts.append(f"SORT:{constraints['sort_direction']}")
 
         # Sort for determinism
         return "|".join(sorted(parts))

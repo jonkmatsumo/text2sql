@@ -47,6 +47,8 @@ CANONICAL_TOOLS: Set[str] = {
     "list_approved_examples",
     "recommend_examples",
     "reload_patterns",
+    "manage_pin_rules",
+    "generate_patterns",
 }
 
 
@@ -82,6 +84,7 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.admin.export_approved_to_fewshot import (
         handler as export_approved_to_fewshot,
     )
+    from mcp_server.tools.admin.generate_patterns import handler as generate_patterns
     from mcp_server.tools.admin.get_interaction_details import handler as get_interaction_details
     from mcp_server.tools.admin.list_approved_examples import handler as list_approved_examples
     from mcp_server.tools.admin.list_interactions import handler as list_interactions
@@ -110,6 +113,7 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.interaction.update_interaction import handler as update_interaction
     from mcp_server.tools.list_tables import handler as list_tables
     from mcp_server.tools.lookup_cache import handler as lookup_cache
+    from mcp_server.tools.manage_pin_rules import handler as manage_pin_rules
     from mcp_server.tools.recommend_examples import handler as recommend_examples
     from mcp_server.tools.resolve_ambiguity import handler as resolve_ambiguity
     from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
@@ -154,5 +158,7 @@ def register_all(mcp: "FastMCP") -> None:
     mcp.tool(name="export_approved_to_fewshot")(export_approved_to_fewshot)
     mcp.tool(name="list_approved_examples")(list_approved_examples)
     mcp.tool(name="reload_patterns")(reload_patterns)
+    mcp.tool(name="manage_pin_rules")(manage_pin_rules)
+    mcp.tool(name="generate_patterns")(generate_patterns)
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

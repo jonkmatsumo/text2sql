@@ -39,7 +39,11 @@ class IntentSignature:
                 for k, v in sorted(self.filters.items())
             }
         if self.ranking:
-            canonical["ranking"] = {k: v for k, v in sorted(self.ranking.items())}
+            # ranking includes limit, include_ties, sort_direction
+            canonical["ranking"] = {
+                k.lower(): v.upper() if k == "sort_direction" else v
+                for k, v in sorted(self.ranking.items())
+            }
 
         return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
 
@@ -76,6 +80,7 @@ def build_signature_from_constraints(
     query: str,
     rating: Optional[str] = None,
     limit: Optional[int] = None,
+    sort_direction: Optional[str] = None,
     include_ties: bool = False,
     entity: Optional[str] = None,
     metric: Optional[str] = None,
@@ -98,6 +103,8 @@ def build_signature_from_constraints(
     ranking = {}
     if limit:
         ranking["limit"] = limit
+    if sort_direction:
+        ranking["sort_direction"] = sort_direction
     if include_ties:
         ranking["include_ties"] = include_ties
 

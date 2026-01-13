@@ -19,33 +19,47 @@ class AdminService:
     @staticmethod
     async def list_pin_rules(tenant_id: int):
         """List all pin rules for a tenant."""
-        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+        from types import SimpleNamespace
 
-        store = PostgresPinnedRecommendationStore()
-        return await store.list_rules(tenant_id)
+        # Use MCP tool instead of direct DAL
+        result = await AdminService._call_tool(
+            "manage_pin_rules", {"operation": "list", "tenant_id": tenant_id}
+        )
+
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(result["error"])
+
+        if not isinstance(result, list):
+            return []
+
+        # Convert dicts to SimpleNamespace for dot-notation access in UI
+        return [SimpleNamespace(**r) for r in result]
 
     @staticmethod
     async def upsert_pin_rule(tenant_id: int, rule_id: Optional[str] = None, **kwargs):
         """Create or update a pin rule."""
-        from uuid import UUID
+        from types import SimpleNamespace
 
-        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+        payload = {"operation": "upsert", "tenant_id": tenant_id, "rule_id": rule_id, **kwargs}
 
-        store = PostgresPinnedRecommendationStore()
-        if rule_id:
-            return await store.update_rule(UUID(rule_id), tenant_id=tenant_id, **kwargs)
-        else:
-            return await store.create_rule(tenant_id=tenant_id, **kwargs)
+        result = await AdminService._call_tool("manage_pin_rules", payload)
+
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(result["error"])
+
+        return SimpleNamespace(**result)
 
     @staticmethod
     async def delete_pin_rule(rule_id: str, tenant_id: int):
         """Delete a pin rule."""
-        from uuid import UUID
+        result = await AdminService._call_tool(
+            "manage_pin_rules", {"operation": "delete", "rule_id": rule_id, "tenant_id": tenant_id}
+        )
 
-        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(result["error"])
 
-        store = PostgresPinnedRecommendationStore()
-        return await store.delete_rule(UUID(rule_id), tenant_id)
+        return result.get("success", False)
 
     @staticmethod
     async def _call_tool(tool_name: str, args: dict) -> Any:

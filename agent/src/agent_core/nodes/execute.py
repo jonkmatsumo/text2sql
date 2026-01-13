@@ -152,8 +152,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     # Get cache update tool
                     cache_tool = next((t for t in tools if t.name == "update_cache"), None)
                     if cache_tool:
-                        # Extract user query from first message
-                        user_query = state["messages"][0].content if state["messages"] else ""
+                        # Use the most recent user message as the cache key (G4 fix)
+                        user_query = state["messages"][-1].content if state.get("messages") else ""
                         if user_query:
                             await cache_tool.ainvoke(
                                 {

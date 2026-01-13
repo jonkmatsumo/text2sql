@@ -19,7 +19,17 @@ CREATE INDEX IF NOT EXISTS idx_pinned_recos_tenant ON pinned_recommendations(ten
 -- Index for finding enabled rules quickly
 CREATE INDEX IF NOT EXISTS idx_pinned_recos_enabled ON pinned_recommendations(enabled);
 
+-- Trigger Function for updated_at
+CREATE OR REPLACE FUNCTION update_modified_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 -- Trigger for updated_at
+DROP TRIGGER IF EXISTS update_pinned_recos_modtime ON pinned_recommendations;
 CREATE TRIGGER update_pinned_recos_modtime
     BEFORE UPDATE ON pinned_recommendations
     FOR EACH ROW

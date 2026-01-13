@@ -33,14 +33,23 @@ async def lookup_cache(user_query: str, tenant_id: int) -> Optional[CacheLookupR
     # === Tier 1: Canonical Registry Lookup (exact signature match) ===
     pair = await RegistryService.lookup_canonical(user_query, tenant_id)
     if pair and "cache" in pair.roles and pair.status != "tombstoned":
-        logger.info(f"✓ Registry signature hit: {pair.signature_key[:16]}...")
-        # We don't block on access update
-        return CacheLookupResult(
-            cache_id=pair.signature_key,
-            value=pair.sql_query,
-            similarity=1.0,
-            metadata={"match_type": "signature"},
-        )
+        # SAFETY: Validate even Tier-1 hits to catch subtle poisoning or stale entries
+        constraints = extract_constraints(user_query)
+        validation = validate_sql_constraints(pair.sql_query, constraints)
+        if validation.is_valid:
+            logger.info(f"✓ Registry signature hit: {pair.signature_key[:16]}...")
+            metadata = {"match_type": "signature"}
+            return CacheLookupResult(
+                cache_id=pair.signature_key,
+                value=pair.sql_query,
+                similarity=1.0,
+                metadata=metadata,
+            )
+        else:
+            reasons = "; ".join(m.message for m in validation.mismatches)
+            msg = f"Tier-1 hit {pair.signature_key[:8]} failed validation"
+            logger.warning(f"{msg}: {reasons}")
+            # Fall through to semantic lookup
 
     # === Tier 2: Semantic Registry Fallback with Validation ===
     candidates = await RegistryService.lookup_semantic(

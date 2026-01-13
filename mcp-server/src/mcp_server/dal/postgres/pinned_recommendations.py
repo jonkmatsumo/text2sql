@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
+from mcp_server.config.control_plane import ControlPlaneDatabase
 from mcp_server.config.database import Database
 
 
@@ -26,7 +27,12 @@ class PostgresPinnedRecommendationStore:
 
     async def list_rules(self, tenant_id: int, only_enabled: bool = False) -> List[PinRule]:
         """List rules for a tenant."""
-        async with Database.get_connection() as conn:
+        if ControlPlaneDatabase.is_enabled():
+            conn_ctx = ControlPlaneDatabase.get_connection(tenant_id)
+        else:
+            conn_ctx = Database.get_connection(tenant_id)
+
+        async with conn_ctx as conn:
             query = """
                 SELECT id, tenant_id, match_type, match_value, registry_example_ids,
                        priority, enabled, created_at, updated_at
@@ -55,7 +61,12 @@ class PostgresPinnedRecommendationStore:
         """Create a new pin rule."""
         import json
 
-        async with Database.get_connection() as conn:
+        if ControlPlaneDatabase.is_enabled():
+            conn_ctx = ControlPlaneDatabase.get_connection(tenant_id)
+        else:
+            conn_ctx = Database.get_connection(tenant_id)
+
+        async with conn_ctx as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO pinned_recommendations
@@ -85,7 +96,12 @@ class PostgresPinnedRecommendationStore:
         """Update a rule. Requires tenant_id for safety."""
         import json
 
-        async with Database.get_connection() as conn:
+        if ControlPlaneDatabase.is_enabled():
+            conn_ctx = ControlPlaneDatabase.get_connection(tenant_id)
+        else:
+            conn_ctx = Database.get_connection(tenant_id)
+
+        async with conn_ctx as conn:
             # Build dynamic update
             updates = []
             args = []
@@ -131,7 +147,12 @@ class PostgresPinnedRecommendationStore:
 
     async def delete_rule(self, rule_id: UUID, tenant_id: int) -> bool:
         """Delete a rule."""
-        async with Database.get_connection() as conn:
+        if ControlPlaneDatabase.is_enabled():
+            conn_ctx = ControlPlaneDatabase.get_connection(tenant_id)
+        else:
+            conn_ctx = Database.get_connection(tenant_id)
+
+        async with conn_ctx as conn:
             res = await conn.execute(
                 "DELETE FROM pinned_recommendations WHERE id = $1::uuid AND tenant_id = $2",
                 str(rule_id),
