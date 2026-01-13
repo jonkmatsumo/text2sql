@@ -16,6 +16,7 @@ class QueryConstraints:
 
     rating: Optional[str] = None  # G, PG, PG-13, R, NC-17
     limit: Optional[int] = None  # e.g., 10
+    sort_direction: Optional[str] = None  # ASC, DESC
     include_ties: bool = False
     entity: Optional[str] = None  # actor, film, customer, etc.
     metric: Optional[str] = None  # count_distinct, sum, avg, etc.
@@ -27,6 +28,7 @@ class QueryConstraints:
         return {
             "rating": self.rating,
             "limit": self.limit,
+            "sort_direction": self.sort_direction,
             "include_ties": self.include_ties,
             "entity": self.entity,
             "metric": self.metric,
@@ -86,12 +88,27 @@ def _parse_spelled_number(m) -> int:
 
 
 LIMIT_PATTERNS = [
-    (r"\btop\s+(\d+)\b", lambda m: int(m.group(1))),
-    (r"\b(\d+)\s+(?:best|top|highest|most)\b", lambda m: int(m.group(1))),
-    (r"\blimit\s+(\d+)\b", lambda m: int(m.group(1))),
-    (r"\bfirst\s+(\d+)\b", lambda m: int(m.group(1))),
-    (rf"\btop\s+({SPELLED_NUM_PATTERN})\b", _parse_spelled_number),
-    (rf"\b({SPELLED_NUM_PATTERN})\s+(?:best|top|highest|most)\b", _parse_spelled_number),
+    (
+        r"\b(?:top|first|limit|best|longest|shortest|highest|lowest)\s+(\d+)\b",
+        lambda m: int(m.group(1)),
+    ),
+    (
+        r"\b(\d+)\s+(?:best|top|highest|most|longest|shortest|highest|lowest)\b",
+        lambda m: int(m.group(1)),
+    ),
+    (
+        rf"\b(?:top|first|best|longest|shortest|highest|lowest)\s+({SPELLED_NUM_PATTERN})\b",
+        _parse_spelled_number,
+    ),
+    (
+        rf"\b({SPELLED_NUM_PATTERN})\s+(?:best|top|highest|most|longest|shortest|highest|lowest)\b",
+        _parse_spelled_number,
+    ),
+]
+
+SORT_PATTERNS = [
+    (r"\b(longest|highest|most|best|top|descending|desc)\b", "DESC"),
+    (r"\b(shortest|lowest|least|ascending|asc)\b", "ASC"),
 ]
 
 TIES_PATTERNS = [
@@ -143,6 +160,13 @@ def extract_constraints(query: str) -> QueryConstraints:
         if match:
             constraints.limit = extractor(match)
             constraints._matched_patterns.append(f"limit:{pattern}")
+            break
+
+    # Extract sort direction
+    for pattern, direction in SORT_PATTERNS:
+        if re.search(pattern, query, re.IGNORECASE):
+            constraints.sort_direction = direction
+            constraints._matched_patterns.append(f"sort:{pattern}")
             break
 
     for pattern in TIES_PATTERNS:
