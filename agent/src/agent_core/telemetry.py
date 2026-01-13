@@ -273,7 +273,10 @@ class OTELTelemetryBackend(TelemetryBackend):
         tracer = self._ensure_tracer()
 
         # Map span_type to attribute as OTEL SpanKind is usually INTERNAL for these
-        base_attrs = {"span.type": span_type.value}
+        base_attrs = {
+            "span.type": span_type.value,
+            "service.name": self.tracer_name,
+        }
         if attributes:
             base_attrs.update(attributes)
 

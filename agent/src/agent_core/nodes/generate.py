@@ -1,5 +1,8 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
+import logging
+from typing import Any, Dict, Optional
+
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
@@ -8,73 +11,173 @@ from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
 llm = get_llm_client(temperature=0)
 
 
-async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
+def _emit_recommendation_telemetry(
+    reco_metadata: Dict[str, Any], fallback_used: bool, span: Any
+) -> None:
+    """Emit bounded, worker-compatible recommendation telemetry.
+
+    Hardening Notes:
+    - Scalar-only: All attributes must be string/int/bool for worker compatibility.
+    - Bounded: JSON lists are capped at 10 items; total string length capped at 4KB.
+    - Fail-safe: Missing metadata results in minimal 'recommendation.used' emission.
+
+    Manual Smoke Test:
+    1. Run agent query that triggers recommendations.
+    2. Check 'recommendation.select' span in OTEL worker.
+    3. Verify attributes: recommendation.*, tenant_id, interaction_id.
+    """
+    try:
+        import json
+
+        def _safe_json(data: list, limit: int = 10, max_chars: int = 4096) -> tuple[str, bool]:
+            """Safely encode list to JSON with item and length bounds."""
+            truncated_flag = False
+            items = data[:limit]
+            if len(data) > limit:
+                truncated_flag = True
+
+            json_str = json.dumps(items)
+            if len(json_str) > max_chars:
+                # If still too long, aggressively reduce items until it fits
+                truncated_flag = True
+                while len(json_str) > max_chars and items:
+                    items.pop()
+                    json_str = json.dumps(items)
+
+            return json_str, truncated_flag
+
+        # Extract lists and apply bounding
+        fingerprints, f_truncated = _safe_json(reco_metadata.get("fingerprints", []))
+        sources, s_truncated = _safe_json(reco_metadata.get("sources", []))
+        statuses, st_truncated = _safe_json(reco_metadata.get("statuses", []))
+        positions, p_truncated = _safe_json(reco_metadata.get("positions", []))
+
+        any_truncated = f_truncated or s_truncated or st_truncated or p_truncated
+
+        telemetry_attrs = {
+            "recommendation.used": True,
+            "recommendation.fallback_used": bool(fallback_used),
+            "recommendation.truncated": bool(reco_metadata.get("truncated", False)),
+            "recommendation.count.total": int(reco_metadata.get("count_total", 0)),
+            "recommendation.count.verified": int(reco_metadata.get("count_approved", 0)),
+            "recommendation.count.seeded": int(reco_metadata.get("count_seeded", 0)),
+            "recommendation.count.fallback": int(reco_metadata.get("count_fallback", 0)),
+            "recommendation.selected.fingerprints": fingerprints,
+            "recommendation.selected.sources": sources,
+            "recommendation.selected.statuses": statuses,
+            "recommendation.selected.positions": positions,
+            "recommendation.selected.truncated": any_truncated,
+        }
+
+        # Attach to child span and parent trace
+        if span:
+            span.set_attributes(telemetry_attrs)
+        telemetry.update_current_trace(metadata=telemetry_attrs)
+
+    except Exception as e:
+        # Fail-safe: Emit minimal telemetry if logic fails
+        logger.warning(f"Metadata telemetry emission failed: {e}")
+        try:
+            minimal_attrs = {"recommendation.used": True}
+            if span:
+                span.set_attributes(minimal_attrs)
+            telemetry.update_current_trace(metadata=minimal_attrs)
+        except Exception:
+            pass
+
+
+async def get_few_shot_examples(
+    user_query: str,
+    tenant_id: int = 1,
+    span: Optional[Any] = None,
+    interaction_id: Optional[str] = None,
+) -> str:
     """
     Retrieve relevant few-shot examples via the recommendation service.
 
     Args:
         user_query: The user's natural language question
         tenant_id: Tenant ID for isolation
+        interaction_id: Unique identifier for the interaction (for indexing)
 
     Returns:
         Formatted string with examples, or empty string if none found
     """
-    from agent_core.tools import get_mcp_tools
+    with telemetry.start_span(
+        name="recommendation.select",
+        span_type=SpanType.RETRIEVER,
+    ) as span:
+        if tenant_id:
+            span.set_attribute("tenant_id", tenant_id)
+        if interaction_id:
+            span.set_attribute("interaction_id", interaction_id)
 
-    tools = await get_mcp_tools()
-    if not tools:
-        return ""
+        from agent_core.tools import get_mcp_tools
 
-    # Prefer 'recommend_examples' over the legacy 'get_few_shot_examples'
-    recommend_tool = next((t for t in tools if t.name == "recommend_examples"), None)
-    legacy_tool = next((t for t in tools if t.name == "get_few_shot_examples"), None)
-
-    selected_tool = recommend_tool or legacy_tool
-    if not selected_tool:
-        return ""
-
-    try:
-        # recommend_examples uses 'query', get_few_shot_examples uses 'query'
-        result = await selected_tool.ainvoke(
-            {"query": user_query, "tenant_id": tenant_id, "limit": 3}
-        )
-        if not result:
+        tools = await get_mcp_tools()
+        if not tools:
             return ""
 
-        from agent_core.utils.parsing import parse_tool_output
+        # Prefer 'recommend_examples' over the legacy 'get_few_shot_examples'
+        recommend_tool = next((t for t in tools if t.name == "recommend_examples"), None)
+        legacy_tool = next((t for t in tools if t.name == "get_few_shot_examples"), None)
 
-        output = parse_tool_output(result)
+        selected_tool = recommend_tool or legacy_tool
+        if not selected_tool:
+            return ""
 
-        # parse_tool_output returns a list of chunks.
-        # recommend_examples returns a dict with 'examples'.
-        # legacy returns a flat list of dicts.
-        if (
-            output
-            and isinstance(output, list)
-            and isinstance(output[0], dict)
-            and "examples" in output[0]
-        ):
-            examples = output[0]["examples"]
-        else:
-            examples = output
+        try:
+            # recommend_examples uses 'query', get_few_shot_examples uses 'query'
+            result = await selected_tool.ainvoke(
+                {"query": user_query, "tenant_id": tenant_id, "limit": 3}
+            )
+            if not result:
+                return ""
 
-        formatted = []
-        for ex in examples:
-            if isinstance(ex, dict):
-                # Both structures have question/sql or question/sql_query
-                q = ex.get("question")
-                s = ex.get("sql") or ex.get("sql_query")
-                if q and s:
-                    formatted.append(f"- Question: {q}\n  SQL: {s}")
+            from agent_core.utils.parsing import parse_tool_output
 
-        return "\n\n".join(formatted)
+            output = parse_tool_output(result)
 
-    except Exception as e:
-        print(f"Warning: Could not retrieve few-shot examples: {e}")
+            # parse_tool_output returns a list of chunks.
+            # recommend_examples returns a dict with 'examples'.
+            # legacy returns a flat list of dicts.
+            if (
+                output
+                and isinstance(output, list)
+                and isinstance(output[0], dict)
+                and "examples" in output[0]
+            ):
+                examples = output[0]["examples"]
+                reco_metadata = output[0].get("metadata", {})
+                fallback_used = output[0].get("fallback_used", False)
+            else:
+                examples = output
+                reco_metadata = {}
+                fallback_used = False
+
+            # Emit Telemetry (OTEL-compatible flat attributes)
+            _emit_recommendation_telemetry(reco_metadata, fallback_used, span)
+
+            formatted = []
+            for ex in examples:
+                if isinstance(ex, dict):
+                    # Both structures have question/sql or question/sql_query
+                    q = ex.get("question")
+                    s = ex.get("sql") or ex.get("sql_query")
+                    if q and s:
+                        formatted.append(f"- Question: {q}\n  SQL: {s}")
+
+            return "\n\n".join(formatted)
+
+        except Exception as e:
+            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            return ""
 
 
 async def generate_sql_node(state: AgentState) -> dict:
@@ -104,6 +207,7 @@ async def generate_sql_node(state: AgentState) -> dict:
         else:
             user_query = messages[-1].content if messages else ""
         tenant_id = state.get("tenant_id")
+        interaction_id = state.get("interaction_id")
 
         span.set_inputs(
             {
@@ -116,12 +220,21 @@ async def generate_sql_node(state: AgentState) -> dict:
         span.set_attribute("cache_hit", "false")
 
         # Cache miss - proceed with normal generation
-        # Retrieve few-shot examples
-        few_shot_examples = ""
+        if tenant_id:
+            span.set_attribute("tenant_id", tenant_id)
+        if interaction_id:
+            span.set_attribute("interaction_id", interaction_id)
+
         try:
-            few_shot_examples = await get_few_shot_examples(user_query, tenant_id or 1)
+            few_shot_examples = await get_few_shot_examples(
+                user_query,
+                tenant_id=tenant_id or 1,
+                span=span,
+                interaction_id=interaction_id,
+            )
         except Exception as e:
-            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            logger.warning(f"Could not retrieve few-shot examples: {e}")
+            few_shot_examples = ""
 
         # Use schema_context directly from retrieve node (now powered by semantic subgraph)
         # No need for redundant get_table_schema call - graph already contains full schema

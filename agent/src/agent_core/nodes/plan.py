@@ -112,6 +112,14 @@ async def plan_sql_node(state: AgentState) -> dict:
             if user_clarification:
                 user_query = f"{user_query}\n\nUser Clarification: {user_clarification}"
 
+        tenant_id = state.get("tenant_id")
+        interaction_id = state.get("interaction_id")
+
+        if tenant_id:
+            span.set_attribute("tenant_id", tenant_id)
+        if interaction_id:
+            span.set_attribute("interaction_id", interaction_id)
+
         span.set_inputs(
             {
                 "user_query": user_query,

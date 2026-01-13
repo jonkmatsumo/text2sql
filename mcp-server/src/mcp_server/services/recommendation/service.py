@@ -93,7 +93,25 @@ class RecommendationService:
                             )
                             picked_fingerprints.add(h.fingerprint)
 
-        return RecommendationResult(examples=recommended, fallback_used=fallback_used)
+        # Build Telemetry Metadata
+        metadata = {
+            "count_total": len(recommended),
+            "count_approved": sum(1 for ex in recommended if ex.source == "approved"),
+            "count_seeded": sum(1 for ex in recommended if ex.source == "seeded"),
+            "count_fallback": sum(1 for ex in recommended if ex.source == "fallback"),
+            "fingerprints": [ex.canonical_group_id for ex in recommended],
+            "sources": [ex.source for ex in recommended],
+            "statuses": [ex.metadata.get("status") or ex.source for ex in recommended],
+            "positions": list(range(len(recommended))),
+            "truncated": len(recommended) >= limit and len(all_to_process) > len(recommended),
+        }
+
+        # Note: 'statuses' extraction depends on RecommendedExample having 'status' in its metadata.
+        # Let's ensure _select_top_n preserves status in metadata if possible, or we use source.
+
+        return RecommendationResult(
+            examples=recommended, fallback_used=fallback_used, metadata=metadata
+        )
 
     @staticmethod
     def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
@@ -293,6 +311,7 @@ class RecommendationService:
                     score=1.0,  # Placeholder
                     source="approved" if cp.status == "verified" else "seeded",
                     canonical_group_id=cp.fingerprint,
+                    metadata={"status": cp.status},
                 )
             )
         return recommended
