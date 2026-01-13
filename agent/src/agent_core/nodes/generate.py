@@ -1,6 +1,7 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
-from typing import Any, Optional
+import logging
+from typing import Any, Dict, Optional
 
 from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
@@ -10,8 +11,74 @@ from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
 llm = get_llm_client(temperature=0)
+
+
+def _emit_recommendation_telemetry(
+    reco_metadata: Dict[str, Any], fallback_used: bool, span: Any
+) -> None:
+    """Emit bounded, worker-compatible recommendation telemetry."""
+    try:
+        import json
+
+        def _safe_json(data: list, limit: int = 10, max_chars: int = 4096) -> tuple[str, bool]:
+            """Safely encode list to JSON with item and length bounds."""
+            truncated_flag = False
+            items = data[:limit]
+            if len(data) > limit:
+                truncated_flag = True
+
+            json_str = json.dumps(items)
+            if len(json_str) > max_chars:
+                # If still too long, aggressively reduce items until it fits
+                truncated_flag = True
+                while len(json_str) > max_chars and items:
+                    items.pop()
+                    json_str = json.dumps(items)
+
+            return json_str, truncated_flag
+
+        # Extract lists and apply bounding
+        fingerprints, f_truncated = _safe_json(reco_metadata.get("fingerprints", []))
+        sources, s_truncated = _safe_json(reco_metadata.get("sources", []))
+        statuses, st_truncated = _safe_json(reco_metadata.get("statuses", []))
+        positions, p_truncated = _safe_json(reco_metadata.get("positions", []))
+
+        any_truncated = f_truncated or s_truncated or st_truncated or p_truncated
+
+        telemetry_attrs = {
+            "recommendation.used": True,
+            "recommendation.fallback_used": bool(fallback_used),
+            "recommendation.truncated": bool(reco_metadata.get("truncated", False)),
+            "recommendation.count.total": int(reco_metadata.get("count_total", 0)),
+            "recommendation.count.verified": int(reco_metadata.get("count_approved", 0)),
+            "recommendation.count.seeded": int(reco_metadata.get("count_seeded", 0)),
+            "recommendation.count.fallback": int(reco_metadata.get("count_fallback", 0)),
+            "recommendation.selected.fingerprints": fingerprints,
+            "recommendation.selected.sources": sources,
+            "recommendation.selected.statuses": statuses,
+            "recommendation.selected.positions": positions,
+            "recommendation.selected.truncated": any_truncated,
+        }
+
+        # Attach to child span and parent trace
+        if span:
+            span.set_attributes(telemetry_attrs)
+        telemetry.update_current_trace(metadata=telemetry_attrs)
+
+    except Exception as e:
+        # Fail-safe: Emit minimal telemetry if logic fails
+        logger.warning(f"Metadata telemetry emission failed: {e}")
+        try:
+            minimal_attrs = {"recommendation.used": True}
+            if span:
+                span.set_attributes(minimal_attrs)
+            telemetry.update_current_trace(metadata=minimal_attrs)
+        except Exception:
+            pass
 
 
 async def get_few_shot_examples(
@@ -71,36 +138,7 @@ async def get_few_shot_examples(
             fallback_used = False
 
         # Emit Telemetry (OTEL-compatible flat attributes)
-        try:
-            import json
-
-            telemetry_attrs = {
-                "recommendation.used": True,
-                "recommendation.fallback_used": bool(fallback_used),
-                "recommendation.truncated": bool(reco_metadata.get("truncated", False)),
-                "recommendation.count.total": int(reco_metadata.get("count_total", 0)),
-                "recommendation.count.verified": int(reco_metadata.get("count_approved", 0)),
-                "recommendation.count.seeded": int(reco_metadata.get("count_seeded", 0)),
-                "recommendation.count.fallback": int(reco_metadata.get("count_fallback", 0)),
-                "recommendation.selected.fingerprints": json.dumps(
-                    reco_metadata.get("fingerprints", [])[:10]
-                ),
-                "recommendation.selected.sources": json.dumps(
-                    reco_metadata.get("sources", [])[:10]
-                ),
-                "recommendation.selected.statuses": json.dumps(
-                    reco_metadata.get("statuses", [])[:10]
-                ),
-                "recommendation.selected.positions": json.dumps(
-                    reco_metadata.get("positions", [])[:10]
-                ),
-            }
-            # Attach to child span and parent trace
-            span.set_attributes(telemetry_attrs)
-            telemetry.update_current_trace(metadata=telemetry_attrs)
-        except Exception as tel_e:
-            # Telemetry should never crash the main flow
-            print(f"Warning: Could not emit recommendation telemetry: {tel_e}")
+        _emit_recommendation_telemetry(reco_metadata, fallback_used, span)
 
         formatted = []
         for ex in examples:
