@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, List
 
 from mcp_server.models import QueryPair
 from mcp_server.services.recommendation.config import RECO_CONFIG
@@ -40,7 +41,13 @@ class RecommendationService:
 
         # 2. Rank and Deduplicate
         all_candidates = approved + seeded
-        recommended = RecommendationService._rank_and_deduplicate(all_candidates, limit)
+        # Centralized filtering hook
+        filtered_candidates = RecommendationService._filter_invalid_candidates(
+            all_candidates, RECO_CONFIG
+        )
+        recommended = RecommendationService._rank_and_deduplicate(
+            filtered_candidates, limit, RECO_CONFIG
+        )
 
         fallback_used = False
         # 3. Fallback Path (enabled by both arg AND config)
@@ -60,31 +67,103 @@ class RecommendationService:
             )
 
             if history:
-                fallback_used = True
-                # Deduplicate history against already picked
-                picked_fingerprints = {
-                    ex.canonical_group_id for ex in recommended if ex.canonical_group_id
-                }
-                for h in history:
-                    if len(recommended) >= limit:
-                        break
-                    if h.fingerprint not in picked_fingerprints:
-                        recommended.append(
-                            RecommendedExample(
-                                question=h.question,
-                                sql=h.sql_query,
-                                score=1.0,  # Placeholder score
-                                source="fallback",
-                                canonical_group_id=h.fingerprint,
+                # Filter fallback candidates too
+                filtered_history = RecommendationService._filter_invalid_candidates(
+                    history, RECO_CONFIG
+                )
+
+                if filtered_history:
+                    fallback_used = True
+                    # Deduplicate history against already picked
+                    picked_fingerprints = {
+                        ex.canonical_group_id for ex in recommended if ex.canonical_group_id
+                    }
+                    for h in filtered_history:
+                        if len(recommended) >= limit:
+                            break
+                        if h.fingerprint not in picked_fingerprints:
+                            recommended.append(
+                                RecommendedExample(
+                                    question=h.question,
+                                    sql=h.sql_query,
+                                    score=1.0,  # Placeholder score
+                                    source="fallback",
+                                    canonical_group_id=h.fingerprint,
+                                )
                             )
-                        )
-                        picked_fingerprints.add(h.fingerprint)
+                            picked_fingerprints.add(h.fingerprint)
 
         return RecommendationResult(examples=recommended, fallback_used=fallback_used)
 
     @staticmethod
+    def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
+        """Filter out candidates based on validity and staleness rules.
+
+        Contract:
+        - Exclude tombstoned examples (if configured).
+        - Exclude incomplete examples (missing question, sql, or fingerprint).
+        - Exclude stale examples (if staleness filtering enabled).
+        - Applied uniformly to ALL candidate sources (verified, seeded, fallback).
+        - Fail-safe: Returns valid subset, never raises.
+        """
+        if not candidates:
+            return []
+
+        filtered = []
+        try:
+            # Safe access to config attributes
+            exclude_tombstoned = getattr(config, "exclude_tombstoned", True)
+            stale_max_age_days = getattr(config, "stale_max_age_days", 0)
+
+            for cp in candidates:
+                # 1. Check Tombstone
+                if exclude_tombstoned and cp.status == "tombstoned":
+                    logger.debug(f"Filtering tombstoned candidate: {cp.fingerprint}")
+                    continue
+
+                # 2. Check Required Fields
+                # question, sql_query, fingerprint must be non-empty
+                if not cp.question or not cp.sql_query or not cp.fingerprint:
+                    logger.debug(f"Filtering incomplete candidate: {cp.fingerprint}")
+                    continue
+
+                # 3. Check Staleness
+                if stale_max_age_days > 0:
+                    if not cp.updated_at:
+                        logger.debug(
+                            "Filtering candidate missing updated_at (staleness enabled): "
+                            f"{cp.fingerprint}"
+                        )
+                        continue
+
+                    # Ensure updated_at is timezone-aware or assume proper comparison
+                    now = datetime.now(timezone.utc)
+
+                    # Handle timezone awareness of cp.updated_at
+                    ex_time = cp.updated_at
+                    if ex_time.tzinfo is None:
+                        # If naive, assume UTC (standard practice in this project)
+                        ex_time = ex_time.replace(tzinfo=timezone.utc)
+
+                    age = now - ex_time
+                    if age.total_seconds() > (stale_max_age_days * 86400):
+                        logger.debug(
+                            f"Filtering stale candidate ({age.days} days old): " f"{cp.fingerprint}"
+                        )
+                        continue
+
+                filtered.append(cp)
+        except Exception as e:
+            # Guardrail: filtering must never raise exceptions
+            logger.error(f"Unexpected error during validity filtering: {e}", exc_info=True)
+            # In case of error, we return the candidates that were already successfully filtered
+            pass
+
+        return filtered
+
+    @staticmethod
     def _rank_and_deduplicate(
-        candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
+        candidates: List[QueryPair], limit: int, config: Any = None
     ) -> List[RecommendedExample]:
         """Rank candidates and enforce diversity (one per canonical group)."""
         ranked = RecommendationService._rank_candidates(candidates)
@@ -123,14 +202,14 @@ class RecommendationService:
 
     @staticmethod
     def _apply_diversity_policy(
-        candidates: List[QueryPair], limit: int, config: Dict[str, Any] = None
+        candidates: List[QueryPair], limit: int, config: Any = None
     ) -> List[QueryPair]:
         """Apply diversity selection policy.
 
         Expected inputs:
         - candidates: List of QueryPair objects, ranked by primary criteria.
         - limit: Maximum number of candidates to return.
-        - config: Configuration dictionary (env-backed).
+        - config: Configuration object (RecommendationConfig) or dict.
 
         Preserved invariants:
         - Output subset of inputs.
@@ -141,17 +220,17 @@ class RecommendationService:
         - Add 'diversity_weights' to config for score adjustment.
         - Support additional dimensions beyond 'source'.
         """
-        if not config or not isinstance(config, dict) or not config.get("diversity_enabled", False):
+        if not config or not getattr(config, "diversity_enabled", False):
             return candidates
 
-        max_per_source = config.get("diversity_max_per_source", -1)
+        max_per_source = getattr(config, "diversity_max_per_source", -1)
         if not isinstance(max_per_source, int) or max_per_source < -1:
             logger.warning(
                 f"Invalid diversity_max_per_source: {max_per_source}. Disabling diversity."
             )
             return candidates
 
-        min_verified = config.get("diversity_min_verified", 0)
+        min_verified = getattr(config, "diversity_min_verified", 0)
         if not isinstance(min_verified, int) or min_verified < 0:
             logger.warning(f"Invalid diversity_min_verified: {min_verified}. Disabling diversity.")
             return candidates
