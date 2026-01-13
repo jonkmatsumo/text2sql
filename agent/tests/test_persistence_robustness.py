@@ -7,13 +7,24 @@ from langchain_core.messages import HumanMessage
 # Set dummy env vars for the test to avoid import errors or config issues
 os.environ["MLFLOW_TRACKING_URI"] = "http://localhost:5001"
 # Patch mlflow to avoid actual connection attempts
-with patch("mlflow.set_tracking_uri"), patch("mlflow.langchain.autolog"):
-    from agent_core.graph import run_agent_with_tracing
 
 
 @pytest.mark.asyncio
 async def test_run_agent_persists_on_crash():
     """Test that update_interaction is called even if agent workflow crashes."""
+    # Local import inside async test to ensure fresh module
+    import sys
+
+    # Clean up polluted modules
+    clean_modules = [m for m in sys.modules if m.startswith("agent_core")]
+    for m in clean_modules:
+        if not isinstance(sys.modules[m], type(sys)):
+            del sys.modules[m]
+    if "agent_core" in sys.modules and not isinstance(sys.modules["agent_core"], type(sys)):
+        del sys.modules["agent_core"]
+
+    from agent_core.graph import run_agent_with_tracing
+
     # Mock MCP tools
     mock_create_tool = AsyncMock()
     mock_create_tool.name = "create_interaction"
@@ -61,6 +72,18 @@ async def test_run_agent_persists_on_crash():
 @pytest.mark.asyncio
 async def test_run_agent_persists_on_success():
     """Test that update_interaction is called on success."""
+    import sys
+
+    # Clean up polluted modules
+    clean_modules = [m for m in sys.modules if m.startswith("agent_core")]
+    for m in clean_modules:
+        if not isinstance(sys.modules[m], type(sys)):
+            del sys.modules[m]
+    if "agent_core" in sys.modules and not isinstance(sys.modules["agent_core"], type(sys)):
+        del sys.modules["agent_core"]
+
+    from agent_core.graph import run_agent_with_tracing
+
     # Mock MCP tools
     mock_create_tool = AsyncMock()
     mock_create_tool.name = "create_interaction"
