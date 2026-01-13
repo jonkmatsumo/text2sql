@@ -20,7 +20,18 @@ llm = get_llm_client(temperature=0)
 def _emit_recommendation_telemetry(
     reco_metadata: Dict[str, Any], fallback_used: bool, span: Any
 ) -> None:
-    """Emit bounded, worker-compatible recommendation telemetry."""
+    """Emit bounded, worker-compatible recommendation telemetry.
+
+    Hardening Notes:
+    - Scalar-only: All attributes must be string/int/bool for worker compatibility.
+    - Bounded: JSON lists are capped at 10 items; total string length capped at 4KB.
+    - Fail-safe: Missing metadata results in minimal 'recommendation.used' emission.
+
+    Manual Smoke Test:
+    1. Run agent query that triggers recommendations.
+    2. Check 'recommendation.select' span in OTEL worker.
+    3. Verify attributes: recommendation.*, tenant_id, interaction_id.
+    """
     try:
         import json
 

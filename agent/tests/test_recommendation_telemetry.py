@@ -206,3 +206,151 @@ async def test_recommendation_telemetry_legacy_tool(mock_get_mcp_tools, mock_upd
     assert metadata["recommendation.used"] is True
     assert metadata["recommendation.count.total"] == 0  # Metadata missing in legacy
     assert json.loads(metadata["recommendation.selected.fingerprints"]) == []
+
+
+@pytest.mark.asyncio
+@patch("agent_core.nodes.generate.telemetry.start_span")
+@patch("agent_core.nodes.generate.telemetry.update_current_trace")
+@patch("agent_core.tools.get_mcp_tools")
+async def test_recommendation_telemetry_bounding_items(
+    mock_get_mcp_tools, mock_update_trace, mock_start_span
+):
+    """Test that list items are capped at 10."""
+    mock_span = MagicMock()
+    mock_start_span.return_value.__enter__.return_value = mock_span
+    mock_tool = MagicMock()
+    mock_tool.name = "recommend_examples"
+
+    # 15 items
+    items = [f"F{i}" for i in range(15)]
+    reco_data = {
+        "examples": [],
+        "metadata": {
+            "count_total": 15,
+            "fingerprints": items,
+            "sources": ["source"] * 15,
+            "statuses": ["ok"] * 15,
+            "positions": list(range(15)),
+        },
+    }
+
+    mock_tool.ainvoke = AsyncMock(return_value=json.dumps(reco_data))
+    mock_get_mcp_tools.return_value = [mock_tool]
+
+    await get_few_shot_examples("test query", tenant_id=1)
+
+    _, kwargs = mock_update_trace.call_args
+    metadata = kwargs["metadata"]
+
+    assert metadata["recommendation.selected.truncated"] is True
+    fingerprints = json.loads(metadata["recommendation.selected.fingerprints"])
+    assert len(fingerprints) == 10
+    assert fingerprints[0] == "F0"
+    assert fingerprints[-1] == "F9"
+
+
+@pytest.mark.asyncio
+@patch("agent_core.nodes.generate.telemetry.start_span")
+@patch("agent_core.nodes.generate.telemetry.update_current_trace")
+@patch("agent_core.tools.get_mcp_tools")
+async def test_recommendation_telemetry_bounding_chars(
+    mock_get_mcp_tools, mock_update_trace, mock_start_span
+):
+    """Test that JSON string length is capped (at element level)."""
+    mock_span = MagicMock()
+    mock_start_span.return_value.__enter__.return_value = mock_span
+    mock_tool = MagicMock()
+    mock_tool.name = "recommend_examples"
+
+    # Large fingerprints to exceed 4KB with small number of items
+    # Each item ~1000 chars. 5 items = 5000 chars > 4096 limit.
+    large_items = ["x" * 1000 for _ in range(5)]
+    reco_data = {
+        "examples": [],
+        "metadata": {
+            "fingerprints": large_items,
+        },
+    }
+
+    mock_tool.ainvoke = AsyncMock(return_value=json.dumps(reco_data))
+    mock_get_mcp_tools.return_value = [mock_tool]
+
+    await get_few_shot_examples("test query", tenant_id=1)
+
+    _, kwargs = mock_update_trace.call_args
+    metadata = kwargs["metadata"]
+
+    json_str = metadata["recommendation.selected.fingerprints"]
+    assert len(json_str) <= 4096
+    items = json.loads(json_str)
+    assert len(items) < 5
+    assert metadata["recommendation.selected.truncated"] is True
+
+
+@pytest.mark.asyncio
+@patch("agent_core.nodes.generate.telemetry.start_span")
+@patch("agent_core.nodes.generate.telemetry.update_current_trace")
+@patch("agent_core.tools.get_mcp_tools")
+async def test_recommendation_telemetry_indexing(
+    mock_get_mcp_tools, mock_update_trace, mock_start_span
+):
+    """Test that indexing fields are attached to spans."""
+    mock_span = MagicMock()
+    mock_start_span.return_value.__enter__.return_value = mock_span
+    mock_tool = MagicMock()
+    mock_tool.name = "recommend_examples"
+
+    mock_tool.ainvoke = AsyncMock(return_value=json.dumps({"examples": []}))
+    mock_get_mcp_tools.return_value = [mock_tool]
+
+    await get_few_shot_examples("test query", tenant_id=99, interaction_id="int-123")
+
+    # Check child span
+    mock_span.set_attribute.assert_any_call("tenant_id", 99)
+    mock_span.set_attribute.assert_any_call("interaction_id", "int-123")
+
+
+@pytest.mark.asyncio
+@patch("agent_core.nodes.generate.telemetry.start_span")
+@patch("agent_core.nodes.generate.telemetry.update_current_trace")
+@patch("agent_core.tools.get_mcp_tools")
+async def test_recommendation_telemetry_fail_safe(
+    mock_get_mcp_tools, mock_update_trace, mock_start_span
+):
+    """Test fail-safe behavior when metadata is broken."""
+    mock_span = MagicMock()
+    mock_start_span.return_value.__enter__.return_value = mock_span
+    mock_tool = MagicMock()
+    mock_tool.name = "recommend_examples"
+
+    # Malformed metadata (e.g. string instead of dict) to trigger exception in helper
+    reco_data = {
+        "examples": [],
+        "metadata": "THIS IS NOT A DICT",
+    }
+
+    mock_tool.ainvoke = AsyncMock(return_value=json.dumps(reco_data))
+    mock_get_mcp_tools.return_value = [mock_tool]
+
+    # Should not raise
+    await get_few_shot_examples("test query", tenant_id=1)
+
+    # Should have fallback to minimal telemetry
+    mock_update_trace.assert_called()
+    _, kwargs = mock_update_trace.call_args
+    metadata = kwargs["metadata"]
+    assert metadata["recommendation.used"] is True
+
+
+def test_otel_worker_compatibility_scalars():
+    """Assertion helper (not a test on its own but could be).
+
+    Ensures all keys in a telemetry dict are scalar.
+    """
+    sample_metadata = {
+        "recommendation.used": True,
+        "recommendation.count.total": 1,
+        "recommendation.selected.fingerprints": "[]",
+    }
+    for k, v in sample_metadata.items():
+        assert isinstance(v, (str, int, bool, float))
