@@ -2,7 +2,7 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel_collector
-    command: ["--config=/etc/otel-collector-config.yaml"]
+    command: [ "--config=/etc/otel-collector-config.yaml" ]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
     environment:
@@ -17,7 +17,7 @@ services:
 
   otel-worker:
     build:
-      context: ./otel-worker
+      context: ./observability/otel-worker
     container_name: otel_worker
     environment:
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-root_password}@agent-control-db:5432/agent_control
