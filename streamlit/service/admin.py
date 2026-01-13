@@ -7,7 +7,7 @@ managing few-shot examples, and syncing with the registry.
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Add agent to path (same as in agent.py)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
@@ -15,6 +15,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
 
 class AdminService:
     """Service for Admin Panel business logic."""
+
+    @staticmethod
+    async def list_pin_rules(tenant_id: int):
+        """List all pin rules for a tenant."""
+        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+        store = PostgresPinnedRecommendationStore()
+        return await store.list_rules(tenant_id)
+
+    @staticmethod
+    async def upsert_pin_rule(tenant_id: int, rule_id: Optional[str] = None, **kwargs):
+        """Create or update a pin rule."""
+        from uuid import UUID
+
+        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+        store = PostgresPinnedRecommendationStore()
+        if rule_id:
+            return await store.update_rule(UUID(rule_id), tenant_id=tenant_id, **kwargs)
+        else:
+            return await store.create_rule(tenant_id=tenant_id, **kwargs)
+
+    @staticmethod
+    async def delete_pin_rule(rule_id: str, tenant_id: int):
+        """Delete a pin rule."""
+        from uuid import UUID
+
+        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+        store = PostgresPinnedRecommendationStore()
+        return await store.delete_rule(UUID(rule_id), tenant_id)
 
     @staticmethod
     async def _call_tool(tool_name: str, args: dict) -> Any:
