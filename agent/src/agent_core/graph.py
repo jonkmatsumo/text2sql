@@ -1,5 +1,6 @@
 """LangGraph workflow definition for Text 2 SQL agent with MLflow tracing."""
 
+import inspect
 import json
 import os
 import uuid
@@ -32,8 +33,14 @@ def with_telemetry_context(node_func):
         ctx = state.get("telemetry_context")
         if ctx:
             with telemetry.use_context(ctx):
-                return await node_func(state)
-        return await node_func(state)
+                ret = node_func(state)
+                if inspect.isawaitable(ret):
+                    return await ret
+                return ret
+        ret = node_func(state)
+        if inspect.isawaitable(ret):
+            return await ret
+        return ret
 
     wrapped_node.__name__ = node_func.__name__
     return wrapped_node
