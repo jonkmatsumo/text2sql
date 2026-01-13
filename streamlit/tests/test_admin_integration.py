@@ -75,8 +75,9 @@ async def test_admin_panel_reload_button_logic():
         with patch("asyncio.run", side_effect=lambda x: x):
             import importlib.util
 
+            # We import the module source to run it "as if" Streamlit ran it
             spec = importlib.util.spec_from_file_location(
-                "Admin_Panel", "streamlit/pages/Admin_Panel.py"
+                "Admin_Panel", "streamlit_app/pages/Admin_Panel.py"
             )
             val_mod = importlib.util.module_from_spec(spec)
             sys.modules["Admin_Panel"] = val_mod
