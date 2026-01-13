@@ -28,3 +28,23 @@ RECO_FALLBACK_ENABLED=false
 ```bash
 RECO_STATUS_PRIORITY=seeded,verified
 ```
+
+## Diversity Guarantees
+
+When diversity is enabled (`RECO_DIVERSITY_ENABLED=true`), the service provides several best-effort guarantees for the selection mix:
+
+### Guarantees
+- **Minimum Verified Floor**: The engine ensures at least `RECO_DIVERSITY_MIN_VERIFIED` (default: 1) examples are sourced from the `verified` (approved) status, regardless of their similarity ranking, provided enough candidates exist.
+- **Source Capping**: No single source (approved, seeded, or fallback) will ever exceed `RECO_DIVERSITY_MAX_PER_SOURCE` (default: -1, meaning uncapped) to prevent source domination.
+- **Fingerprint Uniqueness**: Even with diversity enabled, the service **always** enforces fingerprint deduplication. You will never see two examples from the same canonical group (duplicate SQL structure) in a single recommendation result.
+- **Deterministic Selection**: For a stable candidate pool, the selection results are deterministic based on the input similarity ranking.
+
+### Non-Guarantees / Out of Scope
+- **SQL Structure Diversity**: We do **not** current guarantee diversity in SQL logic beyond group deduplication.
+- **Global Optimality**: Diversity floors may pull a less similar verified example in place of a more similar seeded one to satisfy the contract.
+- **Stable Ordering on Ties**: Tie-breaking on identical similarity scores is not explicitly stable.
+
+### Related Configs
+- `RECO_DIVERSITY_ENABLED`: Main toggle (default: false).
+- `RECO_DIVERSITY_MIN_VERIFIED`: Minimum number of verified examples.
+- `RECO_DIVERSITY_MAX_PER_SOURCE`: Maximum examples per status source.
