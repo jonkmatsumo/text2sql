@@ -24,10 +24,10 @@ class RecommendationConfig:
     # RECO_DIVERSITY_MIN_VERIFIED: Minimum floor for approved examples (Default: 0)
     diversity_min_verified: int
     # Safety Configuration
-    safety_enabled: bool
-    safety_max_pattern_length: int
-    safety_blocklist_regex: Optional[str]
-    safety_require_sanitizable: bool
+    safety_enabled: bool = False
+    safety_max_pattern_length: int = 100
+    safety_blocklist_regex: Optional[str] = None
+    safety_require_sanitizable: bool = True
 
 
 def load_recommendation_config() -> RecommendationConfig:
