@@ -46,11 +46,11 @@ class CanonicalizationService:
         Args:
             model: SpaCy model name (default: en_core_web_sm for speed)
         """
+        self._state: Optional[CanonicalizationService.PipelineState] = None
         if CanonicalizationService._initialized:
             return
 
         self.model = model
-        self._state: Optional[CanonicalizationService.PipelineState] = None
 
         try:
             import spacy  # noqa: F401
