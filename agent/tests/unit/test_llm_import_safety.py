@@ -25,6 +25,12 @@ def test_llm_client_import_safe(no_api_keys):
 
     importlib.reload(agent_core.llm_client)
 
+    # Also check the graph module, which imports all nodes
+    # This verifies that NO node module eagerly instantiates an LLM
+    import agent_core.graph
+
+    importlib.reload(agent_core.graph)
+
 
 def test_llm_accessor_lazy_init(no_api_keys):
     """Verify that get_llm() initializes lazily and raises error only on access."""
