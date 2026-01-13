@@ -46,11 +46,11 @@ class CanonicalizationService:
         Args:
             model: SpaCy model name (default: en_core_web_sm for speed)
         """
+        self._state: Optional[CanonicalizationService.PipelineState] = None
         if CanonicalizationService._initialized:
             return
 
         self.model = model
-        self._state: Optional[CanonicalizationService.PipelineState] = None
 
         try:
             import spacy  # noqa: F401
@@ -63,6 +63,16 @@ class CanonicalizationService:
         CanonicalizationService._initialized = True
         if self._state:
             logger.info(f"CanonicalizationService initialized with model: {model}")
+
+    @property
+    def nlp(self):
+        """Access SpaCy NLP object from current state."""
+        return self._state.nlp if self._state else None
+
+    @property
+    def matcher(self):
+        """Access DependencyMatcher from current state."""
+        return self._state.matcher if self._state else None
 
     def _build_pipeline(self, model: str, extra_patterns: list = None) -> Optional[PipelineState]:
         """Build a fresh pipeline state.

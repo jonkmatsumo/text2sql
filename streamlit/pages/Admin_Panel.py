@@ -1,18 +1,11 @@
 import asyncio
 import json
-import sys
-from pathlib import Path
 
 import nest_asyncio
 import pandas as pd
 
 import streamlit as st
-
-# Add agent src to path for tools
-# Since this is in pages/, we go up three levels to reach the root
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
-
-from service.admin import AdminService  # noqa: E402
+from streamlit_app.service.admin import AdminService  # noqa: E402
 
 # Allow nested asyncio loops for MCP
 nest_asyncio.apply()
@@ -223,8 +216,7 @@ def main():
             st.info("No approved examples found.")
 
     elif view == "Operations":
-        # Import here to avoid circulars if any, though top-level is fine usually
-        from service.ops_service import OpsService
+        from streamlit_app.service.ops_service import OpsService
 
         st.header("⚙️ System Operations")
         st.write("Perform maintenance tasks and update system state.")

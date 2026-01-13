@@ -75,6 +75,7 @@ class TestRouterNode:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -115,6 +116,7 @@ class TestRouterNode:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -129,7 +131,10 @@ class TestRouterNode:
         """Test that existing clarification clears ambiguity and proceeds."""
         base_state["user_clarification"] = "I meant customer region"
 
-        with patch("mlflow.start_span", return_value=create_mock_span()):
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.llm_client.get_llm"),
+        ):
             result = await router_node(base_state)
 
         assert result.get("ambiguity_type") is None
@@ -143,7 +148,10 @@ class TestRouterNode:
         """Test that empty query returns empty dict."""
         base_state["messages"] = []
 
-        with patch("mlflow.start_span", return_value=create_mock_span()):
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.llm_client.get_llm"),
+        ):
             result = await router_node(base_state)
 
         assert result == {}
@@ -161,6 +169,7 @@ class TestRouterNode:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -196,6 +205,7 @@ class TestRouterNode:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -275,6 +285,7 @@ class TestHardRefusalLogic:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -316,6 +327,7 @@ class TestHardRefusalLogic:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -369,6 +381,7 @@ class TestHardRefusalLogic:
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent_core.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 

@@ -9,7 +9,7 @@ from agent_core.state import AgentState
 class TestSynthesizeInsightNode:
     """Unit tests for synthesize_insight_node function."""
 
-    @patch("agent_core.nodes.synthesize.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_success(self, mock_prompt_class, mock_llm):
         """Test successful insight synthesis with query results."""
@@ -95,7 +95,7 @@ class TestSynthesizeInsightNode:
         assert "messages" in result
         assert len(result["messages"]) == 1
 
-    @patch("agent_core.nodes.synthesize.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_large_result_set(self, mock_prompt_class, mock_llm):
         """Test synthesis with large result set."""
@@ -133,7 +133,7 @@ class TestSynthesizeInsightNode:
         assert "messages" in result
         assert result["messages"][0].content == "Found 500 films matching your criteria."
 
-    @patch("agent_core.nodes.synthesize.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_json_serialization(self, mock_prompt_class, mock_llm):
         """Test JSON serialization handles complex types (dates, decimals)."""
@@ -179,7 +179,7 @@ class TestSynthesizeInsightNode:
         assert "messages" in result
         assert len(result["messages"]) == 1
 
-    @patch("agent_core.nodes.synthesize.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_multiple_messages(self, mock_prompt_class, mock_llm):
         """Test that original question is extracted from first message."""
@@ -216,7 +216,7 @@ class TestSynthesizeInsightNode:
 
         assert "messages" in result
 
-    @patch("agent_core.nodes.synthesize.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_returns_aimessage(self, mock_prompt_class, mock_llm):
         """Test that result contains AIMessage objects, not dicts."""

@@ -19,7 +19,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_success(self, mock_prompt_class, mock_llm, mock_start_span):
         """Test successful SQL generation."""
@@ -67,7 +67,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_markdown_sql_block(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -101,7 +101,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_markdown_block(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -135,7 +135,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_no_markdown(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -169,7 +169,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_empty_schema_context(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -207,7 +207,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_multiple_messages(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -249,7 +249,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_whitespace_handling(
         self, mock_prompt_class, mock_llm, mock_start_span
@@ -283,7 +283,7 @@ class TestGenerateSqlNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_complex_markdown(
         self, mock_prompt_class, mock_llm, mock_start_span

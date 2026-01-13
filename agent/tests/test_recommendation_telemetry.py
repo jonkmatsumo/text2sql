@@ -7,7 +7,7 @@ from agent_core.nodes.generate import get_few_shot_examples
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_success(mock_get_mcp_tools, mock_update_trace):
     """Test telemetry emission for successful recommendation."""
     # Setup mocks
@@ -71,7 +71,7 @@ async def test_recommendation_telemetry_success(mock_get_mcp_tools, mock_update_
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_fallback(mock_get_mcp_tools, mock_update_trace):
     """Test telemetry emission when fallback is used."""
     # Setup mocks
@@ -119,7 +119,7 @@ async def test_recommendation_telemetry_fallback(mock_get_mcp_tools, mock_update
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_truncated(mock_get_mcp_tools, mock_update_trace):
     """Test telemetry emission when results are truncated."""
     # Setup mocks
@@ -148,7 +148,7 @@ async def test_recommendation_telemetry_truncated(mock_get_mcp_tools, mock_updat
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_empty(mock_get_mcp_tools, mock_update_trace):
     """Test telemetry emission for empty results."""
     # Setup mocks
@@ -182,7 +182,7 @@ async def test_recommendation_telemetry_empty(mock_get_mcp_tools, mock_update_tr
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_legacy_tool(mock_get_mcp_tools, mock_update_trace):
     """Test telemetry emission when legacy tool is used (no metadata)."""
     # Setup mocks
@@ -211,7 +211,7 @@ async def test_recommendation_telemetry_legacy_tool(mock_get_mcp_tools, mock_upd
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_bounding_items(
     mock_get_mcp_tools, mock_update_trace, mock_start_span
 ):
@@ -252,7 +252,7 @@ async def test_recommendation_telemetry_bounding_items(
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_bounding_chars(
     mock_get_mcp_tools, mock_update_trace, mock_start_span
 ):
@@ -290,7 +290,7 @@ async def test_recommendation_telemetry_bounding_chars(
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_indexing(
     mock_get_mcp_tools, mock_update_trace, mock_start_span
 ):
@@ -313,7 +313,7 @@ async def test_recommendation_telemetry_indexing(
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.nodes.generate.telemetry.update_current_trace")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_recommendation_telemetry_fail_safe(
     mock_get_mcp_tools, mock_update_trace, mock_start_span
 ):

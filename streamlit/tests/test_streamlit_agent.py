@@ -19,8 +19,14 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key-for-testing-only")
 sys.modules["langchain_mcp_adapters"] = MagicMock()
 sys.modules["langchain_mcp_adapters.client"] = MagicMock()
 sys.modules["mlflow"] = MagicMock()
+sys.modules["agent_core"] = MagicMock()
+sys.modules["agent_core.graph"] = MagicMock()
+sys.modules["agent_core.telemetry"] = MagicMock()
+sys.modules["agent_core.state"] = MagicMock()
+sys.modules["agent_core.nodes"] = MagicMock()
+sys.modules["agent_core.tools"] = MagicMock()
 
-from streamlit.service.agent import AgentService  # noqa: E402
+from streamlit_app.service.agent import AgentService  # noqa: E402
 
 
 class TestRunAgent:

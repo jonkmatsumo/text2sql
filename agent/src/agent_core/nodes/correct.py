@@ -3,7 +3,6 @@
 Enhanced with error taxonomy for targeted correction strategies.
 """
 
-from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent_core.telemetry import SpanType, telemetry
@@ -11,9 +10,6 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
-
-# Initialize LLM using the factory (temperature=0 for deterministic SQL correction)
-llm = get_llm_client(temperature=0)
 
 
 def correct_sql_node(state: AgentState) -> dict:
@@ -126,7 +122,9 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             ]
         )
 
-        chain = prompt | llm
+        from agent_core.llm_client import get_llm
+
+        chain = prompt | get_llm(temperature=0)
 
         response = chain.invoke(
             {

@@ -10,6 +10,8 @@ from mcp_server.services.canonicalization.spacy_pipeline import Canonicalization
 # Ensure SpaCy is enabled for these tests
 os.environ["SPACY_ENABLED"] = "true"
 
+pytestmark = pytest.mark.requires_db
+
 
 @pytest.fixture
 def reset_canonicalization_service():

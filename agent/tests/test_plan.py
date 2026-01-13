@@ -80,6 +80,7 @@ class TestPlanSqlNode:
         with (
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.plan.ChatPromptTemplate") as mock_prompt,
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -93,7 +94,10 @@ class TestPlanSqlNode:
         """Test plan generation with empty query."""
         base_state["messages"] = []
 
-        with patch("mlflow.start_span", return_value=create_mock_span()):
+        with (
+            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent_core.llm_client.get_llm"),
+        ):
             result = await plan_sql_node(base_state)
 
         # Should return empty dict for empty query
@@ -121,6 +125,7 @@ class TestPlanSqlNode:
         with (
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.plan.ChatPromptTemplate") as mock_prompt,
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 
@@ -141,6 +146,7 @@ class TestPlanSqlNode:
         with (
             patch("mlflow.start_span", return_value=create_mock_span()),
             patch("agent_core.nodes.plan.ChatPromptTemplate") as mock_prompt,
+            patch("agent_core.llm_client.get_llm"),
         ):
             mock_prompt.from_messages.return_value.__or__ = MagicMock(return_value=mock_chain)
 

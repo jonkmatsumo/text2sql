@@ -18,15 +18,29 @@ async def test_reload_patterns_integration():
     mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_db_ctx.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx):
+    with patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True), patch(
+        "mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx
+    ), patch("spacy.load") as mock_spacy_load, patch("spacy.blank") as mock_spacy_blank, patch(
+        "spacy.matcher.DependencyMatcher"
+    ) as mock_matcher_cls:
+        mock_nlp = MagicMock()
+        mock_nlp.pipe_names = []
+        mock_nlp.add_pipe.return_value = MagicMock()
+        mock_spacy_load.return_value = mock_nlp
+        mock_spacy_blank.return_value = mock_nlp
+
+        # Configure mocked matcher
+        mock_matcher = MagicMock()
+        mock_matcher_cls.return_value = mock_matcher
+        # Make the matcher callable (it's called as matcher(doc))
+        mock_matcher.return_value = []
+        CanonicalizationService.reset_instance()
         service = CanonicalizationService.get_instance()
 
         # Ensure we have a mock NLP if spacy is missing or to isolate
         if service.nlp is None:
-            # Create a dummy NLP object if spacy not installed in test env
-            service.nlp = MagicMock()
-            service.nlp.pipe_names = []
-            service.nlp.add_pipe.return_value = MagicMock()
+            # Service will initialize nlp via spacy.load/blank which we mocked
+            pass
 
         await service.reload_patterns()
 

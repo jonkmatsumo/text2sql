@@ -2,7 +2,7 @@
 
 import json
 
-from agent_core.llm_client import get_llm_client
+from agent_core.llm_client import get_llm
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
@@ -12,7 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate
 load_dotenv()
 
 # Initialize LLM using the factory (temperature=0.7 for more creative responses)
-llm = get_llm_client(temperature=0.7)
 
 
 def synthesize_insight_node(state: AgentState) -> dict:
@@ -79,7 +78,7 @@ Be concise but informative. Use numbers and data from the results.
             ]
         )
 
-        chain = prompt | llm
+        chain = prompt | get_llm(temperature=0.7)
 
         response = chain.invoke(
             {

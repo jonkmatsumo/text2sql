@@ -1,16 +1,23 @@
-"""Unit tests for LangGraph workflow definition."""
-
+import sys
 from unittest.mock import MagicMock, patch
 
-from agent_core.graph import (
-    app,
-    create_workflow,
-    route_after_execution,
-    route_after_router,
-    route_after_validation,
-)
 from agent_core.state import AgentState
 from langgraph.graph import END
+
+# We delay imports of agent_core.graph to test methods to allow for cleanup of polluted modules
+
+
+def clean_agent_modules():
+    """Clean up polluted modules from other tests."""
+    clean_modules = [m for m in sys.modules if m.startswith("agent_core")]
+    for m in clean_modules:
+        # We only delete mocks, or if force reloading is needed
+        if not isinstance(sys.modules[m], type(sys)) or "agent_core.graph" in m:
+            if m in sys.modules:
+                del sys.modules[m]
+
+    if "agent_core" in sys.modules:
+        del sys.modules["agent_core"]
 
 
 class TestRouteAfterRouter:
@@ -18,6 +25,9 @@ class TestRouteAfterRouter:
 
     def test_route_to_clarify_when_ambiguous(self):
         """Test routing to clarify when ambiguity detected."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_router
+
         state = {
             "messages": [],
             "ambiguity_type": "UNCLEAR_SCHEMA_REFERENCE",
@@ -30,6 +40,9 @@ class TestRouteAfterRouter:
 
     def test_route_to_plan_when_clear(self):
         """Test routing to plan when no ambiguity (schema already retrieved)."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_router
+
         state = {
             "messages": [],
             "ambiguity_type": None,
@@ -42,6 +55,9 @@ class TestRouteAfterRouter:
 
     def test_route_to_plan_when_ambiguity_missing(self):
         """Test routing to plan when ambiguity_type is missing."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_router
+
         state = {"messages": [], "schema_context": "Tables: film"}
 
         result = route_after_router(state)
@@ -54,6 +70,9 @@ class TestRouteAfterValidation:
 
     def test_route_to_execute_when_valid(self):
         """Test routing to execute when validation passes."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_validation
+
         state = {
             "ast_validation_result": {"is_valid": True},
             "error": None,
@@ -65,6 +84,9 @@ class TestRouteAfterValidation:
 
     def test_route_to_correct_when_invalid(self):
         """Test routing to correct when validation fails."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_validation
+
         state = {
             "ast_validation_result": {"is_valid": False},
             "error": None,
@@ -76,6 +98,9 @@ class TestRouteAfterValidation:
 
     def test_route_to_correct_when_error(self):
         """Test routing to correct when error is set."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_validation
+
         state = {
             "ast_validation_result": None,
             "error": "Security violation",
@@ -87,6 +112,9 @@ class TestRouteAfterValidation:
 
     def test_route_to_execute_when_no_validation_result(self):
         """Test routing to execute when no validation result."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_validation
+
         state = {
             "ast_validation_result": None,
             "error": None,
@@ -102,6 +130,9 @@ class TestRouteAfterExecution:
 
     def test_route_success_to_synthesize(self):
         """Test routing to synthesize when execution succeeds."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_execution
+
         state = AgentState(
             messages=[],
             schema_context="",
@@ -117,6 +148,9 @@ class TestRouteAfterExecution:
 
     def test_route_error_with_retries_under_limit_to_correct(self):
         """Test routing to correct when error occurs and retries < 3."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_execution
+
         state = AgentState(
             messages=[],
             schema_context="",
@@ -142,6 +176,9 @@ class TestRouteAfterExecution:
 
     def test_route_error_with_retries_at_limit_to_failed(self):
         """Test routing to failed when error occurs and retries >= 3."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_execution
+
         state = AgentState(
             messages=[],
             schema_context="",
@@ -162,6 +199,9 @@ class TestRouteAfterExecution:
 
     def test_route_error_with_missing_retry_count(self):
         """Test routing when retry_count is missing (defaults to 0)."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_execution
+
         state = {
             "messages": [],
             "schema_context": "",
@@ -178,6 +218,9 @@ class TestRouteAfterExecution:
 
     def test_route_no_error_with_empty_result(self):
         """Test routing when no error but result is empty."""
+        clean_agent_modules()
+        from agent_core.graph import route_after_execution
+
         state = AgentState(
             messages=[],
             schema_context="",
@@ -196,16 +239,19 @@ class TestRouteAfterExecution:
 class TestCreateWorkflow:
     """Unit tests for create_workflow function."""
 
-    @patch("agent_core.graph.StateGraph")
-    def test_workflow_creation(self, mock_state_graph_class):
+    def test_workflow_creation(self):
         """Test that workflow is created with correct structure."""
-        mock_workflow = MagicMock()
-        mock_state_graph_class.return_value = mock_workflow
+        clean_agent_modules()
+        from agent_core.graph import AgentState, create_workflow
 
-        create_workflow()
+        with patch("agent_core.graph.StateGraph") as mock_state_graph_class:
+            mock_workflow = MagicMock()
+            mock_state_graph_class.return_value = mock_workflow
 
-        # Verify StateGraph was created with AgentState
-        mock_state_graph_class.assert_called_once_with(AgentState)
+            create_workflow()
+
+            # Verify StateGraph was created with AgentState
+            mock_state_graph_class.assert_called_once_with(AgentState)
 
         # Verify nodes were added (now 10 nodes)
         assert mock_workflow.add_node.call_count == 10
@@ -240,6 +286,9 @@ class TestCreateWorkflow:
 
     def test_workflow_compiles(self):
         """Test that the workflow can be compiled without errors."""
+        clean_agent_modules()
+        from agent_core.graph import create_workflow
+
         workflow = create_workflow()
         # Use MemorySaver for compilation
         from langgraph.checkpoint.memory import MemorySaver
@@ -260,12 +309,18 @@ class TestAppCompilation:
 
     def test_app_exists(self):
         """Test that app is compiled and available."""
+        clean_agent_modules()
+        from agent_core.graph import app
+
         assert app is not None
         # Verify it's a compiled LangGraph workflow
         assert hasattr(app, "invoke") or hasattr(app, "astream")
 
     def test_app_has_workflow_methods(self):
         """Test that app has required workflow methods."""
+        clean_agent_modules()
+        from agent_core.graph import app
+
         # Verify the compiled app has methods to execute the workflow
         assert hasattr(app, "invoke") or hasattr(app, "astream")
         # If nodes are accessible, check if they're populated
@@ -296,7 +351,7 @@ class TestAppCompilation:
     def test_app_can_be_imported(self):
         """Test that app can be imported and is usable."""
         # Verify the app module-level compilation worked
+        clean_agent_modules()
         from agent_core.graph import app as imported_app
 
         assert imported_app is not None
-        assert imported_app is app  # Should be the same instance

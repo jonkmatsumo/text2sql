@@ -18,7 +18,7 @@ class TestGenerateSchema(unittest.IsolatedAsyncioTestCase):
     """Unit tests for structured schema handling in generate_sql_node."""
 
     @patch("agent_core.nodes.generate.telemetry.start_span")
-    @patch("agent_core.nodes.generate.llm")
+    @patch("agent_core.llm_client.get_llm")
     @patch("agent_core.nodes.generate.ChatPromptTemplate")
     @patch("agent_core.nodes.generate.get_few_shot_examples", new_callable=AsyncMock)
     async def test_generate_sql_uses_schema_context(
