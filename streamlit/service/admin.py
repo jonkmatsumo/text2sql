@@ -194,3 +194,22 @@ class AdminService:
             if query in ex.get("question", "").lower() or query in ex.get("sql_query", "").lower()
         ]
         return filtered
+
+    @classmethod
+    async def get_recommendations(
+        cls, query: str, tenant_id: int, limit: int, enable_fallback: bool
+    ) -> Dict:
+        """
+        Run recommendations for inspection.
+
+        Returns the raw tool output including metadata.
+        """
+        return await cls._call_tool(
+            "recommend_examples",
+            {
+                "query": query,
+                "tenant_id": tenant_id,
+                "limit": limit,
+                "enable_fallback": enable_fallback,
+            },
+        )
