@@ -91,6 +91,7 @@ class ControlPlaneDatabase:
             return
 
         async with cls._pool.acquire() as conn:
+            # 1. Create table
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS pinned_recommendations (
@@ -107,6 +108,7 @@ class ControlPlaneDatabase:
                 """
             )
 
+            # 2. Add indexes
             await conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_pinned_recos_tenant
@@ -121,24 +123,23 @@ class ControlPlaneDatabase:
                 """
             )
 
+            # 3. Define helper function for triggers
             await conn.execute(
                 """
-                DO $$
+                CREATE OR REPLACE FUNCTION update_modified_column()
+                RETURNS TRIGGER AS $$
                 BEGIN
-                    IF EXISTS (
-                        SELECT 1 FROM pg_trigger
-                        WHERE tgname = 'update_pinned_recos_modtime'
-                    ) THEN
-                        DROP TRIGGER update_pinned_recos_modtime
-                        ON pinned_recommendations;
-                    END IF;
-                END
-                $$;
+                    NEW.updated_at = NOW();
+                    RETURN NEW;
+                END;
+                $$ language 'plpgsql';
                 """
             )
 
+            # 4. Create trigger (idempotent via DROP IF EXISTS)
             await conn.execute(
                 """
+                DROP TRIGGER IF EXISTS update_pinned_recos_modtime ON pinned_recommendations;
                 CREATE TRIGGER update_pinned_recos_modtime
                     BEFORE UPDATE ON pinned_recommendations
                     FOR EACH ROW

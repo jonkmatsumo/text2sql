@@ -50,4 +50,18 @@ class TestControlPlaneDatabase:
 
         executed_sql = " ".join(call.args[0] for call in mock_conn.execute.call_args_list)
         assert "CREATE TABLE IF NOT EXISTS pinned_recommendations" in executed_sql
+        assert "CREATE OR REPLACE FUNCTION update_modified_column" in executed_sql
+        assert "DROP TRIGGER IF EXISTS update_pinned_recos_modtime" in executed_sql
         assert "CREATE TRIGGER update_pinned_recos_modtime" in executed_sql
+
+        # Verify order: Function before Trigger
+        calls = [call.args[0] for call in mock_conn.execute.call_args_list]
+        func_idx = next(
+            i
+            for i, c in enumerate(calls)
+            if "CREATE OR REPLACE FUNCTION update_modified_column" in c
+        )
+        trigger_idx = next(
+            i for i, c in enumerate(calls) if "CREATE TRIGGER update_pinned_recos_modtime" in c
+        )
+        assert func_idx < trigger_idx
