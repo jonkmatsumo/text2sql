@@ -17,7 +17,6 @@ services:
     image: text2sql-mcp-server:latest
     container_name: text2sql_seeder
     command: sleep infinity
-    build: ./mcp-server
     depends_on:
       postgres-db:
         condition: service_healthy
@@ -49,6 +48,7 @@ services:
 
   mcp-server:
     build: ./mcp-server
+    image: text2sql-mcp-server:latest
     container_name: text2sql_core
     depends_on:
       postgres-db:

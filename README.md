@@ -184,7 +184,8 @@ text2sql/
 ├── streamlit/                  # Streamlit packaging + Docker assets
 ├── streamlit_app/              # Streamlit UI entrypoint (Text_2_SQL_Agent.py)
 ├── observability/              # Optional OTEL stack
-├── docker-compose.yml          # Service orchestration
+├── docker-compose.infra.yml    # Infrastructure services (Postgres, MinIO, etc.)
+├── docker-compose.app.yml      # Application services (Python apps)
 └── docker-compose.test.yml     # Test DB compose file
 ```
 
