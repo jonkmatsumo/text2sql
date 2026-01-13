@@ -1,11 +1,18 @@
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, List
+from typing import Any, List, Optional
 
 from mcp_server.models import QueryPair
 from mcp_server.services.recommendation.config import RECO_CONFIG
+from mcp_server.services.recommendation.explanation import (
+    DiversityExplanation,
+    FilteringExplanation,
+    RecommendationExplanation,
+)
 from mcp_server.services.recommendation.interface import RecommendationResult, RecommendedExample
 from mcp_server.services.registry import RegistryService
+from mcp_server.services.sanitization.text_sanitizer import sanitize_text
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +51,18 @@ class RecommendationService:
         4. Rank, Dedupe, and Apply Diversity to remaining candidates.
         5. Fallback if insufficient.
         """
+        # 0. Initialize Explanation
+        explanation = RecommendationExplanation()
+
         # 0. Pinned Examples
         pin_rules = await RecommendationService._match_pin_rules(question, tenant_id)
         pinned_examples = await RecommendationService._resolve_pins(pin_rules, tenant_id)
         selected_fingerprints = {
             ex.canonical_group_id for ex in pinned_examples if ex.canonical_group_id
         }
+
+        explanation.pins.matched_rules = [str(r.id) for r in pin_rules]
+        explanation.pins.selected_count = len(pinned_examples)
 
         # 1. Fetch Candidates (Normal)
         fetch_limit = limit * RECO_CONFIG.candidate_multiplier
@@ -63,9 +76,13 @@ class RecommendationService:
 
         # 2. Rank and Deduplicate (with Pins Pre-filled)
         all_candidates = approved + seeded
+        explanation.selection_summary.total_candidates = len(all_candidates) + len(pinned_examples)
+        explanation.selection_summary.counts_by_source["approved"] = len(approved)
+        explanation.selection_summary.counts_by_source["seeded"] = len(seeded)
+
         # Centralized filtering hook
         filtered_candidates = RecommendationService._filter_invalid_candidates(
-            all_candidates, RECO_CONFIG
+            all_candidates, RECO_CONFIG, explanation.filtering
         )
 
         # Exclude already pinned fingerprints
@@ -75,7 +92,7 @@ class RecommendationService:
 
         remaining_limit = max(0, limit - len(pinned_examples))
         dynamic_recos = RecommendationService._rank_and_deduplicate(
-            filtered_candidates, remaining_limit, RECO_CONFIG
+            filtered_candidates, remaining_limit, RECO_CONFIG, explanation.diversity
         )
 
         recommended = pinned_examples + dynamic_recos
@@ -97,10 +114,12 @@ class RecommendationService:
             if history:
                 # Filter fallback candidates too
                 filtered_history = RecommendationService._filter_invalid_candidates(
-                    history, RECO_CONFIG
+                    history, RECO_CONFIG, explanation.filtering
                 )
                 if filtered_history:
                     total_valid_candidates += len(filtered_history)
+                    explanation.selection_summary.total_candidates += len(history)
+                    explanation.selection_summary.counts_by_source["interactions"] = len(history)
 
                 if filtered_history:
                     fallback_used = True
@@ -123,7 +142,19 @@ class RecommendationService:
                             )
                             picked_fingerprints.add(h.fingerprint)
 
+                    explanation.fallback.used = True
+                    explanation.fallback.reason = "insufficient_verified_candidates"
+
+        explanation.fallback.enabled = effective_fallback_enabled
+        explanation.fallback.candidate_multiplier = RECO_CONFIG.candidate_multiplier
+        explanation.fallback.shortage_count = max(0, limit - len(recommended))
+
         # Build Telemetry Metadata
+        explanation.selection_summary.returned_count = len(recommended)
+        for ex in recommended:
+            explanation.selection_summary.counts_by_status[ex.source] = (
+                explanation.selection_summary.counts_by_status.get(ex.source, 0) + 1
+            )
         metadata = {
             "count_total": len(recommended),
             "count_approved": sum(1 for ex in recommended if ex.source == "approved"),
@@ -139,11 +170,16 @@ class RecommendationService:
         }
 
         return RecommendationResult(
-            examples=recommended, fallback_used=fallback_used, metadata=metadata
+            examples=recommended,
+            fallback_used=fallback_used,
+            metadata=metadata,
+            explanation=explanation,
         )
 
     @staticmethod
-    def _filter_invalid_candidates(candidates: List[QueryPair], config: Any) -> List[QueryPair]:
+    def _filter_invalid_candidates(
+        candidates: List[QueryPair], config: Any, explanation: Optional[FilteringExplanation] = None
+    ) -> List[QueryPair]:
         """Filter out candidates based on validity and staleness rules.
 
         Contract:
@@ -166,12 +202,16 @@ class RecommendationService:
                 # 1. Check Tombstone
                 if exclude_tombstoned and cp.status == "tombstoned":
                     logger.debug(f"Filtering tombstoned candidate: {cp.fingerprint}")
+                    if explanation:
+                        explanation.tombstoned_removed += 1
                     continue
 
                 # 2. Check Required Fields
                 # question, sql_query, fingerprint must be non-empty
                 if not cp.question or not cp.sql_query or not cp.fingerprint:
                     logger.debug(f"Filtering incomplete candidate: {cp.fingerprint}")
+                    if explanation:
+                        explanation.missing_fields_removed += 1
                     continue
 
                 # 3. Check Staleness
@@ -197,7 +237,44 @@ class RecommendationService:
                         logger.debug(
                             f"Filtering stale candidate ({age.days} days old): " f"{cp.fingerprint}"
                         )
+                        if explanation:
+                            explanation.stale_removed += 1
                         continue
+
+                # 4. Check Safety Rules (Issue #119)
+                if getattr(config, "safety_enabled", False):
+                    # a. Length check (config-based)
+                    max_len = getattr(config, "safety_max_pattern_length", 100)
+                    if len(cp.question) > max_len:
+                        logger.debug(f"Safety filtering: Question too long ({len(cp.question)}).")
+                        if explanation:
+                            explanation.safety_removed += 1
+                        continue
+
+                    # b. Regex Blocklist
+                    blocklist_regex = getattr(config, "safety_blocklist_regex", None)
+                    if blocklist_regex:
+                        try:
+                            if re.search(blocklist_regex, cp.question, re.IGNORECASE):
+                                logger.debug(
+                                    f"Safety filtering: Blocklist match for {cp.fingerprint}."
+                                )
+                                if explanation:
+                                    explanation.safety_removed += 1
+                                continue
+                        except re.error as e:
+                            logger.error(f"Invalid safety blocklist regex: {e}")
+
+                    # c. Sanitizer (if required)
+                    if getattr(config, "safety_require_sanitizable", True):
+                        res = sanitize_text(cp.question)
+                        if not res.is_valid:
+                            logger.debug(
+                                f"Safety filtering: Invalid following sanitization: {res.errors}"
+                            )
+                            if explanation:
+                                explanation.safety_removed += 1
+                            continue
 
                 filtered.append(cp)
         except Exception as e:
@@ -210,12 +287,17 @@ class RecommendationService:
 
     @staticmethod
     def _rank_and_deduplicate(
-        candidates: List[QueryPair], limit: int, config: Any = None
+        candidates: List[QueryPair],
+        limit: int,
+        config: Any = None,
+        explanation: Optional[DiversityExplanation] = None,
     ) -> List[RecommendedExample]:
         """Rank candidates and enforce diversity (one per canonical group)."""
         ranked = RecommendationService._rank_candidates(candidates)
         deduped = RecommendationService._dedupe_by_fingerprint(ranked)
-        diversified = RecommendationService._apply_diversity_policy(deduped, limit, config)
+        diversified = RecommendationService._apply_diversity_policy(
+            deduped, limit, config, explanation
+        )
         return RecommendationService._select_top_n(diversified, limit)
 
     @staticmethod
@@ -249,7 +331,10 @@ class RecommendationService:
 
     @staticmethod
     def _apply_diversity_policy(
-        candidates: List[QueryPair], limit: int, config: Any = None
+        candidates: List[QueryPair],
+        limit: int,
+        config: Any = None,
+        explanation: Optional[DiversityExplanation] = None,
     ) -> List[QueryPair]:
         """Apply diversity selection policy.
 
@@ -295,6 +380,12 @@ class RecommendationService:
             logger.warning(f"Invalid diversity_min_verified: {min_verified}. Disabling diversity.")
             return candidates
 
+        if explanation:
+            explanation.enabled = True
+            explanation.min_verified = min_verified
+            explanation.max_per_source = max_per_source
+            explanation.applied = True
+
         selected: List[QueryPair] = []
         source_counts = {"approved": 0, "seeded": 0, "fallback": 0}
         selected_fingerprints = set()
@@ -317,6 +408,8 @@ class RecommendationService:
                         selected.append(cp)
                         source_counts["approved"] += 1
                         selected_fingerprints.add(cp.fingerprint)
+                        if explanation:
+                            explanation.effects.verified_floor_applied = True
 
         # Pass B: Fill Remaining
         for cp in candidates:
@@ -330,6 +423,10 @@ class RecommendationService:
 
             # Check cap (if applicable)
             if max_per_source != -1 and source_counts.get(source, 0) >= max_per_source:
+                if explanation:
+                    explanation.effects.source_caps_applied[source] = (
+                        explanation.effects.source_caps_applied.get(source, 0) + 1
+                    )
                 continue
 
             selected.append(cp)

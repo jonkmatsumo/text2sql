@@ -57,3 +57,44 @@ async def test_recommend_examples_handler_fallback_false():
         mock_service.assert_called_once_with(
             question="test", tenant_id=1, limit=3, enable_fallback=False
         )
+
+
+@pytest.mark.asyncio
+async def test_recommend_examples_handler_includes_explanation():
+    """Test that the handler includes the explanation field in the output."""
+    with patch(
+        "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
+        new_callable=AsyncMock,
+    ) as mock_service:
+        from mcp_server.services.recommendation.explanation import RecommendationExplanation
+        from mcp_server.services.recommendation.interface import RecommendationResult
+
+        mock_explanation = RecommendationExplanation(selection_summary={"total_candidates": 5})
+        mock_result = RecommendationResult(examples=[], explanation=mock_explanation)
+        mock_service.return_value = mock_result
+
+        response = await handler(query="test", tenant_id=1, limit=3)
+
+        assert "explanation" in response
+        assert response["explanation"]["selection_summary"]["total_candidates"] == 5
+
+
+@pytest.mark.asyncio
+async def test_recommend_examples_handler_includes_safety_info():
+    """Test that the handler includes safety filtering info in the explanation."""
+    with patch(
+        "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
+        new_callable=AsyncMock,
+    ) as mock_service:
+        from mcp_server.services.recommendation.explanation import RecommendationExplanation
+        from mcp_server.services.recommendation.interface import RecommendationResult
+
+        mock_explanation = RecommendationExplanation()
+        mock_explanation.filtering.safety_removed = 2
+        mock_result = RecommendationResult(examples=[], explanation=mock_explanation)
+        mock_service.return_value = mock_result
+
+        response = await handler(query="test", tenant_id=1, limit=3)
+
+        assert "explanation" in response
+        assert response["explanation"]["filtering"]["safety_removed"] == 2

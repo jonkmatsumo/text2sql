@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,11 @@ class RecommendationConfig:
     diversity_max_per_source: int
     # RECO_DIVERSITY_MIN_VERIFIED: Minimum floor for approved examples (Default: 0)
     diversity_min_verified: int
+    # Safety Configuration
+    safety_enabled: bool
+    safety_max_pattern_length: int
+    safety_blocklist_regex: Optional[str]
+    safety_require_sanitizable: bool
 
 
 def load_recommendation_config() -> RecommendationConfig:
@@ -132,6 +137,36 @@ def load_recommendation_config() -> RecommendationConfig:
         logger.warning(f"Invalid RECO_DIVERSITY_MIN_VERIFIED, using {DEFAULT_MIN_VERIFIED}")
         diversity_min_verified = DEFAULT_MIN_VERIFIED
 
+    # 9. Safety Configuration
+    DEFAULT_SAFETY_ENABLED = False
+    safety_enabled_val = os.environ.get("RECO_SAFETY_ENABLED", str(DEFAULT_SAFETY_ENABLED))
+    safety_enabled = safety_enabled_val.lower() in ("true", "1", "yes", "on")
+
+    DEFAULT_MAX_PATTERN_LEN = 100
+    try:
+        safety_max_pattern_length = int(
+            os.environ.get("RECO_SAFETY_MAX_PATTERN_LENGTH", str(DEFAULT_MAX_PATTERN_LEN))
+        )
+        if safety_max_pattern_length < 1:
+            logger.warning(
+                f"Invalid RECO_SAFETY_MAX_PATTERN_LENGTH {safety_max_pattern_length}, "
+                f"using {DEFAULT_MAX_PATTERN_LEN}"
+            )
+            safety_max_pattern_length = DEFAULT_MAX_PATTERN_LEN
+    except ValueError:
+        logger.warning(
+            f"Invalid RECO_SAFETY_MAX_PATTERN_LENGTH format, using {DEFAULT_MAX_PATTERN_LEN}"
+        )
+        safety_max_pattern_length = DEFAULT_MAX_PATTERN_LEN
+
+    safety_blocklist_regex = os.environ.get("RECO_SAFETY_BLOCKLIST_REGEX")
+
+    DEFAULT_REQUIRE_SANITIZABLE = True
+    require_sanitizable_val = os.environ.get(
+        "RECO_SAFETY_REQUIRE_SANITIZABLE", str(DEFAULT_REQUIRE_SANITIZABLE)
+    )
+    safety_require_sanitizable = require_sanitizable_val.lower() in ("true", "1", "yes", "on")
+
     return RecommendationConfig(
         limit_default=limit_default,
         candidate_multiplier=candidate_multiplier,
@@ -143,6 +178,10 @@ def load_recommendation_config() -> RecommendationConfig:
         diversity_enabled=diversity_enabled,
         diversity_max_per_source=diversity_max_per_source,
         diversity_min_verified=diversity_min_verified,
+        safety_enabled=safety_enabled,
+        safety_max_pattern_length=safety_max_pattern_length,
+        safety_blocklist_regex=safety_blocklist_regex,
+        safety_require_sanitizable=safety_require_sanitizable,
     )
 
 

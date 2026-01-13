@@ -1,5 +1,6 @@
 from typing import List, Optional
 
+from mcp_server.services.recommendation.explanation import RecommendationExplanation
 from pydantic import BaseModel, Field
 
 
@@ -20,3 +21,4 @@ class RecommendationResult(BaseModel):
     examples: List[RecommendedExample]
     fallback_used: bool = False
     metadata: dict = Field(default_factory=dict)
+    explanation: Optional[RecommendationExplanation] = None
