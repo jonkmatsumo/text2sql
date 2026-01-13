@@ -209,18 +209,68 @@ Environment variables are grouped by category (not exhaustive):
 *   **LLM provider selection**: Provider + model settings and provider API key.
 *   **DAL provider selectors**: Optional overrides to choose storage backends.
 
-### Setup & Run
+## Local Development
 
-1.  **Configure Environment**: Create a `.env` file for local development.
-2.  **Start Services**:
-    ```bash
-    docker compose up -d --build
-    ```
-3.  **Initialize Data**: Run the seed script after services are running.
-    ```bash
-    ./scripts/seed_graph.sh
-    ```
-    This runs inside the `seeder` container via `docker compose exec seeder`.
+### 1. Initial Setup
+
+Before starting, bootstrap the local data directories:
+
+```bash
+./scripts/bootstrap_local_data.sh
+```
+
+### 2. Services Bring-Up
+
+We use a "pull-and-run" model for infrastructure to avoid unnecessary local builds.
+
+**Infrastructure (No Build)**
+Starts Postgres, MinIO, Memgraph, MLflow. These use pinned images and do not rebuild.
+
+```bash
+docker compose -f docker-compose.infra.yml up -d
+```
+
+**Application (Build)**
+Starts API Server, Streamlit App, Seeder, and Workers. Checks for code changes.
+
+```bash
+docker compose -f docker-compose.infra.yml \
+  -f docker-compose.app.yml \
+  up -d --build
+```
+
+**Optional: Observability**
+Starts OTEL Collector alongside infra and app.
+
+```bash
+docker compose -f docker-compose.infra.yml \
+  -f observability/docker-compose.observability.yml \
+  up -d
+```
+
+### 3. Development Workflow (Hot Reload)
+
+Source code is bind-mounted into containers for hot reload.
+- **Streamlit**: Edits to `streamlit/`, `agent/`, `mcp-server/` are reflected immediately.
+- **MCP Server**: Edits to `mcp-server/src` are reflected immediately.
+- **OTEL Worker**: Edits to `observability/otel-worker/src` are reflected immediately.
+
+**Note**:
+- Large directories (`.git`, `local-data`, `docs`) are **not** mounted.
+- Dependency changes (e.g., `pyproject.toml`) always require a rebuild (`--build`).
+- If a code change is not reflected, rebuild the app service.
+
+### 4. Cleanup
+
+We provide `make` targets for safe and deep cleanup.
+
+| Command | Action | Impact |
+|---------|--------|--------|
+| `make docker-clean` | Stops containers, prunes dangling images | **Safe** (No data loss) |
+| `make docker-clean-deep` | Also prunes unused images/cache | **Safe** (Reclaims disk) |
+| `make docker-nuke` | **DESTRUCTIVE:** Removes volumes & `./local-data` | **Data Loss** (Resets everything) |
+
+> **Warning**: `make docker-nuke` will delete all your local database data.
 
 ### Access Points
 
