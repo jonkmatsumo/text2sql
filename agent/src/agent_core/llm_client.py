@@ -105,3 +105,40 @@ def get_available_providers() -> list[str]:
         List of provider names.
     """
     return list(SUPPORTED_MODELS.keys())
+
+
+# Private cache for lazy-loaded LLM clients
+# keys: tuple(provider, model, temperature, use_light_model)
+_LLM_CACHE = {}
+
+
+def get_llm(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: float = 0,
+    use_light_model: bool = False,
+) -> BaseChatModel:
+    """
+    Lazy accessor for LLM clients.
+
+    Uses a simple cache to avoid re-instantiating clients with the same configuration.
+    This is preferred over calling get_llm_client() directly in module-level code,
+    as it delays validation and API key checks until runtime.
+
+    Args:
+        provider: LLM provider
+        model: Model name
+        temperature: Temperature
+        use_light_model: Use light model flag
+
+    Returns:
+        BaseChatModel: The configured chat model
+    """
+    key = (provider, model, temperature, use_light_model)
+
+    if key not in _LLM_CACHE:
+        _LLM_CACHE[key] = get_llm_client(
+            provider=provider, model=model, temperature=temperature, use_light_model=use_light_model
+        )
+
+    return _LLM_CACHE[key]

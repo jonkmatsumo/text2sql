@@ -8,7 +8,6 @@ This module implements the entry point that:
 
 import json
 
-from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
 from agent_core.tools import get_mcp_tools
@@ -17,9 +16,6 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 load_dotenv()
-
-# Initialize LLM (temperature=0 for deterministic classification)
-llm = get_llm_client(temperature=0)
 
 
 CONTEXTUALIZE_SYSTEM_PROMPT = """You are a helpful assistant that reformulates follow-up questions.
@@ -92,7 +88,9 @@ async def router_node(state: AgentState) -> dict:
                         ("human", "{question}"),
                     ]
                 )
-                contextualize_chain = contextualize_prompt | llm
+                from agent_core.llm_client import get_llm
+
+                contextualize_chain = contextualize_prompt | get_llm(temperature=0)
 
                 # Exclude the last message (current user query) from history
                 history_messages = messages[:-1]
@@ -155,7 +153,9 @@ async def router_node(state: AgentState) -> dict:
         if status in ("AMBIGUOUS", "MISSING"):
             # Use LLM to phrase the question/refusal nicely
             prompt = ChatPromptTemplate.from_messages([("system", CLARIFICATION_SYSTEM_PROMPT)])
-            chain = prompt | llm
+            from agent_core.llm_client import get_llm
+
+            chain = prompt | get_llm(temperature=0)
             response = await chain.ainvoke(
                 {
                     "ambiguity_data": json.dumps(res_data),

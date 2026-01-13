@@ -8,11 +8,11 @@ from agent_core.state import AgentState
 
 @pytest.mark.asyncio
 @patch("agent_core.nodes.generate.telemetry.start_span")
-@patch("agent_core.nodes.generate.llm")
+@patch("agent_core.llm_client.get_llm")
 @patch("agent_core.nodes.generate.ChatPromptTemplate")
 @patch("agent_core.tools.get_mcp_tools")
 async def test_generate_few_shot_integration(
-    mock_get_mcp_tools, mock_prompt_class, mock_llm, mock_start_span
+    mock_get_mcp_tools, mock_prompt_class, mock_get_llm, mock_start_span
 ):
     """Test integration of few-shot example retrieval."""
     # Setup mocks
@@ -34,6 +34,10 @@ async def test_generate_few_shot_integration(
     mock_prompt_instance = MagicMock()
     mock_chain = MagicMock()
     mock_prompt_class.from_messages.return_value = mock_prompt_instance
+    # When using lazy accessor: chain = prompt | get_llm()
+    # mock_get_llm.return_value needs to be set if we were inspecting it,
+    # but since we mock the chain result via prompt | llm, we assume valid chain construction.
+    # The unused assignment caused lint error.
     mock_prompt_instance.__or__.return_value = mock_chain
     mock_chain.invoke.return_value.content = "SELECT 1"
 

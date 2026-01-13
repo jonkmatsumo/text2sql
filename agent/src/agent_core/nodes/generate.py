@@ -3,7 +3,6 @@
 import logging
 from typing import Any, Dict, Optional
 
-from agent_core.llm_client import get_llm_client
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
 from dotenv import load_dotenv
@@ -12,9 +11,6 @@ from langchain_core.prompts import ChatPromptTemplate
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-# Initialize LLM using the factory (temperature=0 for deterministic SQL generation)
-llm = get_llm_client(temperature=0)
 
 
 def _emit_recommendation_telemetry(
@@ -342,7 +338,9 @@ Rules:
             ]
         )
 
-        chain = prompt | llm
+        from agent_core.llm_client import get_llm
+
+        chain = prompt | get_llm(temperature=0)
 
         # Generate SQL (MLflow autolog will capture token usage)
         response = chain.invoke(
