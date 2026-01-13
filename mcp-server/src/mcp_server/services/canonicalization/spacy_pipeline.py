@@ -8,7 +8,9 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
+
+from mcp_server.utils.telemetry import Telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +337,7 @@ class CanonicalizationService:
         """
         return hashlib.sha256(fingerprint.encode()).hexdigest()
 
-    def process_query(self, query: str) -> tuple[dict, str, str]:
+    async def process_query(self, query: str) -> Tuple[dict, str, str]:
         """Full pipeline: extract constraints, generate fingerprint and key.
 
         Args:
@@ -344,7 +346,23 @@ class CanonicalizationService:
         Returns:
             tuple of (constraints, fingerprint, fingerprint_key)
         """
-        constraints = self.extract_constraints(query)
-        fingerprint = self.generate_fingerprint(constraints)
-        key = self.compute_fingerprint_key(fingerprint)
-        return constraints, fingerprint, key
+        with Telemetry.start_span(
+            "canonicalize.spacy",
+            attributes={
+                "telemetry.input_len_chars": len(query),
+                "spacy.model": self.model,
+            },
+        ) as span:
+            try:
+                constraints = self.extract_constraints(query)
+                fingerprint = self.generate_fingerprint(constraints)
+                key = self.compute_fingerprint_key(fingerprint)
+
+                span.set_attribute("telemetry.output_len_chars", len(fingerprint))
+                span.set_attribute("spacy.fingerprint", fingerprint)
+                Telemetry.set_span_status(span, True)
+
+                return constraints, fingerprint, key
+            except Exception as e:
+                Telemetry.set_span_status(span, False, e)
+                raise

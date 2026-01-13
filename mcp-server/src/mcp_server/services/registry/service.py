@@ -32,7 +32,7 @@ class RegistryService:
         canonicalizer = CanonicalizationService.get_instance()
 
         # 1. Generate Canonical Signature
-        constraints, fingerprint, signature_key = canonicalizer.process_query(question)
+        constraints, fingerprint, signature_key = await canonicalizer.process_query(question)
 
         # Fallback to raw question hash if canonicalization is disabled or fails
         # This prevents collisions in the registry when SpaCy is unavailable
@@ -70,7 +70,7 @@ class RegistryService:
     async def lookup_canonical(question: str, tenant_id: int) -> Optional[QueryPair]:
         """Fetch a specific pair by its canonical signature."""
         canonicalizer = CanonicalizationService.get_instance()
-        _, fingerprint, signature_key = canonicalizer.process_query(question)
+        _, fingerprint, signature_key = await canonicalizer.process_query(question)
 
         if not fingerprint:
             import hashlib

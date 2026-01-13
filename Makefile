@@ -9,12 +9,12 @@ help:
 	@echo "  make docker-clean       - Safe cleanup (stops containers, removes dangling images)"
 	@echo "  make docker-clean-deep  - Deep cleanup (reclaims disk: unused images, build cache)"
 	@echo "  make docker-nuke        - DESTRUCTIVE: Removes all volumes and local persistent data"
-	@echo "  make otel-migrate       - Run database migrations for the OTEL worker"
-	@echo "  make otel-up            - Bring up the observability stack (collector + worker)"
+	@echo "  make otel-migrate       - Run database migrations for the OTEL worker (manual)"
+	@echo "  make otel-up            - Bring up the observability stack (auto-migrates)"
 
 # OTEL Scaffolding (Issue D/F)
 otel-migrate:
-	docker compose $(COMPOSE_FILES) exec otel-worker alembic upgrade head
+	docker compose $(COMPOSE_FILES) run --rm otel-worker-migrate
 
 otel-up:
 	docker compose $(COMPOSE_FILES) up -d otel-collector otel-worker

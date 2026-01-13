@@ -1,3 +1,5 @@
+import asyncio
+import base64
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -11,7 +13,13 @@ from otel_worker.otlp.parser import (
     parse_otlp_traces,
 )
 from otel_worker.storage.minio import get_trace_blob, init_minio
-from otel_worker.storage.postgres import get_trace, init_db, list_spans_for_trace, list_traces
+from otel_worker.storage.postgres import (
+    enqueue_ingestion,
+    get_trace,
+    init_db,
+    list_spans_for_trace,
+    list_traces,
+)
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
@@ -210,43 +218,47 @@ async def receive_traces(request: Request):
     """Endpoint for OTLP traces (supports Protobuf and JSON)."""
     content_type = request.headers.get("content-type", "")
 
-    # Normalize content-type (handle cases like 'application/json; charset=UTF-8')
+    # Normalize content-type
     base_content_type = content_type.split(";")[0].strip().lower()
 
     body = await request.body()
     try:
-        if base_content_type == "application/x-protobuf":
-            parsed_data = parse_otlp_traces(body)
-        elif base_content_type == "application/json":
-            parsed_data = parse_otlp_json_traces(body)
-        else:
-            msg = (
-                f"Unsupported content-type: '{content_type}'. "
-                "Supported formats: 'application/x-protobuf', 'application/json'."
-            )
+        # Validate content-type
+        if base_content_type not in ("application/x-protobuf", "application/json"):
+            msg = f"Unsupported content-type: '{content_type}'"
             logger.warning(msg)
-            return Response(
-                content=msg,
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            )
+            return Response(content=msg, status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
 
-        summaries = extract_trace_summaries(parsed_data)
+        # Determine payload to store
+        # In durable mode, we store the raw payload and its format metadata
+        payload = {
+            "body_b64": base64.b64encode(body).decode("utf-8"),
+            "content_type": base_content_type,
+        }
 
-        if not summaries:
-            return Response(status_code=status.HTTP_200_OK)
+        # Determine a primary trace_id for indexing (optional, but helpful)
+        trace_id = None
+        try:
+            if base_content_type == "application/x-protobuf":
+                parsed = parse_otlp_traces(body)
+            else:
+                parsed = parse_otlp_json_traces(body)
 
-        # Enqueue for background persistence
-        await coordinator.enqueue(parsed_data, summaries)
+            summaries = extract_trace_summaries(parsed)
+            if summaries:
+                # Use the first trace ID as a hint
+                tid_b64 = summaries[0]["trace_id"]
+                trace_id = base64.b64decode(tid_b64).hex()
+        except Exception:
+            # If parsing fails, we still store the raw body for later recovery/debugging
+            pass
+
+        # Write to durable ingestion queue (E)
+        await asyncio.to_thread(enqueue_ingestion, payload, trace_id=trace_id)
 
         return Response(status_code=status.HTTP_202_ACCEPTED)
-    except ValueError as e:
-        logger.error(f"Validation failed: {e}")
-        return Response(
-            content=str(e),
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
     except Exception as e:
-        logger.error(f"Internal error processing traces: {e}")
+        logger.error(f"Internal error enqueuing traces: {e}")
         return Response(
             content=f"Internal Server Error: {e}",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
