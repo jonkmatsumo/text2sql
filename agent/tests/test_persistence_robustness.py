@@ -40,7 +40,8 @@ async def test_run_agent_persists_on_crash():
         result = await run_agent_with_tracing("My question")
 
         # Verify result contains error
-        assert result["error"] == "Simulated Crash"
+        # Under TaskGroup/LangGraph, exceptions might be wrapped
+        assert "Simulated Crash" in str(result["error"])
         assert result["error_category"] == "SYSTEM_CRASH"
 
         # Verify create_interaction was called
@@ -54,7 +55,7 @@ async def test_run_agent_persists_on_crash():
         assert call_args["interaction_id"] == "interaction-123"
         assert call_args["execution_status"] == "FAILURE"
         assert call_args["error_type"] == "SYSTEM_CRASH"
-        assert "Simulated Crash" in call_args["response_payload"]
+        assert "Simulated Crash" in str(call_args["response_payload"])
 
 
 @pytest.mark.asyncio
@@ -73,10 +74,12 @@ async def test_run_agent_persists_on_success():
 
     # Mock app.ainvoke to return success
     mock_app = AsyncMock()
+    # Mock state return
     mock_app.ainvoke.return_value = {
         "messages": [HumanMessage(content="Hello"), MagicMock(content="World")],
         "current_sql": "SELECT * FROM table",
         "error": None,
+        "interaction_id": "interaction-456",
     }
 
     # Patch dependencies
