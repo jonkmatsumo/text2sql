@@ -15,6 +15,16 @@ def mock_registry():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_pin_store_global():
+    """Mock Persistent Store globally to avoid DB init errors."""
+    with patch(
+        "mcp_server.dal.postgres.pinned_recommendations.PostgresPinnedRecommendationStore"
+    ) as mock:
+        mock.return_value.list_rules = AsyncMock(return_value=[])
+        yield mock
+
+
 @pytest.mark.asyncio
 async def test_recommend_ranking_priority(mock_registry):
     """Test that verified examples are prioritized over seeded ones."""
@@ -802,3 +812,146 @@ async def test_diversity_invalid_config_fails_safe(mock_registry, diversity_pool
         assert len(result.examples) == 3
         sources = [ex.source for ex in result.examples]
         assert sources.count("approved") == 3
+
+
+# --- Phase 2: Pinned Recommendations Tests ---
+
+
+@pytest.mark.asyncio
+async def test_pinned_recommendation_override(mock_registry, mock_pin_store_global):
+    """Test that pinned examples override ranking and diversity."""
+    from datetime import datetime
+    from uuid import uuid4
+
+    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+
+    # 1. Setup Pin Rule
+    pin_rule = PinRule(
+        id=uuid4(),
+        tenant_id=1,
+        match_type="contains",
+        match_value="sales",
+        registry_example_ids=["fp_pinned"],
+        priority=10,
+        enabled=True,
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    mock_pin_store_global.return_value.list_rules.return_value = [pin_rule]
+
+    # 2. Setup Candidates
+    # Pinned item (status=seeded to prove override)
+    pinned_qp = make_qp("fp_pinned", "seeded")
+    pinned_qp.signature_key = "fp_pinned"  # Match rule ID
+
+    # Normal Verified item
+    verified_qp = make_qp("fp_verified", "verified")
+
+    # Fix: Use AsyncMock for async method
+    mock_registry.fetch_by_signatures = AsyncMock(return_value=[pinned_qp])
+
+    # lookup_semantic is already mocked as AsyncMock in the fixture?
+    # Yes, mock.lookup_semantic = AsyncMock() is in the fixture.
+    # But duplicate mocking? No, just setting side_effect.
+    mock_registry.lookup_semantic.side_effect = [
+        [verified_qp],  # Verified
+        [],  # Seeded
+        [],  # Fallback
+    ]
+
+    # 3. Execute
+    result = await RecommendationService.recommend_examples("show me sales", 1, limit=2)
+
+    # 4. Verify
+    assert len(result.examples) == 2
+    # Pinned should be first despite being "seeded" status vs "verified" normal
+    assert result.examples[0].canonical_group_id == "fp_pinned"
+    assert result.examples[0].metadata.get("pinned") is True
+    assert result.examples[0].metadata.get("pin_priority") == 10
+
+    assert result.examples[1].canonical_group_id == "fp_verified"
+
+
+@pytest.mark.asyncio
+async def test_pinned_recommendation_safety(mock_registry, mock_pin_store_global):
+    """Test that tombstoned pins are skipped."""
+    from datetime import datetime
+    from uuid import uuid4
+
+    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+
+    pin_rule = PinRule(
+        id=uuid4(),
+        tenant_id=1,
+        match_type="exact",
+        match_value="sales",
+        registry_example_ids=["fp_tomb"],
+        priority=10,
+        enabled=True,
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    mock_pin_store_global.return_value.list_rules.return_value = [pin_rule]
+
+    tomb_qp = make_qp("fp_tomb", "tombstoned")
+    tomb_qp.signature_key = "fp_tomb"  # Match rule ID
+
+    # Fix: AsyncMock
+    mock_registry.fetch_by_signatures = AsyncMock(return_value=[tomb_qp])
+
+    mock_registry.lookup_semantic.side_effect = [[], [], []]
+
+    result = await RecommendationService.recommend_examples("sales", 1)
+
+    assert len(result.examples) == 0
+
+
+@pytest.mark.asyncio
+async def test_pinned_recommendation_bypass_diversity_cap(mock_registry, mock_pin_store_global):
+    """Test that pinned items bypass diversity caps."""
+    from datetime import datetime
+    from uuid import uuid4
+
+    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+
+    # Cap approved at 0 (to prove bypass)
+    config = RecommendationConfig(
+        limit_default=2,
+        candidate_multiplier=2,
+        fallback_enabled=True,
+        fallback_threshold=0.85,
+        status_priority=["verified", "seeded"],
+        exclude_tombstoned=True,
+        stale_max_age_days=0,
+        diversity_enabled=True,
+        diversity_max_per_source=0,  # Strict cap
+        diversity_min_verified=0,
+    )
+
+    pin_rule = PinRule(
+        id=uuid4(),
+        tenant_id=1,
+        match_type="exact",
+        match_value="sales",
+        registry_example_ids=["fp_pinned"],
+        priority=10,
+        enabled=True,
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    mock_pin_store_global.return_value.list_rules.return_value = [pin_rule]
+
+    pinned_qp = make_qp("fp_pinned", "verified")  # Verified source
+    pinned_qp.signature_key = "fp_pinned"  # Match rule ID
+
+    # Fix: AsyncMock
+    mock_registry.fetch_by_signatures = AsyncMock(return_value=[pinned_qp])
+
+    mock_registry.lookup_semantic.side_effect = [[], [], []]
+
+    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        result = await RecommendationService.recommend_examples("sales", 1)
+
+        # Should be returned despite cap=0 because it's pinned
+        assert len(result.examples) == 1
+        assert result.examples[0].canonical_group_id == "fp_pinned"
