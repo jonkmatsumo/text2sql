@@ -82,7 +82,10 @@ def _emit_recommendation_telemetry(
 
 
 async def get_few_shot_examples(
-    user_query: str, tenant_id: int = 1, span: Optional[Any] = None
+    user_query: str,
+    tenant_id: int = 1,
+    span: Optional[Any] = None,
+    interaction_id: Optional[str] = None,
 ) -> str:
     """
     Retrieve relevant few-shot examples via the recommendation service.
@@ -90,70 +93,80 @@ async def get_few_shot_examples(
     Args:
         user_query: The user's natural language question
         tenant_id: Tenant ID for isolation
+        interaction_id: Unique identifier for the interaction (for indexing)
 
     Returns:
         Formatted string with examples, or empty string if none found
     """
-    from agent_core.tools import get_mcp_tools
+    with telemetry.start_span(
+        name="recommendation.select",
+        span_type=SpanType.RETRIEVER,
+    ) as span:
+        if tenant_id:
+            span.set_attribute("tenant_id", tenant_id)
+        if interaction_id:
+            span.set_attribute("interaction_id", interaction_id)
 
-    tools = await get_mcp_tools()
-    if not tools:
-        return ""
+        from agent_core.tools import get_mcp_tools
 
-    # Prefer 'recommend_examples' over the legacy 'get_few_shot_examples'
-    recommend_tool = next((t for t in tools if t.name == "recommend_examples"), None)
-    legacy_tool = next((t for t in tools if t.name == "get_few_shot_examples"), None)
-
-    selected_tool = recommend_tool or legacy_tool
-    if not selected_tool:
-        return ""
-
-    try:
-        # recommend_examples uses 'query', get_few_shot_examples uses 'query'
-        result = await selected_tool.ainvoke(
-            {"query": user_query, "tenant_id": tenant_id, "limit": 3}
-        )
-        if not result:
+        tools = await get_mcp_tools()
+        if not tools:
             return ""
 
-        from agent_core.utils.parsing import parse_tool_output
+        # Prefer 'recommend_examples' over the legacy 'get_few_shot_examples'
+        recommend_tool = next((t for t in tools if t.name == "recommend_examples"), None)
+        legacy_tool = next((t for t in tools if t.name == "get_few_shot_examples"), None)
 
-        output = parse_tool_output(result)
+        selected_tool = recommend_tool or legacy_tool
+        if not selected_tool:
+            return ""
 
-        # parse_tool_output returns a list of chunks.
-        # recommend_examples returns a dict with 'examples'.
-        # legacy returns a flat list of dicts.
-        if (
-            output
-            and isinstance(output, list)
-            and isinstance(output[0], dict)
-            and "examples" in output[0]
-        ):
-            examples = output[0]["examples"]
-            reco_metadata = output[0].get("metadata", {})
-            fallback_used = output[0].get("fallback_used", False)
-        else:
-            examples = output
-            reco_metadata = {}
-            fallback_used = False
+        try:
+            # recommend_examples uses 'query', get_few_shot_examples uses 'query'
+            result = await selected_tool.ainvoke(
+                {"query": user_query, "tenant_id": tenant_id, "limit": 3}
+            )
+            if not result:
+                return ""
 
-        # Emit Telemetry (OTEL-compatible flat attributes)
-        _emit_recommendation_telemetry(reco_metadata, fallback_used, span)
+            from agent_core.utils.parsing import parse_tool_output
 
-        formatted = []
-        for ex in examples:
-            if isinstance(ex, dict):
-                # Both structures have question/sql or question/sql_query
-                q = ex.get("question")
-                s = ex.get("sql") or ex.get("sql_query")
-                if q and s:
-                    formatted.append(f"- Question: {q}\n  SQL: {s}")
+            output = parse_tool_output(result)
 
-        return "\n\n".join(formatted)
+            # parse_tool_output returns a list of chunks.
+            # recommend_examples returns a dict with 'examples'.
+            # legacy returns a flat list of dicts.
+            if (
+                output
+                and isinstance(output, list)
+                and isinstance(output[0], dict)
+                and "examples" in output[0]
+            ):
+                examples = output[0]["examples"]
+                reco_metadata = output[0].get("metadata", {})
+                fallback_used = output[0].get("fallback_used", False)
+            else:
+                examples = output
+                reco_metadata = {}
+                fallback_used = False
 
-    except Exception as e:
-        print(f"Warning: Could not retrieve few-shot examples: {e}")
-        return ""
+            # Emit Telemetry (OTEL-compatible flat attributes)
+            _emit_recommendation_telemetry(reco_metadata, fallback_used, span)
+
+            formatted = []
+            for ex in examples:
+                if isinstance(ex, dict):
+                    # Both structures have question/sql or question/sql_query
+                    q = ex.get("question")
+                    s = ex.get("sql") or ex.get("sql_query")
+                    if q and s:
+                        formatted.append(f"- Question: {q}\n  SQL: {s}")
+
+            return "\n\n".join(formatted)
+
+        except Exception as e:
+            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            return ""
 
 
 async def generate_sql_node(state: AgentState) -> dict:
@@ -183,6 +196,7 @@ async def generate_sql_node(state: AgentState) -> dict:
         else:
             user_query = messages[-1].content if messages else ""
         tenant_id = state.get("tenant_id")
+        interaction_id = state.get("interaction_id")
 
         span.set_inputs(
             {
@@ -195,12 +209,21 @@ async def generate_sql_node(state: AgentState) -> dict:
         span.set_attribute("cache_hit", "false")
 
         # Cache miss - proceed with normal generation
-        # Retrieve few-shot examples
-        few_shot_examples = ""
+        if tenant_id:
+            span.set_attribute("tenant_id", tenant_id)
+        if interaction_id:
+            span.set_attribute("interaction_id", interaction_id)
+
         try:
-            few_shot_examples = await get_few_shot_examples(user_query, tenant_id or 1, span=span)
+            few_shot_examples = await get_few_shot_examples(
+                user_query,
+                tenant_id=tenant_id or 1,
+                span=span,
+                interaction_id=interaction_id,
+            )
         except Exception as e:
-            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            logger.warning(f"Could not retrieve few-shot examples: {e}")
+            few_shot_examples = ""
 
         # Use schema_context directly from retrieve node (now powered by semantic subgraph)
         # No need for redundant get_table_schema call - graph already contains full schema
