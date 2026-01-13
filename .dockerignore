@@ -1,0 +1,27 @@
+# Version control
+.git/
+.github/
+
+# Python caches
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# OS / editor artifacts
+.DS_Store
+.idea/
+.vscode/
+
+# Generated or large data
+local-data/
+mlruns/
+artifacts/
+logs/
+tmp/
+coverage/
