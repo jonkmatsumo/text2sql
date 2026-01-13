@@ -10,7 +10,7 @@ from agent_core.state import AgentState
 @patch("agent_core.nodes.generate.telemetry.start_span")
 @patch("agent_core.llm_client.get_llm")
 @patch("agent_core.nodes.generate.ChatPromptTemplate")
-@patch("agent_core.tools.get_mcp_tools")
+@patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock)
 async def test_generate_few_shot_integration(
     mock_get_mcp_tools, mock_prompt_class, mock_get_llm, mock_start_span
 ):
