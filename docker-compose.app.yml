@@ -8,6 +8,8 @@ services:
       - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
     depends_on:
       - agent-control-db
+    volumes:
+      - ./observability/otel-worker/src:/app/src
     networks:
       - text2sql_net
 
@@ -75,6 +77,7 @@ services:
     networks:
       - text2sql_net
     volumes:
+      - ./mcp-server/src:/app/src
       - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 
@@ -119,6 +122,7 @@ services:
       # Mount for development (hot reload)
       - ./streamlit:/app/streamlit
       - ./agent:/app/agent
+      - ./mcp-server:/app/mcp-server
     networks:
       - text2sql_net
     restart: unless-stopped

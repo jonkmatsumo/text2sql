@@ -54,6 +54,18 @@ To enable the observability stack (OTEL Collector):
 docker compose -f docker-compose.infra.yml -f observability/docker-compose.observability.yml up -d
 ```
 
+## Development Workflow (Hot Reload)
+
+To support rapid iteration, source code is bind-mounted into containers. This means changes to files on your host machine are immediately reflected in the container (hot reload).
+
+**Mounted Directories:**
+- `streamlit/` -> Streamlit App
+- `agent/` -> Agent Logic
+- `mcp-server/src` -> MCP Server Logic
+- `observability/otel-worker/src` -> OTEL Worker
+
+**Note:** Large directories like `local-data/`, `.git/`, and `docs/` are **not** mounted to improve performance. Only specific source and configuration files are shared.
+
 Repeate for `text2sql_control_pg_data`, `text2sql_mlflow_artifacts`, etc.
 
 ## Troubleshooting

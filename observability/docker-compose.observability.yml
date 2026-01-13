@@ -10,13 +10,11 @@ services:
     environment:
       - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-local}
     ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8888:8888" # Prometheus metrics
     networks:
       - text2sql_net
-    depends_on:
-      agent-control-db:
-        condition: service_started
-      minio:
-        condition: service_healthy
 
 networks:
   text2sql_net:
