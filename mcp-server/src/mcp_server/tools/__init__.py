@@ -19,6 +19,7 @@ from mcp_server.tools.admin import get_interaction_details as get_interaction_de
 from mcp_server.tools.admin import list_approved_examples as list_approved_examples_handler
 from mcp_server.tools.admin import list_interactions as list_interactions_handler
 from mcp_server.tools.admin import reject_interaction as reject_interaction_handler
+from mcp_server.tools.admin.generate_patterns import handler as generate_patterns_handler
 
 # Re-export conversation tools
 from mcp_server.tools.conversation import load_conversation_state as load_conversation_state_handler
@@ -78,6 +79,7 @@ __all__ = [
     "reject_interaction_handler",
     "export_approved_to_fewshot_handler",
     "list_approved_examples_handler",
+    "generate_patterns_handler",
 ]
 
 # Re-exports for backwards compatibility are handled via __all__
