@@ -13,7 +13,9 @@ async def test_recommend_examples_handler_fallback_none():
         "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
         new_callable=AsyncMock,
     ) as mock_service:
-        mock_result = AsyncMock()
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
         mock_result.model_dump.return_value = {"examples": []}
         mock_service.return_value = mock_result
 
@@ -30,7 +32,9 @@ async def test_recommend_examples_handler_fallback_true():
         "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
         new_callable=AsyncMock,
     ) as mock_service:
-        mock_result = AsyncMock()
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
         mock_result.model_dump.return_value = {"examples": []}
         mock_service.return_value = mock_result
 
@@ -48,7 +52,9 @@ async def test_recommend_examples_handler_fallback_false():
         "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
         new_callable=AsyncMock,
     ) as mock_service:
-        mock_result = AsyncMock()
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
         mock_result.model_dump.return_value = {"examples": []}
         mock_service.return_value = mock_result
 
@@ -86,11 +92,15 @@ async def test_recommend_examples_handler_includes_safety_info():
         "mcp_server.services.recommendation.service.RecommendationService.recommend_examples",
         new_callable=AsyncMock,
     ) as mock_service:
-        from mcp_server.services.recommendation.explanation import RecommendationExplanation
+        from mcp_server.services.recommendation.explanation import (
+            FilteringExplanation,
+            RecommendationExplanation,
+        )
         from mcp_server.services.recommendation.interface import RecommendationResult
 
-        mock_explanation = RecommendationExplanation()
-        mock_explanation.filtering.safety_removed = 2
+        mock_explanation = RecommendationExplanation(
+            filtering=FilteringExplanation(safety_removed=2)
+        )
         mock_result = RecommendationResult(examples=[], explanation=mock_explanation)
         mock_service.return_value = mock_result
 

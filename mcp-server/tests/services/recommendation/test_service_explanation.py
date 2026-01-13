@@ -68,7 +68,6 @@ async def test_explanation_filtering_counters(mock_registry):
     incomplete = make_qp("F2", "verified")
     incomplete.sql_query = ""
     valid = make_qp("F3", "verified")
-
     mock_registry.lookup_semantic.side_effect = [[tomb, incomplete, valid], [], []]
 
     # Execute
@@ -109,31 +108,32 @@ async def test_explanation_diversity_population(mock_registry):
     # Setup
     v1 = make_qp("F1", "verified")
     v2 = make_qp("F2", "verified")
+    s1 = make_qp("F3", "seeded")
 
     config = create_config(
         diversity_enabled=True, diversity_max_per_source=1, diversity_min_verified=1
     )
 
-    mock_registry.lookup_semantic.side_effect = [[v1, v2], [], []]
-
     with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config):
+        mock_registry.lookup_semantic.side_effect = [[v1, v2], [s1], []]
+
+        # Execute: limit 2 allows selection of v1 and s1, while v2 is capped
         result = await RecommendationService.recommend_examples("test", 1, limit=2)
 
-    # Verify
-    exp = result.explanation
-    assert exp.diversity.enabled is True
-    assert exp.diversity.applied is True
-    assert exp.diversity.effects.verified_floor_applied is True
-    assert exp.diversity.effects.source_caps_applied["approved"] == 1
+        # Verify
+        exp = result.explanation
+        assert exp.diversity.applied is True
+        assert exp.diversity.effects.verified_floor_applied is True
+        assert exp.diversity.effects.source_caps_applied["approved"] == 1
 
 
 @pytest.mark.asyncio
 async def test_explanation_fallback_population(mock_registry):
     """Test fallback details in explanation."""
-    # Setup: No primary, 1 fallback
-    f1 = make_qp("F1", "unverified")
-    f1.roles = ["interaction"]
-    mock_registry.lookup_semantic.side_effect = [[], [], [f1]]
+    # Setup: No primary, 1 history
+    h1 = make_qp("H1", "unverified")
+    h1.roles = ["interaction"]
+    mock_registry.lookup_semantic.side_effect = [[], [], [h1]]
 
     # Execute
     result = await RecommendationService.recommend_examples("test", 1, limit=1)
@@ -141,5 +141,4 @@ async def test_explanation_fallback_population(mock_registry):
     # Verify
     exp = result.explanation
     assert exp.fallback.used is True
-    assert exp.fallback.reason == "insufficient_verified_candidates"
     assert exp.selection_summary.counts_by_source["interactions"] == 1

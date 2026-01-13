@@ -142,8 +142,9 @@ class RecommendationService:
                             )
                             picked_fingerprints.add(h.fingerprint)
 
-                    explanation.fallback.used = True
-                    explanation.fallback.reason = "insufficient_verified_candidates"
+                fallback_used = True
+                explanation.fallback.used = True
+                explanation.fallback.reason = "insufficient_verified_candidates"
 
         explanation.fallback.enabled = effective_fallback_enabled
         explanation.fallback.candidate_multiplier = RECO_CONFIG.candidate_multiplier
