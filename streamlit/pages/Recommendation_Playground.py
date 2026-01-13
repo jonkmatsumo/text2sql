@@ -80,11 +80,17 @@ if "reco_result" in st.session_state:
     st.markdown("### Selection Summary")
 
     # Metrics
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Total Selected", meta.get("count_total", 0))
     m2.metric("Verified", meta.get("count_approved", 0))
     m3.metric("Seeded", meta.get("count_seeded", 0))
     m4.metric("Fallback", meta.get("count_fallback", 0))
+    m5.metric("Pinned", meta.get("pins_selected_count", 0))
+
+    # Matched Rules
+    matched_rules = meta.get("pins_matched_rules", [])
+    if matched_rules:
+        st.info(f"📌 Matched Pin Rules: {', '.join(matched_rules)}")
 
     # Flags
     flags = []
@@ -137,6 +143,10 @@ if "reco_result" in st.session_state:
                 status = ex_meta.get("status", "unknown").upper()
 
                 badges = f"**{source}** • *{status}*"
+
+                if ex_meta.get("pinned"):
+                    badges = f"📌 **PINNED** • {badges}"
+
                 st.markdown(badges)
                 st.text(safe_q)
 
