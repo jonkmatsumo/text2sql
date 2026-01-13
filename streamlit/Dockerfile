@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.5
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -8,31 +9,54 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project structure (build context is project root)
+# --- DEPENDENCY LAYER ---
+# Copy ONLY dependency descriptors for all packages first.
+# This ensures that changes to source code files (*.py) do NOT invalidate
+# the dependency installation layer.
+
+# 1. Streamlit app deps
 COPY streamlit/pyproject.toml ./streamlit/
-# COPY streamlit_app/ ./streamlit_app/ # Already here in line 14, but I'll make it explicit
+# 2. Agent deps
+COPY agent/pyproject.toml ./agent/
+# 3. MCP Server deps
+COPY mcp-server/pyproject.toml ./mcp-server/
+
+# Create dummy source files for local dependencies enable caching
+# Agent expects src/agent_core
+RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
+# MCP Server expects src/mcp_server
+RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
+
+# Install dependencies for all packages using cache mounts.
+# We install them in non-editable mode first to populate site-packages.
+# Note: Since they are local packages, we install their dependencies by
+# installing the package itself.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install ./streamlit ./agent ./mcp-server
+
+# --- SOURCE LAYER ---
+# Now copy the actual source code. Changing a .py file will strictly
+# invalidate layers below this point.
+
+# Streamlit source
 COPY streamlit_app/ ./streamlit_app/
 COPY streamlit/tests/ ./streamlit/tests/
 
-# Copy Agent dependencies and source (needed for agent_core imports)
-COPY agent/pyproject.toml ./agent/
+# Agent source
 COPY agent/src/ ./agent/src/
 
-# Copy MCP Server dependencies (needed for shared config/DAL)
-COPY mcp-server/pyproject.toml ./mcp-server/
+# MCP Server source
 COPY mcp-server/src/ ./mcp-server/src/
 
-# Install Streamlit dependencies
-# We keep installing 'streamlit' folder for deps, assuming pyproject.toml is valid.
-# Note: Phase E removes __init__.py, so it might not be a package anymore,
-# but if pyproject.toml exists pip install might still work for deps.
-RUN pip install --no-cache-dir -e ./streamlit
+# --- EDITABLE INSTALL LAYER ---
+# Re-install in editable mode so that imports resolve correctly to the /app/x/src locations
+# and standard development workflows (bind mounts) work as expected.
+# This is very fast as dependencies are already installed.
 
-# Install MCP Server dependencies
-RUN pip install --no-cache-dir -e ./mcp-server
-
-# Install Agent dependencies (needed for agent_core.graph import)
-RUN pip install --no-cache-dir -e ./agent
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -e ./streamlit \
+    && pip install -e ./mcp-server \
+    && pip install -e ./agent
 
 # Expose Streamlit port
 EXPOSE 8501

@@ -23,7 +23,7 @@ This directory contains the OpenTelemetry (OTEL) infrastructure for the Text2SQL
 1.  Copy `.env.example` to `.env` (if not already managed by root compose).
 2.  Start the observability stack using the override:
     ```bash
-    docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d otel-collector otel-worker
+    docker compose -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml up -d otel-collector otel-worker
     ```
 
 ### Instrumented Services

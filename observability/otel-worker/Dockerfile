@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.5
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -8,7 +9,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+
+# Create dummy source for dependency cache
+RUN mkdir -p src/otel_worker && touch src/otel_worker/__init__.py
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install .
 
 COPY src/ ./src/
 

@@ -32,7 +32,8 @@ This is a Text 2 SQL MVP (Phase 1) that implements a secure, containerized data 
 ## File Structure
 ```
 text2sql/
-├── docker-compose.yml
+├── docker-compose.infra.yml
+├── docker-compose.app.yml
 ├── .env
 ├── .pre-commit-config.yaml
 ├── .github/

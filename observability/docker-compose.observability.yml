@@ -1,6 +1,8 @@
+version: "3.8"
+
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.94.0
     container_name: otel_collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
@@ -10,33 +12,9 @@ services:
     ports:
       - "4317:4317" # OTLP gRPC
       - "4318:4318" # OTLP HTTP
+      - "8888:8888" # Prometheus metrics
     networks:
       - text2sql_net
-    depends_on:
-      - otel-worker
-
-  otel-worker:
-    build:
-      context: ./otel-worker
-    container_name: otel_worker
-    environment:
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-root_password}@agent-control-db:5432/agent_control
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_BUCKET=${OTEL_MINIO_BUCKET:-otel-traces}
-      - MLFLOW_TRACKING_URI=http://mlflow-server:5000
-      - ENABLE_MLFLOW_EXPORT=${ENABLE_MLFLOW_EXPORT:-true}
-      - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-local}
-    ports:
-      - "4320:4320"
-    networks:
-      - text2sql_net
-    depends_on:
-      agent-control-db:
-        condition: service_started
-      minio:
-        condition: service_healthy
 
 networks:
   text2sql_net:
