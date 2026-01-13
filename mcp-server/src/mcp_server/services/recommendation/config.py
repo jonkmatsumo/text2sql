@@ -106,6 +106,7 @@ def load_recommendation_config() -> RecommendationConfig:
         stale_max_age_days = 0.0
 
     # 8. Diversity Configuration
+    # 8. Diversity Configuration
     # RECO_DIVERSITY_ENABLED: Toggle for source-based selection mixing (Default: False)
     DEFAULT_DIVERSITY_ENABLED = False
     diversity_enabled_val = os.environ.get("RECO_DIVERSITY_ENABLED", str(DEFAULT_DIVERSITY_ENABLED))

@@ -22,11 +22,27 @@ class RecommendationService:
     ) -> RecommendationResult:
         """Recommend few-shot examples for a given question.
 
+        Guarantees:
+        - When diversity is disabled (default), returns top candidates by status priority
+          and similarity.
+        - When diversity is enabled, guarantees a best-effort distribution across
+          sources (approved, seeded, fallback) based on configured floors and caps.
+        - Fingerprint uniqueness (one example per canonical ID) is ALWAYS enforced.
+        - Fallback examples participate in diversity policies when triggered.
+        - Selection is deterministic based on input ranking.
+
+        Explicitly NOT Guaranteed:
+        - No guarantee of diversity in SQL query structure or logic.
+        - No guarantee that 'limit' is reached if available candidates are exhausted
+          by source caps and floors.
+        - Similarity ordering within a single source bucket may be skewed by diversity floors.
+
         Algorithm:
         1. Fetch 'verified' examples (approved).
         2. Fetch 'seeded' examples.
-        3. Rank and Deduplicate by canonical group (fingerprint).
-        4. If insufficient and enabled, fetch from interaction history (fallback).
+        3. If insufficient, fetch from interaction history (fallback).
+        4. Apply unified filtering (staleness/validity).
+        5. Apply unified ranking, deduplication, and diversity policy.
         """
         # 1. Fetch Candidates
         fetch_limit = limit * RECO_CONFIG.candidate_multiplier
@@ -48,6 +64,7 @@ class RecommendationService:
         recommended = RecommendationService._rank_and_deduplicate(
             filtered_candidates, limit, RECO_CONFIG
         )
+        total_valid_candidates = len(filtered_candidates)
 
         fallback_used = False
         # 3. Fallback Path (enabled by both arg AND config)
@@ -71,6 +88,8 @@ class RecommendationService:
                 filtered_history = RecommendationService._filter_invalid_candidates(
                     history, RECO_CONFIG
                 )
+                if filtered_history:
+                    total_valid_candidates += len(filtered_history)
 
                 if filtered_history:
                     fallback_used = True
@@ -103,7 +122,7 @@ class RecommendationService:
             "sources": [ex.source for ex in recommended],
             "statuses": [ex.metadata.get("status") or ex.source for ex in recommended],
             "positions": list(range(len(recommended))),
-            "truncated": len(recommended) >= limit and len(all_to_process) > len(recommended),
+            "truncated": len(recommended) >= limit and total_valid_candidates > len(recommended),
         }
 
         # Note: 'statuses' extraction depends on RecommendedExample having 'status' in its metadata.
@@ -224,19 +243,32 @@ class RecommendationService:
     ) -> List[QueryPair]:
         """Apply diversity selection policy.
 
-        Expected inputs:
-        - candidates: List of QueryPair objects, ranked by primary criteria.
-        - limit: Maximum number of candidates to return.
-        - config: Configuration object (RecommendationConfig) or dict.
+        This policy is applied AFTER ranking and fingerprint deduplication. It defines
+        the final "mix" of examples returned to the user.
 
-        Preserved invariants:
-        - Output subset of inputs.
-        - Order matches selection order (stable relative to inputs where posssible).
-        - Fingerprint uniqueness (already enforced, but preserved here).
+        Invariants Preserved:
+        - Result is always a subset of input candidates.
+        - Order matches selection order (Pass A then Pass B).
+        - Fingerprint uniqueness (already enforced but preserved).
+        - Never returns more than 'limit'.
 
-        Future extension points:
-        - Add 'diversity_weights' to config for score adjustment.
-        - Support additional dimensions beyond 'source'.
+        Selection Passes:
+        1. Pass A (Verified Floor): Pulls up to 'diversity_min_verified' examples
+           from the 'approved' source regardless of their original rank position.
+        2. Pass B (Fill Remaining): Fills the remaining capacity to reach 'limit' while
+           enforcing 'diversity_max_per_source' caps across all sources (approved,
+           seeded, fallback).
+
+        Note: If diversity is disabled or config is invalid, this is a passthrough.
+
+        Future-Proofing & Extensions:
+        - SQL-structure diversity is currently OUT OF SCOPE. This would require
+          SQL parsing/fingerprinting beyond canonical GIDs.
+        - Tests (Issue #111) should assert source distribution but NOT strict
+          similarity ordering, as diversity floors (Pass A) explicitly break
+          pure similarity preference to ensure mix.
+        - New heuristics (e.g. schema overlap, keyword diversity) should plug in
+          as additional passes between Pass A and Pass B.
         """
         if not config or not getattr(config, "diversity_enabled", False):
             return candidates
