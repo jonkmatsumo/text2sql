@@ -209,3 +209,22 @@ class PostgresRegistryStore(RegistryStore):
         async with self._get_connection(tenant_id) as conn:
             result = await conn.execute(query, signature_key, tenant_id, reason)
             return int(result.split(" ")[-1]) > 0
+
+    async def fetch_by_signatures(
+        self, signature_keys: List[str], tenant_id: int
+    ) -> List[QueryPair]:
+        """Fetch multiple pairs by their signature keys."""
+        if not signature_keys:
+            return []
+
+        query = """
+            SELECT signature_key, tenant_id, fingerprint, question,
+                   sql_query, embedding, roles, status, metadata, performance,
+                   created_at, updated_at
+            FROM public.query_pairs
+            WHERE signature_key = ANY($1) AND tenant_id = $2
+        """
+        async with self._get_connection(tenant_id) as conn:
+            rows = await conn.fetch(query, signature_keys, tenant_id)
+
+        return [self._row_to_model(row) for row in rows]

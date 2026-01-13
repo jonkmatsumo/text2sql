@@ -38,15 +38,21 @@ class RecommendationService:
         - Similarity ordering within a single source bucket may be skewed by diversity floors.
 
         Algorithm:
-        1. Fetch 'verified' examples (approved).
-        2. Fetch 'seeded' examples.
-        3. If insufficient, fetch from interaction history (fallback).
-        4. Apply unified filtering (staleness/validity).
-        5. Apply unified ranking, deduplication, and diversity policy.
+        1. Fetch and resolve Pinned Examples.
+        2. Fetch 'verified' and 'seeded' examples.
+        3. Filter invalid and Deduplicate against pins.
+        4. Rank, Dedupe, and Apply Diversity to remaining candidates.
+        5. Fallback if insufficient.
         """
-        # 1. Fetch Candidates
-        fetch_limit = limit * RECO_CONFIG.candidate_multiplier
+        # 0. Pinned Examples
+        pin_rules = await RecommendationService._match_pin_rules(question, tenant_id)
+        pinned_examples = await RecommendationService._resolve_pins(pin_rules, tenant_id)
+        selected_fingerprints = {
+            ex.canonical_group_id for ex in pinned_examples if ex.canonical_group_id
+        }
 
+        # 1. Fetch Candidates (Normal)
+        fetch_limit = limit * RECO_CONFIG.candidate_multiplier
         approved = await RegistryService.lookup_semantic(
             question, tenant_id, role="example", status="verified", limit=fetch_limit
         )
@@ -55,26 +61,31 @@ class RecommendationService:
             question, tenant_id, role="example", status="seeded", limit=fetch_limit
         )
 
-        # 2. Rank and Deduplicate
+        # 2. Rank and Deduplicate (with Pins Pre-filled)
         all_candidates = approved + seeded
         # Centralized filtering hook
         filtered_candidates = RecommendationService._filter_invalid_candidates(
             all_candidates, RECO_CONFIG
         )
-        recommended = RecommendationService._rank_and_deduplicate(
-            filtered_candidates, limit, RECO_CONFIG
+
+        # Exclude already pinned fingerprints
+        filtered_candidates = [
+            cp for cp in filtered_candidates if cp.fingerprint not in selected_fingerprints
+        ]
+
+        remaining_limit = max(0, limit - len(pinned_examples))
+        dynamic_recos = RecommendationService._rank_and_deduplicate(
+            filtered_candidates, remaining_limit, RECO_CONFIG
         )
-        total_valid_candidates = len(filtered_candidates)
+
+        recommended = pinned_examples + dynamic_recos
+        total_valid_candidates = len(filtered_candidates) + len(pinned_examples)
 
         fallback_used = False
         # 3. Fallback Path (enabled by both arg AND config)
         effective_fallback_enabled = enable_fallback and RECO_CONFIG.fallback_enabled
 
         if len(recommended) < limit and effective_fallback_enabled:
-            # For fallback, we look at successful interactions
-            # Note: We currently don't have a specific status for 'success' in QueryPair
-            # in a way that matches this exactly, but we can look for role='interaction'
-            # and potentially a high similarity threshold.
             history = await RegistryService.lookup_semantic(
                 question,
                 tenant_id,
@@ -123,10 +134,9 @@ class RecommendationService:
             "statuses": [ex.metadata.get("status") or ex.source for ex in recommended],
             "positions": list(range(len(recommended))),
             "truncated": len(recommended) >= limit and total_valid_candidates > len(recommended),
+            "pins_matched_rules": [str(r.id) for r in pin_rules],
+            "pins_selected_count": len(pinned_examples),
         }
-
-        # Note: 'statuses' extraction depends on RecommendedExample having 'status' in its metadata.
-        # Let's ensure _select_top_n preserves status in metadata if possible, or we use source.
 
         return RecommendationResult(
             examples=recommended, fallback_used=fallback_used, metadata=metadata
@@ -347,3 +357,74 @@ class RecommendationService:
                 )
             )
         return recommended
+
+    @staticmethod
+    async def _match_pin_rules(question: str, tenant_id: int):
+        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+        store = PostgresPinnedRecommendationStore()
+        rules = await store.list_rules(tenant_id, only_enabled=True)
+
+        matches = []
+        q_norm = question.lower().strip()
+        for r in rules:
+            if r.match_type == "exact" and r.match_value.lower() == q_norm:
+                matches.append(r)
+            elif r.match_type == "contains" and r.match_value.lower() in q_norm:
+                matches.append(r)
+
+        # Sort by priority desc
+        return sorted(matches, key=lambda x: x.priority, reverse=True)
+
+    @staticmethod
+    async def _resolve_pins(rules, tenant_id: int) -> List[RecommendedExample]:
+        if not rules:
+            return []
+
+        sig_to_rule_meta = {}
+        all_sigs = []
+
+        for r in rules:
+            for sig in r.registry_example_ids:
+                if sig not in sig_to_rule_meta:
+                    sig_to_rule_meta[sig] = {"rule_id": str(r.id), "priority": r.priority}
+                    all_sigs.append(sig)
+
+        if not all_sigs:
+            return []
+
+        pairs = await RegistryService.fetch_by_signatures(all_sigs, tenant_id)
+        pair_map = {p.signature_key: p for p in pairs}
+
+        pinned_examples = []
+
+        for sig in all_sigs:
+            if sig in pair_map:
+                pair = pair_map[sig]
+                # Safety: Skip tombstones
+                if pair.status == "tombstoned":
+                    continue
+
+                meta = sig_to_rule_meta[sig]
+
+                reco_meta = pair.metadata.copy() if pair.metadata else {}
+                reco_meta.update(
+                    {
+                        "pinned": True,
+                        "pin_rule_id": meta["rule_id"],
+                        "pin_priority": meta["priority"],
+                    }
+                )
+
+                pinned_examples.append(
+                    RecommendedExample(
+                        question=pair.question,
+                        sql=pair.sql_query,
+                        score=2.0,
+                        source="pinned",
+                        canonical_group_id=pair.fingerprint,
+                        metadata=reco_meta,
+                    )
+                )
+
+        return pinned_examples

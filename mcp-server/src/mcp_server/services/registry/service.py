@@ -124,3 +124,9 @@ class RegistryService:
         """Mark a pair as tombstoned in the registry."""
         store = get_registry_store()
         return await store.tombstone_pair(signature_key, tenant_id, reason)
+
+    @staticmethod
+    async def fetch_by_signatures(signature_keys: List[str], tenant_id: int) -> List[QueryPair]:
+        """Fetch multiple pairs by their signature keys."""
+        store = get_registry_store()
+        return await store.fetch_by_signatures(signature_keys, tenant_id)
