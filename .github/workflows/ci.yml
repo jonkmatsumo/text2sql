@@ -54,7 +54,11 @@ jobs:
 
       - name: Validate docker-compose
         run: |
-          docker compose config
+          # Explicit compose files required because docker-compose.yml was removed
+          # as part of Docker Local Optimization (infra/app split).
+          docker compose -f docker-compose.infra.yml config
+          docker compose -f docker-compose.infra.yml -f docker-compose.app.yml config
+          docker compose -f docker-compose.infra.yml -f observability/docker-compose.observability.yml config
 
   database-init:
     name: Database Initialization Test
