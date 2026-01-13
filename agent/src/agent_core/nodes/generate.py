@@ -59,8 +59,36 @@ async def get_few_shot_examples(user_query: str, tenant_id: int = 1) -> str:
             and "examples" in output[0]
         ):
             examples = output[0]["examples"]
+            reco_metadata = output[0].get("metadata", {})
+            fallback_used = output[0].get("fallback_used", False)
         else:
             examples = output
+            reco_metadata = {}
+            fallback_used = False
+
+        # Emit Telemetry (OTEL-compatible flat attributes)
+        try:
+            import json
+
+            telemetry_attrs = {
+                "recommendation.used": True,
+                "recommendation.fallback_used": fallback_used,
+                "recommendation.truncated": reco_metadata.get("truncated", False),
+                "recommendation.count.total": reco_metadata.get("count_total", 0),
+                "recommendation.count.verified": reco_metadata.get("count_approved", 0),
+                "recommendation.count.seeded": reco_metadata.get("count_seeded", 0),
+                "recommendation.count.fallback": reco_metadata.get("count_fallback", 0),
+                "recommendation.selected.fingerprints": json.dumps(
+                    reco_metadata.get("fingerprints", [])
+                ),
+                "recommendation.selected.sources": json.dumps(reco_metadata.get("sources", [])),
+                "recommendation.selected.statuses": json.dumps(reco_metadata.get("statuses", [])),
+                "recommendation.selected.positions": json.dumps(reco_metadata.get("positions", [])),
+            }
+            telemetry.update_current_trace(metadata=telemetry_attrs)
+        except Exception as tel_e:
+            # Telemetry should never crash the main flow
+            print(f"Warning: Could not emit recommendation telemetry: {tel_e}")
 
         formatted = []
         for ex in examples:
