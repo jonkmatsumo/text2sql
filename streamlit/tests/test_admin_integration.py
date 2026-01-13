@@ -52,7 +52,7 @@ async def test_admin_panel_reload_button_logic():
     # Use MagicMock so it returns the dict immediately (since we bypass asyncio.run)
     # Correct import path from root where we run pytest
     with patch(
-        "service.ops_service.OpsService.reload_patterns", new_callable=MagicMock
+        "streamlit_app.service.ops_service.OpsService.reload_patterns", new_callable=MagicMock
     ) as mock_service_reload:
         mock_service_reload.return_value = {
             "success": True,
@@ -125,7 +125,7 @@ async def test_admin_panel_reload_button_logic():
 @pytest.mark.asyncio
 async def test_admin_ops_integration_sanity():
     """Sanity check that OpsService methods are exposed correctly for UI."""
-    from service.ops_service import OpsService
+    from streamlit_app.service.ops_service import OpsService
 
     # Ensure method exists
     assert hasattr(OpsService, "reload_patterns")

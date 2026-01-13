@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from streamlit.service.ops_service import OpsService
+from streamlit_app.service.ops_service import OpsService
 
 
 # Mock ReloadResult since it's imported inside the method

@@ -2,14 +2,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from streamlit.service.admin import AdminService
+from streamlit_app.service.admin import AdminService
 
 
 @pytest.mark.asyncio
 async def test_admin_service_get_recommendations_wiring():
     """Verify get_recommendations calls the correct MCP tool with args."""
     with patch(
-        "streamlit.service.admin.AdminService._call_tool", new_callable=AsyncMock
+        "streamlit_app.service.admin.AdminService._call_tool", new_callable=AsyncMock
     ) as mock_call:
         mock_call.return_value = {"examples": [], "metadata": {}}
 
@@ -27,7 +27,7 @@ async def test_admin_service_get_recommendations_wiring():
 async def test_admin_service_handles_tool_error():
     """Verify error propagation."""
     with patch(
-        "streamlit.service.admin.AdminService._call_tool", new_callable=AsyncMock
+        "streamlit_app.service.admin.AdminService._call_tool", new_callable=AsyncMock
     ) as mock_call:
         mock_call.return_value = {"error": "Connection failed"}
 

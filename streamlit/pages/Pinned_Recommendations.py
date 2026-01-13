@@ -1,7 +1,7 @@
 import asyncio
 
 import streamlit as st
-from streamlit.service.admin import AdminService
+from streamlit_app.service.admin import AdminService
 
 st.set_page_config(page_title="Pinned Recommendations", layout="wide")
 

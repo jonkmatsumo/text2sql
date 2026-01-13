@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from streamlit.service.admin import AdminService  # noqa: E402
+from streamlit_app.service.admin import AdminService  # noqa: E402
 
 
 class TestListInteractions:

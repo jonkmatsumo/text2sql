@@ -39,7 +39,7 @@ if st.button("Run Recommendations", type="primary"):
         try:
             import asyncio
 
-            from streamlit.service.admin import AdminService
+            from streamlit_app.service.admin import AdminService
 
             with st.spinner("Running recommendations..."):
                 result = asyncio.run(
