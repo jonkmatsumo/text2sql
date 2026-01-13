@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 WORKDIR /app
+ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -10,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 # Copy project structure (build context is project root)
 COPY streamlit/pyproject.toml ./streamlit/
 COPY streamlit/Text_2_SQL_Agent.py ./streamlit/
-COPY streamlit/service/ ./streamlit/service/
+COPY streamlit_app/ ./streamlit_app/
 COPY streamlit/pages/ ./streamlit/pages/
 
 # Copy Streamlit config directory
