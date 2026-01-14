@@ -1,31 +1,8 @@
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Setup mocks for all required OTEL modules
-# We must do this BEFORE importing agent_core.telemetry
-otel_mock = MagicMock()
-sys.modules["opentelemetry"] = otel_mock
-sys.modules["opentelemetry.context"] = MagicMock()
-sys.modules["opentelemetry.propagate"] = MagicMock()
-sys.modules["opentelemetry.trace"] = MagicMock()
-sys.modules["opentelemetry.sdk"] = MagicMock()
-sys.modules["opentelemetry.sdk.resources"] = MagicMock()
-sys.modules["opentelemetry.sdk.trace"] = MagicMock()
-sys.modules["opentelemetry.sdk.trace.export"] = MagicMock()
-# Mock the exporter modules that are dynamically imported
-sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto.http.trace_exporter"] = MagicMock()
-
-# Ensure that 'from opentelemetry import trace' gets the same mock as 'import opentelemetry.trace'
-otel_mock.trace = sys.modules["opentelemetry.trace"]
-otel_mock.context = sys.modules["opentelemetry.context"]
-otel_mock.propagate = sys.modules["opentelemetry.propagate"]
-
-# Now import the module under test
-from agent_core import telemetry  # noqa: E402
 
 
 @pytest.fixture
@@ -40,47 +17,67 @@ def clean_env():
 @pytest.fixture
 def reset_telemetry_globals():
     """Reset global state in telemetry module."""
+    from agent_core import telemetry
+
     # Reset the global flag in telemetry module
     telemetry._otel_initialized = False
     yield
     telemetry._otel_initialized = False
 
 
-@pytest.fixture(autouse=True)
-def reset_mocks():
-    """Reset all mocks before each test."""
-    sys.modules["opentelemetry"].reset_mock()
-    sys.modules["opentelemetry.context"].reset_mock()
-    sys.modules["opentelemetry.propagate"].reset_mock()
-    sys.modules["opentelemetry.trace"].reset_mock()
-    sys.modules["opentelemetry.sdk"].reset_mock()
-    sys.modules["opentelemetry.sdk.resources"].reset_mock()
-    sys.modules["opentelemetry.sdk.trace"].reset_mock()
-    sys.modules["opentelemetry.sdk.trace.export"].reset_mock()
-    sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"].reset_mock()
-    yield
+@pytest.fixture
+def otel_mocks():
+    """Mock all required OTEL modules and inject into sys.modules."""
+    otel_mock = MagicMock()
+
+    # Define the mocks we want to inject
+    mocks = {
+        "opentelemetry": otel_mock,
+        "opentelemetry.context": MagicMock(),
+        "opentelemetry.propagate": MagicMock(),
+        "opentelemetry.trace": MagicMock(),
+        "opentelemetry.sdk": MagicMock(),
+        "opentelemetry.sdk.resources": MagicMock(),
+        "opentelemetry.sdk.trace": MagicMock(),
+        "opentelemetry.sdk.trace.export": MagicMock(),
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": MagicMock(),
+        "opentelemetry.exporter.otlp.proto.http.trace_exporter": MagicMock(),
+    }
+
+    # Setup internal attributes of the main mock
+    otel_mock.trace = mocks["opentelemetry.trace"]
+    otel_mock.context = mocks["opentelemetry.context"]
+    otel_mock.propagate = mocks["opentelemetry.propagate"]
+
+    with patch.dict("sys.modules", mocks):
+        # We must import telemetry AFTER mocking sys.modules to pick up mocks.
+        # If already imported, reload it to ensure use of mocks.
+        if "agent_core.telemetry" in sys.modules:
+            import importlib
+
+            importlib.reload(sys.modules["agent_core.telemetry"])
+        from agent_core import telemetry
+
+        yield mocks, telemetry
 
 
-def test_otel_setup(clean_env, reset_telemetry_globals):
+def test_otel_setup(clean_env, reset_telemetry_globals, otel_mocks):
     """Verify that OTEL backend configures the SDK."""
     os.environ["TELEMETRY_BACKEND"] = "otel"
     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4317"
-    # Protocol defaults to grpc in code
 
-    # Re-initialize service to pick up env var
+    mocks, telemetry = otel_mocks
     svc = telemetry.TelemetryService()
 
     # Get the mocks that should be used
-    mock_resource_create = sys.modules["opentelemetry.sdk.resources"].Resource.create
-    mock_provider_cls = sys.modules["opentelemetry.sdk.trace"].TracerProvider
-    mock_grpc_exporter_cls = sys.modules[
+    mock_resource_create = mocks["opentelemetry.sdk.resources"].Resource.create
+    mock_provider_cls = mocks["opentelemetry.sdk.trace"].TracerProvider
+    mock_grpc_exporter_cls = mocks[
         "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
     ].OTLPSpanExporter
-    mock_processor_cls = sys.modules["opentelemetry.sdk.trace.export"].BatchSpanProcessor
+    mock_processor_cls = mocks["opentelemetry.sdk.trace.export"].BatchSpanProcessor
 
-    # Note: When importing trace from opentelemetry, and opentelemetry.trace is mocked,
-    # the imported 'trace' object is sys.modules["opentelemetry.trace"]
-    mock_set_provider = sys.modules["opentelemetry.trace"].set_tracer_provider
+    mock_set_provider = mocks["opentelemetry.trace"].set_tracer_provider
 
     # Act
     svc.configure()
@@ -93,14 +90,15 @@ def test_otel_setup(clean_env, reset_telemetry_globals):
     mock_set_provider.assert_called_once()
 
 
-def test_mlflow_backend_does_not_configure_otel(clean_env, reset_telemetry_globals):
+def test_mlflow_backend_does_not_configure_otel(clean_env, reset_telemetry_globals, otel_mocks):
     """Verify that MLflow backend does NOT configure OTEL SDK."""
     os.environ["TELEMETRY_BACKEND"] = "mlflow"
 
+    mocks, telemetry = otel_mocks
     svc = telemetry.TelemetryService()
 
     # Mocks
-    mock_resource_create = sys.modules["opentelemetry.sdk.resources"].Resource.create
+    mock_resource_create = mocks["opentelemetry.sdk.resources"].Resource.create
 
     # Act
     svc.configure()

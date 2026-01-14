@@ -20,13 +20,16 @@ from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-# Configure Telemetry tracking URI and autologging
-# Default to localhost for local dev, but use container name in Docker
-telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-backend_name = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
-should_autolog = backend_name != "otel"
 
-telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
+def run_telemetry_configure():
+    """Configure telemetry at runtime to avoid import-time side effects."""
+    # Configure Telemetry tracking URI and autologging
+    # Default to localhost for local dev, but use container name in Docker
+    telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    backend_name = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+    should_autolog = backend_name != "otel"
+
+    telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
 
 
 def with_telemetry_context(node_func):
@@ -233,6 +236,9 @@ async def run_agent_with_tracing(
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
+
+    # Ensure telemetry is configured at runtime
+    run_telemetry_configure()
 
     # Generate thread_id if not provided (required for checkpointer and telemetry)
     if thread_id is None:
