@@ -77,4 +77,7 @@ def get_env_list(
             raise KeyError(f"Environment variable '{name}' is required but not set.")
         return default
 
-    return [s.strip() for s in value.split(separator) if s.strip()]
+    result = [s.strip() for s in value.split(separator) if s.strip()]
+    if not result and default is not None:
+        return default
+    return result
