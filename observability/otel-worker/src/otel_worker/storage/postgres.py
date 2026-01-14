@@ -41,121 +41,141 @@ def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict],
     """
     Save trace summary and its spans to Postgres using the migration-hardened schema.
 
-    Idempotent upsert logic.
+    Legacy wrapper for save_traces_batch for a single trace.
     """
-    if not summaries:
+    save_traces_batch(
+        [{"trace_id": trace_id, "summaries": summaries, "raw_blob_url": raw_blob_url}]
+    )
+
+
+def save_traces_batch(trace_units: list[dict]):
+    """Save multiple traces and their spans in a single Postgres transaction.
+
+    Each unit should have: trace_id, summaries, raw_blob_url.
+    """
+    if not trace_units:
         return
 
-    # Calculate trace-level metrics
-    service_name = summaries[0]["service_name"]
-    resource_attributes = summaries[0].get("resource_attributes", {})
-    start_ts = min(int(s["start_time_unix_nano"]) for s in summaries)
-    end_ts = max(int(s["end_time_unix_nano"]) for s in summaries)
-    duration_ms = (end_ts - start_ts) // 1_000_000
-
-    # Convert nano timestamps to ISO string for PG
-    start_dt = datetime.fromtimestamp(start_ts / 1e9, tz=timezone.utc)
-    end_dt = datetime.fromtimestamp(end_ts / 1e9, tz=timezone.utc)
-
-    # Simple error count by looking at status code
-    error_count = sum(1 for s in summaries if s["status"] == "STATUS_CODE_ERROR")
-
-    # Extract optional app-specific attributes and trace-level attributes
-    tenant_id = None
-    interaction_id = None
-    trace_attributes = {}
-    for s in summaries:
-        attrs = s.get("attributes", {})
-        tenant_id = tenant_id or attrs.get("tenant_id")
-        interaction_id = interaction_id or attrs.get("interaction_id")
-        # For trace_attributes, we'll take top-level attributes found in any span
-        trace_attributes.update(attrs)
+    traces_table = get_table_name("traces")
+    spans_table = get_table_name("spans")
 
     with engine.begin() as conn:
-        # Upsert Trace
-        traces_table = get_table_name("traces")
-        conn.execute(
-            text(
-                f"""
-            INSERT INTO {traces_table} (
-                trace_id, start_time, end_time, duration_ms, service_name,
-                environment, tenant_id, interaction_id, status,
-                error_count, span_count, raw_blob_url,
-                resource_attributes, trace_attributes
-            ) VALUES (
-                :trace_id, :start_time, :end_time, :duration_ms, :service_name,
-                :environment, :tenant_id, :interaction_id, :status,
-                :error_count, :span_count, :raw_blob_url,
-                :resource_attributes, :trace_attributes
-            )
-            ON CONFLICT (trace_id) DO UPDATE SET
-                end_time = EXCLUDED.end_time,
-                duration_ms = EXCLUDED.duration_ms,
-                error_count = EXCLUDED.error_count,
-                span_count = EXCLUDED.span_count,
-                raw_blob_url = EXCLUDED.raw_blob_url,
-                trace_attributes = {traces_table}.trace_attributes
-                    || EXCLUDED.trace_attributes;
-        """
-            ),
-            {
-                "trace_id": trace_id,
-                "start_time": start_dt,
-                "end_time": end_dt,
-                "duration_ms": duration_ms,
-                "service_name": service_name,
-                "environment": settings.OTEL_ENVIRONMENT,
-                "tenant_id": tenant_id,
-                "interaction_id": interaction_id,
-                "status": "ERROR" if error_count > 0 else "OK",
-                "error_count": error_count,
-                "span_count": len(summaries),
-                "raw_blob_url": raw_blob_url,
-                "resource_attributes": json.dumps(resource_attributes),
-                "trace_attributes": json.dumps(trace_attributes),
-            },
-        )
+        for unit in trace_units:
+            trace_id = unit["trace_id"]
+            summaries = unit["summaries"]
+            raw_blob_url = unit["raw_blob_url"]
 
-        # Upsert Spans
-        for s in summaries:
-            s_start = datetime.fromtimestamp(int(s["start_time_unix_nano"]) / 1e9, tz=timezone.utc)
-            s_end = datetime.fromtimestamp(int(s["end_time_unix_nano"]) / 1e9, tz=timezone.utc)
-            s_duration = (
-                int(s["end_time_unix_nano"]) - int(s["start_time_unix_nano"])
-            ) // 1_000_000
+            if not summaries:
+                continue
 
-            spans_table = get_table_name("spans")
+            # Calculate trace-level metrics
+            service_name = summaries[0]["service_name"]
+            resource_attributes = summaries[0].get("resource_attributes", {})
+            start_ts = min(int(s["start_time_unix_nano"]) for s in summaries)
+            end_ts = max(int(s["end_time_unix_nano"]) for s in summaries)
+            duration_ms = (end_ts - start_ts) // 1_000_000
+
+            # Convert nano timestamps to ISO string for PG
+            start_dt = datetime.fromtimestamp(start_ts / 1e9, tz=timezone.utc)
+            end_dt = datetime.fromtimestamp(end_ts / 1e9, tz=timezone.utc)
+
+            # Simple error count by looking at status code
+            error_count = sum(1 for s in summaries if s["status"] == "STATUS_CODE_ERROR")
+
+            # Extract optional app-specific attributes and trace-level attributes
+            tenant_id = None
+            interaction_id = None
+            trace_attributes = {}
+            for s in summaries:
+                attrs = s.get("attributes", {})
+                tenant_id = tenant_id or attrs.get("tenant_id")
+                interaction_id = interaction_id or attrs.get("interaction_id")
+                trace_attributes.update(attrs)
+
+            # Upsert Trace
             conn.execute(
                 text(
                     f"""
-                INSERT INTO {spans_table} (
-                    span_id, trace_id, parent_span_id, name, kind,
-                    start_time, end_time, duration_ms, status_code,
-                    status_message, span_attributes, events
+                INSERT INTO {traces_table} (
+                    trace_id, start_time, end_time, duration_ms, service_name,
+                    environment, tenant_id, interaction_id, status,
+                    error_count, span_count, raw_blob_url,
+                    resource_attributes, trace_attributes
                 ) VALUES (
-                    :span_id, :trace_id, :parent_span_id, :name, :kind,
-                    :start_time, :end_time, :duration_ms, :status_code,
-                    :status_message, :span_attributes, :events
+                    :trace_id, :start_time, :end_time, :duration_ms, :service_name,
+                    :environment, :tenant_id, :interaction_id, :status,
+                    :error_count, :span_count, :raw_blob_url,
+                    :resource_attributes, :trace_attributes
                 )
-                ON CONFLICT (span_id) DO NOTHING;
+                ON CONFLICT (trace_id) DO UPDATE SET
+                    end_time = EXCLUDED.end_time,
+                    duration_ms = EXCLUDED.duration_ms,
+                    error_count = EXCLUDED.error_count,
+                    span_count = EXCLUDED.span_count,
+                    raw_blob_url = EXCLUDED.raw_blob_url,
+                    trace_attributes = {traces_table}.trace_attributes
+                        || EXCLUDED.trace_attributes;
             """
                 ),
                 {
-                    "span_id": s["span_id"],
                     "trace_id": trace_id,
-                    "parent_span_id": s.get("parent_span_id"),
-                    "name": s["name"],
-                    "kind": s.get("kind", "INTERNAL"),
-                    "start_time": s_start,
-                    "end_time": s_end,
-                    "duration_ms": s_duration,
-                    "status_code": s["status"],
-                    "status_message": s.get("status_message"),
-                    "span_attributes": json.dumps(s.get("attributes", {})),
-                    "events": json.dumps(s.get("events", [])),
+                    "start_time": start_dt,
+                    "end_time": end_dt,
+                    "duration_ms": duration_ms,
+                    "service_name": service_name,
+                    "environment": settings.OTEL_ENVIRONMENT,
+                    "tenant_id": tenant_id,
+                    "interaction_id": interaction_id,
+                    "status": "ERROR" if error_count > 0 else "OK",
+                    "error_count": error_count,
+                    "span_count": len(summaries),
+                    "raw_blob_url": raw_blob_url,
+                    "resource_attributes": json.dumps(resource_attributes),
+                    "trace_attributes": json.dumps(trace_attributes),
                 },
             )
-    logger.info(f"Saved trace {trace_id} with {len(summaries)} spans to Postgres")
+
+            # Upsert Spans
+            for s in summaries:
+                s_start = datetime.fromtimestamp(
+                    int(s["start_time_unix_nano"]) / 1e9, tz=timezone.utc
+                )
+                s_end = datetime.fromtimestamp(int(s["end_time_unix_nano"]) / 1e9, tz=timezone.utc)
+                s_duration = (
+                    int(s["end_time_unix_nano"]) - int(s["start_time_unix_nano"])
+                ) // 1_000_000
+
+                conn.execute(
+                    text(
+                        f"""
+                    INSERT INTO {spans_table} (
+                        span_id, trace_id, parent_span_id, name, kind,
+                        start_time, end_time, duration_ms, status_code,
+                        status_message, span_attributes, events
+                    ) VALUES (
+                        :span_id, :trace_id, :parent_span_id, :name, :kind,
+                        :start_time, :end_time, :duration_ms, :status_code,
+                        :status_message, :span_attributes, :events
+                    )
+                    ON CONFLICT (span_id) DO NOTHING;
+                """
+                    ),
+                    {
+                        "span_id": s["span_id"],
+                        "trace_id": trace_id,
+                        "parent_span_id": s.get("parent_span_id"),
+                        "name": s["name"],
+                        "kind": s.get("kind", "INTERNAL"),
+                        "start_time": s_start,
+                        "end_time": s_end,
+                        "duration_ms": s_duration,
+                        "status_code": s["status"],
+                        "status_message": s.get("status_message"),
+                        "span_attributes": json.dumps(s.get("attributes", {})),
+                        "events": json.dumps(s.get("events", [])),
+                    },
+                )
+    logger.info(f"Batched saved {len(trace_units)} traces to Postgres")
 
 
 def list_traces(
