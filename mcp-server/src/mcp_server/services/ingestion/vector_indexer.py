@@ -5,7 +5,7 @@ Includes adaptive thresholding to filter low-quality vector matches.
 
 import asyncio
 import logging
-import math
+import time
 from typing import List, Optional
 
 from mcp_server.dal.memgraph import MemgraphStore
@@ -42,21 +42,6 @@ class EmbeddingService:
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
             return [0.0] * 1536
-
-
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """Compute cosine similarity between two vectors."""
-    if not vec1 or not vec2 or len(vec1) != len(vec2):
-        return 0.0
-
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    norm1 = math.sqrt(sum(a * a for a in vec1))
-    norm2 = math.sqrt(sum(b * b for b in vec2))
-
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-
-    return dot_product / (norm1 * norm2)
 
 
 def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
@@ -239,6 +224,7 @@ class VectorIndexer:
         query_vector = await self.embedding_service.embed_text(query_text)
 
         def _run_search():
+            start_time = time.monotonic()
             with self.driver.session() as session:
                 if not query_vector:
                     return []
@@ -256,6 +242,19 @@ class VectorIndexer:
                 # Apply adaptive thresholding
                 if apply_threshold:
                     hits = apply_adaptive_threshold(hits)
+
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                logger.info(
+                    f"ANN search completed for label={label}, returned {len(hits)} hits",
+                    extra={
+                        "event": "memgraph_ann_seed_search",
+                        "label": label,
+                        "top_k": k,
+                        "returned_count": len(hits),
+                        "elapsed_ms": elapsed_ms,
+                        "threshold_applied": apply_threshold,
+                    },
+                )
 
                 return hits
 

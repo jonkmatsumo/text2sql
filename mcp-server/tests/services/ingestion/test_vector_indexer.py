@@ -142,6 +142,50 @@ class TestVectorIndexerANNHelpers:
         assert "YIELD node, score" in query
         assert "RETURN node, score" in query
 
+
+class TestVectorIndexerObservability:
+    """Tests for Phase 2d observability."""
+
+    @pytest.fixture
+    def indexer(self):
+        """Fixture for VectorIndexer with patched dependencies."""
+        store = MagicMock()
+        store.driver.session.return_value.__enter__.return_value = MagicMock()
+        with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+            indexer = VectorIndexer(store=store)
+            indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1] * 1536)
+            return indexer
+
+    @pytest.mark.asyncio
+    async def test_search_nodes_logs_structured_event(self, indexer):
+        """Validate search_nodes logs formatted event with expected keys."""
+        mock_session = indexer.store.driver.session.return_value.__enter__.return_value
+        mock_session.run.return_value = [{"node": {"name": "test"}, "score": 0.9}]
+
+        # Mock mapper to return dict
+        indexer._map_ann_results = lambda r: r
+
+        with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
+            await indexer.search_nodes("query", k=5, apply_threshold=True)
+
+            mock_logger.info.assert_called()
+            # Assert extra dict structure in the last call
+            call_args = mock_logger.info.call_args
+            assert call_args is not None
+
+            # call_args.kwargs['extra'] or call_args[1]['extra'] depending on how called
+            # It was called as logger.info(msg, extra={...})
+            kwargs = call_args.kwargs
+            extra = kwargs.get("extra")
+            assert extra is not None
+            assert extra["event"] == "memgraph_ann_seed_search"
+            assert extra["label"] == "Table"
+            assert extra["top_k"] == 5
+            assert extra["returned_count"] == 1
+            assert "elapsed_ms" in extra
+            assert isinstance(extra["elapsed_ms"], float)
+            assert extra["threshold_applied"] is True
+
     def test_build_ann_query_column(self, indexer):
         """Validate query construction for Column label uses fallback Cypher scan."""
         query = indexer._build_ann_query("Column", "embedding", "$emb", "$k")
