@@ -13,14 +13,14 @@ def monitor():
 
 def test_under_limit(monitor):
     """Test that requests are accepted when under the limit."""
-    settings.QUEUE_MAX_DEPTH = 100
+    settings.STAGING_MAX_BACKLOG = 100
     monitor._current_depth = 50
     assert monitor.check_admissibility() == OverflowAction.ACCEPT
 
 
 def test_policy_reject(monitor):
     """Test 'reject' policy behavior."""
-    settings.QUEUE_MAX_DEPTH = 100
+    settings.STAGING_MAX_BACKLOG = 100
     settings.OVERFLOW_POLICY = "reject"
     monitor._current_depth = 150
     assert monitor.check_admissibility() == OverflowAction.REJECT
@@ -28,7 +28,7 @@ def test_policy_reject(monitor):
 
 def test_policy_drop(monitor):
     """Test 'drop' policy behavior."""
-    settings.QUEUE_MAX_DEPTH = 100
+    settings.STAGING_MAX_BACKLOG = 100
     settings.OVERFLOW_POLICY = "drop"
     monitor._current_depth = 150
     assert monitor.check_admissibility() == OverflowAction.DROP
@@ -36,7 +36,7 @@ def test_policy_drop(monitor):
 
 def test_policy_sample(monitor):
     """Test 'sample' policy behavior (probabilistic)."""
-    settings.QUEUE_MAX_DEPTH = 100
+    settings.STAGING_MAX_BACKLOG = 100
     settings.OVERFLOW_POLICY = "sample"
     settings.OVERFLOW_SAMPLE_RATE = 0.5
     monitor._current_depth = 150

@@ -33,7 +33,7 @@ class QueueMonitor:
         self._stopping = False
         self._monitoring_task = asyncio.create_task(self._monitor_loop())
         logger.info(
-            f"Queue monitor started (Max: {settings.QUEUE_MAX_DEPTH}, "
+            f"Queue monitor started (Max Backlog: {settings.STAGING_MAX_BACKLOG}, "
             f"Policy: {settings.OVERFLOW_POLICY})"
         )
 
@@ -51,7 +51,7 @@ class QueueMonitor:
     def check_admissibility(self) -> OverflowAction:
         """Determine if a request should be accepted based on current depth and policy."""
         # Fast path: under limit
-        if self._current_depth < settings.QUEUE_MAX_DEPTH:
+        if self._current_depth < settings.STAGING_MAX_BACKLOG:
             return OverflowAction.ACCEPT
 
         # Slow path: apply policy

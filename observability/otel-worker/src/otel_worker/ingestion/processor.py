@@ -8,6 +8,7 @@ from typing import Dict, List, Set
 
 from otel_worker.config import settings
 from otel_worker.export.mlflow_exporter import export_to_mlflow
+from otel_worker.logging import log_event
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
     parse_otlp_json_traces,
@@ -67,12 +68,27 @@ class PersistenceCoordinator:
 
         while not self._stopping:
             try:
-                # Poll for pending items up to remaining batch capacity
-                capacity = settings.BATCH_MAX_SIZE - len(buffer)
-                if capacity > 0:
-                    items = await asyncio.to_thread(poll_ingestion_queue, limit=capacity)
-                    if items:
-                        buffer.extend(items)
+                # 0. Backpressure Check (Memory)
+                # If buffer is full, pause polling to allow processing to catch up
+                if len(buffer) >= settings.PROCESSING_QUEUE_MAX_DEPTH:
+                    log_event(
+                        "processing_paused",
+                        reason="buffer_full",
+                        buffer_size=len(buffer),
+                    )
+                    await asyncio.sleep(0.1)
+                    # Continue to flush check
+                else:
+                    # Poll for pending items up to remaining batch capacity
+                    # We still use BATCH_MAX_SIZE for the *chunk* we pull,
+                    # but limit total buffer by PROCESSING_QUEUE_MAX_DEPTH
+                    capacity = settings.PROCESSING_QUEUE_MAX_DEPTH - len(buffer)
+                    poll_limit = min(capacity, settings.BATCH_MAX_SIZE)
+
+                    if poll_limit > 0:
+                        items = await asyncio.to_thread(poll_ingestion_queue, limit=poll_limit)
+                        if items:
+                            buffer.extend(items)
 
                 now = time.time()
                 interval_ms = (now - last_flush) * 1000
@@ -85,12 +101,13 @@ class PersistenceCoordinator:
                     try:
                         await self._process_batch(buffer)
                     finally:
-                        # Clear buffer regardless of success (individual items handle retries)
+                        # Clear buffer regardless of success
+                        # (individual items handle retries via DB status)
                         buffer = []
                         last_flush = now
                 elif not buffer:
                     # Nothing to do, wait for new items
-                    await asyncio.sleep(2.0)
+                    await asyncio.sleep(1.0)
                 else:
                     # Buffer exists but not ready to flush, wait a bit
                     await asyncio.sleep(0.05)
@@ -110,62 +127,69 @@ class PersistenceCoordinator:
         trace_map: Dict[str, dict] = {}
         processed_item_ids: Set[int] = set()
 
-        for item in items:
-            item_id = item["id"]
-            processed_item_ids.add(item_id)
-            payload = item["payload_json"]
-
-            try:
-                # Reconstruct original body and parse
-                body = base64.b64decode(payload["body_b64"])
-                content_type = payload["content_type"]
-
-                if content_type == "application/x-protobuf":
-                    parsed_data = parse_otlp_traces(body)
-                else:
-                    parsed_data = parse_otlp_json_traces(body)
-
-                summaries = extract_trace_summaries(parsed_data)
-                if not summaries:
-                    # Empty or no-op payload, mark as complete later
-                    continue
-
-                # Group by trace_id found in summaries
-                # (Normally one OTLP request has multiple traces)
-                trace_summary_ids = set(s["trace_id"] for s in summaries)
-                for tid_b64 in trace_summary_ids:
-                    tid_bytes = base64.b64decode(tid_b64)
-                    trace_id = tid_bytes.hex()
-                    trace_summaries = [s for s in summaries if s["trace_id"] == tid_b64]
-                    service_name = trace_summaries[0]["service_name"]
-
-                    if trace_id not in trace_map:
-                        trace_map[trace_id] = {
-                            "parsed_data": parsed_data,  # Ref to full data
-                            "summaries": [],
-                            "service_name": service_name,
-                            "item_ids": set(),
-                        }
-                    trace_map[trace_id]["summaries"].extend(trace_summaries)
-                    trace_map[trace_id]["item_ids"].add(item_id)
-
-            except Exception as e:
-                logger.error(f"Failed to parse ingestion item {item_id}: {e}")
-                await asyncio.to_thread(update_ingestion_status, item_id, "failed", error=str(e))
-                processed_item_ids.remove(item_id)
-
-        if not trace_map:
-            # If nothing to persist, just mark the items complete
-            for item_id in processed_item_ids:
-                await asyncio.to_thread(update_ingestion_status, item_id, "complete")
-            return
-
-        # 2. Sequential/Parallel Processing Stages
-        # A) MinIO Uploads (Concurrent but bounded)
-        # B) Postgres Save (Batched transaction)
-        # C) MLflow Export (Concurrent)
+        # Collect all item IDs for failure handling
+        all_item_ids = {item["id"] for item in items}
 
         try:
+            for item in items:
+                item_id = item["id"]
+                processed_item_ids.add(item_id)
+                payload = item["payload_json"]
+
+                try:
+                    # Reconstruct original body and parse
+                    body = base64.b64decode(payload["body_b64"])
+                    content_type = payload["content_type"]
+
+                    if content_type == "application/x-protobuf":
+                        parsed_data = parse_otlp_traces(body)
+                    else:
+                        parsed_data = parse_otlp_json_traces(body)
+
+                    summaries = extract_trace_summaries(parsed_data)
+                    if not summaries:
+                        # Empty or no-op payload, mark as complete later
+                        continue
+
+                    # Group by trace_id found in summaries
+                    # (Normally one OTLP request has multiple traces)
+                    trace_summary_ids = set(s["trace_id"] for s in summaries)
+                    for tid_b64 in trace_summary_ids:
+                        tid_bytes = base64.b64decode(tid_b64)
+                        trace_id = tid_bytes.hex()
+                        trace_summaries = [s for s in summaries if s["trace_id"] == tid_b64]
+                        service_name = trace_summaries[0]["service_name"]
+
+                        if trace_id not in trace_map:
+                            trace_map[trace_id] = {
+                                "parsed_data": parsed_data,  # Ref to full data
+                                "summaries": [],
+                                "service_name": service_name,
+                                "item_ids": set(),
+                            }
+                        trace_map[trace_id]["summaries"].extend(trace_summaries)
+                        trace_map[trace_id]["item_ids"].add(item_id)
+
+                except Exception as e:
+                    logger.error(f"Failed to parse ingestion item {item_id}: {e}")
+                    await asyncio.to_thread(
+                        update_ingestion_status, item_id, "failed", error=str(e)
+                    )
+                    # Remove from processed so we don't double-mark
+                    processed_item_ids.remove(item_id)
+                    all_item_ids.remove(item_id)
+
+            if not trace_map:
+                # If nothing to persist, just mark the remaining items complete
+                for item_id in set(all_item_ids).intersection(processed_item_ids):
+                    await asyncio.to_thread(update_ingestion_status, item_id, "complete")
+                return
+
+            # 2. Sequential/Parallel Processing Stages
+            # A) MinIO Uploads (Concurrent but bounded)
+            # B) Postgres Save (Batched transaction)
+            # C) MLflow Export (Concurrent)
+
             # Stage A: MinIO Uploads (Parallel, Bounded)
             async def bounded_upload(tid, svc, data):
                 async with self._minio_semaphore:
@@ -226,15 +250,21 @@ class PersistenceCoordinator:
 
             # 3. Finalize items
             # Mark all items as complete
-            for item_id in processed_item_ids:
+            for item_id in set(all_item_ids).intersection(processed_item_ids):
                 await asyncio.to_thread(update_ingestion_status, item_id, "complete")
+                log_event("item_complete", item_id=item_id)
 
         except Exception as e:
             logger.error(f"Batch processing failed: {e}")
-            # Individual items that failed parsing already marked 'failed'
-            # For the rest, we rely on the next polling cycle IF we didn't update status
-            # Actually, we should probably mark them as failed here if they weren't finalized
-            pass
+            log_event("batch_persist_failed", error=str(e), batch_size=len(items))
+            # Mark all involved items as failed so they can be retried by DB with backoff
+            for item_id in all_item_ids:
+                try:
+                    await asyncio.to_thread(
+                        update_ingestion_status, item_id, "failed", error=str(e)
+                    )
+                except Exception:
+                    pass
 
     async def _run_with_retry(self, func, label: str):
         """Run a function with exponential backoff retries."""
