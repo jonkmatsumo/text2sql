@@ -284,3 +284,55 @@ class TestVectorIndexerObservability:
 
             # Verify status
             mock_telemetry.set_span_status.assert_called_with(mock_span, success=True)
+
+
+class TestRegressionGuardrails:
+    """Guardrails against performance regressions."""
+
+    @pytest.fixture
+    def indexer(self):
+        """Fixture for VectorIndexer with patched dependencies."""
+        store = MagicMock()
+        store.driver.session.return_value.__enter__.return_value = MagicMock()
+        with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+            indexer = VectorIndexer(store=store)
+            indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1] * 1536)
+            return indexer
+
+    @pytest.mark.asyncio
+    async def test_no_fetch_all_embeddings(self, indexer):
+        """Ensure no O(N) fetch-all query is executed."""
+        mock_session = indexer.store.driver.session.return_value.__enter__.return_value
+        # Mock result to avoid processing errors
+        mock_session.run.return_value = []
+
+        await indexer.search_nodes("query", label="Table", k=5)
+
+        # Verify only one query run
+        assert mock_session.run.call_count == 1
+        args, _ = mock_session.run.call_args
+        query = args[0]
+
+        # Assert strictly uses vector index procedure
+        assert "call vector_search.search" in query.lower()
+
+        # Guard against broad matches without vector search
+        forbidden_patterns = ["match (n:table) return n", "match (n:table) return n, n.embedding"]
+        for pattern in forbidden_patterns:
+            assert pattern not in query.lower()
+
+    @pytest.mark.asyncio
+    async def test_column_fallback_uses_limit(self, indexer):
+        """Ensure fallback scan uses LIMIT and doesn't fetch all."""
+        mock_session = indexer.store.driver.session.return_value.__enter__.return_value
+        mock_session.run.return_value = []
+
+        await indexer.search_nodes("query", label="Column", k=5)
+
+        args, _ = mock_session.run.call_args
+        query = args[0].lower()
+
+        assert "limit $k" in query
+        assert "order by score desc" in query
+        # Should not just return all embeddings
+        assert "return n, n.embedding" not in query
