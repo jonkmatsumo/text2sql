@@ -102,6 +102,31 @@ class MockGraphStore:
         """Mock delete_subgraph."""
         return [root_id]
 
+    def get_nodes(self, label: str) -> List[Node]:
+        """Mock get_nodes."""
+        return []
+
+    def run_query(
+        self, query: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Mock run_query."""
+        return []
+
+    def search_ann_seeds(
+        self,
+        label: str,
+        embedding: List[float],
+        k: int,
+        index_name: str = "table_embedding_index",
+        embedding_property: str = "embedding",
+    ) -> List[Dict[str, Any]]:
+        """Mock search_ann_seeds."""
+        return []
+
+    def close(self):
+        """Mock close."""
+        pass
+
 
 class MockVectorIndex:
     """Mock implementation of ExtendedVectorIndex."""

@@ -1,80 +1,28 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from mcp_server.dal.interfaces.graph_store import GraphStore
-from mcp_server.models import Edge, GraphData, Node
-from neo4j import Driver, GraphDatabase
+from mcp_server.dal.interfaces import GraphStore
+from mcp_server.models.graph.data import GraphData
+from mcp_server.models.graph.edge import Edge
+from mcp_server.models.graph.node import Node
+from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
 
 
 class MemgraphStore(GraphStore):
-    """GraphStore implementation for Memgraph/Neo4j."""
+    """Memgraph implementation of GraphStore.
+
+    Uses the Neo4j Python driver (compatible with Memgraph Bolt protocol).
+    """
 
     def __init__(self, uri: str, user: str, password: str):
-        """Initialize the Memgraph driver.
-
-        Args:
-            uri: Bolt URI (e.g., "bolt://localhost:7687")
-            user: Database username
-            password: Database password
-        """
-        auth = (user, password) if user and password else None
-        self._uri = uri
-        self._auth = auth
-        self._driver: Optional[Driver] = None
-        self._connect()
-
-    def _connect(self):
-        """Establish the driver connection."""
-        if self._driver:
-            self._driver.close()
-        self._driver = GraphDatabase.driver(self._uri, auth=self._auth)
-
-    @property
-    def driver(self) -> Driver:
-        """Get the driver, ensuring it is connected."""
-        if not self._driver:
-            self._connect()
-
-        # lightweight connectivity check logic could go here,
-        # but verification on every access might be slow.
-        # However, for "defunct" errors, we usually only find out when we try to use it.
-        # To strictly fix the user's issue, we can verify_connectivity() here
-        # or rely on a retry wrapper.
-        # User error was "Failed to read...".
-        # Let's verify once.
-        try:
-            self._driver.verify_connectivity()
-        except Exception:
-            logger.warning("Memgraph driver disconnected. Reconnecting...")
-            self._connect()
-
-        return self._driver
+        """Initialize Memgraph driver."""
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
     def close(self):
-        """Close the driver connection."""
-
-    def verify_connectivity(self) -> bool:
-        """Verify connection is alive."""
-        try:
-            self.driver.verify_connectivity()
-            return True
-        except Exception as e:
-            logger.warning(f"Memgraph connection check failed: {e}")
-            return False
-
-    def _get_session(self):
-        """Get a session with retry logic for stale connections."""
-        if not self.verify_connectivity():
-            logger.warning("Connection defunct, attempting reconnect...")
-            # Re-init driver (requires storing auth params)
-            # Ideally we'd close old and create new, but auth is local.
-            # For now, let's just properly raise so caller can handle or Factory can recreate.
-            # Actually, best is to let Neo4j driver handle it? It usually does.
-            # "Defunct" usually means pool is bad.
-            pass
-        return self.driver.session()
+        """Close driver connection."""
+        self.driver.close()
 
     def upsert_node(
         self,
@@ -291,3 +239,88 @@ class MemgraphStore(GraphStore):
         with self.driver.session() as session:
             result = session.run(query, root_id=root_id)
             return [record["deleted_id"] for record in result if record["deleted_id"]]
+
+    def search_ann_seeds(
+        self,
+        label: str,
+        embedding: List[float],
+        k: int,
+        index_name: str = "table_embedding_index",
+        embedding_property: str = "embedding",
+    ) -> List[Dict[str, Any]]:
+        """Search for seeds using vector similarity.
+
+        Strategies:
+        1. If label is 'Table', use Memgraph HNSW index via vector_search module.
+        2. Otherwise (e.g. 'Column'), use brute-force cosine similarity scan.
+
+        Returns:
+            List of dicts: {"node": dict, "score": float}
+            Where 'node' is a flat dictionary of node properties.
+        """
+        # Strategy selection based on label (could be config-driven in future)
+        if label == "Table":
+            query = """
+            CALL vector_search.search($index, $label, $prop, $vector, $k)
+            YIELD node, score
+            RETURN node, score
+            """
+            params = {
+                "index": index_name,
+                "label": label,
+                "prop": embedding_property,
+                "vector": embedding,
+                "k": k,
+            }
+        else:
+            # Fallback Scan
+            query = f"""
+            MATCH (n:`{label}`)
+            WHERE n.{embedding_property} IS NOT NULL
+            WITH n, vector.similarity.cosine(n.{embedding_property}, $vector) AS score
+            ORDER BY score DESC
+            LIMIT $k
+            RETURN n AS node, score
+            """
+            params = {
+                "vector": embedding,
+                "k": k,
+            }
+
+        with self.driver.session() as session:
+            result = session.run(query, params)
+            hits = []
+            for record in result:
+                neo_node = record["node"]
+                score = record["score"]
+
+                # Normalize score
+                if not isinstance(score, float):
+                    try:
+                        score = float(score)
+                    except (ValueError, TypeError):
+                        score = 0.0
+
+                # Map to property dict
+                props = dict(neo_node)
+                # Remove embedding from returned properties to save bandwidth
+                props.pop(embedding_property, None)
+
+                # Ensure ID is present in the dict if it's available via element_id
+                if "id" not in props:
+                    try:
+                        props["id"] = str(neo_node.element_id)
+                    except AttributeError:
+                        pass
+
+                hits.append({"node": props, "score": score})
+
+            return hits
+
+    def run_query(
+        self, query: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Run a raw Cypher query and return results as dictionaries."""
+        with self.driver.session() as session:
+            result = session.run(query, parameters or {})
+            return [dict(record) for record in result]

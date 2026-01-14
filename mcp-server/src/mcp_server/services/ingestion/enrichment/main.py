@@ -1,13 +1,10 @@
 import asyncio
 import logging
-import os
-from contextlib import contextmanager
 
-from neo4j import GraphDatabase
+from mcp_server.dal.interfaces import GraphStore
 
 from .agent import EnrichmentAgent
 from .config import PipelineConfig
-from .delta import get_nodes_needing_enrichment
 from .hashing import generate_canonical_hash
 from .loader import replay_wal
 from .wal import WALManager
@@ -18,26 +15,20 @@ logger = logging.getLogger(__name__)
 class EnrichmentPipeline:
     """Orchestrates the semantic enrichment process (Robust & Idempotent)."""
 
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, store: GraphStore = None):
         """Initialize the pipeline."""
         self.config = PipelineConfig(dry_run=dry_run)
-        self.uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
-        self.user = os.getenv("MEMGRAPH_USER", "")
-        self.password = os.getenv("MEMGRAPH_PASSWORD", "")
-        self.driver = None
-        self.semaphore = asyncio.Semaphore(5)  # Enforce concurrency limit
+        if store:
+            self.store = store
+        else:
+            from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
 
-    @contextmanager
-    def _get_driver(self):
-        if not self.driver:
-            auth = (self.user, self.password) if self.user and self.password else None
-            self.driver = GraphDatabase.driver(self.uri, auth=auth)
-        yield self.driver
+            self.store = get_ingestion_graph_store()
+        self.semaphore = asyncio.Semaphore(5)  # Enforce concurrency limit
 
     def close(self):
         """Close the database driver."""
-        if self.driver:
-            self.driver.close()
+        self.store.close()
 
     async def run(self):
         """Execute the enrichment pipeline."""
@@ -53,9 +44,15 @@ class EnrichmentPipeline:
 
         # Phase 2: Delta Detection
         nodes_to_enrich = []
-        with self._get_driver() as driver:
-            with driver.session() as session:
-                nodes_to_enrich = session.execute_read(get_nodes_needing_enrichment)
+        # get_nodes_needing_enrichment is a Cypher query helper
+        # Since we refactored to GraphStore, we can use run_query
+        from .delta import NODES_NEEDING_ENRICHMENT_QUERY
+
+        results = self.store.run_query(NODES_NEEDING_ENRICHMENT_QUERY)
+        # Note: run_query returns list of dicts.
+        # Delta helper used to return [dict(record["n"]) for record in result]
+        # In run_query, each dict is record, which has keys like "n".
+        nodes_to_enrich = [dict(record["n"]) for record in results]
 
         if not nodes_to_enrich:
             logger.info("No nodes need enrichment.")
@@ -109,18 +106,16 @@ class EnrichmentPipeline:
         """Read the WAL and commit entries to the database."""
         count = 0
         logger.info(f"[{phase_name}] Syncing WAL to Database...")
-        with self._get_driver() as driver:
-            with driver.session() as session:
-                for entry in replay_wal(wal_path):
-                    try:
-                        session.execute_write(self._commit_entry, entry)
-                        count += 1
-                    except Exception as e:
-                        logger.error(f"Error commiting entry {entry.get('node_id')}: {e}")
+        for entry in replay_wal(wal_path):
+            try:
+                self._commit_entry(entry)
+                count += 1
+            except Exception as e:
+                logger.error(f"Error commiting entry {entry.get('node_id')}: {e}")
 
         logger.info(f"[{phase_name}] Committed {count} entries.")
 
-    def _commit_entry(self, tx, entry: dict):
+    def _commit_entry(self, entry: dict):
         """Execute Cypher to update the node."""
         node_id_str = entry["node_id"]
 
@@ -142,11 +137,13 @@ class EnrichmentPipeline:
                  n.enrichment_source_hash = $new_hash
              """
 
-        tx.run(
+        self.store.run_query(
             query,
-            node_id=node_id,
-            description=entry["description"],
-            new_hash=entry["new_hash"],
+            parameters={
+                "node_id": node_id,
+                "description": entry["description"],
+                "new_hash": entry["new_hash"],
+            },
         )
 
 

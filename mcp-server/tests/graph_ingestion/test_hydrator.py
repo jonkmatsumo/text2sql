@@ -1,17 +1,17 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp_server.dal.interfaces import GraphStore
 from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 from mcp_server.services.ingestion.graph_hydrator import GraphHydrator, should_skip_column_embedding
 
 
-@patch("mcp_server.services.ingestion.graph_hydrator.MemgraphStore")
 @patch("mcp_server.services.ingestion.graph_hydrator.EmbeddingService")
 @pytest.mark.asyncio
-async def test_hydrate_schema(mock_embedding_service, mock_memgraph_store_cls):
+async def test_hydrate_schema(mock_embedding_service):
     """Test hydrate_schema logic with DAL."""
     # Setup mock store instance
-    mock_store = mock_memgraph_store_cls.return_value
+    mock_store = MagicMock(spec=GraphStore)
 
     mock_embedding_service.return_value.embed_text.return_value = [0.1, 0.2]
 
@@ -30,11 +30,8 @@ async def test_hydrate_schema(mock_embedding_service, mock_memgraph_store_cls):
     mock_introspector.get_table_def = AsyncMock(return_value=t1_def)
     mock_introspector.get_sample_rows = AsyncMock(return_value=[{"a": 1}])
 
-    hydrator = GraphHydrator()
+    hydrator = GraphHydrator(store=mock_store)
     await hydrator.hydrate_schema(mock_introspector)
-
-    # Verify Store Intialization
-    mock_memgraph_store_cls.assert_called_once()
 
     # Verify UPSERT calls
     # 1. Table upsert

@@ -28,13 +28,24 @@ async def _ingest_graph_schema():
         # Get introspector (Postgres connection assumed via env vars)
         introspector = get_schema_introspector()
 
-        # Hydrate - use MEMGRAPH_URI from environment
-        memgraph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
-        hydrator = GraphHydrator(uri=memgraph_uri)
+        # Hydrate
+        hydrator = GraphHydrator()
         try:
             # Run async hydration
             await hydrator.hydrate_schema(introspector)
             print("✓ Graph schema ingestion complete.")
+
+            from mcp_server.services.ingestion.vector_index_ddl import (
+                ensure_table_embedding_hnsw_index,
+            )
+
+            try:
+                ensure_table_embedding_hnsw_index(hydrator.store)
+            except Exception as e:
+                # Log but do not block startup for Phase 1
+                # (unless strictness required in later phases)
+                print(f"⚠ Failed to ensure vector index: {e}")
+
         finally:
             hydrator.close()
 

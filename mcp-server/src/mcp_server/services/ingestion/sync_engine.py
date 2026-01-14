@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, List
 
 from mcp_server.dal.factory import get_schema_introspector
-from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.dal.interfaces import GraphStore
 
 logger = logging.getLogger(__name__)
 
@@ -10,18 +10,20 @@ logger = logging.getLogger(__name__)
 class SyncEngine:
     """Synchronizes live PostgreSQL schema with Memgraph using DAL."""
 
-    def __init__(self, graph_uri: str = "bolt://localhost:7687", graph_auth: tuple = None):
+    def __init__(self, store: GraphStore = None):
         """
         Initialize the Sync Engine.
 
         Args:
-            graph_uri: Memgraph/Neo4j Bolt URI.
-            graph_auth: Tuple of (user, password) for Memgraph.
+            store: Optional existing GraphStore instance. If None, uses singleton from factory.
         """
         self.introspector = get_schema_introspector()
-        user = graph_auth[0] if graph_auth else ""
-        password = graph_auth[1] if graph_auth else ""
-        self.store = MemgraphStore(graph_uri, user, password)
+        if store:
+            self.store = store
+        else:
+            from .dependencies import get_ingestion_graph_store
+
+            self.store = get_ingestion_graph_store()
 
     def close(self):
         """Close connections."""

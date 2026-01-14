@@ -5,10 +5,11 @@ Includes adaptive thresholding to filter low-quality vector matches.
 
 import asyncio
 import logging
-import math
+import time
 from typing import List, Optional
 
-from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.dal.interfaces import GraphStore
+from mcp_server.utils.telemetry import Telemetry
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -44,22 +45,7 @@ class EmbeddingService:
             return [0.0] * 1536
 
 
-def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """Compute cosine similarity between two vectors."""
-    if not vec1 or not vec2 or len(vec1) != len(vec2):
-        return 0.0
-
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    norm1 = math.sqrt(sum(a * a for a in vec1))
-    norm2 = math.sqrt(sum(b * b for b in vec2))
-
-    if norm1 == 0 or norm2 == 0:
-        return 0.0
-
-    return dot_product / (norm1 * norm2)
-
-
-def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
+def apply_adaptive_threshold(hits: List[dict]) -> tuple[List[dict], float]:
     """Apply adaptive thresholding to filter low-quality matches.
 
     Algorithm:
@@ -72,10 +58,10 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
         hits: List of dicts with 'score' key, sorted by score descending
 
     Returns:
-        Filtered list of hits
+        Tuple of (Filtered list of hits, threshold used)
     """
     if not hits:
-        return []
+        return [], 0.0
 
     best_score = hits[0]["score"]
     threshold = max(MIN_SCORE_ABSOLUTE, best_score - SCORE_DROP_TOLERANCE)
@@ -85,18 +71,18 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
     # Fallback: return top 3 when all below threshold (ensures broader context)
     if not filtered and hits:
         fallback_count = min(3, len(hits))
-        logger.warning(
+        logger.debug(
             f"All hits below threshold {threshold:.3f}, returning top-{fallback_count} fallback "
             f"(best_score={best_score:.3f})"
         )
-        return hits[:fallback_count]
+        return hits[:fallback_count], threshold
 
     if len(filtered) < len(hits):
-        logger.info(
+        logger.debug(
             f"Adaptive threshold {threshold:.3f} filtered {len(hits)} -> {len(filtered)} hits"
         )
 
-    return filtered
+    return filtered, threshold
 
 
 class VectorIndexer:
@@ -108,25 +94,21 @@ class VectorIndexer:
 
     def __init__(
         self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "",
-        password: str = "",
-        store: Optional[MemgraphStore] = None,
+        store: Optional[GraphStore] = None,
     ):
-        """Initialize Memgraph store.
+        """Initialize with GraphStore.
 
         Args:
-            uri: Bolt URI for Memgraph connection.
-            user: Username for authentication.
-            password: Password for authentication.
-            store: Optional existing MemgraphStore instance.
+            store: Optional existing GraphStore instance. If None, uses singleton from factory.
         """
         if store:
             self.store = store
             self.owns_store = False
         else:
-            self.store = MemgraphStore(uri, user, password)
-            self.owns_store = True
+            from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
+
+            self.store = get_ingestion_graph_store()
+            self.owns_store = False  # Singleton managed by factory
 
         self.embedding_service = EmbeddingService()
 
@@ -140,31 +122,6 @@ class VectorIndexer:
         """Access underlying driver for legacy support."""
         return self.store.driver
 
-    async def create_indexes(self):
-        """Create property indexes to speed up node retrieval.
-
-        Note: Vector indexes (usearch) are not available in base Memgraph.
-        We use property indexes for filtering, then compute similarity in Python.
-        """
-        logger.info("Creating property indexes...")
-
-        # Note: session() on sync driver can still be used, but we should ideally move to async
-        # driver. For now, we wrap the sync call to avoid blocking the event loop extensively.
-        def _run_indexes():
-            with self.driver.session() as session:
-                try:
-                    session.run("CREATE INDEX ON :Table(name)")
-                except Exception:
-                    pass  # Index may already exist
-                try:
-                    session.run("CREATE INDEX ON :Column(name, table)")
-                except Exception:
-                    pass  # Index may already exist
-
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _run_indexes)
-        logger.info("Property indexes created.")
-
     async def search_nodes(
         self,
         query_text: str,
@@ -172,9 +129,19 @@ class VectorIndexer:
         k: int = 5,
         apply_threshold: bool = True,
     ) -> List[dict]:
-        """Search for nearest nodes using brute-force cosine similarity.
+        """Search for nearest nodes using Memgraph HNSW ANN or vector scan.
 
+        Delegates to DAL for query execution.
         Includes adaptive thresholding to filter low-quality matches.
+
+        Contract behavior:
+        - Return shape: List[{"node": dict, "score": float}]
+        - 'node': Dictionary of node properties (excluding 'embedding')
+        - 'score': Cosine similarity (0.0 to 1.0), NOT distance. Higher is better.
+        - Sorting: Descending score (best match first).
+        - Labels: Supports 'Table' or 'Column'.
+        - Missing embeddings: Nodes with NULL embeddings are silently skipped.
+        - Adaptive thresholding: Applied after top-k selection if enabled.
 
         Args:
             query_text: The semantic query.
@@ -188,44 +155,72 @@ class VectorIndexer:
         query_vector = await self.embedding_service.embed_text(query_text)
 
         def _run_search():
-            with self.driver.session() as session:
-                # Fetch all nodes of the given label that have embeddings
-                query = f"""
-                MATCH (n:{label})
-                WHERE n.embedding IS NOT NULL
-                RETURN n, n.embedding as embedding
-                """
+            start_time = time.monotonic()
 
-                result = session.run(query)
+            span_attributes = {
+                "db.system": "memgraph",
+                "db.operation": "ANN_SEARCH",
+                "vector.label": label,
+                "vector.top_k": k,
+            }
 
-                hits = []
-                for record in result:
-                    node = record["n"]
-                    node_embedding = record["embedding"]
+            with Telemetry.start_span(
+                "vector_seed_selection.ann", attributes=span_attributes
+            ) as span:
+                try:
+                    if not query_vector:
+                        return []
 
-                    if not node_embedding:
-                        continue
+                    # Delegate to DAL
+                    mapped_hits = self.store.search_ann_seeds(label, query_vector, k)
 
-                    score = cosine_similarity(query_vector, node_embedding)
+                    # Apply adaptive thresholding
+                    threshold_val = 0.0
+                    if apply_threshold and mapped_hits:
+                        mapped_hits, threshold_val = apply_adaptive_threshold(mapped_hits)
 
-                    # Convert node to dict, excluding embedding
-                    node_dict = dict(node)
-                    if "embedding" in node_dict:
-                        del node_dict["embedding"]
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
 
-                    hits.append({"node": node_dict, "score": score})
+                    log_payload = {
+                        "event": "memgraph_ann_seed_search",
+                        "label": label,
+                        "top_k": k,
+                        "returned_count": len(mapped_hits),
+                        "elapsed_ms": elapsed_ms,
+                        "threshold_applied": apply_threshold,
+                    }
+                    if apply_threshold:
+                        log_payload["threshold_value"] = threshold_val
 
-                # Sort by score descending
-                hits.sort(key=lambda x: x["score"], reverse=True)
+                    # Add dynamic attributes to span
+                    span.set_attribute("vector.returned_count", len(mapped_hits))
+                    span.set_attribute("vector.threshold_applied", apply_threshold)
+                    if apply_threshold:
+                        span.set_attribute("vector.threshold_value", threshold_val)
 
-                # Take top k first
-                hits = hits[:k]
+                    logger.info(
+                        f"ANN search completed for label={label}, returned {len(mapped_hits)} hits",
+                        extra=log_payload,
+                    )
 
-                # Apply adaptive thresholding
-                if apply_threshold:
-                    hits = apply_adaptive_threshold(hits)
-
-                return hits
+                    Telemetry.set_span_status(span, success=True)
+                    return mapped_hits
+                except Exception as e:
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
+                    logger.error(
+                        "ANN search failed",
+                        exc_info=True,
+                        extra={
+                            "event": "memgraph_ann_seed_search_failed",
+                            "error_type": type(e).__name__,
+                            "label": label,
+                            "top_k": k,
+                            "elapsed_ms": elapsed_ms,
+                        },
+                    )
+                    Telemetry.set_span_status(span, success=False, error=e)
+                    # Re-raise to preserve contract; failure handled upstream.
+                    raise
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_search)
