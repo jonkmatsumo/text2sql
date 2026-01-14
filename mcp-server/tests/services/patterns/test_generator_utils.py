@@ -1,13 +1,14 @@
 """Unit tests for pattern generator utilities."""
 
 import pytest
-from mcp_server.models import ColumnDef
 from mcp_server.services.patterns.generator import (
     generate_column_patterns,
     generate_table_patterns,
     get_target_tables,
     normalize_name,
 )
+
+from schema import ColumnDef
 
 
 def test_normalize_name():

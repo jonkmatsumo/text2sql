@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from mcp_server.models import ColumnDef
+from schema import ColumnDef
 
 
 @dataclass

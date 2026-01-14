@@ -2,8 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.dal.interfaces import GraphStore
-from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 from mcp_server.services.ingestion.graph_hydrator import GraphHydrator, should_skip_column_embedding
+
+from schema import ColumnDef, ForeignKeyDef, TableDef
 
 
 @patch("mcp_server.services.ingestion.graph_hydrator.EmbeddingService")

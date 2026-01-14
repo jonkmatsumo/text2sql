@@ -5,7 +5,8 @@ from typing import List, Set, Tuple
 
 from mcp_server.dal.interfaces import GraphStore
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
-from mcp_server.models import ColumnDef, TableDef
+
+from schema import ColumnDef, TableDef
 
 from .vector_indexer import EmbeddingService
 

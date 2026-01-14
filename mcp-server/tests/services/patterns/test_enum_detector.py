@@ -1,7 +1,8 @@
 """Unit tests for EnumLikeColumnDetector."""
 
-from mcp_server.models import ColumnDef
 from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
+
+from schema import ColumnDef
 
 
 def test_denylist_exclusion():

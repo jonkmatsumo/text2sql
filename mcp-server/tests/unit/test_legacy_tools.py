@@ -10,7 +10,8 @@ import mcp_server.tools.get_table_schema as get_table_schema_mod
 import mcp_server.tools.list_tables as list_tables_mod
 import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
 import pytest
-from mcp_server.models import ColumnDef, TableDef
+
+from schema import ColumnDef, TableDef
 
 get_table_schema = get_table_schema_mod.handler
 list_tables = list_tables_mod.handler

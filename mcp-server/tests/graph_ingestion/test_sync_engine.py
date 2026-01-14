@@ -2,8 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.dal.interfaces import GraphStore
-from mcp_server.models import ColumnDef, TableDef
 from mcp_server.services.ingestion.sync_engine import SyncEngine
+
+from schema import ColumnDef, TableDef
 
 
 @patch("mcp_server.services.ingestion.sync_engine.get_schema_introspector")

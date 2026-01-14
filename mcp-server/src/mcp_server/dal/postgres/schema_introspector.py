@@ -2,7 +2,8 @@ from typing import List
 
 from mcp_server.config.database import Database
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
-from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
+
+from schema import ColumnDef, ForeignKeyDef, TableDef
 
 
 class PostgresSchemaIntrospector(SchemaIntrospector):
