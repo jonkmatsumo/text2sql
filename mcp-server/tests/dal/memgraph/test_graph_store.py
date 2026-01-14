@@ -24,7 +24,7 @@ class TestMemgraphStoreANN:
             store = MemgraphStore("bolt://localhost:7687", "user", "pass")
             return store
 
-    def test_search_ann_nodes_table_strategy(self, store):
+    def test_search_ann_seeds_table_strategy(self, store):
         """Verify Table strategy uses vector_search module."""
         mock_session = MagicMock()
         store.driver.session.return_value.__enter__.return_value = mock_session
@@ -40,11 +40,11 @@ class TestMemgraphStoreANN:
         mock_session.run.return_value = [mock_record]
 
         embedding = [0.1, 0.2]
-        hits = store.search_ann_nodes("Table", embedding, k=5)
+        hits = store.search_ann_seeds("Table", embedding, k=5)
 
         assert len(hits) == 1
-        # Check canonical node properties
-        assert hits[0]["node"].properties["name"] == "foo"
+        # Check flat node properties
+        assert hits[0]["node"]["name"] == "foo"
         assert hits[0]["score"] == 0.95
 
         # Verify Query
@@ -58,7 +58,7 @@ class TestMemgraphStoreANN:
         assert params["vector"] == embedding
         assert params["k"] == 5
 
-    def test_search_ann_nodes_fallback_strategy(self, store):
+    def test_search_ann_seeds_fallback_strategy(self, store):
         """Verify Fallback strategy uses cosine scan."""
         mock_session = MagicMock()
         store.driver.session.return_value.__enter__.return_value = mock_session
@@ -74,10 +74,10 @@ class TestMemgraphStoreANN:
         mock_session.run.return_value = [mock_record]
 
         embedding = [0.1, 0.2]
-        hits = store.search_ann_nodes("Column", embedding, k=3)
+        hits = store.search_ann_seeds("Column", embedding, k=3)
 
         assert len(hits) == 1
-        assert hits[0]["node"].properties["col"] == "c"
+        assert hits[0]["node"]["col"] == "c"
 
         # Verify Query
         args, _ = mock_session.run.call_args

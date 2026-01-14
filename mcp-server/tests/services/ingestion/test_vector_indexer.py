@@ -11,8 +11,8 @@ class TestVectorIndexerCharacterization:
     def mock_store(self):
         """Fixture for MemgraphStore mock."""
         store = MagicMock()
-        # Mock search_ann_nodes to return empty list by default
-        store.search_ann_nodes.return_value = []
+        # Mock search_ann_seeds to return empty list by default
+        store.search_ann_seeds.return_value = []
         return store
 
     @pytest.fixture
@@ -27,11 +27,10 @@ class TestVectorIndexerCharacterization:
     @pytest.mark.asyncio
     async def test_search_nodes_output_shape(self, indexer):
         """Validate output is list of dicts with node and score."""
-        # Mock DAL return
-        mock_node = MagicMock()
-        mock_node.properties = {"name": "test_table"}
-
-        indexer.store.search_ann_nodes.return_value = [{"node": mock_node, "score": 0.95}]
+        # Mock DAL return using flat dicts
+        indexer.store.search_ann_seeds.return_value = [
+            {"node": {"name": "test_table"}, "score": 0.95}
+        ]
 
         results = await indexer.search_nodes("query", k=1)
 
@@ -42,8 +41,8 @@ class TestVectorIndexerCharacterization:
         assert item["node"]["name"] == "test_table"
 
         # Verify DAL call
-        indexer.store.search_ann_nodes.assert_called_once()
-        args = indexer.store.search_ann_nodes.call_args
+        indexer.store.search_ann_seeds.assert_called_once()
+        args = indexer.store.search_ann_seeds.call_args
         assert args[0][0] == "Table"  # label
 
     @pytest.mark.asyncio
@@ -52,15 +51,10 @@ class TestVectorIndexerCharacterization:
         indexer.embedding_service.embed_text = AsyncMock(return_value=[1.0, 0.0])
 
         # Mock DAL returning sorted results
-        node1 = MagicMock()
-        node1.properties = {"name": "good"}
-        node2 = MagicMock()
-        node2.properties = {"name": "bad"}
+        rec1 = {"node": {"name": "good"}, "score": 0.9}
+        rec2 = {"node": {"name": "bad"}, "score": 0.1}
 
-        rec1 = {"node": node1, "score": 0.9}
-        rec2 = {"node": node2, "score": 0.1}
-
-        indexer.store.search_ann_nodes.return_value = [rec1, rec2]
+        indexer.store.search_ann_seeds.return_value = [rec1, rec2]
 
         results = await indexer.search_nodes("query", k=2, apply_threshold=False)
 
@@ -115,7 +109,7 @@ class TestVectorIndexerObservability:
     def indexer(self):
         """Fixture for VectorIndexer with patched dependencies."""
         store = MagicMock()
-        store.search_ann_nodes.return_value = []
+        store.search_ann_seeds.return_value = []
         with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
             indexer = VectorIndexer(store=store)
             indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1] * 1536)
@@ -124,9 +118,7 @@ class TestVectorIndexerObservability:
     @pytest.mark.asyncio
     async def test_search_nodes_logs_structured_event(self, indexer):
         """Validate search_nodes logs formatted event with expected keys."""
-        mock_node = MagicMock()
-        mock_node.properties = {"name": "test"}
-        indexer.store.search_ann_nodes.return_value = [{"node": mock_node, "score": 0.9}]
+        indexer.store.search_ann_seeds.return_value = [{"node": {"name": "test"}, "score": 0.9}]
 
         with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
             await indexer.search_nodes("query", k=5, apply_threshold=True)
@@ -145,7 +137,7 @@ class TestVectorIndexerObservability:
     @pytest.mark.asyncio
     async def test_search_nodes_logs_error(self, indexer):
         """Validate search_nodes logs error event on failure."""
-        indexer.store.search_ann_nodes.side_effect = Exception("DB Error")
+        indexer.store.search_ann_seeds.side_effect = Exception("DB Error")
 
         with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
             with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
@@ -167,9 +159,7 @@ class TestVectorIndexerObservability:
     @pytest.mark.asyncio
     async def test_search_nodes_otel_span_success(self, indexer):
         """Validate OTEL span creation and attributes on success."""
-        mock_node = MagicMock()
-        mock_node.properties = {"name": "test"}
-        indexer.store.search_ann_nodes.return_value = [{"node": mock_node, "score": 0.9}]
+        indexer.store.search_ann_seeds.return_value = [{"node": {"name": "test"}, "score": 0.9}]
 
         with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
             mock_span = MagicMock()

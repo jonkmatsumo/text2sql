@@ -176,14 +176,7 @@ class VectorIndexer:
                         return []
 
                     # Delegate to DAL
-                    hits = self.store.search_ann_nodes(label, query_vector, k)
-
-                    # Map output to contract {"node": dict, "score": float}
-                    mapped_hits = []
-                    for h in hits:
-                        # Extract properties as the 'node' dict contract requires
-                        node_props = h["node"].properties
-                        mapped_hits.append({"node": node_props, "score": h["score"]})
+                    mapped_hits = self.store.search_ann_seeds(label, query_vector, k)
 
                     # Apply adaptive thresholding
                     threshold_val = 0.0
