@@ -153,6 +153,13 @@ Generate the SQL execution plan:""",
             }
         )
 
+        # Capture token usage
+        from agent_core.llm_client import extract_token_usage
+
+        usage_stats = extract_token_usage(response)
+        if usage_stats:
+            span.set_attributes(usage_stats)
+
         # Parse the JSON response
         plan_text = response.content.strip()
 
