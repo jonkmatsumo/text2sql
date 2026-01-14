@@ -14,29 +14,33 @@ RUN apt-get update && apt-get install -y \
 # This ensures that changes to source code files (*.py) do NOT invalidate
 # the dependency installation layer.
 
-# 1. Streamlit app deps
+# 1. Common deps
+COPY common/pyproject.toml ./common/
+# 2. Streamlit app deps
 COPY streamlit/pyproject.toml ./streamlit/
-# 2. Agent deps
+# 3. Agent deps
 COPY agent/pyproject.toml ./agent/
-# 3. MCP Server deps
+# 4. MCP Server deps
 COPY mcp-server/pyproject.toml ./mcp-server/
 
 # Create dummy source files for local dependencies enable caching
+# Common expects src/common
+RUN mkdir -p common/src/common && touch common/src/common/__init__.py
 # Agent expects src/agent_core
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
 # MCP Server expects src/mcp_server
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
 
 # Install dependencies for all packages using cache mounts.
-# We install them in non-editable mode first to populate site-packages.
-# Note: Since they are local packages, we install their dependencies by
-# installing the package itself.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./streamlit ./agent ./mcp-server
+    pip install ./common ./streamlit ./agent ./mcp-server
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
 # invalidate layers below this point.
+
+# Common source
+COPY common/src/ ./common/src/
 
 # Streamlit source
 COPY streamlit_app/ ./streamlit_app/
@@ -54,7 +58,8 @@ COPY mcp-server/src/ ./mcp-server/src/
 # This is very fast as dependencies are already installed.
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./streamlit \
+    pip install -e ./common \
+    && pip install -e ./streamlit \
     && pip install -e ./mcp-server \
     && pip install -e ./agent
 

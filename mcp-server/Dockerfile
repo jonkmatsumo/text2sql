@@ -9,30 +9,31 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency definition first (cache invalidation layer)
-COPY mcp-server/pyproject.toml ./
+COPY common/pyproject.toml ./common/
+COPY mcp-server/pyproject.toml ./mcp-server/
 
 # Create dummy source to allow pip install to work for dependencies
-# content of src/mcp_server can be empty, but directory structure must match pyproject.toml
-RUN mkdir -p src/mcp_server && touch src/mcp_server/__init__.py
+RUN mkdir -p common/src/common && touch common/src/common/__init__.py
+RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
 
 # Install packages with cache mount (so repeat builds are fast)
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install .
+    pip install ./common ./mcp-server
 
 # Copy source code (this changes frequently)
-# Overwrites the dummy src
-COPY mcp-server/src/ ./src/
+COPY common/src/ ./common/src/
+COPY mcp-server/src/ ./mcp-server/src/
 
-# Re-install in editable mode (minimal time, just links source)
+# Re-install in editable mode
+# This ensures that imports resolve correctly and bind mounts work.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e .
+    pip install -e ./common -e ./mcp-server
 
 # Download SpaCy model for linguistic canonicalization
-# (Could be moved up if stable, but usually fine here)
 RUN python -m spacy download en_core_web_sm
 
 # Expose SSE port
 EXPOSE 8000
 
 # Run the MCP server
-CMD ["python", "src/mcp_server/main.py"]
+CMD ["python", "mcp-server/src/mcp_server/main.py"]

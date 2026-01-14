@@ -65,7 +65,8 @@ services:
     networks:
       - text2sql_net
     volumes:
-      - ./mcp-server/src:/app/src
+      - ./mcp-server/src:/app/mcp-server/src
+      - ./common/src:/app/common/src
       - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 
