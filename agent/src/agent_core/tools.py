@@ -1,6 +1,8 @@
 """MCP server tool integration for LangGraph."""
 
 import os
+from contextlib import asynccontextmanager
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -39,20 +41,38 @@ async def get_mcp_tools():
 
     # Returns tools: list_tables, execute_sql_query, get_semantic_definitions,
     # get_table_schema, search_relevant_tables
-    tools = await client.get_tools()
+    return await client.get_tools()
 
-    # Wrap tools to ensure trace context propagation (B)
-    def wrap_tool(tool):
-        original_ainvoke = tool.ainvoke
 
-        async def traced_ainvoke(input, config=None, **kwargs):
-            # Capture current context and inject into headers if possible
-            # Note: langchain-mcp-adapters might not expose headers easily here.
-            # We'll rely on the fact that if we use the same trace_id, they group.
-            # However, for true parenting, we need propagation.
-            return await original_ainvoke(input, config=config, **kwargs)
+@asynccontextmanager
+async def mcp_tools_context():
+    """Context manager for backward compatibility and future stability."""
+    # Since MultiServerMCPClient 0.1.0 doesn't support context manager directly,
+    # we just yield the tools for now.
+    tools = await get_mcp_tools()
+    yield tools
 
-        tool.ainvoke = traced_ainvoke
-        return tool
 
-    return [wrap_tool(t) for t in tools]
+def unpack_mcp_result(result: Any) -> Any:
+    """Unpack standardized MCP content list/dict into raw value."""
+    import json
+
+    # LangChain MCP adapter returns a list of dicts like [{'type': 'text', 'text': '...'}]
+    if isinstance(result, list) and result and isinstance(result[0], dict) and "type" in result[0]:
+        text_content = ""
+        for item in result:
+            if item.get("type") == "text":
+                text_content += item.get("text", "")
+
+        # Try parsing as JSON if it looks like a JSON object/list
+        stripped = text_content.strip()
+        if (stripped.startswith("{") and stripped.endswith("}")) or (
+            stripped.startswith("[") and stripped.endswith("]")
+        ):
+            try:
+                return json.loads(text_content)
+            except json.JSONDecodeError:
+                pass
+        return text_content
+
+    return result
