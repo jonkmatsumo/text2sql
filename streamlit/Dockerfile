@@ -16,24 +16,28 @@ RUN apt-get update && apt-get install -y \
 
 # 1. Common deps
 COPY common/pyproject.toml ./common/
-# 2. Streamlit app deps
+# 2. Schema deps
+COPY schema/pyproject.toml ./schema/
+# 3. Ingestion deps
+COPY ingestion/pyproject.toml ./ingestion/
+# 4. Streamlit app deps
 COPY streamlit/pyproject.toml ./streamlit/
-# 3. Agent deps
+# 5. Agent deps
 COPY agent/pyproject.toml ./agent/
-# 4. MCP Server deps
+# 6. MCP Server deps
 COPY mcp-server/pyproject.toml ./mcp-server/
 
 # Create dummy source files for local dependencies enable caching
 # Common expects src/common
 RUN mkdir -p common/src/common && touch common/src/common/__init__.py
-# Agent expects src/agent_core
+RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
+RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
-# MCP Server expects src/mcp_server
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./common ./streamlit ./agent ./mcp-server
+    pip install ./common ./schema ./ingestion ./streamlit ./agent ./mcp-server
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
@@ -41,6 +45,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Common source
 COPY common/src/ ./common/src/
+
+# Schema source
+COPY schema/src/ ./schema/src/
+
+# Ingestion source
+COPY ingestion/src/ ./ingestion/src/
 
 # Streamlit source
 COPY streamlit_app/ ./streamlit_app/
@@ -59,6 +69,8 @@ COPY mcp-server/src/ ./mcp-server/src/
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e ./common \
+    && pip install -e ./schema \
+    && pip install -e ./ingestion \
     && pip install -e ./streamlit \
     && pip install -e ./mcp-server \
     && pip install -e ./agent
