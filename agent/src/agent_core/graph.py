@@ -16,9 +16,12 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import SpanType, maybe_import_mlflow_for_backend, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
+
+# Eagerly import mlflow if backend requires it (for test isolation)
+maybe_import_mlflow_for_backend()
 
 
 def run_telemetry_configure():

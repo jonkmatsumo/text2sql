@@ -51,11 +51,14 @@ def otel_mocks():
 
     with patch.dict("sys.modules", mocks):
         # We must import telemetry AFTER mocking sys.modules to pick up mocks.
-        # If already imported, reload it to ensure use of mocks.
+        # If already imported, reload the module to ensure use of mocks.
         if "agent_core.telemetry" in sys.modules:
             import importlib
 
-            importlib.reload(sys.modules["agent_core.telemetry"])
+            import agent_core.telemetry as telemetry_module
+
+            importlib.reload(telemetry_module)
+
         from agent_core import telemetry
 
         yield mocks, telemetry

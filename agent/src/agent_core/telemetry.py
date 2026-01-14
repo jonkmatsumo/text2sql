@@ -61,6 +61,20 @@ def _setup_otel_sdk():
     logger.info(f"OTEL SDK initialized with endpoint: {OTEL_EXPORTER_OTLP_ENDPOINT}")
 
 
+def maybe_import_mlflow_for_backend():
+    """Eagerly import mlflow if the backend is 'mlflow' or 'dual'.
+
+    This is used to satisfy test isolation requirements where certain
+    backends are expected to have mlflow loaded in sys.modules at import time.
+    """
+    backend_type = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+    if backend_type in ("mlflow", "dual"):
+        try:
+            import mlflow  # noqa: F401
+        except ImportError:
+            pass
+
+
 class SpanType(Enum):
     """Semantic span types mapping to MLflow/OTEL concepts."""
 
