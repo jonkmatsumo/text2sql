@@ -4,12 +4,40 @@ This module initializes the FastMCP server and registers all database tools
 via the central registry.
 """
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from mcp_server.config.database import Database
 from mcp_server.tools.registry import register_all
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.starlette import StarletteInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+logger = logging.getLogger(__name__)
+
+# OTEL Setup
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-mcp")
+
+
+def setup_telemetry():
+    """Initialize OTEL SDK for MCP Server."""
+    resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
+    provider = TracerProvider(resource=resource)
+    exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
+    processor = BatchSpanProcessor(exporter)
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+    logger.info(f"OTEL initialized for MCP Server: {OTEL_SERVICE_NAME}")
+
+
+setup_telemetry()
 
 # Load environment variables
 load_dotenv()
@@ -82,6 +110,16 @@ if __name__ == "__main__":
         # We standardize on sse transport to be compatible with langchain-mcp-adapters
         # which does not yet support the session requirements of streamable-http.
         print(f"🚀 Starting MCP server in sse mode on {host}:{port}/messages")
+
+        # Access the underlying starlette app to instrument with OTEL
+        # FastMCP usually stores the app in mcp._app when using SSE
+        try:
+            starlette_app = mcp.get_app()
+            StarletteInstrumentor().instrument_app(starlette_app)
+            print("✅ Starlette app instrumented for OTEL")
+        except Exception as e:
+            print(f"Warning: Could not instrument Starlette app: {e}")
+
         mcp.run(transport="sse", host=host, port=port, path="/messages")
     else:
         mcp.run(transport="stdio")

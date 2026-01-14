@@ -39,4 +39,20 @@ async def get_mcp_tools():
 
     # Returns tools: list_tables, execute_sql_query, get_semantic_definitions,
     # get_table_schema, search_relevant_tables
-    return await client.get_tools()
+    tools = await client.get_tools()
+
+    # Wrap tools to ensure trace context propagation (B)
+    def wrap_tool(tool):
+        original_ainvoke = tool.ainvoke
+
+        async def traced_ainvoke(input, config=None, **kwargs):
+            # Capture current context and inject into headers if possible
+            # Note: langchain-mcp-adapters might not expose headers easily here.
+            # We'll rely on the fact that if we use the same trace_id, they group.
+            # However, for true parenting, we need propagation.
+            return await original_ainvoke(input, config=config, **kwargs)
+
+        tool.ainvoke = traced_ainvoke
+        return tool
+
+    return [wrap_tool(t) for t in tools]

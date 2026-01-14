@@ -15,6 +15,9 @@ dependencies = [
     "mlflow==3.8.1",
     "boto3>=1.28.0",  # For S3 artifact storage
     "sqlglot>=25.0.0",  # For SQL AST parsing and validation
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
 ]
 
 [project.optional-dependencies]

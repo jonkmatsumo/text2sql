@@ -265,3 +265,77 @@ def list_spans_for_trace(
                 data.pop("events", None)
             spans.append(data)
         return spans
+
+
+def enqueue_ingestion(payload_json: dict, trace_id: str = None) -> int:
+    """Write raw OTLP payload to ingestion queue for durable buffering."""
+    queue_table = get_table_name("ingestion_queue")
+    with engine.begin() as conn:
+        result = conn.execute(
+            text(
+                f"""
+            INSERT INTO {queue_table} (payload_json, trace_id, status)
+            VALUES (:payload_json, :trace_id, 'pending')
+            RETURNING id
+        """
+            ),
+            {"payload_json": json.dumps(payload_json), "trace_id": trace_id},
+        )
+        return result.scalar()
+
+
+def poll_ingestion_queue(limit: int = 10) -> list[dict]:
+    """Fetch pending items from the ingestion queue and mark them as processing."""
+    queue_table = get_table_name("ingestion_queue")
+    # Using a simple SELECT ... FOR UPDATE SKIP LOCKED if supported (Postgres 9.5+)
+    # or just a simple update + return.
+    # We'll use a transaction to claim items.
+    with engine.begin() as conn:
+        # Atomic claim: update status to 'processing' and return the rows
+        query = f"""
+            UPDATE {queue_table}
+            SET status = 'processing', attempts = attempts + 1
+            WHERE id IN (
+                SELECT id FROM {queue_table}
+                WHERE status = 'pending'
+                   OR (status = 'failed' AND attempts < 5 AND next_attempt_at <= NOW())
+                ORDER BY received_at ASC
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id, payload_json, trace_id, attempts
+        """
+        result = conn.execute(text(query), {"limit": limit})
+        items = []
+        for row in result:
+            data = dict(row._mapping)
+            if isinstance(data["payload_json"], str):
+                data["payload_json"] = json.loads(data["payload_json"])
+            items.append(data)
+        return items
+
+
+def update_ingestion_status(item_id: int, status: str, error: str = None):
+    """Update the status of an ingestion item after processing."""
+    queue_table = get_table_name("ingestion_queue")
+    with engine.begin() as conn:
+        if status == "complete":
+            # We can delete on success to keep the queue small,
+            # or just mark it. Let's mark it for now but maybe delete in a cleanup job.
+            conn.execute(
+                text(f"UPDATE {queue_table} SET status = 'complete' WHERE id = :id"),
+                {"id": item_id},
+            )
+        else:
+            # Failed: set next attempt time
+            conn.execute(
+                text(
+                    f"""
+                UPDATE {queue_table}
+                SET status = 'failed', error_message = :error,
+                    next_attempt_at = NOW() + (interval '1 minute' * power(2, attempts))
+                WHERE id = :id
+            """
+                ),
+                {"id": item_id, "error": error},
+            )

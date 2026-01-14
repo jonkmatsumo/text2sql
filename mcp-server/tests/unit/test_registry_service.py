@@ -12,7 +12,7 @@ def mock_canonicalizer():
     """Mock the CanonicalizationService instance."""
     with patch("mcp_server.services.canonicalization.CanonicalizationService.get_instance") as mock:
         instance = mock.return_value
-        instance.process_query.return_value = ({}, "FINGERPRINT", "SIG_KEY")
+        instance.process_query = AsyncMock(return_value=({}, "FINGERPRINT", "SIG_KEY"))
         yield instance
 
 

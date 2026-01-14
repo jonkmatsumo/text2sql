@@ -3,24 +3,29 @@
 import asyncio
 import base64
 import logging
-from typing import List, Tuple
+from typing import List
 
 from otel_worker.export.mlflow_exporter import export_to_mlflow
+from otel_worker.otlp.parser import (
+    extract_trace_summaries,
+    parse_otlp_json_traces,
+    parse_otlp_traces,
+)
 from otel_worker.storage.minio import upload_trace_blob
-from otel_worker.storage.postgres import save_trace_and_spans
+from otel_worker.storage.postgres import (
+    poll_ingestion_queue,
+    save_trace_and_spans,
+    update_ingestion_status,
+)
 
 logger = logging.getLogger(__name__)
 
-# Max items in memory before we start blocking or rejecting (backpressure)
-MAX_QUEUE_SIZE = 1000
-
 
 class PersistenceCoordinator:
-    """Manages background persistence of OTEL traces with retries and isolation."""
+    """Manages background persistence of OTEL traces with durable buffering."""
 
     def __init__(self, max_attempts: int = 5, initial_delay: float = 1.0):
         """Initialize the persistence coordinator."""
-        self.queue: asyncio.Queue[Tuple[dict, List[dict]]] = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
         self.max_attempts = max_attempts
         self.initial_delay = initial_delay
         self.worker_tasks: List[asyncio.Task] = []
@@ -32,48 +37,66 @@ class PersistenceCoordinator:
         for i in range(num_workers):
             task = asyncio.create_task(self._worker(i))
             self.worker_tasks.append(task)
-        logger.info(f"Started {num_workers} background persistence workers")
+        logger.info(f"Started {num_workers} background persistence workers (polling DB)")
 
     async def stop(self):
         """Stop background worker tasks gracefully."""
         self._stopping = True
-        logger.info("Stopping background workers, awaiting pending tasks...")
-        # Give periodic yields to allow worker to process the last item if it just started
-        if self.queue.qsize() > 0:
-            await self.queue.join()
-
+        logger.info("Stopping background workers...")
         for task in self.worker_tasks:
             task.cancel()
         await asyncio.gather(*self.worker_tasks, return_exceptions=True)
         logger.info("Background workers stopped")
 
-    async def enqueue(self, parsed_data: dict, summaries: List[dict]):
-        """Enqueue a batch of traces for background processing."""
-        try:
-            # We enqueue the whole request batch to preserve atomicity if needed,
-            # but the worker will split them by trace_id for processing.
-            self.queue.put_nowait((parsed_data, summaries))
-        except asyncio.QueueFull:
-            logger.error("Persistence queue is full, dropping trace batch!")
-            raise ValueError("Queue overflow")
+    async def enqueue(self, *args, **kwargs):
+        """Legacy method for in-memory enqueueing. Now a no-op as app.py writes to DB."""
+        pass
 
     async def _worker(self, worker_id: int):
-        """Run the worker loop that processes tasks from the queue."""
+        """Run the worker loop that polls the ingestion queue."""
         while not self._stopping:
             try:
-                # Use a timeout to occasionally check _stopping
-                try:
-                    batch = await asyncio.wait_for(self.queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
+                # Poll for pending items
+                items = await asyncio.to_thread(poll_ingestion_queue, limit=5)
+                if not items:
+                    await asyncio.sleep(2.0)  # Idle wait
                     continue
 
-                parsed_data, summaries = batch
-                await self._process_batch(parsed_data, summaries)
-                self.queue.task_done()
+                for item in items:
+                    await self._process_queue_item(item)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Worker {worker_id} encountered unexpected error: {e}")
+                await asyncio.sleep(5.0)
+
+    async def _process_queue_item(self, item: dict):
+        """Process a single item from the ingestion queue."""
+        item_id = item["id"]
+        payload = item["payload_json"]
+
+        try:
+            # Reconstruct original body and parse
+            body = base64.b64decode(payload["body_b64"])
+            content_type = payload["content_type"]
+
+            if content_type == "application/x-protobuf":
+                parsed_data = parse_otlp_traces(body)
+            else:
+                parsed_data = parse_otlp_json_traces(body)
+
+            summaries = extract_trace_summaries(parsed_data)
+
+            if summaries:
+                await self._process_batch(parsed_data, summaries)
+
+            # Mark as complete in DB
+            await asyncio.to_thread(update_ingestion_status, item_id, "complete")
+
+        except Exception as e:
+            logger.error(f"Failed to process ingestion item {item_id}: {e}")
+            await asyncio.to_thread(update_ingestion_status, item_id, "failed", error=str(e))
 
     async def _process_batch(self, parsed_data: dict, summaries: List[dict]):
         """Split batch by trace_id and process each trace independently."""

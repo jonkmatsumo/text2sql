@@ -13,10 +13,48 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
-from opentelemetry import context, trace
+from opentelemetry import context, propagate, trace
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger(__name__)
+
+# OTEL Configuration Defaults
+OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-agent")
+
+_otel_initialized = False
+
+
+def _setup_otel_sdk():
+    """Configure the OTEL SDK once."""
+    global _otel_initialized
+    if _otel_initialized:
+        return
+
+    resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
+    provider = TracerProvider(resource=resource)
+
+    if OTEL_EXPORTER_OTLP_PROTOCOL == "grpc":
+        try:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        except ImportError:
+            # Fallback to HTTP if grpc is not available or mismatch
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    else:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
+    processor = BatchSpanProcessor(exporter)
+    provider.add_span_processor(processor)
+
+    # Set as global tracer provider
+    trace.set_tracer_provider(provider)
+    _otel_initialized = True
+    logger.info(f"OTEL SDK initialized with endpoint: {OTEL_EXPORTER_OTLP_ENDPOINT}")
 
 
 class SpanType(Enum):
@@ -253,11 +291,8 @@ class OTELTelemetryBackend(TelemetryBackend):
         return self._tracer
 
     def configure(self, **kwargs) -> None:
-        """Configure OTEL.
-
-        Note: Actual SDK configuration (exporters, etc.) is usually handled
-        externally or via env vars, but we provide a hook here.
-        """
+        """Configure OTEL SDK and initialize tracer."""
+        _setup_otel_sdk()
         # Ensure tracer is initialized
         self._ensure_tracer()
 
@@ -572,11 +607,20 @@ class TelemetryService:
         """Capture current tracing context."""
         return self._backend.capture_context()
 
+    def inject_context(self, carrier: Dict[str, str]) -> None:
+        """Inject current context into a carrier (e.g. headers)."""
+        propagate.inject(carrier)
+
     @contextlib.contextmanager
     def use_context(self, ctx: TelemetryContext):
         """Use a previously captured context."""
         with self._backend.use_context(ctx):
             yield
+
+    def extract_context(self, carrier: Dict[str, str]) -> TelemetryContext:
+        """Extract context from a carrier and return it."""
+        otel_ctx = propagate.extract(carrier)
+        return TelemetryContext(otel_context=otel_ctx)
 
     def run_with_context(self, ctx: TelemetryContext, func: Callable, *args, **kwargs):
         """Run a function under a specific context."""
