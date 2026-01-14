@@ -291,3 +291,89 @@ class MemgraphStore(GraphStore):
         with self.driver.session() as session:
             result = session.run(query, root_id=root_id)
             return [record["deleted_id"] for record in result if record["deleted_id"]]
+
+    def search_ann_nodes(
+        self,
+        label: str,
+        embedding: List[float],
+        k: int,
+        index_name: str = "table_embedding_index",
+        embedding_property: str = "embedding",
+    ) -> List[Dict[str, Any]]:
+        """Search for nodes using vector similarity.
+
+        Strategies:
+        1. If label is 'Table', use Memgraph HNSW index via vector_search module.
+        2. Otherwise (e.g. 'Column'), use brute-force cosine similarity scan.
+
+        Returns:
+            List of dicts: {"node": Node(canonical), "score": float}
+        """
+        # Strategy selection based on label (could be config-driven in future)
+        if label == "Table":
+            # HNSW Index Search
+            # Query: CALL vector_search.search(index, label, prop, vector, limit)
+            # vector_search.search arguments validation:
+            # - index_name: string literal or param? It usually accepts string.
+            # - label: string
+            # - prop: string
+            # - vector: list<float>
+            # - limit: int
+            query = """
+            CALL vector_search.search($index, $label, $prop, $vector, $k)
+            YIELD node, score
+            RETURN node, score
+            """
+            params = {
+                "index": index_name,
+                "label": label,
+                "prop": embedding_property,
+                "vector": embedding,
+                "k": k,
+            }
+        else:
+            # Fallback Scan
+            query = f"""
+            MATCH (n:`{label}`)
+            WHERE n.{embedding_property} IS NOT NULL
+            WITH n, vector.similarity.cosine(n.{embedding_property}, $vector) AS score
+            ORDER BY score DESC
+            LIMIT $k
+            RETURN n AS node, score
+            """
+            params = {
+                "vector": embedding,
+                "k": k,
+            }
+
+        with self.driver.session() as session:
+            result = session.run(query, params)
+            hits = []
+            for record in result:
+                neo_node = record["node"]
+                score = record["score"]
+
+                # Normalize score
+                if not isinstance(score, float):
+                    try:
+                        score = float(score)
+                    except (ValueError, TypeError):
+                        score = 0.0
+
+                # Map to canonical Node
+                props = dict(neo_node)
+                # Remove embedding from returned properties to save bandwidth
+                props.pop(embedding_property, None)
+
+                # Ensure ID
+                nid = str(props.get("id", neo_node.element_id))
+
+                canonical_node = Node(
+                    id=nid,
+                    label=label if label else (list(neo_node.labels)[0] if neo_node.labels else ""),
+                    properties=props,
+                )
+
+                hits.append({"node": canonical_node, "score": score})
+
+            return hits
