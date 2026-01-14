@@ -477,11 +477,11 @@ class DualTelemetryBackend(TelemetryBackend):
     def use_context(self, ctx: TelemetryContext):
         """Use context for both backends."""
         with self.primary.use_context(ctx):
-            try:
-                with self.secondary.use_context(ctx):
-                    yield
-            except Exception:
-                logger.warning("Secondary backend use_context failed", exc_info=True)
+            with contextlib.ExitStack() as stack:
+                try:
+                    stack.enter_context(self.secondary.use_context(ctx))
+                except Exception:
+                    logger.warning("Secondary backend use_context failed to enter", exc_info=True)
                 yield
 
 

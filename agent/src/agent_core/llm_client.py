@@ -68,6 +68,15 @@ def get_llm_client(
     if resolved_provider == "openai":
         from langchain_openai import ChatOpenAI
 
+        # Validate API key before instantiation to fail fast
+        key = os.getenv("OPENAI_API_KEY")
+        placeholders = {"<REPLACE_ME>", "changeme", "your_api_key_here"}
+        if not key or key.strip() in placeholders or key.startswith("<"):
+            raise ValueError(
+                "OPENAI_API_KEY is missing or set to a placeholder value (<REPLACE_ME>). "
+                "Please update your .env file with a valid OpenAI API key."
+            )
+
         return ChatOpenAI(model=resolved_model, temperature=temperature)
 
     elif resolved_provider == "anthropic":
