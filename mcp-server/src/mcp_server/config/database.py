@@ -11,7 +11,6 @@ from mcp_server.dal.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
-from mcp_server.dal.memgraph import MemgraphStore
 
 
 class Database:
@@ -37,11 +36,6 @@ class Database:
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
-        # Memgraph Config
-        graph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
-        graph_user = os.getenv("MEMGRAPH_USER", "")
-        graph_pass = os.getenv("MEMGRAPH_PASSWORD", "")
-
         try:
             # 1. Init Postgres
             cls._pool = await asyncpg.create_pool(
@@ -53,18 +47,18 @@ class Database:
             )
             print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
 
-            # 2. Init Memgraph
-            cls._graph_store = MemgraphStore(graph_uri, graph_user, graph_pass)
-            print(f"✓ Graph store connection established: {graph_uri}")
-
-            # 3. Init Stores via Factory
+            # 2. Init Stores via Factory
             from mcp_server.dal.factory import (
                 get_cache_store,
                 get_example_store,
+                get_graph_store,
                 get_metadata_store,
                 get_schema_introspector,
                 get_schema_store,
             )
+
+            cls._graph_store = get_graph_store()
+            print("✓ Graph store connection established (via factory)")
 
             # Ensure operational schema exists
             await cls.ensure_schema()

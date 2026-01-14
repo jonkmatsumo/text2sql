@@ -8,7 +8,7 @@ import logging
 import time
 from typing import List, Optional
 
-from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.dal.interfaces import GraphStore
 from mcp_server.utils.telemetry import Telemetry
 from openai import AsyncOpenAI
 
@@ -94,25 +94,21 @@ class VectorIndexer:
 
     def __init__(
         self,
-        uri: str = "bolt://localhost:7687",
-        user: str = "",
-        password: str = "",
-        store: Optional[MemgraphStore] = None,
+        store: Optional[GraphStore] = None,
     ):
-        """Initialize Memgraph store.
+        """Initialize with GraphStore.
 
         Args:
-            uri: Bolt URI for Memgraph connection.
-            user: Username for authentication.
-            password: Password for authentication.
-            store: Optional existing MemgraphStore instance.
+            store: Optional existing GraphStore instance. If None, uses singleton from factory.
         """
         if store:
             self.store = store
             self.owns_store = False
         else:
-            self.store = MemgraphStore(uri, user, password)
-            self.owns_store = True
+            from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
+
+            self.store = get_ingestion_graph_store()
+            self.owns_store = False  # Singleton managed by factory
 
         self.embedding_service = EmbeddingService()
 

@@ -28,9 +28,8 @@ async def _ingest_graph_schema():
         # Get introspector (Postgres connection assumed via env vars)
         introspector = get_schema_introspector()
 
-        # Hydrate - use MEMGRAPH_URI from environment
-        memgraph_uri = os.getenv("MEMGRAPH_URI", "bolt://localhost:7687")
-        hydrator = GraphHydrator(uri=memgraph_uri)
+        # Hydrate
+        hydrator = GraphHydrator()
         try:
             # Run async hydration
             await hydrator.hydrate_schema(introspector)
@@ -40,14 +39,8 @@ async def _ingest_graph_schema():
                 ensure_table_embedding_hnsw_index,
             )
 
-            # We need the underlying session, which isn't directly exposed by hydrator.store.
-            # However, MemgraphStore (hydrator.store) exposes ._get_session() or driver.session().
-            # Best is to use the driver from the store.
-
             try:
-                driver = hydrator.store.driver
-                with driver.session() as session:
-                    ensure_table_embedding_hnsw_index(session)
+                ensure_table_embedding_hnsw_index(hydrator.store)
             except Exception as e:
                 # Log but do not block startup for Phase 1
                 # (unless strictness required in later phases)

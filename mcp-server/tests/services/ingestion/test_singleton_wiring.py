@@ -32,15 +32,13 @@ def test_direct_import_check():
     """
     ingestion_path = Path("mcp-server/src/mcp_server/services/ingestion")
 
-    # Files we expect to have direct imports CURRENTLY (will be fixed in INVc)
-    # This test is just to confirm the current state.
     files_with_direct_imports = []
-
     for py_file in ingestion_path.glob("**/*.py"):
         content = py_file.read_text()
         if "from mcp_server.dal.memgraph import MemgraphStore" in content:
             files_with_direct_imports.append(str(py_file))
 
-    # We expect these to be non-zero for now
-    assert len(files_with_direct_imports) > 0
-    print(f"\nFound direct imports in: {files_with_direct_imports}")
+    # We expect these to be zero now that refactoring is complete
+    assert (
+        len(files_with_direct_imports) == 0
+    ), f"Found direct imports in: {files_with_direct_imports}"

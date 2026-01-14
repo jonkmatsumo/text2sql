@@ -20,18 +20,13 @@ async def test_ingest_graph_schema_wires_vector_index():
         mock_hydrator_instance = MockHydrator.return_value
         mock_hydrator_instance.hydrate_schema = AsyncMock()
 
-        # Setup mock driver/session
-        mock_driver = MagicMock()
-        mock_session = MagicMock()
-        mock_driver.session.return_value.__enter__.return_value = mock_session
-
-        mock_hydrator_instance.store.driver = mock_driver
+        mock_hydrator_instance.store = MagicMock()
 
         # Run the function
         await _ingest_graph_schema()
 
         # Verify ensure was called
-        mock_ensure.assert_called_once_with(mock_session)
+        mock_ensure.assert_called_once_with(mock_hydrator_instance.store)
 
         # Verify sequence: hydrate -> ensure -> close (by context)
         # (Implicit in code flow, verifying Ensure is called is key)
@@ -52,9 +47,7 @@ async def test_ingest_graph_schema_handles_ensure_error():
         # Mock failure
         mock_ensure.side_effect = Exception("Connection Refused")
 
-        mock_driver = MagicMock()
-        mock_driver.session.return_value.__enter__.return_value = MagicMock()
-        mock_hydrator_instance.store.driver = mock_driver
+        mock_hydrator_instance.store = MagicMock()
 
         # Should not raise exception (caught and logged)
         await _ingest_graph_schema()

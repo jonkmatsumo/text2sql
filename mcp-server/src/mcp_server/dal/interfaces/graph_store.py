@@ -85,3 +85,57 @@ class GraphStore(Protocol):
             List of deleted node IDs.
         """
         ...
+
+    def get_nodes(self, label: str) -> List[Node]:
+        """Retrieve all nodes with a specific label.
+
+        Args:
+            label: Node label (e.g., "Table").
+
+        Returns:
+            List of canonical Node representations.
+        """
+        ...
+
+    def run_query(
+        self, query: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Run a raw Cypher/SQL query and return results as dictionaries.
+
+        Use ONLY for complex operations not covered by standard CRUD methods.
+        Implementations must handle parameter binding to prevent injection.
+
+        Args:
+            query: The raw query string.
+            parameters: Optional query parameters.
+
+        Returns:
+            List of result records as dictionaries.
+        """
+        ...
+
+    def search_ann_seeds(
+        self,
+        label: str,
+        embedding: List[float],
+        k: int,
+        index_name: str = "table_embedding_index",
+        embedding_property: str = "embedding",
+    ) -> List[Dict[str, Any]]:
+        """Search for seeds using vector similarity.
+
+        Args:
+            label: Node label to search (e.g., "Table").
+            embedding: The query vector.
+            k: Number of hits to return.
+            index_name: Name of the vector index to use (if applicable).
+            embedding_property: Property containing the vector.
+
+        Returns:
+            List of dicts: {"node": dict, "score": float}
+        """
+        ...
+
+    def close(self):
+        """Close the store connection."""
+        ...

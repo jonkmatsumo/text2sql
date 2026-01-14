@@ -5,19 +5,20 @@ ensuring idempotency and correct syntax.
 """
 
 import logging
-from typing import Any
+
+from mcp_server.dal.interfaces import GraphStore
 
 logger = logging.getLogger(__name__)
 
 
-def ensure_table_embedding_hnsw_index(session: Any, *, dims: int = 1536) -> bool:
+def ensure_table_embedding_hnsw_index(store: GraphStore, *, dims: int = 1536) -> bool:
     """Ensure that the HNSW vector index exists for :Table(embedding).
 
     This function is idempotent. It attempts to create the index and
     gracefully handles the case where it already exists.
 
     Args:
-        session: A Memgraph/Neo4j driver session object.
+        store: A GraphStore instance.
         dims: The dimension of the vector embedding (default: 1536).
 
     Returns:
@@ -41,7 +42,7 @@ def ensure_table_embedding_hnsw_index(session: Any, *, dims: int = 1536) -> bool
 
     try:
         logger.info(f"Ensuring vector index '{index_name}' on :{label}({property_name})...")
-        session.run(query)
+        store.run_query(query)
         elapsed_ms = (time.monotonic() - start_time) * 1000
 
         logger.info(

@@ -3,8 +3,8 @@ import logging
 import re
 from typing import List, Set, Tuple
 
+from mcp_server.dal.interfaces import GraphStore
 from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
-from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.models import ColumnDef, TableDef
 
 from .vector_indexer import EmbeddingService
@@ -68,9 +68,18 @@ def should_skip_column_embedding(
 class GraphHydrator:
     """Hydrates Memgraph/Neo4j with schema information using DAL."""
 
-    def __init__(self, uri: str = "bolt://localhost:7687", user: str = "", password: str = ""):
-        """Initialize the Graph Hydrator."""
-        self.store = MemgraphStore(uri, user, password)
+    def __init__(self, store: GraphStore = None):
+        """Initialize the Graph Hydrator.
+
+        Args:
+            store: Optional existing GraphStore instance. If None, uses singleton from factory.
+        """
+        if store:
+            self.store = store
+        else:
+            from .dependencies import get_ingestion_graph_store
+
+            self.store = get_ingestion_graph_store()
         self.embedding_service = EmbeddingService()
 
     def close(self):

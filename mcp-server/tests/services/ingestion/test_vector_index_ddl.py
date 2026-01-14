@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp_server.dal.interfaces import GraphStore
 from mcp_server.services.ingestion.vector_index_ddl import ensure_table_embedding_hnsw_index
 
 
@@ -12,13 +13,13 @@ class TestVectorIndexDDL:
     @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
     def test_ensure_index_creates_successfully(self, mock_logger):
         """Verify DDL is correct and returns True on success."""
-        mock_session = MagicMock()
+        mock_store = MagicMock(spec=GraphStore)
 
-        result = ensure_table_embedding_hnsw_index(mock_session)
+        result = ensure_table_embedding_hnsw_index(mock_store)
 
         assert result is True
-        mock_session.run.assert_called_once()
-        query = mock_session.run.call_args[0][0]
+        mock_store.run_query.assert_called_once()
+        query = mock_store.run_query.call_args[0][0]
 
         # Verify DDL syntax
         assert "CREATE VECTOR INDEX table_embedding_index" in query
@@ -27,8 +28,6 @@ class TestVectorIndexDDL:
         assert "'metric': 'cosine'" in query
 
         # Verify structured log
-        # 1. Start log
-        # 2. Success log
         assert mock_logger.info.call_count >= 2
         calls = mock_logger.info.call_args_list
         success_call = calls[-1]
@@ -42,16 +41,16 @@ class TestVectorIndexDDL:
     @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
     def test_ensure_index_already_exists(self, mock_logger):
         """Verify returns False (and suppresses error) if index already exists."""
-        mock_session = MagicMock()
+        mock_store = MagicMock(spec=GraphStore)
         # Simulate Memgraph "already exists" error
-        mock_session.run.side_effect = Exception(
+        mock_store.run_query.side_effect = Exception(
             "Neo.ClientError.Schema.IndexAlreadyExists: The index already exists"
         )
 
-        result = ensure_table_embedding_hnsw_index(mock_session)
+        result = ensure_table_embedding_hnsw_index(mock_store)
 
         assert result is False
-        mock_session.run.assert_called_once()
+        mock_store.run_query.assert_called_once()
 
         # Verify debug log for existing index
         mock_logger.debug.assert_called_once()
@@ -63,11 +62,11 @@ class TestVectorIndexDDL:
     @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
     def test_ensure_index_propagates_unexpected_error(self, mock_logger):
         """Verify unexpected errors are re-raised."""
-        mock_session = MagicMock()
-        mock_session.run.side_effect = Exception("SyntaxError: Invalid syntax")
+        mock_store = MagicMock(spec=GraphStore)
+        mock_store.run_query.side_effect = Exception("SyntaxError: Invalid syntax")
 
         with pytest.raises(Exception, match="SyntaxError"):
-            ensure_table_embedding_hnsw_index(mock_session)
+            ensure_table_embedding_hnsw_index(mock_store)
 
         # Verify error log
         mock_logger.error.assert_called_once()
@@ -76,9 +75,9 @@ class TestVectorIndexDDL:
 
     def test_custom_dimensions(self):
         """Verify custom dimensions can be passed."""
-        mock_session = MagicMock()
+        mock_store = MagicMock(spec=GraphStore)
 
-        ensure_table_embedding_hnsw_index(mock_session, dims=768)
+        ensure_table_embedding_hnsw_index(mock_store, dims=768)
 
-        query = mock_session.run.call_args[0][0]
+        query = mock_store.run_query.call_args[0][0]
         assert "'dimension': 768" in query

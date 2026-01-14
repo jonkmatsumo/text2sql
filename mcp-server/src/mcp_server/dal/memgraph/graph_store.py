@@ -316,3 +316,11 @@ class MemgraphStore(GraphStore):
                 hits.append({"node": props, "score": score})
 
             return hits
+
+    def run_query(
+        self, query: str, parameters: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """Run a raw Cypher query and return results as dictionaries."""
+        with self.driver.session() as session:
+            result = session.run(query, parameters or {})
+            return [dict(record) for record in result]

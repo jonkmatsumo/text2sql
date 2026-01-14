@@ -2,9 +2,16 @@ from typing import Any, Dict, List
 
 from neo4j import Transaction
 
+NODES_NEEDING_ENRICHMENT_QUERY = """
+MATCH (n)
+WHERE n.source_hash IS NOT NULL
+  AND (n.enrichment_source_hash IS NULL OR n.source_hash <> n.enrichment_source_hash)
+RETURN n
+"""
+
 
 def get_nodes_needing_enrichment(tx: Transaction) -> List[Dict[str, Any]]:
-    """Find nodes that need enrichment.
+    """Find nodes that need enrichment (Legacy support for raw sessions).
 
     A node needs enrichment if:
     1. It has a 'source_hash' property (indicating it is a syncable entity).
@@ -14,12 +21,6 @@ def get_nodes_needing_enrichment(tx: Transaction) -> List[Dict[str, Any]]:
     Returns:
         List of node properties (as dictionaries).
     """
-    query = """
-    MATCH (n)
-    WHERE n.source_hash IS NOT NULL
-      AND (n.enrichment_source_hash IS NULL OR n.source_hash <> n.enrichment_source_hash)
-    RETURN n
-    """
-    result = tx.run(query)
+    result = tx.run(NODES_NEEDING_ENRICHMENT_QUERY)
     # Convert Neo4j Nodes to dictionaries
     return [dict(record["n"]) for record in result]
