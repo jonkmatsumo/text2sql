@@ -44,7 +44,7 @@ class EmbeddingService:
             return [0.0] * 1536
 
 
-def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
+def apply_adaptive_threshold(hits: List[dict]) -> tuple[List[dict], float]:
     """Apply adaptive thresholding to filter low-quality matches.
 
     Algorithm:
@@ -57,10 +57,10 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
         hits: List of dicts with 'score' key, sorted by score descending
 
     Returns:
-        Filtered list of hits
+        Tuple of (Filtered list of hits, threshold used)
     """
     if not hits:
-        return []
+        return [], 0.0
 
     best_score = hits[0]["score"]
     threshold = max(MIN_SCORE_ABSOLUTE, best_score - SCORE_DROP_TOLERANCE)
@@ -70,18 +70,18 @@ def apply_adaptive_threshold(hits: List[dict]) -> List[dict]:
     # Fallback: return top 3 when all below threshold (ensures broader context)
     if not filtered and hits:
         fallback_count = min(3, len(hits))
-        logger.warning(
+        logger.debug(
             f"All hits below threshold {threshold:.3f}, returning top-{fallback_count} fallback "
             f"(best_score={best_score:.3f})"
         )
-        return hits[:fallback_count]
+        return hits[:fallback_count], threshold
 
     if len(filtered) < len(hits):
-        logger.info(
+        logger.debug(
             f"Adaptive threshold {threshold:.3f} filtered {len(hits)} -> {len(filtered)} hits"
         )
 
-    return filtered
+    return filtered, threshold
 
 
 class VectorIndexer:
@@ -225,38 +225,60 @@ class VectorIndexer:
 
         def _run_search():
             start_time = time.monotonic()
-            with self.driver.session() as session:
-                if not query_vector:
-                    return []
+            try:
+                with self.driver.session() as session:
+                    if not query_vector:
+                        return []
 
-                # Build query (HNSW for Table, Scan for others)
-                query = self._build_ann_query(label, "embedding", "$embedding", "$k")
+                    # Build query (HNSW for Table, Scan for others)
+                    query = self._build_ann_query(label, "embedding", "$embedding", "$k")
 
-                params = {"embedding": query_vector, "k": k}
-                result = session.run(query, params)
+                    params = {"embedding": query_vector, "k": k}
+                    result = session.run(query, params)
 
-                hits = []
-                for record in result:
-                    hits.append(self._map_ann_results(record))
+                    hits = []
+                    for record in result:
+                        hits.append(self._map_ann_results(record))
 
-                # Apply adaptive thresholding
-                if apply_threshold:
-                    hits = apply_adaptive_threshold(hits)
+                    # Apply adaptive thresholding
+                    threshold_val = 0.0
+                    if apply_threshold and hits:
+                        hits, threshold_val = apply_adaptive_threshold(hits)
 
-                elapsed_ms = (time.monotonic() - start_time) * 1000
-                logger.info(
-                    f"ANN search completed for label={label}, returned {len(hits)} hits",
-                    extra={
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
+
+                    log_payload = {
                         "event": "memgraph_ann_seed_search",
                         "label": label,
                         "top_k": k,
                         "returned_count": len(hits),
                         "elapsed_ms": elapsed_ms,
                         "threshold_applied": apply_threshold,
+                    }
+                    if apply_threshold:
+                        log_payload["threshold_value"] = threshold_val
+
+                    logger.info(
+                        f"ANN search completed for label={label}, returned {len(hits)} hits",
+                        extra=log_payload,
+                    )
+
+                    return hits
+            except Exception as e:
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                logger.error(
+                    "ANN search failed",
+                    exc_info=True,
+                    extra={
+                        "event": "memgraph_ann_seed_search_failed",
+                        "error_type": type(e).__name__,
+                        "label": label,
+                        "top_k": k,
+                        "elapsed_ms": elapsed_ms,
                     },
                 )
-
-                return hits
+                # Re-raise to preserve contract; failure handled upstream.
+                raise
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_search)

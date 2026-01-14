@@ -84,7 +84,7 @@ class TestAdaptiveThresholdCharacterization:
             {"score": 0.8, "id": 2},  # keep (> 0.75)
             {"score": 0.7, "id": 3},  # drop (< 0.75)
         ]
-        filtered = apply_adaptive_threshold(hits)
+        filtered, threshold = apply_adaptive_threshold(hits)
         assert len(filtered) == 2
         ids = [h["id"] for h in filtered]
         assert ids == [1, 2]
@@ -100,7 +100,7 @@ class TestAdaptiveThresholdCharacterization:
             {"score": 0.37, "id": 4},
         ]
         # Should return top 3 fallback
-        filtered = apply_adaptive_threshold(hits)
+        filtered, threshold = apply_adaptive_threshold(hits)
         assert len(filtered) == 3
         ids = [h["id"] for h in filtered]
         assert ids == [1, 2, 3]
@@ -114,7 +114,7 @@ class TestAdaptiveThresholdCharacterization:
             {"score": 0.46, "id": 2},  # keep
             {"score": 0.44, "id": 3},  # drop
         ]
-        filtered = apply_adaptive_threshold(hits)
+        filtered, threshold = apply_adaptive_threshold(hits)
         assert len(filtered) == 2
 
 
@@ -227,3 +227,21 @@ class TestVectorIndexerObservability:
             assert "elapsed_ms" in extra
             assert isinstance(extra["elapsed_ms"], float)
             assert extra["threshold_applied"] is True
+            assert "threshold_value" in extra
+
+    @pytest.mark.asyncio
+    async def test_search_nodes_logs_error(self, indexer):
+        """Validate search_nodes logs error event on failure."""
+        mock_session = indexer.store.driver.session.return_value.__enter__.return_value
+        mock_session.run.side_effect = Exception("DB Error")
+
+        with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
+            with pytest.raises(Exception):
+                await indexer.search_nodes("query", k=5)
+
+            mock_logger.error.assert_called()
+            call_args = mock_logger.error.call_args
+            extra = call_args.kwargs.get("extra")
+            assert extra["event"] == "memgraph_ann_seed_search_failed"
+            assert extra["error_type"] == "Exception"
+            assert extra["label"] == "Table"
