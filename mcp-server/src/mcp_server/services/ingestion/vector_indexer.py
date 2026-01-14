@@ -135,6 +135,7 @@ class VectorIndexer:
     ) -> List[dict]:
         """Search for nearest nodes using Memgraph HNSW ANN or vector scan.
 
+        Delegates to DAL for query execution.
         Includes adaptive thresholding to filter low-quality matches.
 
         Contract behavior:
@@ -171,51 +172,50 @@ class VectorIndexer:
                 "vector_seed_selection.ann", attributes=span_attributes
             ) as span:
                 try:
-                    with self.driver.session() as session:
-                        if not query_vector:
-                            return []
+                    if not query_vector:
+                        return []
 
-                        # Build query (HNSW for Table, Scan for others)
-                        query = self._build_ann_query(label, "embedding", "$embedding", "$k")
+                    # Delegate to DAL
+                    hits = self.store.search_ann_nodes(label, query_vector, k)
 
-                        params = {"embedding": query_vector, "k": k}
-                        result = session.run(query, params)
+                    # Map output to contract {"node": dict, "score": float}
+                    mapped_hits = []
+                    for h in hits:
+                        # Extract properties as the 'node' dict contract requires
+                        node_props = h["node"].properties
+                        mapped_hits.append({"node": node_props, "score": h["score"]})
 
-                        hits = []
-                        for record in result:
-                            hits.append(self._map_ann_results(record))
+                    # Apply adaptive thresholding
+                    threshold_val = 0.0
+                    if apply_threshold and mapped_hits:
+                        mapped_hits, threshold_val = apply_adaptive_threshold(mapped_hits)
 
-                        # Apply adaptive thresholding
-                        threshold_val = 0.0
-                        if apply_threshold and hits:
-                            hits, threshold_val = apply_adaptive_threshold(hits)
+                    elapsed_ms = (time.monotonic() - start_time) * 1000
 
-                        elapsed_ms = (time.monotonic() - start_time) * 1000
+                    log_payload = {
+                        "event": "memgraph_ann_seed_search",
+                        "label": label,
+                        "top_k": k,
+                        "returned_count": len(mapped_hits),
+                        "elapsed_ms": elapsed_ms,
+                        "threshold_applied": apply_threshold,
+                    }
+                    if apply_threshold:
+                        log_payload["threshold_value"] = threshold_val
 
-                        log_payload = {
-                            "event": "memgraph_ann_seed_search",
-                            "label": label,
-                            "top_k": k,
-                            "returned_count": len(hits),
-                            "elapsed_ms": elapsed_ms,
-                            "threshold_applied": apply_threshold,
-                        }
-                        if apply_threshold:
-                            log_payload["threshold_value"] = threshold_val
+                    # Add dynamic attributes to span
+                    span.set_attribute("vector.returned_count", len(mapped_hits))
+                    span.set_attribute("vector.threshold_applied", apply_threshold)
+                    if apply_threshold:
+                        span.set_attribute("vector.threshold_value", threshold_val)
 
-                        # Add dynamic attributes to span
-                        span.set_attribute("vector.returned_count", len(hits))
-                        span.set_attribute("vector.threshold_applied", apply_threshold)
-                        if apply_threshold:
-                            span.set_attribute("vector.threshold_value", threshold_val)
+                    logger.info(
+                        f"ANN search completed for label={label}, returned {len(mapped_hits)} hits",
+                        extra=log_payload,
+                    )
 
-                        logger.info(
-                            f"ANN search completed for label={label}, returned {len(hits)} hits",
-                            extra=log_payload,
-                        )
-
-                        Telemetry.set_span_status(span, success=True)
-                        return hits
+                    Telemetry.set_span_status(span, success=True)
+                    return mapped_hits
                 except Exception as e:
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     logger.error(
