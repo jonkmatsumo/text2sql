@@ -49,8 +49,7 @@ jobs:
 
       - name: Build MCP Server image
         run: |
-          cd mcp-server
-          docker build -t bi-agent-mcp:test .
+          docker build -t bi-agent-mcp:test -f mcp-server/Dockerfile .
 
       - name: Validate docker-compose
         run: |
