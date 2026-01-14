@@ -8,7 +8,6 @@ Implements hybrid retrieval pattern to maximize Recall@K by:
 """
 
 import logging
-import os
 from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
@@ -95,7 +94,9 @@ def search_with_rerank(
         )
 
     # 5. Validation: Log recall loss if RECORD_GOLDEN_SET is on
-    if os.getenv("RECORD_GOLDEN_SET", "").lower() in ("1", "true", "on"):
+    from common.config.env import get_env_bool
+
+    if get_env_bool("RECORD_GOLDEN_SET", False):
         _log_recall_loss(results, brute_force_index, query_vector, k)
 
     return results

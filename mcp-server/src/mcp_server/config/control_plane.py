@@ -8,7 +8,6 @@ LLM-generated SQL never accesses control-plane data.
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -31,11 +30,13 @@ class ControlPlaneDatabase:
     @classmethod
     async def init(cls):
         """Initialize control-plane connection pool."""
+        from common.config.env import get_env_bool, get_env_int, get_env_str
+
         # Check feature flag for READ routing
-        cls._isolation_enabled = os.getenv("DB_ISOLATION_ENABLED", "false").lower() == "true"
+        cls._isolation_enabled = get_env_bool("DB_ISOLATION_ENABLED", False)
 
         # Always attempt to connect to control-plane if configured (for dual-write)
-        db_host = os.getenv("CONTROL_DB_HOST")
+        db_host = get_env_str("CONTROL_DB_HOST")
 
         if not db_host:
             if cls._isolation_enabled:
@@ -47,10 +48,10 @@ class ControlPlaneDatabase:
             return
 
         # Control-plane Postgres Config
-        db_port = int(os.getenv("CONTROL_DB_PORT", "5432"))
-        db_name = os.getenv("CONTROL_DB_NAME", "agent_control")
-        db_user = os.getenv("CONTROL_DB_USER", "postgres")
-        db_pass = os.getenv("CONTROL_DB_PASSWORD", "control_password")
+        db_port = get_env_int("CONTROL_DB_PORT", 5432)
+        db_name = get_env_str("CONTROL_DB_NAME", "agent_control")
+        db_user = get_env_str("CONTROL_DB_USER", "postgres")
+        db_pass = get_env_str("CONTROL_DB_PASSWORD", "control_password")
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 

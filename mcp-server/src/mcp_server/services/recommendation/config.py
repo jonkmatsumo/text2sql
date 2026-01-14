@@ -1,5 +1,4 @@
 import logging
-import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -36,6 +35,14 @@ def load_recommendation_config() -> RecommendationConfig:
     Reads once and returns a RecommendationConfig object.
     Invalid values trigger warnings and fallback to defaults.
     """
+    from common.config.env import (
+        get_env_bool,
+        get_env_float,
+        get_env_int,
+        get_env_list,
+        get_env_str,
+    )
+
     # Defaults (must match legacy hardcoded behavior)
     DEFAULT_LIMIT = 3
     DEFAULT_MULTIPLIER = 2
@@ -45,7 +52,7 @@ def load_recommendation_config() -> RecommendationConfig:
 
     # 1. Limit Default
     try:
-        limit_default = int(os.environ.get("RECO_LIMIT_DEFAULT", DEFAULT_LIMIT))
+        limit_default = get_env_int("RECO_LIMIT_DEFAULT", DEFAULT_LIMIT)
         if limit_default < 1:
             logger.warning(f"Invalid RECO_LIMIT_DEFAULT {limit_default}, using {DEFAULT_LIMIT}")
             limit_default = DEFAULT_LIMIT
@@ -55,7 +62,7 @@ def load_recommendation_config() -> RecommendationConfig:
 
     # 2. Candidate Multiplier
     try:
-        candidate_multiplier = int(os.environ.get("RECO_CANDIDATE_MULTIPLIER", DEFAULT_MULTIPLIER))
+        candidate_multiplier = get_env_int("RECO_CANDIDATE_MULTIPLIER", DEFAULT_MULTIPLIER)
         if candidate_multiplier < 1:
             logger.warning(
                 f"Invalid RECO_CANDIDATE_MULTIPLIER {candidate_multiplier}, "
@@ -67,14 +74,11 @@ def load_recommendation_config() -> RecommendationConfig:
         candidate_multiplier = DEFAULT_MULTIPLIER
 
     # 3. Fallback Enabled
-    fallback_val = os.environ.get("RECO_FALLBACK_ENABLED", str(DEFAULT_FALLBACK_ENABLED))
-    fallback_enabled = fallback_val.lower() in ("true", "1", "yes", "on")
+    fallback_enabled = get_env_bool("RECO_FALLBACK_ENABLED", DEFAULT_FALLBACK_ENABLED)
 
     # 4. Fallback Threshold
     try:
-        fallback_threshold = float(
-            os.environ.get("RECO_FALLBACK_THRESHOLD", DEFAULT_FALLBACK_THRESHOLD)
-        )
+        fallback_threshold = get_env_float("RECO_FALLBACK_THRESHOLD", DEFAULT_FALLBACK_THRESHOLD)
         if not (0.0 <= fallback_threshold <= 1.0):
             logger.warning(
                 f"Invalid RECO_FALLBACK_THRESHOLD {fallback_threshold}, "
@@ -88,64 +92,46 @@ def load_recommendation_config() -> RecommendationConfig:
         fallback_threshold = DEFAULT_FALLBACK_THRESHOLD
 
     # 5. Status Priority
-    status_str = os.environ.get("RECO_STATUS_PRIORITY")
-    if status_str:
-        status_priority = [s.strip().lower() for s in status_str.split(",") if s.strip()]
-        if not status_priority:
-            # Case where split resulted in empty
-            status_priority = DEFAULT_STATUS_PRIORITY
-    else:
-        status_priority = DEFAULT_STATUS_PRIORITY
+    status_priority = get_env_list("RECO_STATUS_PRIORITY", DEFAULT_STATUS_PRIORITY)
+    # Ensure they are lowercased to match original behavior
+    status_priority = [s.lower() for s in status_priority]
 
     # 6. Exclude Tombstoned
-    # Default is true
-    exclude_tombstoned_val = os.environ.get("RECO_EXCLUDE_TOMBSTONED", "true")
-    exclude_tombstoned = exclude_tombstoned_val.lower() in ("true", "1", "yes", "on")
+    exclude_tombstoned = get_env_bool("RECO_EXCLUDE_TOMBSTONED", True)
 
     # 7. Stale Max Age Days
-    # Default is 0 (disabled)
     try:
-        stale_max_age_days = float(os.environ.get("RECO_STALE_MAX_AGE_DAYS", "0"))
+        stale_max_age_days = get_env_float("RECO_STALE_MAX_AGE_DAYS", 0.0)
     except ValueError:
         logger.warning("Invalid RECO_STALE_MAX_AGE_DAYS format, using 0 (disabled)")
         stale_max_age_days = 0.0
 
     # 8. Diversity Configuration
-    # 8. Diversity Configuration
-    # RECO_DIVERSITY_ENABLED: Toggle for source-based selection mixing (Default: False)
-    DEFAULT_DIVERSITY_ENABLED = False
-    diversity_enabled_val = os.environ.get("RECO_DIVERSITY_ENABLED", str(DEFAULT_DIVERSITY_ENABLED))
-    diversity_enabled = diversity_enabled_val.lower() in ("true", "1", "yes", "on")
+    diversity_enabled = get_env_bool("RECO_DIVERSITY_ENABLED", False)
 
-    # RECO_DIVERSITY_MAX_PER_SOURCE: Cap for examples from ONE source bucket (Default: -1)
     DEFAULT_MAX_PER_SOURCE = -1
     try:
-        diversity_max_per_source = int(
-            os.environ.get("RECO_DIVERSITY_MAX_PER_SOURCE", DEFAULT_MAX_PER_SOURCE)
+        diversity_max_per_source = get_env_int(
+            "RECO_DIVERSITY_MAX_PER_SOURCE", DEFAULT_MAX_PER_SOURCE
         )
     except ValueError:
         logger.warning(f"Invalid RECO_DIVERSITY_MAX_PER_SOURCE, using {DEFAULT_MAX_PER_SOURCE}")
         diversity_max_per_source = DEFAULT_MAX_PER_SOURCE
 
-    # RECO_DIVERSITY_MIN_VERIFIED: Guaranteed minimum floor for 'approved' examples (Default: 0)
     DEFAULT_MIN_VERIFIED = 0
     try:
-        diversity_min_verified = int(
-            os.environ.get("RECO_DIVERSITY_MIN_VERIFIED", DEFAULT_MIN_VERIFIED)
-        )
+        diversity_min_verified = get_env_int("RECO_DIVERSITY_MIN_VERIFIED", DEFAULT_MIN_VERIFIED)
     except ValueError:
         logger.warning(f"Invalid RECO_DIVERSITY_MIN_VERIFIED, using {DEFAULT_MIN_VERIFIED}")
         diversity_min_verified = DEFAULT_MIN_VERIFIED
 
     # 9. Safety Configuration
-    DEFAULT_SAFETY_ENABLED = False
-    safety_enabled_val = os.environ.get("RECO_SAFETY_ENABLED", str(DEFAULT_SAFETY_ENABLED))
-    safety_enabled = safety_enabled_val.lower() in ("true", "1", "yes", "on")
+    safety_enabled = get_env_bool("RECO_SAFETY_ENABLED", False)
 
     DEFAULT_MAX_PATTERN_LEN = 100
     try:
-        safety_max_pattern_length = int(
-            os.environ.get("RECO_SAFETY_MAX_PATTERN_LENGTH", str(DEFAULT_MAX_PATTERN_LEN))
+        safety_max_pattern_length = get_env_int(
+            "RECO_SAFETY_MAX_PATTERN_LENGTH", DEFAULT_MAX_PATTERN_LEN
         )
         if safety_max_pattern_length < 1:
             logger.warning(
@@ -159,13 +145,9 @@ def load_recommendation_config() -> RecommendationConfig:
         )
         safety_max_pattern_length = DEFAULT_MAX_PATTERN_LEN
 
-    safety_blocklist_regex = os.environ.get("RECO_SAFETY_BLOCKLIST_REGEX")
+    safety_blocklist_regex = get_env_str("RECO_SAFETY_BLOCKLIST_REGEX")
 
-    DEFAULT_REQUIRE_SANITIZABLE = True
-    require_sanitizable_val = os.environ.get(
-        "RECO_SAFETY_REQUIRE_SANITIZABLE", str(DEFAULT_REQUIRE_SANITIZABLE)
-    )
-    safety_require_sanitizable = require_sanitizable_val.lower() in ("true", "1", "yes", "on")
+    safety_require_sanitizable = get_env_bool("RECO_SAFETY_REQUIRE_SANITIZABLE", True)
 
     return RecommendationConfig(
         limit_default=limit_default,

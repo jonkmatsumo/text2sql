@@ -4,7 +4,6 @@ Uses INDEX_BACKEND environment variable to select the backend.
 Currently only HNSW is supported, but env var is preserved for future backends.
 """
 
-import os
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -34,7 +33,9 @@ def create_vector_index(
         ImportError: If hnswlib is not installed.
     """
     if backend is None:
-        backend = os.getenv("INDEX_BACKEND", "hnsw")
+        from common.config.env import get_env_str
+
+        backend = get_env_str("INDEX_BACKEND", "hnsw")
 
     backend = backend.lower().strip()
 

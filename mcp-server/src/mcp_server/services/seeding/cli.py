@@ -5,7 +5,6 @@ before the main MCP server starts.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -94,9 +93,12 @@ async def main():
 
         # Primary/Main Connection
         async with Database.get_connection() as conn_main:
+            from common.config.env import get_env_str
+
             print(
                 f"✓ Main DB connection established: "
-                f"{os.getenv('POSTGRES_USER')}@{os.getenv('DB_HOST')}/{os.getenv('POSTGRES_DB')}"
+                f"{get_env_str('POSTGRES_USER')}@{get_env_str('DB_HOST')}/"
+                f"{get_env_str('POSTGRES_DB')}"
             )
 
             # Control Connection (Direct Write)

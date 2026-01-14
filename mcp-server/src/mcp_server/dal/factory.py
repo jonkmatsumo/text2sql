@@ -24,7 +24,6 @@ Example:
 """
 
 import logging
-import os
 from typing import Optional
 
 from mcp_server.dal.interfaces import (
@@ -155,10 +154,12 @@ def get_graph_store() -> GraphStore:
         )
         logger.info(f"Initializing GraphStore with provider: {provider}")
 
+        from common.config.env import get_env_str
+
         # MemgraphStore requires connection params from environment
-        uri = os.environ.get("MEMGRAPH_URI", "bolt://localhost:7687")
-        user = os.environ.get("MEMGRAPH_USER", "")
-        password = os.environ.get("MEMGRAPH_PASSWORD", "")
+        uri = get_env_str("MEMGRAPH_URI", "bolt://localhost:7687")
+        user = get_env_str("MEMGRAPH_USER", "")
+        password = get_env_str("MEMGRAPH_PASSWORD", "")
 
         store_cls = GRAPH_STORE_PROVIDERS[provider]
         _graph_store = store_cls(uri, user, password)
