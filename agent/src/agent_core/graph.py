@@ -234,8 +234,28 @@ async def run_agent_with_tracing(
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
 
-    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN):
-        # Capture context for nodes to use later
+    # Generate thread_id if not provided (required for checkpointer and telemetry)
+    if thread_id is None:
+        thread_id = session_id or str(uuid.uuid4())
+
+    # Prepare base metadata for all spans
+    base_metadata = {
+        "tenant_id": str(tenant_id),
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "deployment": os.getenv("DEPLOYMENT", "development"),
+        "version": "2.0.0",
+        "thread_id": thread_id,
+    }
+    if session_id:
+        base_metadata["mlflow.trace.session"] = session_id
+    if user_id:
+        base_metadata["mlflow.trace.user"] = user_id
+
+    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN, attributes=base_metadata):
+        # Make metadata sticky for all child spans
+        telemetry.update_current_trace(base_metadata)
+
+        # Capture context for nodes to use later (includes sticky metadata)
         telemetry_context = telemetry.capture_context()
 
         # Prepare initial state
@@ -255,10 +275,6 @@ async def run_agent_with_tracing(
             "from_cache": False,
             "telemetry_context": telemetry_context,
         }
-
-        # Generate thread_id if not provided (required for checkpointer)
-        if thread_id is None:
-            thread_id = session_id or str(uuid.uuid4())
 
         # Config with thread_id for checkpointer
         config = {"configurable": {"thread_id": thread_id}}
@@ -283,6 +299,8 @@ async def run_agent_with_tracing(
                     }
                 )
                 inputs["interaction_id"] = interaction_id
+                # Also make interaction_id sticky
+                telemetry.update_current_trace({"interaction_id": interaction_id})
         except Exception as e:
             print(f"Warning: Failed to create interaction log: {e}")
 
@@ -336,22 +354,6 @@ async def run_agent_with_tracing(
             except Exception as e:
                 print(f"Warning: Failed to update interaction log: {e}")
 
-        # Enrich the trace with user/session metadata
-        try:
-            metadata = {
-                "tenant_id": str(tenant_id),
-                "environment": os.getenv("ENVIRONMENT", "development"),
-                "deployment": os.getenv("DEPLOYMENT", "development"),
-                "version": "2.0.0",
-                "thread_id": thread_id,
-            }
-            if session_id:
-                metadata["mlflow.trace.session"] = session_id
-            if user_id:
-                metadata["mlflow.trace.user"] = user_id
-
-            telemetry.update_current_trace(metadata=metadata)
-        except Exception:
-            pass
+        # Metadata is already handled early and made sticky via telemetry_context
 
     return result
