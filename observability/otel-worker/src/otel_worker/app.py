@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
 from otel_worker.otlp.parser import (
@@ -219,6 +220,14 @@ async def healthz():
 @app.post("/v1/traces")
 async def receive_traces(request: Request):
     """Endpoint for OTLP traces (supports Protobuf and JSON)."""
+    # Enforce Rate Limiting (Token Bucket)
+    if not limiter.acquire():
+        logger.warning("Rejected ingestion due to rate limiting")
+        return Response(
+            content="Too Many Requests: Rate limit exceeded",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
     # Enforce queue overflow policy
     action = monitor.check_admissibility()
     if action == OverflowAction.REJECT:

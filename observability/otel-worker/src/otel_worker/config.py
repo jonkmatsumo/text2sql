@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     OVERFLOW_POLICY: str = "drop"  # drop, reject, sample
     OVERFLOW_SAMPLE_RATE: float = 0.1
 
+    ENABLE_RATE_LIMITING: bool = False
+    RATE_LIMIT_RPS: float = 100.0
+    RATE_LIMIT_BURST: int = 200
+
     @model_validator(mode="after")
     def build_postgres_url(self) -> "Settings":
         """Build POSTGRES_URL if not provided or if it's a dummy value."""
