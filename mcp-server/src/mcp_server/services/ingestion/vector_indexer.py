@@ -140,30 +140,72 @@ class VectorIndexer:
         """Access underlying driver for legacy support."""
         return self.store.driver
 
-    async def create_indexes(self):
-        """Create property indexes to speed up node retrieval.
+    def _build_ann_query(
+        self,
+        label: str,
+        property_name: str,
+        query_param: str,
+        k_param: str,
+    ) -> str:
+        """Construct ANN Cypher query for Memgraph HNSW index.
 
-        Note: Vector indexes (usearch) are not available in base Memgraph.
-        We use property indexes for filtering, then compute similarity in Python.
+        Args:
+            label: Node label (e.g., 'Table').
+            property_name: Embedding property name (e.g., 'embedding').
+            query_param: Parameter name for query vector (e.g., '$embedding').
+            k_param: Parameter name for k (e.g., '$k').
+
+        Returns:
+            Cypher query string.
         """
-        logger.info("Creating property indexes...")
+        # MVP: Explicitly map Table to its known index
+        # For Column, we currently don't have a known index, but contract requires it.
+        if label == "Table":
+            index_name = "table_embedding_index"
+            # Syntax: CALL vector_search.search(index_name, label, property, query_vector, limit)
+            # Returns: node, distance, score
+            return (
+                f"CALL vector_search.search('{index_name}', '{label}', '{property_name}', "
+                f"{query_param}, {k_param}) YIELD node, score "
+                f"RETURN node, score"
+            )
+        else:
+            # Fallback for Column (or others) without index
+            # Use Cypher-based brute force scan (O(N)) to avoid bringing vectors to Python.
+            # Assumes Memgraph has vector modules or can use similarity functions.
+            # Safe default if HNSW index is missing.
+            return (
+                f"MATCH (node:{label}) WHERE node.{property_name} IS NOT NULL "
+                f"WITH node, vector.similarity.cosine(node.{property_name}, {query_param}) "
+                f"AS score ORDER BY score DESC LIMIT {k_param} "
+                f"RETURN node, score"
+            )
 
-        # Note: session() on sync driver can still be used, but we should ideally move to async
-        # driver. For now, we wrap the sync call to avoid blocking the event loop extensively.
-        def _run_indexes():
-            with self.driver.session() as session:
-                try:
-                    session.run("CREATE INDEX ON :Table(name)")
-                except Exception:
-                    pass  # Index may already exist
-                try:
-                    session.run("CREATE INDEX ON :Column(name, table)")
-                except Exception:
-                    pass  # Index may already exist
+    def _map_ann_results(self, record) -> dict:
+        """Map Memgraph ANN result record to contract shape.
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _run_indexes)
-        logger.info("Property indexes created.")
+        Args:
+            record: Memgraph/Neo4j Record object with 'node' and 'score'.
+
+        Returns:
+            Dict matching contract: {"node": dict, "score": float}
+        """
+        node = record["node"]
+        score = record["score"]
+
+        # Ensure score is float
+        if not isinstance(score, float):
+            try:
+                score = float(score)
+            except (ValueError, TypeError):
+                score = 0.0
+
+        # Convert node to dict and remove embedding for bandwidth/memory
+        node_dict = dict(node)
+        if "embedding" in node_dict:
+            del node_dict["embedding"]
+
+        return {"node": node_dict, "score": score}
 
     async def search_nodes(
         self,
@@ -172,9 +214,18 @@ class VectorIndexer:
         k: int = 5,
         apply_threshold: bool = True,
     ) -> List[dict]:
-        """Search for nearest nodes using brute-force cosine similarity.
+        """Search for nearest nodes using Memgraph HNSW ANN or vector scan.
 
         Includes adaptive thresholding to filter low-quality matches.
+
+        Contract behavior:
+        - Return shape: List[{"node": dict, "score": float}]
+        - 'node': Dictionary of node properties (excluding 'embedding')
+        - 'score': Cosine similarity (0.0 to 1.0), NOT distance. Higher is better.
+        - Sorting: Descending score (best match first).
+        - Labels: Supports 'Table' or 'Column'.
+        - Missing embeddings: Nodes with NULL embeddings are silently skipped.
+        - Adaptive thresholding: Applied after top-k selection if enabled.
 
         Args:
             query_text: The semantic query.
@@ -189,37 +240,18 @@ class VectorIndexer:
 
         def _run_search():
             with self.driver.session() as session:
-                # Fetch all nodes of the given label that have embeddings
-                query = f"""
-                MATCH (n:{label})
-                WHERE n.embedding IS NOT NULL
-                RETURN n, n.embedding as embedding
-                """
+                if not query_vector:
+                    return []
 
-                result = session.run(query)
+                # Build query (HNSW for Table, Scan for others)
+                query = self._build_ann_query(label, "embedding", "$embedding", "$k")
+
+                params = {"embedding": query_vector, "k": k}
+                result = session.run(query, params)
 
                 hits = []
                 for record in result:
-                    node = record["n"]
-                    node_embedding = record["embedding"]
-
-                    if not node_embedding:
-                        continue
-
-                    score = cosine_similarity(query_vector, node_embedding)
-
-                    # Convert node to dict, excluding embedding
-                    node_dict = dict(node)
-                    if "embedding" in node_dict:
-                        del node_dict["embedding"]
-
-                    hits.append({"node": node_dict, "score": score})
-
-                # Sort by score descending
-                hits.sort(key=lambda x: x["score"], reverse=True)
-
-                # Take top k first
-                hits = hits[:k]
+                    hits.append(self._map_ann_results(record))
 
                 # Apply adaptive thresholding
                 if apply_threshold:
