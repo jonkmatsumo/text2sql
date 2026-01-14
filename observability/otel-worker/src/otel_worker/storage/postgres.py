@@ -287,6 +287,14 @@ def list_spans_for_trace(
         return spans
 
 
+def get_queue_depth() -> int:
+    """Get the current number of pending items in the ingestion queue."""
+    queue_table = get_table_name("ingestion_queue")
+    with engine.connect() as conn:
+        result = conn.execute(text(f"SELECT count(*) FROM {queue_table} WHERE status = 'pending'"))
+        return result.scalar()
+
+
 def enqueue_ingestion(payload_json: dict, trace_id: str = None) -> int:
     """Write raw OTLP payload to ingestion queue for durable buffering."""
     queue_table = get_table_name("ingestion_queue")

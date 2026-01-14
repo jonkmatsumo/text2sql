@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
@@ -89,9 +90,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize storage: {e}")
 
+    await monitor.start()
     await coordinator.start()
     yield
     await coordinator.stop()
+    await monitor.stop()
 
 
 app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)
@@ -216,6 +219,19 @@ async def healthz():
 @app.post("/v1/traces")
 async def receive_traces(request: Request):
     """Endpoint for OTLP traces (supports Protobuf and JSON)."""
+    # Enforce queue overflow policy
+    action = monitor.check_admissibility()
+    if action == OverflowAction.REJECT:
+        logger.warning("Rejected ingestion due to queue overflow policy")
+        return Response(
+            content="Too Many Requests: Ingestion queue full",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    elif action == OverflowAction.DROP:
+        logger.warning("Dropped ingestion due to queue overflow policy (sampled/drop)")
+        # Return success to client but discard
+        return Response(status_code=status.HTTP_202_ACCEPTED)
+
     content_type = request.headers.get("content-type", "")
 
     # Normalize content-type

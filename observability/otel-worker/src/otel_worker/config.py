@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     BATCH_MAX_SIZE: int = 25
     BATCH_FLUSH_INTERVAL_MS: int = 200
 
+    QUEUE_MAX_DEPTH: int = 1000
+    OVERFLOW_POLICY: str = "drop"  # drop, reject, sample
+    OVERFLOW_SAMPLE_RATE: float = 0.1
+
     @model_validator(mode="after")
     def build_postgres_url(self) -> "Settings":
         """Build POSTGRES_URL if not provided or if it's a dummy value."""
