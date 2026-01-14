@@ -20,7 +20,7 @@ HAS_GOOGLE = (
 class TestGetLLMClient:
     """Unit tests for get_llm_client factory function."""
 
-    @patch.dict(os.environ, {}, clear=True)
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-key"}, clear=True)
     @patch("langchain_openai.ChatOpenAI")
     def test_get_llm_client_openai_default(self, mock_openai):
         """Test that OpenAI with gpt-5.2 is returned when no env vars set."""
@@ -33,7 +33,7 @@ class TestGetLLMClient:
         mock_openai.assert_called_once_with(model="gpt-5.2", temperature=0)
         assert result == mock_openai.return_value
 
-    @patch.dict(os.environ, {"LLM_MODEL": "gpt-4o"}, clear=True)
+    @patch.dict(os.environ, {"LLM_MODEL": "gpt-4o", "OPENAI_API_KEY": "sk-test-key"}, clear=True)
     @patch("langchain_openai.ChatOpenAI")
     def test_get_llm_client_openai_custom_model(self, mock_openai):
         """Test that custom model from env var is used."""
@@ -82,7 +82,7 @@ class TestGetLLMClient:
         with pytest.raises(ValueError, match="Unsupported provider: unsupported"):
             get_llm_client()
 
-    @patch.dict(os.environ, {}, clear=True)
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-key"}, clear=True)
     @patch("langchain_openai.ChatOpenAI")
     def test_get_llm_client_temperature(self, mock_openai):
         """Test that temperature is correctly passed to client."""
@@ -94,7 +94,11 @@ class TestGetLLMClient:
 
         mock_openai.assert_called_once_with(model="gpt-5.2", temperature=0.7)
 
-    @patch.dict(os.environ, {"LLM_PROVIDER": "openai", "LLM_MODEL": "gpt-4o"}, clear=True)
+    @patch.dict(
+        os.environ,
+        {"LLM_PROVIDER": "openai", "LLM_MODEL": "gpt-4o", "OPENAI_API_KEY": "sk-test-key"},
+        clear=True,
+    )
     @patch("langchain_openai.ChatOpenAI")
     def test_get_llm_client_override_params(self, mock_openai):
         """Test that explicit params override env vars."""
