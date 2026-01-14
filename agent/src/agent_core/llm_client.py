@@ -4,7 +4,7 @@ Supports OpenAI, Anthropic (Claude), and Google (Gemini) with runtime model sele
 """
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -142,3 +142,62 @@ def get_llm(
         )
 
     return _LLM_CACHE[key]
+
+
+def extract_token_usage(response: Any) -> dict[str, int]:
+    """
+    Extract token usage from LLM response metadata.
+
+    Handles different provider formats (OpenAI, Anthropic, Google).
+    Returns standard OTEL-compatible keys:
+    - llm.token_usage.input_tokens
+    - llm.token_usage.output_tokens
+    - llm.token_usage.total_tokens
+
+    Args:
+        response: LangChain AIMessage response.
+
+    Returns:
+        Dict with usage metrics (integers).
+    """
+    usage = {}
+    if not hasattr(response, "response_metadata"):
+        return usage
+
+    meta = response.response_metadata
+
+    # OpenAI format:
+    # 'token_usage': {'completion_tokens': 15, 'prompt_tokens': 561, 'total_tokens': 576}
+    if "token_usage" in meta:
+        tu = meta["token_usage"]
+        if "prompt_tokens" in tu:
+            usage["llm.token_usage.input_tokens"] = int(tu["prompt_tokens"])
+        if "completion_tokens" in tu:
+            usage["llm.token_usage.output_tokens"] = int(tu["completion_tokens"])
+        if "total_tokens" in tu:
+            usage["llm.token_usage.total_tokens"] = int(tu["total_tokens"])
+
+    # Anthropic/Google format: 'usage': {'input_tokens': 20, 'output_tokens': 20, ...}
+    elif "usage" in meta:
+        u = meta["usage"]
+        if hasattr(u, "input_tokens"):  # Some are objects
+            usage["llm.token_usage.input_tokens"] = int(u.input_tokens)
+            usage["llm.token_usage.output_tokens"] = int(u.output_tokens)
+            usage["llm.token_usage.total_tokens"] = int(u.total_tokens)
+        elif isinstance(u, dict):
+            if "input_tokens" in u:
+                usage["llm.token_usage.input_tokens"] = int(u["input_tokens"])
+            if "prompt_token_count" in u:  # Google sometimes
+                usage["llm.token_usage.input_tokens"] = int(u["prompt_token_count"])
+
+            if "output_tokens" in u:
+                usage["llm.token_usage.output_tokens"] = int(u["output_tokens"])
+            if "candidates_token_count" in u:  # Google sometimes
+                usage["llm.token_usage.output_tokens"] = int(u["candidates_token_count"])
+
+            if "total_tokens" in u:
+                usage["llm.token_usage.total_tokens"] = int(u["total_tokens"])
+            if "total_token_count" in u:  # Google sometimes
+                usage["llm.token_usage.total_tokens"] = int(u["total_token_count"])
+
+    return usage

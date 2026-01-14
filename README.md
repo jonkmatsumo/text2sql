@@ -55,15 +55,14 @@ flowchart TB
         ExecuteNode -->|"Max Retries"| Response
     end
 
-    subgraph Observability["📡 Observability (Default: MLflow, Optional: OTEL)"]
-        MLflow["MLflow Tracking Server<br/>Traces & Metrics"]
-        MLflowDB[("Postgres (postgres-db)<br/>MLflow backend")]
-        MinIO[("MinIO Artifacts")]
-        OTEL["OpenTelemetry Stack (Optional)"]
+    subgraph Observability["📡 Observability (Required)"]
+        OTEL["OpenTelemetry Stack (Canonical)"]
+        OTEL_Worker["OTEL Worker<br/>Postgres + MinIO"]
+        MLflow["MLflow Sink<br/>Summarized Runs"]
 
-        MLflow --> MLflowDB
-        MLflow --> MinIO
-        Agent -.->|"Optional (TELEMETRY_BACKEND=otel/dual)"| OTEL
+        Agent --> OTEL
+        OTEL --> OTEL_Worker
+        OTEL_Worker --> MLflow
     end
 
     subgraph MCPServer["🔧 MCP Server (FastMCP, /messages SSE)"]
@@ -159,11 +158,11 @@ flowchart TB
 *   **AST-Based Security**: Employs `sqlglot` for AST traversal to strictly enforce read-only access and inject tenant isolation predicates at runtime.
 *   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
-### 📡 Observability & Performance
-*   **TelemetryService Emission**: The agent emits telemetry via `TelemetryService`, with backend selection controlled by `TELEMETRY_BACKEND`.
-*   **MLflow by Default**: `TELEMETRY_BACKEND=mlflow` by default, and the agent writes directly to MLflow (see `agent/src/agent_core/telemetry.py` and `agent/src/agent_core/graph.py`).
-*   **Optional OTEL Backend**: `TELEMETRY_BACKEND=otel` or `dual` enables OTEL span emission; the OTEL stack must be running (see `observability/docker-compose.observability.yml`).
-*   **OTLP Configuration Caveat**: Although an OTEL backend exists in code, OTLP exporter configuration is not wired by default and requires explicit environment configuration (see `observability/.env.example`).
+### 📡 Observability (OTEL-First)
+*   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=dual`).
+*   **Durable Sink**: The OTEL worker provides persistent storage (Postgres) and raw archives (MinIO).
+*   **MLflow Run Sink**: High-level metrics and trace summaries are automatically exported to MLflow for experiment tracking.
+*   **Access Point**: Query the OTEL worker API at `/api/v1/traces`.
 
 ## Project Structure
 
@@ -281,7 +280,7 @@ We provide `make` targets for safe and deep cleanup.
 |---------|-----|-------------|
 | **Web UI** | `http://localhost:8501` | Streamlit interface |
 | **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
-| **MLflow UI** | `http://localhost:5001` | Telemetry traces and metrics (default backend) |
+| **MLflow UI** | `http://localhost:5001` | Downstream sink for summarized runs (Experiment: otel-traces) |
 | **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
 
 #### Optional / Advanced Observability Services
@@ -321,11 +320,9 @@ Several environment variables exist to select storage backends when alternative 
 are implemented (e.g. `GRAPH_STORE_PROVIDER`, `CACHE_STORE_PROVIDER`). These are optional
 and default to Postgres or Memgraph for local development.
 
-## Optional Observability Stack (OTEL)
+## Observability Stack (OTEL)
 
-An optional OpenTelemetry stack is provided in `observability/docker-compose.observability.yml`.
-It includes `otel-collector` and `otel-worker`, and expects the primary stack to be running
-with the external `text2sql_net` network.
+The OpenTelemetry stack is provided in `observability/docker-compose.observability.yml`.
+It includes `otel-collector` and `otel-worker`, and is required for full end-to-end tracing.
 
-MLflow is the default telemetry backend; OTEL is only used if explicitly enabled via
-`TELEMETRY_BACKEND` and the OTEL stack is started.
+OTEL is the default telemetry backend (`TELEMETRY_BACKEND=dual`).

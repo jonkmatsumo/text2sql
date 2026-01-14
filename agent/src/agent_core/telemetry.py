@@ -9,6 +9,7 @@ import contextlib
 import json
 import logging
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
@@ -27,6 +28,9 @@ OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
 OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-agent")
 
 _otel_initialized = False
+
+# "Sticky" metadata that persists across spans in the same execution context
+_sticky_metadata: ContextVar[Dict[str, Any]] = ContextVar("sticky_metadata", default={})
 
 
 def _setup_otel_sdk():
@@ -57,6 +61,20 @@ def _setup_otel_sdk():
     logger.info(f"OTEL SDK initialized with endpoint: {OTEL_EXPORTER_OTLP_ENDPOINT}")
 
 
+def maybe_import_mlflow_for_backend():
+    """Eagerly import mlflow if the backend is EXPLICITLY 'mlflow' or 'dual'.
+
+    This is used to satisfy test isolation requirements while allowing the
+    default mode (no env var) to remain minimal.
+    """
+    backend_type = os.getenv("TELEMETRY_BACKEND", "").lower()
+    if backend_type in ("mlflow", "dual"):
+        try:
+            import mlflow  # noqa: F401
+        except ImportError:
+            pass
+
+
 class SpanType(Enum):
     """Semantic span types mapping to MLflow/OTEL concepts."""
 
@@ -74,6 +92,7 @@ class TelemetryContext:
 
     otel_context: Optional[Any] = None
     metadata: Optional[Dict[str, Any]] = None
+    sticky_metadata: Optional[Dict[str, Any]] = None
 
 
 class TelemetrySpan(abc.ABC):
@@ -560,7 +579,7 @@ class TelemetryService:
         if backend:
             self._backend = backend
         else:
-            backend_type = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+            backend_type = os.getenv("TELEMETRY_BACKEND", "dual").lower()
             if backend_type == "otel":
                 self._backend = OTELTelemetryBackend()
             elif backend_type == "dual":
@@ -584,6 +603,7 @@ class TelemetryService:
         """
         self._backend.configure(tracking_uri=tracking_uri, autolog=autolog, **kwargs)
 
+    @contextlib.contextmanager
     def start_span(
         self,
         name: str,
@@ -591,21 +611,47 @@ class TelemetryService:
         inputs: Optional[Dict[str, Any]] = None,
         attributes: Optional[Dict[str, Any]] = None,
     ):
-        """Start a new span."""
-        return self._backend.start_span(
-            name=name,
-            span_type=span_type,
-            inputs=inputs,
-            attributes=attributes,
-        )
+        """Start a new span.
+
+        This method acts as a boundary for sticky metadata. Any metadata added
+        via update_current_trace inside this span will be inherited by child
+        spans but will be discarded when this span exits.
+        """
+        # Snapshot current sticky metadata to prevent leaks outside this span
+        token = _sticky_metadata.set(_sticky_metadata.get().copy())
+
+        try:
+            # Merge sticky metadata into attributes for this span
+            merged_attributes = _sticky_metadata.get().copy()
+            if attributes:
+                merged_attributes.update(attributes)
+
+            with self._backend.start_span(
+                name=name,
+                span_type=span_type,
+                inputs=inputs,
+                attributes=merged_attributes,
+            ) as span:
+                yield span
+        finally:
+            # Restore sticky metadata to pre-span state
+            _sticky_metadata.reset(token)
 
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
-        """Update current trace with metadata."""
+        """Update current trace with metadata and make it sticky."""
+        # Update sticky metadata for future spans
+        current = _sticky_metadata.get().copy()
+        current.update(metadata)
+        _sticky_metadata.set(current)
+
+        # Update current span/trace in backend
         self._backend.update_current_trace(metadata)
 
     def capture_context(self) -> TelemetryContext:
-        """Capture current tracing context."""
-        return self._backend.capture_context()
+        """Capture current tracing context including sticky metadata."""
+        ctx = self._backend.capture_context()
+        ctx.sticky_metadata = _sticky_metadata.get().copy()
+        return ctx
 
     def inject_context(self, carrier: Dict[str, str]) -> None:
         """Inject current context into a carrier (e.g. headers)."""
@@ -614,8 +660,17 @@ class TelemetryService:
     @contextlib.contextmanager
     def use_context(self, ctx: TelemetryContext):
         """Use a previously captured context."""
-        with self._backend.use_context(ctx):
-            yield
+        # Restore sticky metadata
+        token = None
+        if ctx.sticky_metadata is not None:
+            token = _sticky_metadata.set(ctx.sticky_metadata)
+
+        try:
+            with self._backend.use_context(ctx):
+                yield
+        finally:
+            if token:
+                _sticky_metadata.reset(token)
 
     def extract_context(self, carrier: Dict[str, str]) -> TelemetryContext:
         """Extract context from a carrier and return it."""

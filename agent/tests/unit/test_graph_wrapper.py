@@ -2,6 +2,14 @@
 
 import asyncio
 import inspect
+import sys
+from unittest.mock import MagicMock
+
+# Mock langchain_mcp_adapters to allow import of agent_core.tools during collection
+if "langchain_mcp_adapters" not in sys.modules:
+    mcp_mock = MagicMock()
+    sys.modules["langchain_mcp_adapters"] = mcp_mock
+    sys.modules["langchain_mcp_adapters.client"] = mcp_mock
 
 import pytest
 from agent_core.graph import with_telemetry_context

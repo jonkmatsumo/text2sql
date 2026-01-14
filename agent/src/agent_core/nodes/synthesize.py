@@ -87,6 +87,13 @@ Be concise but informative. Use numbers and data from the results.
             }
         )
 
+        # Capture token usage
+        from agent_core.llm_client import extract_token_usage
+
+        usage_stats = extract_token_usage(response)
+        if usage_stats:
+            span.set_attributes(usage_stats)
+
         span.set_outputs({"response_length": len(response.content)})
 
         return {

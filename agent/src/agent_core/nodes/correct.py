@@ -138,6 +138,13 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             }
         )
 
+        # Capture token usage
+        from agent_core.llm_client import extract_token_usage
+
+        usage_stats = extract_token_usage(response)
+        if usage_stats:
+            span.set_attributes(usage_stats)
+
         # Extract SQL from response (remove markdown code blocks if present)
         corrected_sql = response.content.strip()
         if corrected_sql.startswith("```sql"):

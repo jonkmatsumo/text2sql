@@ -16,14 +16,24 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import SpanType, maybe_import_mlflow_for_backend, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-# Configure Telemetry tracking URI and autologging
-# Default to localhost for local dev, but use container name in Docker
-telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
+# Eagerly import mlflow if backend requires it (for test isolation)
+maybe_import_mlflow_for_backend()
+
+
+def run_telemetry_configure():
+    """Configure telemetry at runtime to avoid import-time side effects."""
+    # Configure Telemetry tracking URI and autologging
+    # Default to localhost for local dev, but use container name in Docker
+    telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    backend_name = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+    # Autolog is used for MLflow integration (direct or via dual)
+    should_autolog = backend_name in ("mlflow", "dual")
+
+    telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
 
 
 def with_telemetry_context(node_func):
@@ -231,8 +241,31 @@ async def run_agent_with_tracing(
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
 
-    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN):
-        # Capture context for nodes to use later
+    # Ensure telemetry is configured at runtime
+    run_telemetry_configure()
+
+    # Generate thread_id if not provided (required for checkpointer and telemetry)
+    if thread_id is None:
+        thread_id = session_id or str(uuid.uuid4())
+
+    # Prepare base metadata for all spans
+    base_metadata = {
+        "tenant_id": str(tenant_id),
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "deployment": os.getenv("DEPLOYMENT", "development"),
+        "version": "2.0.0",
+        "thread_id": thread_id,
+    }
+    if session_id:
+        base_metadata["telemetry.session_id"] = session_id
+    if user_id:
+        base_metadata["telemetry.user_id"] = user_id
+
+    with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN, attributes=base_metadata):
+        # Make metadata sticky for all child spans
+        telemetry.update_current_trace(base_metadata)
+
+        # Capture context for nodes to use later (includes sticky metadata)
         telemetry_context = telemetry.capture_context()
 
         # Prepare initial state
@@ -252,10 +285,6 @@ async def run_agent_with_tracing(
             "from_cache": False,
             "telemetry_context": telemetry_context,
         }
-
-        # Generate thread_id if not provided (required for checkpointer)
-        if thread_id is None:
-            thread_id = session_id or str(uuid.uuid4())
 
         # Config with thread_id for checkpointer
         config = {"configurable": {"thread_id": thread_id}}
@@ -280,6 +309,8 @@ async def run_agent_with_tracing(
                     }
                 )
                 inputs["interaction_id"] = interaction_id
+                # Also make interaction_id sticky
+                telemetry.update_current_trace({"interaction_id": interaction_id})
         except Exception as e:
             print(f"Warning: Failed to create interaction log: {e}")
 
@@ -333,22 +364,6 @@ async def run_agent_with_tracing(
             except Exception as e:
                 print(f"Warning: Failed to update interaction log: {e}")
 
-        # Enrich the trace with user/session metadata
-        try:
-            metadata = {
-                "tenant_id": str(tenant_id),
-                "environment": os.getenv("ENVIRONMENT", "development"),
-                "deployment": os.getenv("DEPLOYMENT", "development"),
-                "version": "2.0.0",
-                "thread_id": thread_id,
-            }
-            if session_id:
-                metadata["mlflow.trace.session"] = session_id
-            if user_id:
-                metadata["mlflow.trace.user"] = user_id
-
-            telemetry.update_current_trace(metadata=metadata)
-        except Exception:
-            pass
+        # Metadata is already handled early and made sticky via telemetry_context
 
     return result

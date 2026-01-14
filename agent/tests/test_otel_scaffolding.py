@@ -33,18 +33,24 @@ def test_otel_import_sanity():
     assert backend._tracer is not None
 
 
-def test_otel_backend_configure():
+def test_otel_backend_configure(clean_env, reset_telemetry_globals):
     """Verify that configure() correctly initializes the OTEL SDK."""
     from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
 
     backend = OTELTelemetryBackend(tracer_name="test-configure")
 
-    # Before configure, provider might be the default NoOp provider
-    # but we can check if our global _otel_initialized is set after configure
+    # Act
     backend.configure()
 
     provider = trace.get_tracer_provider()
+
+    # In some cases (e.g. proxying), we might need to look at the delegate
+    if hasattr(provider, "_provider"):
+        provider = provider._provider
+
     assert provider is not None
-    # If initialized, it should be a TracerProvider from the SDK
+    # Verify it is indeed an SDK TracerProvider
+    assert isinstance(provider, TracerProvider)
     assert hasattr(provider, "resource")
     assert provider.resource.attributes["service.name"] == "text2sql-agent"
