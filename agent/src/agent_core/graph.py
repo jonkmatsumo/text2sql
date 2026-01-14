@@ -26,8 +26,9 @@ def run_telemetry_configure():
     # Configure Telemetry tracking URI and autologging
     # Default to localhost for local dev, but use container name in Docker
     telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-    backend_name = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
-    should_autolog = backend_name != "otel"
+    backend_name = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+    # Autolog is used for MLflow integration (direct or via dual)
+    should_autolog = backend_name in ("mlflow", "dual")
 
     telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
 
@@ -253,9 +254,9 @@ async def run_agent_with_tracing(
         "thread_id": thread_id,
     }
     if session_id:
-        base_metadata["mlflow.trace.session"] = session_id
+        base_metadata["telemetry.session_id"] = session_id
     if user_id:
-        base_metadata["mlflow.trace.user"] = user_id
+        base_metadata["telemetry.user_id"] = user_id
 
     with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN, attributes=base_metadata):
         # Make metadata sticky for all child spans

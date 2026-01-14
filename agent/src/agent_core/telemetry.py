@@ -565,7 +565,7 @@ class TelemetryService:
         if backend:
             self._backend = backend
         else:
-            backend_type = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+            backend_type = os.getenv("TELEMETRY_BACKEND", "dual").lower()
             if backend_type == "otel":
                 self._backend = OTELTelemetryBackend()
             elif backend_type == "dual":

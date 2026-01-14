@@ -73,7 +73,7 @@ def test_metadata_propagation_with_context(otel_test_setup):
 
     # 1. Start root, set metadata, capture context
     with service.start_span("root"):
-        service.update_current_trace({"session_id": "sess-ABC"})
+        service.update_current_trace({"telemetry.session_id": "sess-ABC"})
         ctx = service.capture_context()
 
     # 2. Use context in another "execution flow" (simulated)
@@ -85,7 +85,7 @@ def test_metadata_propagation_with_context(otel_test_setup):
     resumed_span = next(s for s in spans if s.name == "resumed_child")
 
     # Resumed span should have the sticky metadata from the captured context
-    assert resumed_span.attributes["session_id"] == "sess-ABC"
+    assert resumed_span.attributes["telemetry.session_id"] == "sess-ABC"
 
 
 def test_metadata_reset_after_context_exit(otel_test_setup):
