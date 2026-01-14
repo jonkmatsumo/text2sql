@@ -142,6 +142,48 @@ class TestVectorIndexerANNHelpers:
         assert "YIELD node, score" in query
         assert "RETURN node, score" in query
 
+    def test_build_ann_query_no_inline_vector(self, indexer):
+        """Validate query uses parameters, avoiding inline vector injection."""
+        query = indexer._build_ann_query("Table", "embedding", "$emb", "$k")
+        # Should not contain any brackets or large lists suggestive of inline vectors
+        assert "[" not in query
+        assert "]" not in query
+
+    def test_build_ann_query_column(self, indexer):
+        """Validate query construction for Column label uses fallback Cypher scan."""
+        query = indexer._build_ann_query("Column", "embedding", "$emb", "$k")
+
+        query_lower = query.lower()
+        assert "call vector_search.search" not in query_lower
+        assert "match (node:column)" in query_lower
+        assert "vector.similarity.cosine" in query_lower
+        assert "limit $k" in query_lower
+
+    def test_map_ann_results_success(self, indexer):
+        """Validate mapping of correct record."""
+        mock_node = {"name": "test", "embedding": [0.1]}
+        record = {"node": mock_node, "score": 0.95}
+
+        result = indexer._map_ann_results(record)
+
+        assert result["score"] == 0.95
+        assert result["node"]["name"] == "test"
+        assert "embedding" not in result["node"]
+
+    def test_map_ann_results_score_type_handling(self, indexer):
+        """Validate robustness to score types."""
+        mock_node = {"name": "test"}
+        # integer score
+        record = {"node": mock_node, "score": 1}
+        result = indexer._map_ann_results(record)
+        assert isinstance(result["score"], float)
+        assert result["score"] == 1.0
+
+        # string score (shouldn't happen but good defense)
+        record = {"node": mock_node, "score": "0.5"}
+        result = indexer._map_ann_results(record)
+        assert result["score"] == 0.5
+
 
 class TestVectorIndexerObservability:
     """Tests for Phase 2d observability."""
@@ -185,38 +227,3 @@ class TestVectorIndexerObservability:
             assert "elapsed_ms" in extra
             assert isinstance(extra["elapsed_ms"], float)
             assert extra["threshold_applied"] is True
-
-    def test_build_ann_query_column(self, indexer):
-        """Validate query construction for Column label uses fallback Cypher scan."""
-        query = indexer._build_ann_query("Column", "embedding", "$emb", "$k")
-
-        query_lower = query.lower()
-        assert "call vector_search.search" not in query_lower
-        assert "match (node:column)" in query_lower
-        assert "vector.similarity.cosine" in query_lower
-        assert "limit $k" in query_lower
-
-    def test_map_ann_results_success(self, indexer):
-        """Validate mapping of correct record."""
-        mock_node = {"name": "test", "embedding": [0.1]}
-        record = {"node": mock_node, "score": 0.95}
-
-        result = indexer._map_ann_results(record)
-
-        assert result["score"] == 0.95
-        assert result["node"]["name"] == "test"
-        assert "embedding" not in result["node"]
-
-    def test_map_ann_results_score_type_handling(self, indexer):
-        """Validate robustness to score types."""
-        mock_node = {"name": "test"}
-        # integer score
-        record = {"node": mock_node, "score": 1}
-        result = indexer._map_ann_results(record)
-        assert isinstance(result["score"], float)
-        assert result["score"] == 1.0
-
-        # string score (shouldn't happen but good defense)
-        record = {"node": mock_node, "score": "0.5"}
-        result = indexer._map_ann_results(record)
-        assert result["score"] == 0.5
