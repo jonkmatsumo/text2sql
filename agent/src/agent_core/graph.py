@@ -289,80 +289,81 @@ async def run_agent_with_tracing(
         # Config with thread_id for checkpointer
         config = {"configurable": {"thread_id": thread_id}}
 
-        # 1. Start Interaction Logging (Pre-execution)
-        interaction_id = None
-        tools = []
-        try:
-            from agent_core.tools import get_mcp_tools
+        # Execute workflow within MCP context to ensure connections are closed
+        from agent_core.tools import mcp_tools_context, unpack_mcp_result
 
-            tools = await get_mcp_tools()
-            create_tool = next((t for t in tools if t.name == "create_interaction"), None)
-            if create_tool:
-                interaction_id = await create_tool.ainvoke(
-                    {
-                        "conversation_id": session_id or thread_id,
-                        "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
-                        "user_nlq_text": question,
-                        "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
-                        "prompt_version": "v1.0",
-                        "trace_id": thread_id,
-                    }
-                )
-                inputs["interaction_id"] = interaction_id
-                # Also make interaction_id sticky
-                telemetry.update_current_trace({"interaction_id": interaction_id})
-        except Exception as e:
-            print(f"Warning: Failed to create interaction log: {e}")
-
-        # Execute workflow
-        result = inputs.copy()
-        try:
-            result = await app.ainvoke(inputs, config=config)
-        except Exception as execute_err:
-            print(f"Critical Error in Agent Workflow: {execute_err}")
-            result["error"] = str(execute_err)
-            result["error_category"] = "SYSTEM_CRASH"
-            if "messages" not in result:
-                result["messages"] = []
-
-        # 2. Update Interaction Logging (Post-execution)
-        if interaction_id:
+        async with mcp_tools_context() as tools:
+            # 1. Start Interaction Logging (Pre-execution)
+            interaction_id = None
             try:
-                update_tool = next((t for t in tools if t.name == "update_interaction"), None)
-                if update_tool:
-                    # Determine status
-                    status = "SUCCESS"
-                    if result.get("error"):
-                        status = "FAILURE"
-                    elif result.get("ambiguity_type"):
-                        status = "CLARIFICATION_REQUIRED"
-
-                    # Get last message as response
-                    last_msg = ""
-                    if result.get("messages") and len(result["messages"]) > 0:
-                        last_message_obj = result["messages"][-1]
-                        if hasattr(last_message_obj, "content"):
-                            last_msg = last_message_obj.content
-                        else:
-                            last_msg = str(last_message_obj)
-
-                    if not last_msg and result.get("error"):
-                        last_msg = f"System Error: {result['error']}"
-
-                    await update_tool.ainvoke(
+                create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+                if create_tool:
+                    raw_interaction_id = await create_tool.ainvoke(
                         {
-                            "interaction_id": interaction_id,
-                            "generated_sql": result.get("current_sql"),
-                            "response_payload": json.dumps(
-                                {"text": last_msg, "error": result.get("error")}
-                            ),
-                            "execution_status": status,
-                            "error_type": result.get("error_category"),
-                            "tables_used": result.get("table_names", []),
+                            "conversation_id": session_id or thread_id,
+                            "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
+                            "user_nlq_text": question,
+                            "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
+                            "prompt_version": "v1.0",
+                            "trace_id": thread_id,
                         }
                     )
+                    interaction_id = unpack_mcp_result(raw_interaction_id)
+                    inputs["interaction_id"] = interaction_id
+                    # Also make interaction_id sticky
+                    telemetry.update_current_trace({"interaction_id": interaction_id})
             except Exception as e:
-                print(f"Warning: Failed to update interaction log: {e}")
+                print(f"Warning: Failed to create interaction log: {e}")
+
+            # Execute workflow
+            result = inputs.copy()
+            try:
+                result = await app.ainvoke(inputs, config=config)
+            except Exception as execute_err:
+                print(f"Critical Error in Agent Workflow: {execute_err}")
+                result["error"] = str(execute_err)
+                result["error_category"] = "SYSTEM_CRASH"
+                if "messages" not in result:
+                    result["messages"] = []
+
+            # 2. Update Interaction Logging (Post-execution)
+            if interaction_id:
+                try:
+                    update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+                    if update_tool:
+                        # Determine status
+                        status = "SUCCESS"
+                        if result.get("error"):
+                            status = "FAILURE"
+                        elif result.get("ambiguity_type"):
+                            status = "CLARIFICATION_REQUIRED"
+
+                        # Get last message as response
+                        last_msg = ""
+                        if result.get("messages") and len(result["messages"]) > 0:
+                            last_message_obj = result["messages"][-1]
+                            if hasattr(last_message_obj, "content"):
+                                last_msg = last_message_obj.content
+                            else:
+                                last_msg = str(last_message_obj)
+
+                        if not last_msg and result.get("error"):
+                            last_msg = f"System Error: {result['error']}"
+
+                        await update_tool.ainvoke(
+                            {
+                                "interaction_id": interaction_id,
+                                "generated_sql": result.get("current_sql"),
+                                "response_payload": json.dumps(
+                                    {"text": last_msg, "error": result.get("error")}
+                                ),
+                                "execution_status": status,
+                                "error_type": result.get("error_category"),
+                                "tables_used": result.get("table_names", []),
+                            }
+                        )
+                except Exception as e:
+                    print(f"Warning: Failed to update interaction log: {e}")
 
         # Metadata is already handled early and made sticky via telemetry_context
 
