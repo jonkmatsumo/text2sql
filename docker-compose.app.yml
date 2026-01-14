@@ -33,7 +33,9 @@ services:
       - text2sql_net
 
   mcp-server:
-    build: ./mcp-server
+    build:
+      context: .
+      dockerfile: mcp-server/Dockerfile
     image: text2sql-mcp-server:latest
     container_name: text2sql_core
     depends_on:
