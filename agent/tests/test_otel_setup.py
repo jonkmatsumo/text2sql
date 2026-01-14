@@ -61,7 +61,7 @@ def reset_mocks():
     yield
 
 
-def test_otel_setup_configured(clean_env, reset_telemetry_globals):
+def test_otel_setup(clean_env, reset_telemetry_globals):
     """Verify that OTEL backend configures the SDK."""
     os.environ["TELEMETRY_BACKEND"] = "otel"
     os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4317"

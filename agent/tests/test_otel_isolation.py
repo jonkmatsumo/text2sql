@@ -13,7 +13,7 @@ TEST_CASES = [
 
 
 @pytest.mark.parametrize("backend,expect_import", TEST_CASES)
-def test_telemetry_isolation(backend, expect_import):
+def test_otel_isolation(backend, expect_import):
     """Verify loading agent_core.graph with different backends respects mlflow import isolation."""
     code = f"""
 import sys
