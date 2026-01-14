@@ -1,0 +1,46 @@
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from mcp_server.dal.factory import get_graph_store, reset_singletons
+from mcp_server.dal.interfaces import GraphStore
+from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.services.ingestion.vector_indexer import VectorIndexer
+
+
+def test_dal_factory_is_singleton():
+    """Verify that get_graph_store returns the same instance."""
+    reset_singletons()
+    store1 = get_graph_store()
+    store2 = get_graph_store()
+    assert store1 is store2
+    assert isinstance(store1, GraphStore)
+    assert isinstance(store1, MemgraphStore)
+
+
+def test_vector_indexer_uses_injected_store():
+    """Confirm VectorIndexer uses the provided store instance."""
+    mock_store = MagicMock(spec=GraphStore)
+    with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+        indexer = VectorIndexer(store=mock_store)
+        assert indexer.store is mock_store
+
+
+def test_direct_import_check():
+    """Check for direct MemgraphStore imports in ingestion service.
+
+    This is an audit test to identify files that need refactoring.
+    """
+    ingestion_path = Path("mcp-server/src/mcp_server/services/ingestion")
+
+    # Files we expect to have direct imports CURRENTLY (will be fixed in INVc)
+    # This test is just to confirm the current state.
+    files_with_direct_imports = []
+
+    for py_file in ingestion_path.glob("**/*.py"):
+        content = py_file.read_text()
+        if "from mcp_server.dal.memgraph import MemgraphStore" in content:
+            files_with_direct_imports.append(str(py_file))
+
+    # We expect these to be non-zero for now
+    assert len(files_with_direct_imports) > 0
+    print(f"\nFound direct imports in: {files_with_direct_imports}")
