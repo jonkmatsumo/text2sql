@@ -23,7 +23,10 @@ from langgraph.graph import END, StateGraph
 # Configure Telemetry tracking URI and autologging
 # Default to localhost for local dev, but use container name in Docker
 telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=True, run_tracer_inline=True)
+backend_name = os.getenv("TELEMETRY_BACKEND", "mlflow").lower()
+should_autolog = backend_name != "otel"
+
+telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
 
 
 def with_telemetry_context(node_func):
