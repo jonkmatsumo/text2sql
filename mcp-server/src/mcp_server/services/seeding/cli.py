@@ -35,6 +35,24 @@ async def _ingest_graph_schema():
             # Run async hydration
             await hydrator.hydrate_schema(introspector)
             print("✓ Graph schema ingestion complete.")
+
+            from mcp_server.services.ingestion.vector_index_ddl import (
+                ensure_table_embedding_hnsw_index,
+            )
+
+            # We need the underlying session, which isn't directly exposed by hydrator.store.
+            # However, MemgraphStore (hydrator.store) exposes ._get_session() or driver.session().
+            # Best is to use the driver from the store.
+
+            try:
+                driver = hydrator.store.driver
+                with driver.session() as session:
+                    ensure_table_embedding_hnsw_index(session)
+            except Exception as e:
+                # Log but do not block startup for Phase 1
+                # (unless strictness required in later phases)
+                print(f"⚠ Failed to ensure vector index: {e}")
+
         finally:
             hydrator.close()
 
