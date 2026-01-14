@@ -269,7 +269,7 @@ def main():
         with col3:
             st.subheader("Semantic Cache")
             st.info("Re-index embeddings for cache/retrieval.")
-            if st.button("Re-index Cache"):
+            if st.button("Re-index Cache", disabled=True, help="Coming soon"):
                 asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
 
 
