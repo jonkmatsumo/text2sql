@@ -112,6 +112,8 @@ services:
       - ./streamlit:/app/streamlit
       - ./agent:/app/agent
       - ./mcp-server:/app/mcp-server
+      - ./common/src:/app/common/src
+      - ./common/tests:/app/common/tests
     networks:
       - text2sql_net
     restart: unless-stopped

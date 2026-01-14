@@ -241,6 +241,16 @@ async def run_agent_with_tracing(
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
 
+    from common.sanitization import sanitize_text
+
+    # 0. Centralized Ingress Sanitization
+    raw_question = question
+    res = sanitize_text(question)
+    # We use the sanitized version for all downstream processing
+    # If sanitization fails completely (e.g. empty after trim),
+    # we use an empty string which will trigger failure/clarification naturally.
+    question = res.sanitized or ""
+
     # Ensure telemetry is configured at runtime
     run_telemetry_configure()
 
@@ -284,6 +294,7 @@ async def run_agent_with_tracing(
             "tenant_id": tenant_id,
             "from_cache": False,
             "telemetry_context": telemetry_context,
+            "raw_user_input": raw_question,
         }
 
         # Config with thread_id for checkpointer
