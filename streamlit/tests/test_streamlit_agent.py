@@ -5,27 +5,31 @@ Renamed from test_agent.py to avoid pytest import collisions with
 agent/test_agent.py during repo-root test collection.
 """
 
-import os
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Set OpenAI API key before importing app_logic (which imports agent modules)
-os.environ.setdefault("OPENAI_API_KEY", "test-key-for-testing-only")
+
+@pytest.fixture(autouse=True)
+def mock_agent_dependencies():
+    """Mock agent dependencies for each test to avoid state leakage."""
+    mocks = {
+        "langchain_mcp_adapters": MagicMock(),
+        "langchain_mcp_adapters.client": MagicMock(),
+        "mlflow": MagicMock(),
+        "agent_core": MagicMock(),
+        "agent_core.graph": MagicMock(),
+        "agent_core.telemetry": MagicMock(),
+        "agent_core.state": MagicMock(),
+        "agent_core.nodes": MagicMock(),
+        "agent_core.tools": MagicMock(),
+    }
+    with patch.dict("sys.modules", mocks):
+        yield mocks
 
 
-# Mock missing dependencies
-sys.modules["langchain_mcp_adapters"] = MagicMock()
-sys.modules["langchain_mcp_adapters.client"] = MagicMock()
-sys.modules["mlflow"] = MagicMock()
-sys.modules["agent_core"] = MagicMock()
-sys.modules["agent_core.graph"] = MagicMock()
-sys.modules["agent_core.telemetry"] = MagicMock()
-sys.modules["agent_core.state"] = MagicMock()
-sys.modules["agent_core.nodes"] = MagicMock()
-sys.modules["agent_core.tools"] = MagicMock()
-
+# We import AgentService here but it uses deferred imports internally
+# for things that would be mocked by the fixture above.
 from streamlit_app.service.agent import AgentService  # noqa: E402
 
 
@@ -33,8 +37,9 @@ class TestRunAgent:
     """Tests for run_agent function."""
 
     @pytest.mark.asyncio
-    async def test_run_agent_success(self):
+    async def test_run_agent_success(self, mock_agent_dependencies):
         """Test successful agent execution."""
+        mocks = mock_agent_dependencies
         mock_state = {
             "current_sql": "SELECT COUNT(*) FROM films",
             "query_result": [{"count": 1000}],
@@ -44,36 +49,41 @@ class TestRunAgent:
             "interaction_id": "int-123",
         }
 
-        with patch("agent_core.graph.run_agent_with_tracing", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = mock_state
+        # Use the mock from the fixture
+        mock_graph = mocks["agent_core.graph"]
+        mock_run = AsyncMock(return_value=mock_state)
+        mock_graph.run_agent_with_tracing = mock_run
 
-            results = await AgentService.run_agent("How many films?", tenant_id=1)
+        results = await AgentService.run_agent("How many films?", tenant_id=1)
 
-            assert results["sql"] == "SELECT COUNT(*) FROM films"
-            assert results["result"] == [{"count": 1000}]
-            assert results["response"] == "There are 1000 films."
-            assert results["interaction_id"] == "int-123"
+        assert results["sql"] == "SELECT COUNT(*) FROM films"
+        assert results["result"] == [{"count": 1000}]
+        assert results["response"] == "There are 1000 films."
+        assert results["interaction_id"] == "int-123"
 
 
 class TestFeedback:
     """Tests for feedback submission."""
 
     @pytest.mark.asyncio
-    async def test_submit_feedback_success(self):
+    async def test_submit_feedback_success(self, mock_agent_dependencies):
         """Test successful feedback submission."""
+        mocks = mock_agent_dependencies
         mock_tool = AsyncMock()
         mock_tool.name = "submit_feedback_tool"
 
-        with patch("agent_core.tools.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            mock_get_tools.return_value = [mock_tool]
+        # Use the mock from the fixture
+        mock_tools_module = mocks["agent_core.tools"]
+        mock_get_tools = AsyncMock(return_value=[mock_tool])
+        mock_tools_module.get_mcp_tools = mock_get_tools
 
-            success = await AgentService.submit_feedback("int-123", "UP", "Great")
+        success = await AgentService.submit_feedback("int-123", "UP", "Great")
 
-            assert success is True
-            mock_tool.ainvoke.assert_called_once()
-            args = mock_tool.ainvoke.call_args[0][0]
-            assert args["interaction_id"] == "int-123"
-            assert args["thumb"] == "UP"
+        assert success is True
+        mock_tool.ainvoke.assert_called_once()
+        args = mock_tool.ainvoke.call_args[0][0]
+        assert args["interaction_id"] == "int-123"
+        assert args["thumb"] == "UP"
 
 
 class TestFormatConversationEntry:
