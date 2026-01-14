@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency definition first (cache invalidation layer)
-COPY pyproject.toml ./
+COPY mcp-server/pyproject.toml ./
 
 # Create dummy source to allow pip install to work for dependencies
 # content of src/mcp_server can be empty, but directory structure must match pyproject.toml
@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Copy source code (this changes frequently)
 # Overwrites the dummy src
-COPY src/ ./src/
+COPY mcp-server/src/ ./src/
 
 # Re-install in editable mode (minimal time, just links source)
 RUN --mount=type=cache,target=/root/.cache/pip \
