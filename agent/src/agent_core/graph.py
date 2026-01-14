@@ -2,7 +2,6 @@
 
 import inspect
 import json
-import os
 import uuid
 
 from agent_core.nodes.cache_lookup import cache_lookup_node
@@ -20,6 +19,8 @@ from agent_core.telemetry import SpanType, maybe_import_mlflow_for_backend, tele
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from common.config.env import get_env_str
+
 # Eagerly import mlflow if backend requires it (for test isolation)
 maybe_import_mlflow_for_backend()
 
@@ -28,8 +29,8 @@ def run_telemetry_configure():
     """Configure telemetry at runtime to avoid import-time side effects."""
     # Configure Telemetry tracking URI and autologging
     # Default to localhost for local dev, but use container name in Docker
-    telemetry_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
-    backend_name = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+    telemetry_tracking_uri = get_env_str("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    backend_name = get_env_str("TELEMETRY_BACKEND", "dual").lower()
     # Autolog is used for MLflow integration (direct or via dual)
     should_autolog = backend_name in ("mlflow", "dual")
 
@@ -261,8 +262,8 @@ async def run_agent_with_tracing(
     # Prepare base metadata for all spans
     base_metadata = {
         "tenant_id": str(tenant_id),
-        "environment": os.getenv("ENVIRONMENT", "development"),
-        "deployment": os.getenv("DEPLOYMENT", "development"),
+        "environment": get_env_str("ENVIRONMENT", "development"),
+        "deployment": get_env_str("DEPLOYMENT", "development"),
         "version": "2.0.0",
         "thread_id": thread_id,
     }
@@ -314,7 +315,7 @@ async def run_agent_with_tracing(
                             "conversation_id": session_id or thread_id,
                             "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
                             "user_nlq_text": question,
-                            "model_version": os.getenv("LLM_MODEL", "gpt-4o"),
+                            "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                             "prompt_version": "v1.0",
                             "trace_id": thread_id,
                         }

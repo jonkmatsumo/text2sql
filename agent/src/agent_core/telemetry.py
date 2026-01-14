@@ -8,7 +8,6 @@ import abc
 import contextlib
 import json
 import logging
-import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
@@ -20,12 +19,13 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
+from common.config.env import get_env_str
+
 logger = logging.getLogger(__name__)
 
-# OTEL Configuration Defaults
-OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-OTEL_EXPORTER_OTLP_PROTOCOL = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
-OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-agent")
+OTEL_EXPORTER_OTLP_ENDPOINT = get_env_str("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+OTEL_EXPORTER_OTLP_PROTOCOL = get_env_str("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+OTEL_SERVICE_NAME = get_env_str("OTEL_SERVICE_NAME", "text2sql-agent")
 
 _otel_initialized = False
 
@@ -67,7 +67,7 @@ def maybe_import_mlflow_for_backend():
     This is used to satisfy test isolation requirements while allowing the
     default mode (no env var) to remain minimal.
     """
-    backend_type = os.getenv("TELEMETRY_BACKEND", "").lower()
+    backend_type = get_env_str("TELEMETRY_BACKEND", "").lower()
     if backend_type in ("mlflow", "dual"):
         try:
             import mlflow  # noqa: F401
@@ -579,7 +579,7 @@ class TelemetryService:
         if backend:
             self._backend = backend
         else:
-            backend_type = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+            backend_type = get_env_str("TELEMETRY_BACKEND", "dual").lower()
             if backend_type == "otel":
                 self._backend = OTELTelemetryBackend()
             elif backend_type == "dual":

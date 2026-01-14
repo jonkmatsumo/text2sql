@@ -3,12 +3,13 @@
 Supports OpenAI, Anthropic (Claude), and Google (Gemini) with runtime model selection.
 """
 
-import os
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableLambda
+
+from common.config.env import get_env_str
 
 load_dotenv()
 
@@ -89,7 +90,7 @@ def get_llm_client(
         ValueError: If provider is not supported.
     """
     # Resolve provider from env or default
-    resolved_provider = provider or os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER)
+    resolved_provider = provider or get_env_str("LLM_PROVIDER", DEFAULT_PROVIDER)
     resolved_provider = resolved_provider.lower()
 
     # Validate provider
@@ -104,16 +105,16 @@ def get_llm_client(
         resolved_model = model
     elif use_light_model:
         # Default for light model is gpt-4o-mini if not set
-        resolved_model = os.getenv("LLM_MODEL_LIGHT", "gpt-4o-mini")
+        resolved_model = get_env_str("LLM_MODEL_LIGHT", "gpt-4o-mini")
     else:
-        resolved_model = os.getenv("LLM_MODEL", DEFAULT_MODEL)
+        resolved_model = get_env_str("LLM_MODEL", DEFAULT_MODEL)
 
     # Create client based on provider
     if resolved_provider == "openai":
         from langchain_openai import ChatOpenAI
 
         # Validate API key before instantiation to fail fast
-        key = os.getenv("OPENAI_API_KEY")
+        key = get_env_str("OPENAI_API_KEY")
         placeholders = {"<REPLACE_ME>", "changeme", "your_api_key_here"}
         if not key or key.strip() in placeholders or key.startswith("<"):
             raise ValueError(
