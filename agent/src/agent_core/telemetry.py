@@ -62,12 +62,12 @@ def _setup_otel_sdk():
 
 
 def maybe_import_mlflow_for_backend():
-    """Eagerly import mlflow if the backend is 'mlflow' or 'dual'.
+    """Eagerly import mlflow if the backend is EXPLICITLY 'mlflow' or 'dual'.
 
-    This is used to satisfy test isolation requirements where certain
-    backends are expected to have mlflow loaded in sys.modules at import time.
+    This is used to satisfy test isolation requirements while allowing the
+    default mode (no env var) to remain minimal.
     """
-    backend_type = os.getenv("TELEMETRY_BACKEND", "dual").lower()
+    backend_type = os.getenv("TELEMETRY_BACKEND", "").lower()
     if backend_type in ("mlflow", "dual"):
         try:
             import mlflow  # noqa: F401

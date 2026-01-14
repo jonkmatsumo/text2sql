@@ -18,6 +18,7 @@ sys.modules["langchain_mcp_adapters"] = mcp_mock
 sys.modules["langchain_mcp_adapters.client"] = mcp_mock
 
 # Import the module under test
+os.environ["TELEMETRY_BACKEND"] = "otel"
 from agent_core import graph
 
 # Assert mlflow is not loaded

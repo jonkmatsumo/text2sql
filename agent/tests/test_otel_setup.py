@@ -1,5 +1,4 @@
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,17 +48,21 @@ def otel_mocks():
     otel_mock.context = mocks["opentelemetry.context"]
     otel_mock.propagate = mocks["opentelemetry.propagate"]
 
-    with patch.dict("sys.modules", mocks):
-        # We must import telemetry AFTER mocking sys.modules to pick up mocks.
-        # If already imported, reload the module to ensure use of mocks.
-        if "agent_core.telemetry" in sys.modules:
-            import importlib
-
-            import agent_core.telemetry as telemetry_module
-
-            importlib.reload(telemetry_module)
+    with patch.dict("sys.modules", mocks), patch(
+        "agent_core.telemetry.Resource", mocks["opentelemetry.sdk.resources"].Resource
+    ), patch(
+        "agent_core.telemetry.TracerProvider", mocks["opentelemetry.sdk.trace"].TracerProvider
+    ), patch(
+        "agent_core.telemetry.BatchSpanProcessor",
+        mocks["opentelemetry.sdk.trace.export"].BatchSpanProcessor,
+    ), patch(
+        "agent_core.telemetry.trace", mocks["opentelemetry.trace"]
+    ):
 
         from agent_core import telemetry
+
+        # Ensure the global flag is reset so configure() actually runs logic
+        telemetry._otel_initialized = False
 
         yield mocks, telemetry
 
