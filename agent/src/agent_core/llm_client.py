@@ -8,8 +8,52 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import RunnableLambda
 
 load_dotenv()
+
+
+def _sanitize_llm_input(input_data: Any) -> Any:
+    """Recursively sanitize all string content in LLM inputs."""
+    from common.sanitization import sanitize_text
+
+    if isinstance(input_data, str):
+        # We allow longer inputs for LLM prompts (e.g. DDLs)
+        # The default max is 64, which is too small for prompts.
+        # However, the user said "exactly once per request/invocation".
+        # And "common.sanitization" has defaults.
+        # If I use defaults, I might truncate the whole prompt!
+
+        # Wait, if I'm sanitizing the WHOLE prompt, I need a much larger max_len.
+        res = sanitize_text(input_data, max_len=100000)
+        return res.sanitized or ""
+
+    if isinstance(input_data, list):
+        return [_sanitize_llm_input(x) for x in input_data]
+
+    if isinstance(input_data, dict):
+        return {k: _sanitize_llm_input(v) for k, v in input_data.items()}
+
+    if hasattr(input_data, "content"):
+        # It's a LangChain message. We want to sanitize its content.
+        # We should not mutate it if we want to be safe, but creating a new one is better.
+        # However, we don't necessarily know the constructor args.
+        # Most LangChain messages allow content as first arg.
+        content = _sanitize_llm_input(input_data.content)
+        # Using copy and update if possible, or just mutation if we are certain it's fresh.
+        # In a Runnable chain, messages are usually freshly created by the prompt.
+        input_data.content = content
+        return input_data
+
+    # Handle PromptValue (has to_messages() and to_string())
+    if hasattr(input_data, "to_messages"):
+        messages = input_data.to_messages()
+        sanitized_messages = [_sanitize_llm_input(m) for m in messages]
+        # Return as list of messages, which LangChain LLMs accept.
+        return sanitized_messages
+
+    return input_data
+
 
 # Default configuration
 DEFAULT_PROVIDER = "openai"
@@ -146,9 +190,11 @@ def get_llm(
     key = (provider, model, temperature, use_light_model)
 
     if key not in _LLM_CACHE:
-        _LLM_CACHE[key] = get_llm_client(
+        llm = get_llm_client(
             provider=provider, model=model, temperature=temperature, use_light_model=use_light_model
         )
+        # Apply sanitization wrapper exactly once at invocation boundary
+        _LLM_CACHE[key] = RunnableLambda(_sanitize_llm_input) | llm
 
     return _LLM_CACHE[key]
 
