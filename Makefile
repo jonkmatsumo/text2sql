@@ -11,6 +11,7 @@ help:
 	@echo "  make docker-nuke        - DESTRUCTIVE: Removes all volumes and local persistent data"
 	@echo "  make otel-migrate       - Run database migrations for the OTEL worker (manual)"
 	@echo "  make otel-up            - Bring up the observability stack (auto-migrates)"
+	@echo "  make stress-verify      - Run stress/stability test for OTEL worker (pip install aiohttp required)"
 
 # OTEL Scaffolding (Issue D/F)
 otel-migrate:
@@ -18,6 +19,10 @@ otel-migrate:
 
 otel-up:
 	docker compose $(COMPOSE_FILES) up -d otel-collector otel-worker
+
+stress-verify:
+	@echo "Running OTEL Worker Stress Test..."
+	@python3 observability/otel-worker/tests/stress_test_otel_worker.py --url http://localhost:8002/v1/traces --duration 5 --concurrency 5 --rps 50
 
 # Safe cleanup (default)
 # Stops containers, removes stopped containers, prunes dangling images and builder cache
