@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from mcp_server.services.ingestion.vector_indexer import VectorIndexer, apply_adaptive_threshold
@@ -236,12 +236,51 @@ class TestVectorIndexerObservability:
         mock_session.run.side_effect = Exception("DB Error")
 
         with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
-            with pytest.raises(Exception):
-                await indexer.search_nodes("query", k=5)
+            with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
+                # Mock context manager
+                mock_span = MagicMock()
+                mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 
-            mock_logger.error.assert_called()
-            call_args = mock_logger.error.call_args
-            extra = call_args.kwargs.get("extra")
-            assert extra["event"] == "memgraph_ann_seed_search_failed"
-            assert extra["error_type"] == "Exception"
-            assert extra["label"] == "Table"
+                with pytest.raises(Exception):
+                    await indexer.search_nodes("query", k=5)
+
+                mock_logger.error.assert_called()
+                call_args = mock_logger.error.call_args
+                extra = call_args.kwargs.get("extra")
+                assert extra["event"] == "memgraph_ann_seed_search_failed"
+                assert extra["error_type"] == "Exception"
+                assert extra["label"] == "Table"
+
+                # Check span failure
+                mock_telemetry.set_span_status.assert_called_with(
+                    mock_span, success=False, error=ANY
+                )
+
+    @pytest.mark.asyncio
+    async def test_search_nodes_otel_span_success(self, indexer):
+        """Validate OTEL span creation and attributes on success."""
+        mock_session = indexer.store.driver.session.return_value.__enter__.return_value
+        mock_session.run.return_value = [{"node": {"name": "test"}, "score": 0.9}]
+        indexer._map_ann_results = lambda r: r
+
+        with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
+            # Mock context manager
+            mock_span = MagicMock()
+            mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
+
+            await indexer.search_nodes("query", k=5, apply_threshold=True)
+
+            # Verify start_span call
+            mock_telemetry.start_span.assert_called_once()
+            args, kwargs = mock_telemetry.start_span.call_args
+            assert args[0] == "vector_seed_selection.ann"
+            assert kwargs["attributes"]["db.operation"] == "ANN_SEARCH"
+            assert kwargs["attributes"]["vector.label"] == "Table"
+
+            # Verify dynamic attributes
+            mock_span.set_attribute.assert_any_call("vector.returned_count", 1)
+            mock_span.set_attribute.assert_any_call("vector.threshold_applied", True)
+            mock_span.set_attribute.assert_any_call("vector.threshold_value", ANY)
+
+            # Verify status
+            mock_telemetry.set_span_status.assert_called_with(mock_span, success=True)

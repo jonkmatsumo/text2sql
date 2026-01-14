@@ -9,6 +9,7 @@ import time
 from typing import List, Optional
 
 from mcp_server.dal.memgraph import MemgraphStore
+from mcp_server.utils.telemetry import Telemetry
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
@@ -225,60 +226,79 @@ class VectorIndexer:
 
         def _run_search():
             start_time = time.monotonic()
-            try:
-                with self.driver.session() as session:
-                    if not query_vector:
-                        return []
 
-                    # Build query (HNSW for Table, Scan for others)
-                    query = self._build_ann_query(label, "embedding", "$embedding", "$k")
+            span_attributes = {
+                "db.system": "memgraph",
+                "db.operation": "ANN_SEARCH",
+                "vector.label": label,
+                "vector.top_k": k,
+            }
 
-                    params = {"embedding": query_vector, "k": k}
-                    result = session.run(query, params)
+            with Telemetry.start_span(
+                "vector_seed_selection.ann", attributes=span_attributes
+            ) as span:
+                try:
+                    with self.driver.session() as session:
+                        if not query_vector:
+                            return []
 
-                    hits = []
-                    for record in result:
-                        hits.append(self._map_ann_results(record))
+                        # Build query (HNSW for Table, Scan for others)
+                        query = self._build_ann_query(label, "embedding", "$embedding", "$k")
 
-                    # Apply adaptive thresholding
-                    threshold_val = 0.0
-                    if apply_threshold and hits:
-                        hits, threshold_val = apply_adaptive_threshold(hits)
+                        params = {"embedding": query_vector, "k": k}
+                        result = session.run(query, params)
 
+                        hits = []
+                        for record in result:
+                            hits.append(self._map_ann_results(record))
+
+                        # Apply adaptive thresholding
+                        threshold_val = 0.0
+                        if apply_threshold and hits:
+                            hits, threshold_val = apply_adaptive_threshold(hits)
+
+                        elapsed_ms = (time.monotonic() - start_time) * 1000
+
+                        log_payload = {
+                            "event": "memgraph_ann_seed_search",
+                            "label": label,
+                            "top_k": k,
+                            "returned_count": len(hits),
+                            "elapsed_ms": elapsed_ms,
+                            "threshold_applied": apply_threshold,
+                        }
+                        if apply_threshold:
+                            log_payload["threshold_value"] = threshold_val
+
+                        # Add dynamic attributes to span
+                        span.set_attribute("vector.returned_count", len(hits))
+                        span.set_attribute("vector.threshold_applied", apply_threshold)
+                        if apply_threshold:
+                            span.set_attribute("vector.threshold_value", threshold_val)
+
+                        logger.info(
+                            f"ANN search completed for label={label}, returned {len(hits)} hits",
+                            extra=log_payload,
+                        )
+
+                        Telemetry.set_span_status(span, success=True)
+                        return hits
+                except Exception as e:
                     elapsed_ms = (time.monotonic() - start_time) * 1000
-
-                    log_payload = {
-                        "event": "memgraph_ann_seed_search",
-                        "label": label,
-                        "top_k": k,
-                        "returned_count": len(hits),
-                        "elapsed_ms": elapsed_ms,
-                        "threshold_applied": apply_threshold,
-                    }
-                    if apply_threshold:
-                        log_payload["threshold_value"] = threshold_val
-
-                    logger.info(
-                        f"ANN search completed for label={label}, returned {len(hits)} hits",
-                        extra=log_payload,
+                    logger.error(
+                        "ANN search failed",
+                        exc_info=True,
+                        extra={
+                            "event": "memgraph_ann_seed_search_failed",
+                            "error_type": type(e).__name__,
+                            "label": label,
+                            "top_k": k,
+                            "elapsed_ms": elapsed_ms,
+                        },
                     )
-
-                    return hits
-            except Exception as e:
-                elapsed_ms = (time.monotonic() - start_time) * 1000
-                logger.error(
-                    "ANN search failed",
-                    exc_info=True,
-                    extra={
-                        "event": "memgraph_ann_seed_search_failed",
-                        "error_type": type(e).__name__,
-                        "label": label,
-                        "top_k": k,
-                        "elapsed_ms": elapsed_ms,
-                    },
-                )
-                # Re-raise to preserve contract; failure handled upstream.
-                raise
+                    Telemetry.set_span_status(span, success=False, error=e)
+                    # Re-raise to preserve contract; failure handled upstream.
+                    raise
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_search)
