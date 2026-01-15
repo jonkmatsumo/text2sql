@@ -41,7 +41,7 @@ services:
       otel-worker-migrate:
         condition: service_completed_successfully
     ports:
-      - "5050:5050"
+      - "4320:4320"
     volumes:
       - ./otel-worker/src:/app/src
     networks:
