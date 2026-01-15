@@ -8,6 +8,7 @@ import abc
 import contextlib
 import json
 import logging
+import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
@@ -41,6 +42,18 @@ def _setup_otel_sdk():
 
     resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
     provider = TracerProvider(resource=resource)
+
+    # Check if we are running in a test environment
+    if (
+        "PYTEST_CURRENT_TEST" in os.environ
+        and os.environ.get("OTEL_ENABLE_IN_TESTS", "").lower() != "true"
+    ):
+        # In tests, specifically avoid OTLP to prevent connection retry noise
+        # unless explicitly enabled.
+        trace.set_tracer_provider(provider)
+        _otel_initialized = True
+        logger.info("OTEL SDK initialized in TEST mode (No-op exporter)")
+        return
 
     if OTEL_EXPORTER_OTLP_PROTOCOL == "grpc":
         try:

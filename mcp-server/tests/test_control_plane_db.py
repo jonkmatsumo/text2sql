@@ -43,7 +43,7 @@ class TestControlPlaneDatabase:
         ) as mock_create:
             mock_create.return_value = mock_pool
             with patch(
-                "mcp_server.config.control_plane.os.getenv",
+                "common.config.env.os.getenv",
                 side_effect=lambda key, default=None: env_vars.get(key, default),
             ):
                 await ControlPlaneDatabase.init()

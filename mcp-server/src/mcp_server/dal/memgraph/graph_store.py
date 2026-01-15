@@ -1,12 +1,12 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from mcp_server.models.graph.data import GraphData
-from mcp_server.models.graph.edge import Edge
-from mcp_server.models.graph.node import Node
 from neo4j import GraphDatabase
 
 from common.interfaces import GraphStore
+from schema.graph.data import GraphData
+from schema.graph.edge import Edge
+from schema.graph.node import Node
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,14 @@
+from contextlib import asynccontextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 from agent_core.graph import run_agent_with_tracing
+
+
+@asynccontextmanager
+async def mock_mcp_context():
+    """Mock MCP context that yields empty tools list."""
+    yield []
 
 
 @pytest.mark.asyncio
@@ -37,7 +44,9 @@ async def test_ingress_sanitization_applied():
 
         # We need to re-import or use the app from graph
 
-        with patch("agent_core.graph.app", mock_app):
+        with patch("agent_core.graph.app", mock_app), patch(
+            "agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context
+        ):
             await run_agent_with_tracing(raw_input)
 
         # 1. Assert sanitization invoked exactly once
@@ -65,7 +74,9 @@ async def test_normal_input_behavior():
         mock_app.ainvoke.return_value = {"messages": []}
         mock_compile.return_value = mock_app
 
-        with patch("agent_core.graph.app", mock_app):
+        with patch("agent_core.graph.app", mock_app), patch(
+            "agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context
+        ):
             await run_agent_with_tracing(normal_input)
 
         inputs = mock_app.ainvoke.call_args[0][0]

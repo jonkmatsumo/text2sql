@@ -40,3 +40,9 @@ class RegistryStore(Protocol):
     async def tombstone_pair(self, signature_key: str, tenant_id: int, reason: str) -> bool:
         """Mark a pair as tombstoned."""
         ...
+
+    async def fetch_by_signatures(
+        self, signature_keys: List[str], tenant_id: int
+    ) -> List[QueryPair]:
+        """Fetch multiple pairs by their signature keys."""
+        ...

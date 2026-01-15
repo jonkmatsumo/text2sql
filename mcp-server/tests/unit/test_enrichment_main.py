@@ -92,7 +92,7 @@ class TestEnrichmentPipeline(unittest.IsolatedAsyncioTestCase):
 
         mock_wal = mock_wal_cls.return_value
 
-        pipeline = EnrichmentPipeline(dry_run=True)
+        pipeline = EnrichmentPipeline(store=MagicMock(), dry_run=True)
 
         # Should not raise exception
         await pipeline._process_node_safely(mock_agent, mock_wal, {"id": 1, "name": "Bad Node"})

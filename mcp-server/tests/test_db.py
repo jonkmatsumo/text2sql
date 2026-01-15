@@ -27,7 +27,7 @@ class TestDatabase:
         ) as mock_create:
             mock_create.return_value = mock_pool
             with patch(
-                "mcp_server.config.database.os.getenv",
+                "common.config.env.os.getenv",
                 side_effect=lambda key, default=None: default,
             ):
                 await Database.init()
@@ -57,7 +57,7 @@ class TestDatabase:
         ) as mock_create:
             mock_create.return_value = mock_pool
             with patch(
-                "mcp_server.config.database.os.getenv",
+                "common.config.env.os.getenv",
                 side_effect=lambda key, default=None: env_vars.get(key, default),
             ):
                 await Database.init()
@@ -79,7 +79,7 @@ class TestDatabase:
         ) as mock_create:
             mock_create.side_effect = Exception("Database connection failed")
             with patch(
-                "mcp_server.config.database.os.getenv",
+                "common.config.env.os.getenv",
                 side_effect=lambda key, default=None: default,
             ):
                 with pytest.raises(ConnectionError) as exc_info:
