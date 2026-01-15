@@ -15,26 +15,17 @@ from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, maybe_import_mlflow_for_backend, telemetry
+from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from common.config.env import get_env_str
 
-# Eagerly import mlflow if backend requires it (for test isolation)
-maybe_import_mlflow_for_backend()
-
 
 def run_telemetry_configure():
     """Configure telemetry at runtime to avoid import-time side effects."""
-    # Configure Telemetry tracking URI and autologging
-    # Default to localhost for local dev, but use container name in Docker
-    telemetry_tracking_uri = get_env_str("MLFLOW_TRACKING_URI", "http://localhost:5001")
-    backend_name = get_env_str("TELEMETRY_BACKEND", "dual").lower()
-    # Autolog is used for MLflow integration (direct or via dual)
-    should_autolog = backend_name in ("mlflow", "dual")
-
-    telemetry.configure(tracking_uri=telemetry_tracking_uri, autolog=should_autolog)
+    # Configure Telemetry (OTEL only)
+    telemetry.configure()
 
 
 def with_telemetry_context(node_func):
