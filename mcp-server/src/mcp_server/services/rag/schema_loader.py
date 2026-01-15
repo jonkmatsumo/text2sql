@@ -5,9 +5,9 @@ import logging
 import numpy as np
 from mcp_server.config.database import Database
 
-# from mcp_server.services.ingestion.vector_indexes import VectorIndex  # If needed
+# from ingestion.vector_indexes import VectorIndex  # If needed
 # Note: Check if generic usage or specific.
-from mcp_server.services.ingestion.vector_indexes.protocol import VectorIndex
+from common.interfaces.vector_index import VectorIndex
 
 logger = logging.getLogger(__name__)
 

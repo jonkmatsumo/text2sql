@@ -1,8 +1,8 @@
 from typing import List
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
 
+from common.interfaces.schema_introspector import SchemaIntrospector
 from schema import ColumnDef, ForeignKeyDef, TableDef
 
 

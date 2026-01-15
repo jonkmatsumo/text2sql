@@ -3,15 +3,23 @@
 import logging
 
 import numpy as np
-from mcp_server.config.database import Database
 
-from .vector_indexes.protocol import VectorIndex
+from common.interfaces import ExampleStore
+from common.interfaces.vector_index import VectorIndex
 
 logger = logging.getLogger(__name__)
 
 
 class ExampleLoader:
     """Loads SQL examples from database into the vector index."""
+
+    def __init__(self, store: ExampleStore):
+        """Initialize with ExampleStore.
+
+        Args:
+            store: ExampleStore instance.
+        """
+        self.store = store
 
     async def load_examples(self, index: VectorIndex) -> None:
         """
@@ -20,8 +28,7 @@ class ExampleLoader:
         Args:
             index: The VectorIndex instance to populate.
         """
-        store = Database.get_example_store()
-        examples = await store.fetch_all_examples()
+        examples = await self.store.fetch_all_examples()
 
         if not examples:
             logger.warning("No examples found in ExampleStore.")

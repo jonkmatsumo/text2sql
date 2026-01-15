@@ -3,8 +3,9 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.example_store import ExampleStore
 from mcp_server.models import Example
+
+from common.interfaces.example_store import ExampleStore
 
 
 class PostgresExampleStore(ExampleStore):

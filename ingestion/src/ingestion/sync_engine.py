@@ -1,8 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from mcp_server.dal.factory import get_schema_introspector
-from mcp_server.dal.interfaces import GraphStore
+from common.interfaces import GraphStore, SchemaIntrospector
 
 logger = logging.getLogger(__name__)
 
@@ -10,20 +9,16 @@ logger = logging.getLogger(__name__)
 class SyncEngine:
     """Synchronizes live PostgreSQL schema with Memgraph using DAL."""
 
-    def __init__(self, store: GraphStore = None):
+    def __init__(self, store: GraphStore, introspector: SchemaIntrospector):
         """
         Initialize the Sync Engine.
 
         Args:
-            store: Optional existing GraphStore instance. If None, uses singleton from factory.
+            store: GraphStore instance.
+            introspector: SchemaIntrospector instance.
         """
-        self.introspector = get_schema_introspector()
-        if store:
-            self.store = store
-        else:
-            from .dependencies import get_ingestion_graph_store
-
-            self.store = get_ingestion_graph_store()
+        self.store = store
+        self.introspector = introspector
 
     def close(self):
         """Close connections."""

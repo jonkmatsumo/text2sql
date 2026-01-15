@@ -9,9 +9,8 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
-from mcp_server.utils.telemetry import Telemetry
-
 from common.config.env import get_env_bool, get_env_str
+from common.telemetry import Telemetry
 
 logger = logging.getLogger(__name__)
 

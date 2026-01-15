@@ -2,7 +2,8 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import (
+
+from common.interfaces import (
     CacheStore,
     ExampleStore,
     GraphStore,

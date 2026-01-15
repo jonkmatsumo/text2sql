@@ -25,11 +25,11 @@ import logging
 from typing import Dict, List, Optional
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
 from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
 from mcp_server.services.patterns.validator import PatternValidator
 from openai import AsyncOpenAI
 
+from common.interfaces.schema_introspector import SchemaIntrospector
 from schema import ColumnDef
 
 logging.basicConfig(level=logging.INFO)

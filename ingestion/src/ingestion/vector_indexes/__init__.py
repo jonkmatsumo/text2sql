@@ -4,9 +4,10 @@ Provides pluggable vector similarity search backends.
 Currently uses HNSW (hnswlib) as the sole implementation.
 """
 
+from common.interfaces.vector_index import SearchResult, VectorIndex
+
 from .factory import create_vector_index
 from .hnsw import HNSWIndex
-from .protocol import SearchResult, VectorIndex
 from .reranker import search_with_rerank
 from .thread_safe import ThreadSafeIndex
 

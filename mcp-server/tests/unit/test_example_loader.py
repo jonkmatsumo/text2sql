@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from mcp_server.services.ingestion.example_loader import ExampleLoader
+
+from ingestion.example_loader import ExampleLoader
 
 
 class TestExampleLoader:
@@ -21,7 +22,7 @@ class TestExampleLoader:
         mock_index = MagicMock()
 
         with patch(
-            "mcp_server.services.ingestion.example_loader.Database.get_example_store",
+            "ingestion.example_loader.Database.get_example_store",
             return_value=mock_store,
         ):
             loader = ExampleLoader()
@@ -50,7 +51,7 @@ class TestExampleLoader:
         mock_index = MagicMock()
 
         with patch(
-            "mcp_server.services.ingestion.example_loader.Database.get_example_store",
+            "ingestion.example_loader.Database.get_example_store",
             return_value=mock_store,
         ):
             loader = ExampleLoader()

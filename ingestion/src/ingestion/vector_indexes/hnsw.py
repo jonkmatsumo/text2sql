@@ -14,7 +14,7 @@ try:
 except ImportError:
     hnswlib = None  # Allow import without hnswlib installed
 
-from .protocol import SearchResult
+from common.interfaces.vector_index import SearchResult
 
 
 class HNSWIndex:

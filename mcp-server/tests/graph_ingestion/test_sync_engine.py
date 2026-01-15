@@ -1,13 +1,13 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp_server.dal.interfaces import GraphStore
-from mcp_server.services.ingestion.sync_engine import SyncEngine
 
+from common.interfaces import GraphStore
+from ingestion.sync_engine import SyncEngine
 from schema import ColumnDef, TableDef
 
 
-@patch("mcp_server.services.ingestion.sync_engine.get_schema_introspector")
+@patch("ingestion.sync_engine.get_schema_introspector")
 def test_sync_engine_init(mock_get_introspector):
     """Test initialization."""
     mock_store = MagicMock(spec=GraphStore)
@@ -15,7 +15,7 @@ def test_sync_engine_init(mock_get_introspector):
     mock_get_introspector.assert_called_once()
 
 
-@patch("mcp_server.services.ingestion.sync_engine.get_schema_introspector")
+@patch("ingestion.sync_engine.get_schema_introspector")
 @pytest.mark.asyncio
 async def test_get_live_schema(mock_get_introspector):
     """Test get_live_schema uses introspector and formats correctly."""

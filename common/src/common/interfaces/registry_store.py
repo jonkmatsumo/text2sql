@@ -1,6 +1,6 @@
 from typing import List, Optional, Protocol, runtime_checkable
 
-from mcp_server.models import QueryPair
+from schema.registry import QueryPair
 
 
 @runtime_checkable

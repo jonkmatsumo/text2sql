@@ -1,6 +1,6 @@
 from typing import List, Protocol, runtime_checkable
 
-from mcp_server.models import Example
+from schema.rag import Example
 
 
 @runtime_checkable

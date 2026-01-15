@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.services.ingestion.vector_indexer import VectorIndexer
+
+from ingestion.vector_indexer import VectorIndexer
 
 # Skip if explicit env var not set (default skip in CI unless configured)
 RUN_INTEGRATION = os.getenv("RUN_MEMGRAPH_INTEGRATION_TESTS", "false").lower() == "true"

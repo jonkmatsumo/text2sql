@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from mcp_server.dal.interfaces import GraphStore
+from common.interfaces import GraphStore
 
 from .agent import EnrichmentAgent
 from .config import PipelineConfig
@@ -15,15 +15,12 @@ logger = logging.getLogger(__name__)
 class EnrichmentPipeline:
     """Orchestrates the semantic enrichment process (Robust & Idempotent)."""
 
-    def __init__(self, dry_run: bool = False, store: GraphStore = None):
+    def __init__(self, store: GraphStore, dry_run: bool = False):
         """Initialize the pipeline."""
         self.config = PipelineConfig(dry_run=dry_run)
-        if store:
-            self.store = store
-        else:
-            from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
-
-            self.store = get_ingestion_graph_store()
+        if store is None:
+            raise ValueError("store is required")
+        self.store = store
         self.semaphore = asyncio.Semaphore(5)  # Enforce concurrency limit
 
     def close(self):
@@ -160,7 +157,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    pipeline = EnrichmentPipeline(dry_run=args.dry_run)
+    from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
+
+    store = get_ingestion_graph_store()
+
+    pipeline = EnrichmentPipeline(store=store, dry_run=args.dry_run)
     try:
         asyncio.run(pipeline.run())
     finally:

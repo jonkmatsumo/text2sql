@@ -6,7 +6,7 @@ ensuring idempotency and correct syntax.
 
 import logging
 
-from mcp_server.dal.interfaces import GraphStore
+from common.interfaces import GraphStore
 
 logger = logging.getLogger(__name__)
 

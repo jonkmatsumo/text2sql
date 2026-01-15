@@ -13,8 +13,9 @@ from typing import List, Optional
 
 import numpy as np
 
+from common.interfaces.vector_index import SearchResult, VectorIndex
+
 from .vector_indexes import search_with_rerank
-from .vector_indexes.protocol import SearchResult, VectorIndex
 
 logger = logging.getLogger(__name__)
 

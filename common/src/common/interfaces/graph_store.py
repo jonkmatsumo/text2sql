@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-from mcp_server.models import Edge, GraphData, Node
+from schema.graph import Edge, GraphData, Node
 
 
 @runtime_checkable

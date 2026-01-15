@@ -1,7 +1,5 @@
-"""RAG model definitions."""
+"""RAG model definitions (legacy shim)."""
 
-from .embedding import SchemaEmbedding
-from .example import Example
-from .filters import FilterCriteria
+from schema.rag import Example, FilterCriteria, SchemaEmbedding
 
 __all__ = ["Example", "FilterCriteria", "SchemaEmbedding"]

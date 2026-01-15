@@ -13,7 +13,7 @@ async def test_ingest_graph_schema_wires_vector_index():
     with patch("mcp_server.services.seeding.cli.get_schema_introspector"), patch(
         "mcp_server.services.seeding.cli.GraphHydrator"
     ) as MockHydrator, patch(
-        "mcp_server.services.ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
+        "ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
     ) as mock_ensure:
 
         # Setup mock hydrator
@@ -38,7 +38,7 @@ async def test_ingest_graph_schema_handles_ensure_error():
     with patch("mcp_server.services.seeding.cli.get_schema_introspector"), patch(
         "mcp_server.services.seeding.cli.GraphHydrator"
     ) as MockHydrator, patch(
-        "mcp_server.services.ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
+        "ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
     ) as mock_ensure:
 
         mock_hydrator_instance = MockHydrator.return_value

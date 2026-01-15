@@ -1,8 +1,10 @@
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import numpy as np
-from mcp_server.models import FilterCriteria
-from mcp_server.services.ingestion.vector_indexes.protocol import SearchResult
+
+from schema.rag import FilterCriteria
+
+from .vector_index import SearchResult
 
 
 @runtime_checkable

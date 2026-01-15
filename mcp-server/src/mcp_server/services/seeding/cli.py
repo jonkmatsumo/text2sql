@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mcp_server.config.database import Database
 from mcp_server.dal.factory import get_schema_introspector
-from mcp_server.services.ingestion.graph_hydrator import GraphHydrator
+from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
 from mcp_server.services.rag.engine import (
     RagEngine,
     format_vector_for_postgres,
@@ -18,6 +18,8 @@ from mcp_server.services.rag.engine import (
 )
 from mcp_server.services.registry import RegistryService
 from mcp_server.services.seeding.loader import load_from_directory, load_table_summaries
+
+from ingestion.graph_hydrator import GraphHydrator
 
 
 async def _ingest_graph_schema():
@@ -28,15 +30,14 @@ async def _ingest_graph_schema():
         introspector = get_schema_introspector()
 
         # Hydrate
-        hydrator = GraphHydrator()
+        store = get_ingestion_graph_store()
+        hydrator = GraphHydrator(store)
         try:
             # Run async hydration
             await hydrator.hydrate_schema(introspector)
             print("✓ Graph schema ingestion complete.")
 
-            from mcp_server.services.ingestion.vector_index_ddl import (
-                ensure_table_embedding_hnsw_index,
-            )
+            from ingestion.vector_index_ddl import ensure_table_embedding_hnsw_index
 
             try:
                 ensure_table_embedding_hnsw_index(hydrator.store)

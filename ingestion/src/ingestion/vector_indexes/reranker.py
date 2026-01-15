@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, List, Optional
 import numpy as np
 
 if TYPE_CHECKING:
-    from .protocol import VectorIndex
+    from common.interfaces.vector_index import VectorIndex
 
-from .protocol import SearchResult
+from common.interfaces.vector_index import SearchResult
 
 logger = logging.getLogger(__name__)
 

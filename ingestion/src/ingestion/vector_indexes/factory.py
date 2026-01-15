@@ -7,7 +7,7 @@ Currently only HNSW is supported, but env var is preserved for future backends.
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from .protocol import VectorIndex
+    from common.interfaces.vector_index import VectorIndex
 
 
 def create_vector_index(

@@ -4,7 +4,8 @@ import os
 
 import numpy as np
 import pytest
-from mcp_server.services.ingestion.vector_indexes import HNSWIndex, search_with_rerank
+
+from ingestion.vector_indexes import HNSWIndex, search_with_rerank
 
 
 class TestSearchWithRerank:

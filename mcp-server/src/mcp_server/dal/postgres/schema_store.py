@@ -2,9 +2,10 @@ import json
 from contextlib import asynccontextmanager
 from typing import List
 
-from mcp_server.dal.interfaces.schema_store import SchemaStore
 from mcp_server.dal.postgres.common import _format_vector
 from mcp_server.models import SchemaEmbedding
+
+from common.interfaces.schema_store import SchemaStore
 
 
 class PostgresSchemaStore(SchemaStore):

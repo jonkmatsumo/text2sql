@@ -5,7 +5,8 @@ import tempfile
 
 import numpy as np
 import pytest
-from mcp_server.services.ingestion.vector_indexes import HNSWIndex, create_vector_index
+
+from ingestion.vector_indexes import HNSWIndex, create_vector_index
 
 # Skip all tests if hnswlib is not available
 pytestmark = pytest.mark.skipif(HNSWIndex is None, reason="hnswlib not installed")
@@ -288,7 +289,7 @@ class TestHNSWProtocolCompliance:
 
     def test_structural_subtyping(self):
         """Verify HNSWIndex works as VectorIndex."""
-        from mcp_server.services.ingestion.vector_indexes import VectorIndex
+        from ingestion.vector_indexes import VectorIndex
 
         index: VectorIndex = HNSWIndex(dim=3)
 

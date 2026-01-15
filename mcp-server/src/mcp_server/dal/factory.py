@@ -26,19 +26,6 @@ Example:
 import logging
 from typing import Optional
 
-from mcp_server.dal.interfaces import (
-    CacheStore,
-    ConversationStore,
-    ExampleStore,
-    FeedbackStore,
-    GraphStore,
-    InteractionStore,
-    MetadataStore,
-    PatternRunStore,
-    RegistryStore,
-    SchemaIntrospector,
-    SchemaStore,
-)
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.postgres import (
     PgSemanticCache,
@@ -53,6 +40,20 @@ from mcp_server.dal.postgres import (
     PostgresSchemaStore,
 )
 from mcp_server.dal.util.env import get_provider_env
+
+from common.interfaces import (
+    CacheStore,
+    ConversationStore,
+    ExampleStore,
+    FeedbackStore,
+    GraphStore,
+    InteractionStore,
+    MetadataStore,
+    PatternRunStore,
+    RegistryStore,
+    SchemaIntrospector,
+    SchemaStore,
+)
 
 logger = logging.getLogger(__name__)
 

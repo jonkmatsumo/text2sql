@@ -1,1 +1,1 @@
-"""Services for data ingestion and vector indexing."""
+"""Ingestion services shim."""

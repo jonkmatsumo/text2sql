@@ -8,9 +8,10 @@ import logging
 import time
 from typing import List, Optional
 
-from mcp_server.dal.interfaces import GraphStore
-from mcp_server.utils.telemetry import Telemetry
 from openai import AsyncOpenAI
+
+from common.interfaces import GraphStore
+from common.telemetry import Telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -94,21 +95,18 @@ class VectorIndexer:
 
     def __init__(
         self,
-        store: Optional[GraphStore] = None,
+        store: GraphStore,
     ):
         """Initialize with GraphStore.
 
         Args:
-            store: Optional existing GraphStore instance. If None, uses singleton from factory.
+            store: GraphStore instance.
         """
-        if store:
-            self.store = store
-            self.owns_store = False
-        else:
-            from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
+        if store is None:
+            raise ValueError("store is required")
 
-            self.store = get_ingestion_graph_store()
-            self.owns_store = False  # Singleton managed by factory
+        self.store = store
+        self.owns_store = False
 
         self.embedding_service = EmbeddingService()
 
@@ -229,7 +227,11 @@ class VectorIndexer:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
-    indexer = VectorIndexer()
+    from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
+
+    store = get_ingestion_graph_store()
+
+    indexer = VectorIndexer(store=store)
     try:
         indexer.create_indexes()
         print("✓ Indexes created.")

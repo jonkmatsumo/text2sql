@@ -2,8 +2,9 @@ import os
 from unittest.mock import patch
 
 import pytest
-from mcp_server.services.ingestion.enrichment.config import PipelineConfig
-from mcp_server.services.ingestion.enrichment.hashing import generate_canonical_hash
+
+from ingestion.enrichment.config import PipelineConfig
+from ingestion.enrichment.hashing import generate_canonical_hash
 
 
 class TestPipelineConfig:
