@@ -326,4 +326,4 @@ and default to Postgres or Memgraph for local development.
 The OpenTelemetry stack is provided in `observability/docker-compose.observability.yml`.
 It includes `otel-collector` and `otel-worker`, and is required for full end-to-end tracing.
 
-OTEL is the default telemetry backend (`TELEMETRY_BACKEND=dual`).
+OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`).

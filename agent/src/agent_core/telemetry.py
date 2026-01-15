@@ -346,6 +346,62 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         yield
 
 
+class NoOpTelemetrySpan(TelemetrySpan):
+    """No-op implementation of TelemetrySpan."""
+
+    def set_inputs(self, inputs: Dict[str, Any]) -> None:
+        """Set inputs (no-op)."""
+        pass
+
+    def set_outputs(self, outputs: Dict[str, Any]) -> None:
+        """Set outputs (no-op)."""
+        pass
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set attribute (no-op)."""
+        pass
+
+    def set_attributes(self, attributes: Dict[str, Any]) -> None:
+        """Set attributes (no-op)."""
+        pass
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add event (no-op)."""
+        pass
+
+
+class NoOpTelemetryBackend(TelemetryBackend):
+    """No-op implementation of TelemetryBackend."""
+
+    def configure(self, **kwargs) -> None:
+        """Configure backend (no-op)."""
+        pass
+
+    @contextlib.contextmanager
+    def start_span(
+        self,
+        name: str,
+        span_type: SpanType = SpanType.UNKNOWN,
+        inputs: Optional[Dict[str, Any]] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+    ):
+        """Start a no-op span."""
+        yield NoOpTelemetrySpan()
+
+    def update_current_trace(self, metadata: Dict[str, Any]) -> None:
+        """Update current trace (no-op)."""
+        pass
+
+    def capture_context(self) -> TelemetryContext:
+        """Capture empty context."""
+        return TelemetryContext()
+
+    @contextlib.contextmanager
+    def use_context(self, ctx: TelemetryContext):
+        """No-op context usage."""
+        yield
+
+
 class TelemetryService:
     """Public surface for telemetry calls."""
 
@@ -359,7 +415,11 @@ class TelemetryService:
         if backend:
             self._backend = backend
         else:
-            self._backend = OTELTelemetryBackend()
+            backend_type = get_env_str("TELEMETRY_BACKEND", "otel").lower()
+            if backend_type == "none":
+                self._backend = NoOpTelemetryBackend()
+            else:
+                self._backend = OTELTelemetryBackend()
 
     def set_backend(self, backend: TelemetryBackend) -> None:
         """Switch backend at runtime (useful for testing)."""
