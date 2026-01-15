@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-from mcp_server.services.ingestion.example_loader import ExampleLoader
+
+from ingestion.example_loader import ExampleLoader
 
 
 class TestExampleLoader:
@@ -20,26 +21,22 @@ class TestExampleLoader:
 
         mock_index = MagicMock()
 
-        with patch(
-            "mcp_server.services.ingestion.example_loader.Database.get_example_store",
-            return_value=mock_store,
-        ):
-            loader = ExampleLoader()
-            await loader.load_examples(mock_index)
+        loader = ExampleLoader(store=mock_store)
+        await loader.load_examples(mock_index)
 
-            mock_index.add_items.assert_called_once()
-            args, kwargs = mock_index.add_items.call_args
+        mock_index.add_items.assert_called_once()
+        args, kwargs = mock_index.add_items.call_args
 
-            vectors = args[0]
-            ids = args[1]
-            metadata = kwargs.get("metadata")
+        vectors = args[0]
+        ids = args[1]
+        metadata = kwargs.get("metadata")
 
-            assert len(ids) == 2
-            assert ids == [1, 2]
-            assert isinstance(vectors, np.ndarray)
-            assert vectors.shape == (2, 2)
-            assert metadata[1]["question"] == "Q1"
-            assert metadata[2]["sql"] == "SELECT 2"
+        assert len(ids) == 2
+        assert ids == [1, 2]
+        assert isinstance(vectors, np.ndarray)
+        assert vectors.shape == (2, 2)
+        assert metadata[1]["question"] == "Q1"
+        assert metadata[2]["sql"] == "SELECT 2"
 
     @pytest.mark.asyncio
     async def test_load_examples_empty(self):
@@ -49,11 +46,7 @@ class TestExampleLoader:
 
         mock_index = MagicMock()
 
-        with patch(
-            "mcp_server.services.ingestion.example_loader.Database.get_example_store",
-            return_value=mock_store,
-        ):
-            loader = ExampleLoader()
-            await loader.load_examples(mock_index)
+        loader = ExampleLoader(store=mock_store)
+        await loader.load_examples(mock_index)
 
-            mock_index.add_items.assert_not_called()
+        mock_index.add_items.assert_not_called()

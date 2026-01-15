@@ -19,14 +19,6 @@ from mcp_server.dal.factory import (
     get_schema_store,
     reset_singletons,
 )
-from mcp_server.dal.interfaces import (
-    CacheStore,
-    ExampleStore,
-    GraphStore,
-    MetadataStore,
-    SchemaIntrospector,
-    SchemaStore,
-)
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.postgres import (
     PgSemanticCache,
@@ -34,6 +26,15 @@ from mcp_server.dal.postgres import (
     PostgresMetadataStore,
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
+)
+
+from common.interfaces import (
+    CacheStore,
+    ExampleStore,
+    GraphStore,
+    MetadataStore,
+    SchemaIntrospector,
+    SchemaStore,
 )
 
 

@@ -1,10 +1,10 @@
 """Vector store initialization for RAG context retrieval."""
 
-import os
-
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
+
+from common.config.env import get_env_str
 
 load_dotenv()
 
@@ -19,14 +19,11 @@ def get_vector_store():
     Returns:
         PGVector: Configured vector store instance
     """
-    # Connection string to the postgres-db container from Phase 1/2
-    # Ensure pgvector extension is enabled on the target DB
-    # Use text2sql_ro user (read-only) for security
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "pagila")
-    db_user = os.getenv("DB_USER", "text2sql_ro")
-    db_password = os.getenv("DB_PASS", os.getenv("DB_PASSWORD", "secure_agent_pass"))
+    db_host = get_env_str("DB_HOST", "localhost")
+    db_port = get_env_str("DB_PORT", "5432")
+    db_name = get_env_str("DB_NAME", "pagila")
+    db_user = get_env_str("DB_USER", "text2sql_ro")
+    db_password = get_env_str("DB_PASS", get_env_str("DB_PASSWORD", "secure_agent_pass"))
 
     connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 

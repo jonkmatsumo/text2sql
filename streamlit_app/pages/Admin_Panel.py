@@ -263,13 +263,13 @@ def main():
         with col2:
             st.subheader("Schema Hydration")
             st.info("Sync Postgres schema to Memgraph.")
-            if st.button("Hydrate Schema"):
+            if st.button("Hydrate Schema", disabled=True, help="Coming soon"):
                 asyncio.run(run_operation("Schema Hydration", OpsService.run_schema_hydration()))
 
         with col3:
             st.subheader("Semantic Cache")
             st.info("Re-index embeddings for cache/retrieval.")
-            if st.button("Re-index Cache"):
+            if st.button("Re-index Cache", disabled=True, help="Coming soon"):
                 asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
 
 

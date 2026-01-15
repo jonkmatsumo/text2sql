@@ -1,3 +1,5 @@
+from typing import Optional
+
 from mcp_server.services.recommendation.config import RECO_CONFIG
 from mcp_server.services.recommendation.service import RecommendationService
 
@@ -6,7 +8,7 @@ async def handler(
     query: str,
     tenant_id: int = 1,
     limit: int = RECO_CONFIG.limit_default,
-    enable_fallback: bool | None = None,
+    enable_fallback: Optional[bool] = None,
 ) -> dict:
     """Recommend few-shot examples for a given natural language query.
 

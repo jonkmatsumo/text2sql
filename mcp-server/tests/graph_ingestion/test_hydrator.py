@@ -1,12 +1,13 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp_server.dal.interfaces import GraphStore
-from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
-from mcp_server.services.ingestion.graph_hydrator import GraphHydrator, should_skip_column_embedding
+
+from common.interfaces import GraphStore
+from ingestion.graph_hydrator import GraphHydrator, should_skip_column_embedding
+from schema import ColumnDef, ForeignKeyDef, TableDef
 
 
-@patch("mcp_server.services.ingestion.graph_hydrator.EmbeddingService")
+@patch("ingestion.graph_hydrator.EmbeddingService")
 @pytest.mark.asyncio
 async def test_hydrate_schema(mock_embedding_service):
     """Test hydrate_schema logic with DAL."""

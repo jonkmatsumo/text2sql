@@ -25,3 +25,15 @@ artifacts/
 logs/
 tmp/
 coverage/
+
+# Node dependencies
+node_modules/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Docker
+docker-compose.override.yml
+.env

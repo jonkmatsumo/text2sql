@@ -10,8 +10,9 @@ errors during test collection from the repo root.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.models import ColumnDef, ForeignKeyDef, TableDef
 from mcp_server.services.rag.indexer import index_all_tables
+
+from schema import ColumnDef, ForeignKeyDef, TableDef
 
 # ... (skipping lines 4-101)
 # We could check the arguments passed to embed_text if we want to be strict

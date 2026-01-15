@@ -13,7 +13,7 @@ async def test_high_cardinality_exclusion_regression():
     This checks the requirement:
     "String columns are treated as enum-like only if COUNT(DISTINCT) < N".
     """
-    from mcp_server.models import ColumnDef, TableDef
+    from schema import ColumnDef, TableDef
 
     # Setup Mocks
     mock_conn = AsyncMock()

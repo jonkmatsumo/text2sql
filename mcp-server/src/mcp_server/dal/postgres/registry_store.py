@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.registry_store import RegistryStore
 from mcp_server.dal.postgres.common import _format_vector
 from mcp_server.models import QueryPair
+
+from common.interfaces.registry_store import RegistryStore
 
 logger = logging.getLogger(__name__)
 

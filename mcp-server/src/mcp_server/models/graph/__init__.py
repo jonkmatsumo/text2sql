@@ -1,7 +1,5 @@
-"""Graph model definitions."""
+"""Graph model definitions (legacy shim)."""
 
-from .data import GraphData
-from .edge import Edge
-from .node import Node
+from schema.graph import Edge, GraphData, Node
 
 __all__ = ["Edge", "GraphData", "Node"]

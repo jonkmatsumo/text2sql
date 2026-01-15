@@ -12,8 +12,9 @@ import logging
 
 from mcp_server.config.database import Database
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.services.ingestion.vector_indexer import VectorIndexer
 from mcp_server.services.rag import RagEngine
+
+from ingestion.vector_indexer import VectorIndexer
 
 TOOL_NAME = "get_semantic_subgraph"
 

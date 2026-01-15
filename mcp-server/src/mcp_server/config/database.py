@@ -1,9 +1,9 @@
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
-from mcp_server.dal.interfaces import (
+
+from common.interfaces import (
     CacheStore,
     ExampleStore,
     GraphStore,
@@ -27,12 +27,14 @@ class Database:
     @classmethod
     async def init(cls):
         """Initialize connection pools."""
+        from common.config.env import get_env_int, get_env_str
+
         # Postgres Config
-        db_host = os.getenv("DB_HOST", "localhost")
-        db_port = int(os.getenv("DB_PORT", "5432"))
-        db_name = os.getenv("DB_NAME", "pagila")
-        db_user = os.getenv("DB_USER", "text2sql_ro")
-        db_pass = os.getenv("DB_PASS", "secure_agent_pass")
+        db_host = get_env_str("DB_HOST", "localhost")
+        db_port = get_env_int("DB_PORT", 5432)
+        db_name = get_env_str("DB_NAME", "pagila")
+        db_user = get_env_str("DB_USER", "text2sql_ro")
+        db_pass = get_env_str("DB_PASS", "secure_agent_pass")
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 

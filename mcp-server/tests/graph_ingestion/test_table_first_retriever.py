@@ -2,13 +2,14 @@
 
 import numpy as np
 import pytest
-from mcp_server.services.ingestion.table_first_retriever import (
+
+from ingestion.table_first_retriever import (
     DEFAULT_MAX_COLUMNS_PER_TABLE,
     TableFirstRetriever,
     format_column_text,
     format_table_text,
 )
-from mcp_server.services.ingestion.vector_indexes import HNSWIndex
+from ingestion.vector_indexes import HNSWIndex
 
 
 class TestFormatFunctions:

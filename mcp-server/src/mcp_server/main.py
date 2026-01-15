@@ -5,7 +5,6 @@ via the central registry.
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -19,11 +18,15 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+from common.config.env import get_env_int, get_env_str
+
 logger = logging.getLogger(__name__)
 
 # OTEL Setup
-OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
-OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "text2sql-mcp")
+OTEL_EXPORTER_OTLP_ENDPOINT = get_env_str(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
+)
+OTEL_SERVICE_NAME = get_env_str("OTEL_SERVICE_NAME", "text2sql-mcp")
 
 
 def setup_telemetry():
@@ -99,12 +102,11 @@ register_all(mcp)
 
 
 if __name__ == "__main__":
-    import os
 
     # Respect transport and host/port from environment for containerized use
-    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8000"))
+    transport = get_env_str("MCP_TRANSPORT", "stdio").lower()
+    host = get_env_str("MCP_HOST", "0.0.0.0")
+    port = get_env_int("MCP_PORT", 8000)
 
     if transport in ("sse", "http", "streamable-http"):
         # We standardize on sse transport to be compatible with langchain-mcp-adapters

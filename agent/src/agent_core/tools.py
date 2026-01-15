@@ -1,11 +1,11 @@
 """MCP server tool integration for LangGraph."""
 
-import os
 from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_mcp_adapters.client import MultiServerMCPClient
+
+from common.config.env import get_env_str
 
 load_dotenv()
 
@@ -27,7 +27,8 @@ async def get_mcp_tools():
     Returns:
         list: List of LangChain tool wrappers for MCP tools
     """
-    mcp_url = os.getenv("MCP_SERVER_URL", DEFAULT_MCP_URL)
+    mcp_url = get_env_str("MCP_SERVER_URL", DEFAULT_MCP_URL)
+    from langchain_mcp_adapters.client import MultiServerMCPClient
 
     # Use sse transport for compatibility
     client = MultiServerMCPClient(

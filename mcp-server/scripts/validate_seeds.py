@@ -10,6 +10,7 @@ This ensures that all seed queries are syntactically correct and bind to the cur
 import asyncio
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Add src to path so we can import mcp_server modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
@@ -21,7 +22,7 @@ from mcp_server.seeding.loader import load_from_directory  # noqa: E402
 load_dotenv()
 
 
-async def validate_query(conn, query: str) -> str | None:
+async def validate_query(conn, query: str) -> Optional[str]:
     """Run EXPLAIN on the query to check validity without executing it.
 
     Returns:

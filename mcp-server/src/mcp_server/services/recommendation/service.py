@@ -12,7 +12,8 @@ from mcp_server.services.recommendation.explanation import (
 )
 from mcp_server.services.recommendation.interface import RecommendationResult, RecommendedExample
 from mcp_server.services.registry import RegistryService
-from mcp_server.services.sanitization.text_sanitizer import sanitize_text
+
+from common.sanitization import sanitize_text
 
 logger = logging.getLogger(__name__)
 

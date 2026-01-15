@@ -34,7 +34,7 @@ async def test_enrich_values_with_llm_no_client():
 @pytest.mark.asyncio
 async def test_generate_entity_patterns():
     """Test the full generation pipeline with mocks."""
-    from mcp_server.models import ColumnDef, TableDef
+    from schema import ColumnDef, TableDef
 
     # Mock Database Connection
     mock_conn = AsyncMock()

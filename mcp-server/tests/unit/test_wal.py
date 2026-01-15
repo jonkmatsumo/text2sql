@@ -2,8 +2,8 @@ import os
 import tempfile
 import unittest
 
-from mcp_server.services.ingestion.enrichment.loader import replay_wal
-from mcp_server.services.ingestion.enrichment.wal import WALManager
+from ingestion.enrichment.loader import replay_wal
+from ingestion.enrichment.wal import WALManager
 
 
 class TestWAL(unittest.TestCase):

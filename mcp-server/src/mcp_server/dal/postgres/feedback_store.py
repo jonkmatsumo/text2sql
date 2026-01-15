@@ -2,7 +2,8 @@ from contextlib import asynccontextmanager
 from typing import Any, List, Optional
 
 from mcp_server.config.control_plane import ControlPlaneDatabase
-from mcp_server.dal.interfaces.feedback_store import FeedbackStore
+
+from common.interfaces.feedback_store import FeedbackStore
 
 
 class PostgresFeedbackStore(FeedbackStore):

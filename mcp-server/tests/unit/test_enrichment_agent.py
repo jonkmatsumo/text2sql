@@ -2,14 +2,14 @@ import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp_server.services.ingestion.enrichment.agent import EnrichmentAgent
+from ingestion.enrichment.agent import EnrichmentAgent
 
 
 @patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"})
 class TestEnrichmentAgent(unittest.IsolatedAsyncioTestCase):
     """Test suite for EnrichmentAgent."""
 
-    @patch("mcp_server.services.ingestion.enrichment.agent.AsyncOpenAI")
+    @patch("ingestion.enrichment.agent.AsyncOpenAI")
     async def test_generate_description_success(self, mock_async_openai):
         """Test successful description generation."""
         # Setup mock client and response
@@ -38,7 +38,7 @@ class TestEnrichmentAgent(unittest.IsolatedAsyncioTestCase):
         assert "users" in user_content
         assert '[{"id": 1, "name": "Alice"}]' in user_content
 
-    @patch("mcp_server.services.ingestion.enrichment.agent.AsyncOpenAI")
+    @patch("ingestion.enrichment.agent.AsyncOpenAI")
     async def test_generate_description_empty_response(self, mock_async_openai):
         """Test handling of empty API response."""
         # Setup mock client with empty choices
@@ -57,7 +57,7 @@ class TestEnrichmentAgent(unittest.IsolatedAsyncioTestCase):
 
         assert description is None
 
-    @patch("mcp_server.services.ingestion.enrichment.agent.AsyncOpenAI")
+    @patch("ingestion.enrichment.agent.AsyncOpenAI")
     async def test_generate_description_exception(self, mock_async_openai):
         """Test handling of API exception."""
         # Setup mock client to raise exception

@@ -1,7 +1,8 @@
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
-from mcp_server.services.ingestion.vector_indexer import VectorIndexer, apply_adaptive_threshold
+
+from ingestion.vector_indexer import VectorIndexer, apply_adaptive_threshold
 
 
 class TestVectorIndexerCharacterization:
@@ -18,7 +19,7 @@ class TestVectorIndexerCharacterization:
     @pytest.fixture
     def indexer(self, mock_store):
         """Fixture for VectorIndexer with patched dependencies."""
-        with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+        with patch("ingestion.vector_indexer.AsyncOpenAI"):
             indexer = VectorIndexer(store=mock_store)
             # Mock embedding service method to strictly avoid API calls
             indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1] * 1536)
@@ -110,7 +111,7 @@ class TestVectorIndexerObservability:
         """Fixture for VectorIndexer with patched dependencies."""
         store = MagicMock()
         store.search_ann_seeds.return_value = []
-        with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+        with patch("ingestion.vector_indexer.AsyncOpenAI"):
             indexer = VectorIndexer(store=store)
             indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1] * 1536)
             return indexer
@@ -120,7 +121,7 @@ class TestVectorIndexerObservability:
         """Validate search_nodes logs formatted event with expected keys."""
         indexer.store.search_ann_seeds.return_value = [{"node": {"name": "test"}, "score": 0.9}]
 
-        with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
+        with patch("ingestion.vector_indexer.logger") as mock_logger:
             await indexer.search_nodes("query", k=5, apply_threshold=True)
 
             mock_logger.info.assert_called()
@@ -139,8 +140,8 @@ class TestVectorIndexerObservability:
         """Validate search_nodes logs error event on failure."""
         indexer.store.search_ann_seeds.side_effect = Exception("DB Error")
 
-        with patch("mcp_server.services.ingestion.vector_indexer.logger") as mock_logger:
-            with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
+        with patch("ingestion.vector_indexer.logger") as mock_logger:
+            with patch("ingestion.vector_indexer.Telemetry") as mock_telemetry:
                 mock_span = MagicMock()
                 mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 
@@ -161,7 +162,7 @@ class TestVectorIndexerObservability:
         """Validate OTEL span creation and attributes on success."""
         indexer.store.search_ann_seeds.return_value = [{"node": {"name": "test"}, "score": 0.9}]
 
-        with patch("mcp_server.services.ingestion.vector_indexer.Telemetry") as mock_telemetry:
+        with patch("ingestion.vector_indexer.Telemetry") as mock_telemetry:
             mock_span = MagicMock()
             mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 

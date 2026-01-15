@@ -33,7 +33,9 @@ services:
       - text2sql_net
 
   mcp-server:
-    build: ./mcp-server
+    build:
+      context: .
+      dockerfile: mcp-server/Dockerfile
     image: text2sql-mcp-server:latest
     container_name: text2sql_core
     depends_on:
@@ -63,7 +65,8 @@ services:
     networks:
       - text2sql_net
     volumes:
-      - ./mcp-server/src:/app/src
+      - ./mcp-server/src:/app/mcp-server/src
+      - ./common/src:/app/common/src
       - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 
@@ -109,6 +112,8 @@ services:
       - ./streamlit:/app/streamlit
       - ./agent:/app/agent
       - ./mcp-server:/app/mcp-server
+      - ./common/src:/app/common/src
+      - ./common/tests:/app/common/tests
     networks:
       - text2sql_net
     restart: unless-stopped

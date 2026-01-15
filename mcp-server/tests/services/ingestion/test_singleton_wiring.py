@@ -2,9 +2,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mcp_server.dal.factory import get_graph_store, reset_singletons
-from mcp_server.dal.interfaces import GraphStore
 from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.services.ingestion.vector_indexer import VectorIndexer
+
+from common.interfaces import GraphStore
+from ingestion.vector_indexer import VectorIndexer
 
 
 def test_dal_factory_is_singleton():
@@ -20,7 +21,7 @@ def test_dal_factory_is_singleton():
 def test_vector_indexer_uses_injected_store():
     """Confirm VectorIndexer uses the provided store instance."""
     mock_store = MagicMock(spec=GraphStore)
-    with patch("mcp_server.services.ingestion.vector_indexer.AsyncOpenAI"):
+    with patch("ingestion.vector_indexer.AsyncOpenAI"):
         indexer = VectorIndexer(store=mock_store)
         assert indexer.store is mock_store
 
@@ -30,7 +31,7 @@ def test_direct_import_check():
 
     This is an audit test to identify files that need refactoring.
     """
-    ingestion_path = Path("mcp-server/src/mcp_server/services/ingestion")
+    ingestion_path = Path("mcp-server/src/ingestion")
 
     files_with_direct_imports = []
     for py_file in ingestion_path.glob("**/*.py"):

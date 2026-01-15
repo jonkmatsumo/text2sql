@@ -5,17 +5,18 @@ policy to decide whether to silently resolve or ask for clarification.
 """
 
 import logging
-import os
 from typing import Any, Dict, List
 
 from mcp_server.services.ambiguity.binder import CandidateBinder, MentionExtractor
 
+from common.config.env import get_env_float
+
 logger = logging.getLogger(__name__)
 
 # Configurable thresholds
-DELTA_THRESHOLD = float(os.getenv("AMBIGUITY_DELTA", "0.10"))
-MIN_BINDING_SCORE = float(os.getenv("AMBIGUITY_MIN_SCORE", "0.70"))
-HIGH_CONFIDENCE_THRESHOLD = float(os.getenv("AMBIGUITY_HIGH_CONFIDENCE", "0.92"))
+DELTA_THRESHOLD = get_env_float("AMBIGUITY_DELTA", 0.10)
+MIN_BINDING_SCORE = get_env_float("AMBIGUITY_MIN_SCORE", 0.70)
+HIGH_CONFIDENCE_THRESHOLD = get_env_float("AMBIGUITY_HIGH_CONFIDENCE", 0.92)
 
 
 class AmbiguityResolver:

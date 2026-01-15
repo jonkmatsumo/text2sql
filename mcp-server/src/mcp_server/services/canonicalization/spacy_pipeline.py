@@ -6,16 +6,16 @@ queries using EntityRuler and DependencyMatcher.
 
 import hashlib
 import logging
-import os
 from pathlib import Path
 from typing import Optional, Tuple
 
-from mcp_server.utils.telemetry import Telemetry
+from common.config.env import get_env_bool, get_env_str
+from common.telemetry import Telemetry
 
 logger = logging.getLogger(__name__)
 
 # Feature flag for gradual rollout
-SPACY_ENABLED = os.getenv("SPACY_ENABLED", "false").lower() == "true"
+SPACY_ENABLED = get_env_bool("SPACY_ENABLED", False)
 
 
 class CanonicalizationService:
@@ -121,7 +121,7 @@ class CanonicalizationService:
 
         # Load patterns from files
         # Priority: Env Var -> /app/patterns -> local dev project paths -> package path
-        env_path = os.getenv("PATTERNS_DIR")
+        env_path = get_env_str("PATTERNS_DIR")
         docker_path = Path("/app/patterns")
         dev_path = (
             Path(__file__).parent.parent.parent.parent.parent.parent

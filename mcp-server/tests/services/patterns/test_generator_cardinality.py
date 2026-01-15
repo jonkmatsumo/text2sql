@@ -3,8 +3,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.models import ColumnDef, TableDef
 from mcp_server.services.patterns.generator import generate_entity_patterns
+
+from schema import ColumnDef, TableDef
 
 
 @pytest.mark.asyncio

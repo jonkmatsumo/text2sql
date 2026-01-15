@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from mcp_server.services.sanitization.text_sanitizer import sanitize_text
+from common.sanitization import sanitize_text
 
 
 @dataclass

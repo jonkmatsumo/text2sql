@@ -3,14 +3,15 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.dal.interfaces import GraphStore
-from mcp_server.services.ingestion.vector_index_ddl import ensure_table_embedding_hnsw_index
+
+from common.interfaces import GraphStore
+from ingestion.vector_index_ddl import ensure_table_embedding_hnsw_index
 
 
 class TestVectorIndexDDL:
     """Tests for vector index creation utility."""
 
-    @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
+    @patch("ingestion.vector_index_ddl.logger")
     def test_ensure_index_creates_successfully(self, mock_logger):
         """Verify DDL is correct and returns True on success."""
         mock_store = MagicMock(spec=GraphStore)
@@ -38,7 +39,7 @@ class TestVectorIndexDDL:
         assert extra["created"] is True
         assert "elapsed_ms" in extra
 
-    @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
+    @patch("ingestion.vector_index_ddl.logger")
     def test_ensure_index_already_exists(self, mock_logger):
         """Verify returns False (and suppresses error) if index already exists."""
         mock_store = MagicMock(spec=GraphStore)
@@ -59,7 +60,7 @@ class TestVectorIndexDDL:
         assert kwargs["extra"]["created"] is False
         assert kwargs["extra"]["reason"] == "already_exists"
 
-    @patch("mcp_server.services.ingestion.vector_index_ddl.logger")
+    @patch("ingestion.vector_index_ddl.logger")
     def test_ensure_index_propagates_unexpected_error(self, mock_logger):
         """Verify unexpected errors are re-raised."""
         mock_store = MagicMock(spec=GraphStore)

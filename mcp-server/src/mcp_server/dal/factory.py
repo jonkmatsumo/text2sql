@@ -24,22 +24,8 @@ Example:
 """
 
 import logging
-import os
 from typing import Optional
 
-from mcp_server.dal.interfaces import (
-    CacheStore,
-    ConversationStore,
-    ExampleStore,
-    FeedbackStore,
-    GraphStore,
-    InteractionStore,
-    MetadataStore,
-    PatternRunStore,
-    RegistryStore,
-    SchemaIntrospector,
-    SchemaStore,
-)
 from mcp_server.dal.memgraph import MemgraphStore
 from mcp_server.dal.postgres import (
     PgSemanticCache,
@@ -54,6 +40,20 @@ from mcp_server.dal.postgres import (
     PostgresSchemaStore,
 )
 from mcp_server.dal.util.env import get_provider_env
+
+from common.interfaces import (
+    CacheStore,
+    ConversationStore,
+    ExampleStore,
+    FeedbackStore,
+    GraphStore,
+    InteractionStore,
+    MetadataStore,
+    PatternRunStore,
+    RegistryStore,
+    SchemaIntrospector,
+    SchemaStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +155,12 @@ def get_graph_store() -> GraphStore:
         )
         logger.info(f"Initializing GraphStore with provider: {provider}")
 
+        from common.config.env import get_env_str
+
         # MemgraphStore requires connection params from environment
-        uri = os.environ.get("MEMGRAPH_URI", "bolt://localhost:7687")
-        user = os.environ.get("MEMGRAPH_USER", "")
-        password = os.environ.get("MEMGRAPH_PASSWORD", "")
+        uri = get_env_str("MEMGRAPH_URI", "bolt://localhost:7687")
+        user = get_env_str("MEMGRAPH_USER", "")
+        password = get_env_str("MEMGRAPH_PASSWORD", "")
 
         store_cls = GRAPH_STORE_PROVIDERS[provider]
         _graph_store = store_cls(uri, user, password)

@@ -4,10 +4,11 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp_server.models import ColumnDef, TableDef
 
 # Import the module under test to ensure patching works on it
 from mcp_server.services.patterns import generator
+
+from schema import ColumnDef, TableDef
 
 
 @pytest.mark.asyncio

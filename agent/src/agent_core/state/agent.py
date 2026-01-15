@@ -124,3 +124,6 @@ class AgentState(TypedDict):
 
     # Opaque tracing context for propagation across nodes/tools
     telemetry_context: Optional[Any]
+
+    # Raw user input stored separately for debugging/telemetry
+    raw_user_input: Optional[str]

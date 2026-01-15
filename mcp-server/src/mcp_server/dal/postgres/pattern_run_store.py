@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.pattern_run_store import PatternRunStore
+
+from common.interfaces.pattern_run_store import PatternRunStore
 
 
 class PostgresPatternRunStore(PatternRunStore):

@@ -1,0 +1,1 @@
+"""Pattern generation module placeholder."""

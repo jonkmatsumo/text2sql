@@ -22,15 +22,15 @@ Configuration (Environment Variables):
 import asyncio
 import json
 import logging
-import os
 from typing import Dict, List, Optional
 
 from mcp_server.config.database import Database
-from mcp_server.dal.interfaces.schema_introspector import SchemaIntrospector
-from mcp_server.models import ColumnDef
 from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
 from mcp_server.services.patterns.validator import PatternValidator
 from openai import AsyncOpenAI
+
+from common.interfaces.schema_introspector import SchemaIntrospector
+from schema import ColumnDef
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -125,7 +125,9 @@ def generate_column_patterns(table_name: str, column: ColumnDef) -> List[Dict[st
 
 async def get_openai_client() -> AsyncOpenAI:
     """Get AsyncOpenAI client."""
-    api_key = os.getenv("OPENAI_API_KEY")
+    from common.config.env import get_env_str
+
+    api_key = get_env_str("OPENAI_API_KEY")
     if not api_key:
         logger.warning("OPENAI_API_KEY not found. LLM enrichment will be skipped.")
         return None
@@ -278,6 +280,8 @@ async def sample_distinct_values(
 
 async def generate_entity_patterns(run_id: Optional[str] = None) -> list[dict]:
     """Generate entity patterns from database introspection."""
+    from common.config.env import get_env_int, get_env_list
+
     # Initialize DB (assumes already running or managed by caller/main)
     trusted_patterns = []
     untrusted_patterns = []
@@ -285,14 +289,11 @@ async def generate_entity_patterns(run_id: Optional[str] = None) -> list[dict]:
     introspector = Database.get_schema_introspector()
 
     # Initialize Detector
-    threshold = int(os.getenv("ENUM_CARDINALITY_THRESHOLD", "10"))
+    threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
 
     # Parse Allow/Deny Lists
-    allowlist_str = os.getenv("ENUM_VALUE_ALLOWLIST", "")
-    denylist_str = os.getenv("ENUM_VALUE_DENYLIST", "")
-
-    allowlist = [s.strip() for s in allowlist_str.split(",") if s.strip()]
-    denylist = [s.strip() for s in denylist_str.split(",") if s.strip()]
+    allowlist = get_env_list("ENUM_VALUE_ALLOWLIST", [])
+    denylist = get_env_list("ENUM_VALUE_DENYLIST", [])
 
     detector = EnumLikeColumnDetector(
         threshold=threshold,
@@ -342,10 +343,8 @@ async def generate_entity_patterns(run_id: Optional[str] = None) -> list[dict]:
                                 table_name,
                                 col.name,
                                 threshold=detector.threshold,
-                                sample_rows=int(os.getenv("ENUM_CARDINALITY_SAMPLE_ROWS", "10000")),
-                                timeout_ms=int(
-                                    os.getenv("ENUM_CARDINALITY_QUERY_TIMEOUT_MS", "2000")
-                                ),
+                                sample_rows=get_env_int("ENUM_CARDINALITY_SAMPLE_ROWS", 10000),
+                                timeout_ms=get_env_int("ENUM_CARDINALITY_QUERY_TIMEOUT_MS", 2000),
                             )
 
                             # Threshold Check (scanned only)

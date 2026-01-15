@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from mcp_server.config.control_plane import ControlPlaneDatabase
-from mcp_server.dal.interfaces.conversation_store import ConversationStore
+
+from common.interfaces.conversation_store import ConversationStore
 
 
 class PostgresConversationStore(ConversationStore):

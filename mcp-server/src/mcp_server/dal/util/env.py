@@ -20,7 +20,6 @@ Example:
     'postgres'
 """
 
-import os
 from typing import Set
 
 # Alias mappings: user-friendly names -> canonical provider ID
@@ -92,7 +91,9 @@ def get_provider_env(var_name: str, default: str, allowed: Set[str]) -> str:
         ValueError: Invalid provider for CACHE_STORE_PROVIDER: 'invalid'.
                     Allowed values: postgres, memgraph
     """
-    raw_value = os.environ.get(var_name)
+    from common.config.env import get_env_str
+
+    raw_value = get_env_str(var_name)
 
     if raw_value is None:
         return default

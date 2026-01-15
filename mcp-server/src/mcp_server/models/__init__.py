@@ -1,10 +1,11 @@
 """Data models for the MCP Server."""
 
-from .cache import CacheLookupResult
+from schema.cache import CacheLookupResult
+from schema.graph import Edge, GraphData, Node
+from schema.rag import Example, FilterCriteria, SchemaEmbedding
+from schema.registry import QueryPair
+
 from .database import ColumnDef, ForeignKeyDef, TableDef
-from .graph import Edge, GraphData, Node
-from .rag import Example, FilterCriteria, SchemaEmbedding
-from .registry import QueryPair
 
 __all__ = [
     "CacheLookupResult",

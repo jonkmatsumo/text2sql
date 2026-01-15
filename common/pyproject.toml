@@ -1,0 +1,18 @@
+[project]
+name = "text2sql-common"
+version = "0.1.0"
+description = "Shared utilities for Text 2 SQL"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "numpy",
+    "opentelemetry-api",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["common*"]

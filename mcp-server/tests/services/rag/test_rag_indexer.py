@@ -10,8 +10,9 @@ errors during test collection from the repo root.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.models import ColumnDef, TableDef
 from mcp_server.services.rag import index_all_tables
+
+from schema import ColumnDef, TableDef
 
 
 class TestIndexer:
