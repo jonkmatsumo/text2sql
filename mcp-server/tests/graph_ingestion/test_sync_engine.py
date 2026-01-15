@@ -7,17 +7,18 @@ from ingestion.sync_engine import SyncEngine
 from schema import ColumnDef, TableDef
 
 
-@patch("ingestion.sync_engine.get_schema_introspector")
-def test_sync_engine_init(mock_get_introspector):
+def test_sync_engine_init():
     """Test initialization."""
     mock_store = MagicMock(spec=GraphStore)
-    SyncEngine(store=mock_store)
-    mock_get_introspector.assert_called_once()
+    mock_introspector = MagicMock()
+
+    # Introspector is now required argument
+    engine = SyncEngine(store=mock_store, introspector=mock_introspector)
+    assert engine.introspector == mock_introspector
 
 
-@patch("ingestion.sync_engine.get_schema_introspector")
 @pytest.mark.asyncio
-async def test_get_live_schema(mock_get_introspector):
+async def test_get_live_schema():
     """Test get_live_schema uses introspector and formats correctly."""
     mock_introspector = MagicMock()
     mock_introspector.list_table_names = AsyncMock(return_value=["t1"])
@@ -26,10 +27,8 @@ async def test_get_live_schema(mock_get_introspector):
     t1_def = TableDef(name="t1", columns=[c1], description="desc")
     mock_introspector.get_table_def = AsyncMock(return_value=t1_def)
 
-    mock_get_introspector.return_value = mock_introspector
-
     mock_store = MagicMock(spec=GraphStore)
-    engine = SyncEngine(store=mock_store)
+    engine = SyncEngine(store=mock_store, introspector=mock_introspector)
     schema = await engine.get_live_schema()
 
     assert "t1" in schema["tables"]
