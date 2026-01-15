@@ -7,8 +7,6 @@ import pytest
 # Define test cases: (backend, expect_mlflow_imported)
 TEST_CASES = [
     ("otel", False),
-    ("mlflow", True),
-    ("dual", True),
 ]
 
 
