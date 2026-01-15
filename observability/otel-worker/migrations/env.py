@@ -16,8 +16,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Use POSTGRES_URL from environment if available
-db_url = os.getenv("POSTGRES_URL")
+# Use POSTGRES_URL or POSTGRES_CONNECTION_STRING from environment if available
+db_url = os.getenv("POSTGRES_URL") or os.getenv("POSTGRES_CONNECTION_STRING")
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 

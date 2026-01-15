@@ -40,6 +40,12 @@ class Settings(BaseSettings):
         """Build POSTGRES_URL if not provided or if it's a dummy value."""
         # Force dummy markers to match both cases and a variety of placeholders
         dummy_markers = ["user:pass", "driver://", "dbname", "postgresql://user:pass"]
+        # Allow fallback to POSTGRES_CONNECTION_STRING
+        import os
+
+        if not self.POSTGRES_URL:
+            self.POSTGRES_URL = os.getenv("POSTGRES_CONNECTION_STRING")
+
         current_url = str(self.POSTGRES_URL or "").lower()
         is_dummy = any(m in current_url for m in dummy_markers)
 
