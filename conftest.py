@@ -21,6 +21,8 @@ ROOT_DIR = Path(__file__).parent.absolute()
 common_src = ROOT_DIR / "common" / "src"
 mcp_server_src = ROOT_DIR / "mcp-server" / "src"
 agent_src = ROOT_DIR / "agent" / "src"
+schema_src = ROOT_DIR / "schema" / "src"
+ingestion_src = ROOT_DIR / "ingestion" / "src"
 
 if str(common_src) not in sys.path:
     sys.path.insert(0, str(common_src))
@@ -34,8 +36,17 @@ if str(agent_src) not in sys.path:
     sys.path.insert(0, str(agent_src))
     print(f"conftest.py: Added {agent_src} to sys.path")
 
+if str(schema_src) in sys.path:
+    sys.path.remove(str(schema_src))
+sys.path.insert(0, str(schema_src))
+print(f"conftest.py: Preprended {schema_src} to sys.path (shadowing fix)")
+
+if str(ingestion_src) not in sys.path:
+    sys.path.insert(0, str(ingestion_src))
+    print(f"conftest.py: Added {ingestion_src} to sys.path")
+
 inserted_paths = []
-for path in (common_src, mcp_server_src, agent_src):
+for path in (common_src, mcp_server_src, agent_src, schema_src, ingestion_src):
     path_str = str(path)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
