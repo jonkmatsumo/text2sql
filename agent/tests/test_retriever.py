@@ -1,7 +1,14 @@
 """Unit tests for vector store retriever."""
 
 import os
+import sys
+from types import ModuleType
 from unittest.mock import MagicMock, patch
+
+if "langchain_postgres" not in sys.modules:
+    mock_pkg = ModuleType("langchain_postgres")
+    mock_pkg.PGVector = MagicMock()
+    sys.modules["langchain_postgres"] = mock_pkg
 
 from agent_core.retriever import get_vector_store
 
