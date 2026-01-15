@@ -162,7 +162,8 @@ flowchart TB
 *   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=dual`).
 *   **Durable Sink**: The OTEL worker provides persistent storage (Postgres) and raw archives (MinIO).
 *   **MLflow Run Sink**: High-level metrics and trace summaries are automatically exported to MLflow for experiment tracking.
-*   **Access Point**: Query the OTEL worker API at `/api/v1/traces`.
+*   **Access Point**: Query the OTEL worker API at `http://localhost:4320/api/v1/traces`.
+*   **MLflow Run Sink**: MLflow acts solely as a downstream sink for experiment tracking. Traces are not sent directly to MLflow; they are exported by the OTEL worker to the `otel-traces` experiment.
 
 ## Project Structure
 
@@ -280,14 +281,14 @@ We provide `make` targets for safe and deep cleanup.
 |---------|-----|-------------|
 | **Web UI** | `http://localhost:8501` | Streamlit interface |
 | **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
-| **MLflow UI** | `http://localhost:5001` | Downstream sink for summarized runs (Experiment: otel-traces) |
+| **MLflow UI** | `http://localhost:5001` | Downstream sink for summarized runs (Experiment: `otel-traces`) |
 | **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
 
 #### Optional / Advanced Observability Services
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **OTEL Worker (Optional)** | `http://localhost:4320` | OpenTelemetry ingestion and trace query API (no user-facing UI) |
+| **OTEL Worker (Optional)** | `http://localhost:4320` | Canonical trace store and query API (no user-facing UI). |
 
 Most users do not need to interact with the OTEL worker directly. It exists to support advanced observability workflows and custom trace storage.
 
