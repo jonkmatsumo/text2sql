@@ -329,6 +329,9 @@ async def run_agent_with_tracing(
                             }
                         )
 
+                    if telemetry.get_current_span():
+                        telemetry.get_current_span().add_event("persistence.create.start")
+
                     raw_interaction_id = await retry_with_backoff(
                         _create_interaction,
                         "create_interaction",
@@ -338,6 +341,10 @@ async def run_agent_with_tracing(
                     inputs["interaction_id"] = interaction_id
                     # Also make interaction_id sticky
                     telemetry.update_current_trace({"interaction_id": interaction_id})
+                    if telemetry.get_current_span():
+                        telemetry.get_current_span().add_event(
+                            "persistence.create.success", {"interaction_id": interaction_id}
+                        )
                 except Exception as e:
                     # Structured logging with context (retry utility already logged attempts)
                     logger.error(
@@ -350,6 +357,11 @@ async def run_agent_with_tracing(
                         },
                         exc_info=True,
                     )
+                    if telemetry.get_current_span():
+                        telemetry.get_current_span().add_event(
+                            "persistence.create.failure",
+                            {"exception": str(e), "type": type(e).__name__},
+                        )
                     if not persistence_fail_open:
                         # Default: fail-closed - interaction persistence is required
                         raise RuntimeError(
@@ -421,6 +433,11 @@ async def run_agent_with_tracing(
                         async def _update_interaction():
                             return await update_tool.ainvoke(update_payload)
 
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "persistence.update.start", {"interaction_id": interaction_id}
+                            )
+
                         await retry_with_backoff(
                             _update_interaction,
                             "update_interaction",
@@ -429,7 +446,17 @@ async def run_agent_with_tracing(
                                 "interaction_id": interaction_id,
                             },
                         )
+
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "persistence.update.success", {"interaction_id": interaction_id}
+                            )
                     except Exception as e:
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "persistence.update.failure",
+                                {"interaction_id": interaction_id, "exception": str(e)},
+                            )
                         # Structured logging - update failure is observable
                         logger.error(
                             "Failed to update interaction after all retries",
