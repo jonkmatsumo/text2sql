@@ -128,8 +128,8 @@ class TestRouteAfterValidation:
 class TestRouteAfterExecution:
     """Unit tests for route_after_execution conditional routing logic."""
 
-    def test_route_success_to_synthesize(self):
-        """Test routing to synthesize when execution succeeds."""
+    def test_route_success_to_visualize(self):
+        """Test routing to visualize when execution succeeds."""
         clean_agent_modules()
         from agent_core.graph import route_after_execution
 
@@ -144,7 +144,7 @@ class TestRouteAfterExecution:
 
         result = route_after_execution(state)
 
-        assert result == "synthesize"
+        assert result == "visualize"
 
     def test_route_error_with_retries_under_limit_to_correct(self):
         """Test routing to correct when error occurs and retries < 3."""
@@ -232,8 +232,8 @@ class TestRouteAfterExecution:
 
         result = route_after_execution(state)
 
-        # Empty result is still success, should go to synthesize
-        assert result == "synthesize"
+        # Empty result is still success, should go to visualize
+        assert result == "visualize"
 
 
 class TestCreateWorkflow:
@@ -253,8 +253,8 @@ class TestCreateWorkflow:
             # Verify StateGraph was created with AgentState
             mock_state_graph_class.assert_called_once_with(AgentState)
 
-        # Verify nodes were added (now 10 nodes)
-        assert mock_workflow.add_node.call_count == 10
+        # Verify nodes were added (now 11 nodes)
+        assert mock_workflow.add_node.call_count == 11
         node_calls = [call_args[0][0] for call_args in mock_workflow.add_node.call_args_list]
         assert "cache_lookup" in node_calls
         assert "router" in node_calls
@@ -265,20 +265,23 @@ class TestCreateWorkflow:
         assert "validate" in node_calls
         assert "execute" in node_calls
         assert "correct" in node_calls
+        assert "visualize" in node_calls
         assert "synthesize" in node_calls
 
         # Verify entry point was set to cache_lookup
         mock_workflow.set_entry_point.assert_called_once_with("cache_lookup")
 
-        # Verify edges were added (6 edges after reorder)
-        assert mock_workflow.add_edge.call_count == 6
+        # Verify edges were added (7 edges after reorder)
+        assert mock_workflow.add_edge.call_count == 7
         edge_calls = [call_args[0] for call_args in mock_workflow.add_edge.call_args_list]
         assert ("retrieve", "router") in edge_calls  # New: retrieve feeds router
 
         assert ("clarify", "router") in edge_calls
         assert ("plan", "generate") in edge_calls
         assert ("generate", "validate") in edge_calls
+        assert ("generate", "validate") in edge_calls
         assert ("correct", "validate") in edge_calls
+        assert ("visualize", "synthesize") in edge_calls
         assert ("synthesize", END) in edge_calls
 
         # Verify conditional edges were added (now 4)
@@ -332,7 +335,7 @@ class TestAppCompilation:
                 # Only verify node names if nodes are actually populated
                 # LangGraph's internal structure may not expose nodes in tests
                 if len(node_names) > 0:
-                    assert len(node_names) >= 9
+                    assert len(node_names) >= 10
                     assert "router" in node_names
                     assert "clarify" in node_names
                     assert "retrieve" in node_names
@@ -341,6 +344,7 @@ class TestAppCompilation:
                     assert "validate" in node_names
                     assert "execute" in node_names
                     assert "correct" in node_names
+                    assert "visualize" in node_names
                     assert "synthesize" in node_names
                 # If nodes is empty, that's also acceptable - workflow structure
                 # is verified by the ability to invoke/astream
