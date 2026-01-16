@@ -14,6 +14,7 @@ from agent_core.nodes.retrieve import retrieve_context_node
 from agent_core.nodes.router import router_node
 from agent_core.nodes.synthesize import synthesize_insight_node
 from agent_core.nodes.validate import validate_sql_node
+from agent_core.nodes.visualize import visualize_query_node
 from agent_core.state import AgentState
 from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
@@ -121,7 +122,7 @@ def route_after_execution(state: AgentState) -> str:
         if state.get("retry_count", 0) >= 3:
             return "failed"  # Go to graceful failure
         return "correct"  # Go to self-correction
-    return "synthesize"  # Go to insight generation
+    return "visualize"  # Go to visualization (then synthesis)
 
 
 def create_workflow() -> StateGraph:
@@ -149,6 +150,7 @@ def create_workflow() -> StateGraph:
     workflow.add_node("validate", with_telemetry_context(validate_sql_node))
     workflow.add_node("execute", with_telemetry_context(validate_and_execute_node))
     workflow.add_node("correct", with_telemetry_context(correct_sql_node))
+    workflow.add_node("visualize", with_telemetry_context(visualize_query_node))
     workflow.add_node("synthesize", with_telemetry_context(synthesize_insight_node))
 
     # Set entry point - Cache Lookup first
@@ -201,10 +203,13 @@ def create_workflow() -> StateGraph:
         route_after_execution,
         {
             "correct": "correct",
-            "synthesize": "synthesize",
+            "visualize": "visualize",
             "failed": END,
         },
     )
+
+    # Visualization feeds into synthesis
+    workflow.add_edge("visualize", "synthesize")
 
     # Correction loops back to validate (to re-check corrected SQL)
     workflow.add_edge("correct", "validate")
