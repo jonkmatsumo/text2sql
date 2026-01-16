@@ -52,3 +52,4 @@ services:
 
 networks:
   text2sql_net:
+    external: true
