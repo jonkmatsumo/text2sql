@@ -305,34 +305,43 @@ async def run_agent_with_tracing(
 
         # Execute workflow within MCP context to ensure connections are closed
         from agent_core.tools import mcp_tools_context, unpack_mcp_result
+        from agent_core.utils.retry import retry_with_backoff
 
         # Check fail-open mode (default: fail-closed for reliability)
         persistence_fail_open = get_env_bool("PERSISTENCE_FAIL_OPEN", False)
 
         async with mcp_tools_context() as tools:
-            # 1. Start Interaction Logging (Pre-execution)
+            # 1. Start Interaction Logging (Pre-execution) with retry
             interaction_id = None
             create_tool = next((t for t in tools if t.name == "create_interaction"), None)
             if create_tool:
                 try:
-                    raw_interaction_id = await create_tool.ainvoke(
-                        {
-                            "conversation_id": session_id or thread_id,
-                            "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
-                            "user_nlq_text": question,
-                            "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
-                            "prompt_version": "v1.0",
-                            "trace_id": thread_id,
-                        }
+
+                    async def _create_interaction():
+                        return await create_tool.ainvoke(
+                            {
+                                "conversation_id": session_id or thread_id,
+                                "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
+                                "user_nlq_text": question,
+                                "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
+                                "prompt_version": "v1.0",
+                                "trace_id": thread_id,
+                            }
+                        )
+
+                    raw_interaction_id = await retry_with_backoff(
+                        _create_interaction,
+                        "create_interaction",
+                        extra_context={"trace_id": thread_id},
                     )
                     interaction_id = unpack_mcp_result(raw_interaction_id)
                     inputs["interaction_id"] = interaction_id
                     # Also make interaction_id sticky
                     telemetry.update_current_trace({"interaction_id": interaction_id})
                 except Exception as e:
-                    # Structured logging with context
+                    # Structured logging with context (retry utility already logged attempts)
                     logger.error(
-                        "Failed to create interaction",
+                        "Failed to create interaction after all retries",
                         extra={
                             "operation": "create_interaction",
                             "trace_id": thread_id,
@@ -373,11 +382,11 @@ async def run_agent_with_tracing(
                 if "messages" not in result:
                     result["messages"] = []
 
-            # 2. Update Interaction Logging (Post-execution)
+            # 2. Update Interaction Logging (Post-execution) with retry
             if interaction_id:
-                try:
-                    update_tool = next((t for t in tools if t.name == "update_interaction"), None)
-                    if update_tool:
+                update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+                if update_tool:
+                    try:
                         # Determine status
                         status = "SUCCESS"
                         if result.get("error"):
@@ -397,20 +406,45 @@ async def run_agent_with_tracing(
                         if not last_msg and result.get("error"):
                             last_msg = f"System Error: {result['error']}"
 
-                        await update_tool.ainvoke(
-                            {
+                        # Capture update payload for retry closure
+                        update_payload = {
+                            "interaction_id": interaction_id,
+                            "generated_sql": result.get("current_sql"),
+                            "response_payload": json.dumps(
+                                {"text": last_msg, "error": result.get("error")}
+                            ),
+                            "execution_status": status,
+                            "error_type": result.get("error_category"),
+                            "tables_used": result.get("table_names", []),
+                        }
+
+                        async def _update_interaction():
+                            return await update_tool.ainvoke(update_payload)
+
+                        await retry_with_backoff(
+                            _update_interaction,
+                            "update_interaction",
+                            extra_context={
+                                "trace_id": thread_id,
                                 "interaction_id": interaction_id,
-                                "generated_sql": result.get("current_sql"),
-                                "response_payload": json.dumps(
-                                    {"text": last_msg, "error": result.get("error")}
-                                ),
-                                "execution_status": status,
-                                "error_type": result.get("error_category"),
-                                "tables_used": result.get("table_names", []),
-                            }
+                            },
                         )
-                except Exception as e:
-                    print(f"Warning: Failed to update interaction log: {e}")
+                    except Exception as e:
+                        # Structured logging - update failure is observable
+                        logger.error(
+                            "Failed to update interaction after all retries",
+                            extra={
+                                "operation": "update_interaction",
+                                "trace_id": thread_id,
+                                "interaction_id": interaction_id,
+                                "exception_type": type(e).__name__,
+                                "exception_message": str(e),
+                            },
+                            exc_info=True,
+                        )
+                        # Mark result as having persistence failure (observable)
+                        result["persistence_failed"] = True
+                        result["persistence_error"] = str(e)
 
         # Metadata is already handled early and made sticky via telemetry_context
 
