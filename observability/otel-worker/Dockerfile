@@ -14,9 +14,11 @@ COPY pyproject.toml .
 RUN mkdir -p src/otel_worker && touch src/otel_worker/__init__.py
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install .
+    pip install -e .
 
 COPY src/ ./src/
+COPY alembic.ini .
+COPY migrations/ ./migrations/
 
 EXPOSE 4320
 

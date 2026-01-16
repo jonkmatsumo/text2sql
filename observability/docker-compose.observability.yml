@@ -18,35 +18,37 @@ services:
 
   otel-worker-migrate:
     build:
-      context: ./otel-worker
+      context: observability/otel-worker
     container_name: otel_worker_migrate
     command: alembic upgrade head
     environment:
       - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
+    depends_on:
+      agent-control-db:
+        condition: service_healthy
     networks:
       - text2sql_net
 
   otel-worker:
     build:
-      context: ./otel-worker
+      context: observability/otel-worker
     container_name: otel_worker
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow-server:5000}
+      - MLFLOW_TRACKING_URI=http://mlflow-server:5000
     depends_on:
       otel-worker-migrate:
         condition: service_completed_successfully
     ports:
-      - "5050:5050"
+      - "4320:4320"
     volumes:
-      - ./otel-worker/src:/app/src
+      - ./observability/otel-worker/src:/app/src
     networks:
       - text2sql_net
 
 networks:
   text2sql_net:
-    external: true

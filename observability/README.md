@@ -8,7 +8,7 @@ This directory contains the OpenTelemetry (OTEL) infrastructure for the Text2SQL
 2.  **OTEL Worker**: A custom FastAPI service that receives traces from the collector and performs three actions:
     -   **Postgres**: Indexes trace and span metadata in a dedicated `otel` schema for fast querying/debugging.
     -   **MinIO**: Stores raw gzipped JSON trace payloads for full data retention (canonical store).
-    -   **MLflow Sink**: Dual-writes derived summaries, metrics (duration, error count, tokens), and trace artifacts to MLflow as a downstream sink for runs and monitoring.
+    -   **MLflow Sink**: Dual-writes derived summaries, metrics (duration, error count, tokens), and trace artifacts to MLflow as a downstream sink for runs and monitoring. MLflow is NOT the canonical trace store.
 
 ## Getting Started
 
