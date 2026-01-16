@@ -63,7 +63,7 @@ def _wrap_tool(tool):
             inputs.update(kwargs)
 
         # Truncate inputs if necessary
-        inputs_json, truncated, size, _ = truncate_json(inputs)
+        inputs_json, truncated, size, sha256 = truncate_json(inputs)
 
         with telemetry.start_span(name=f"tool.{tool.name}", span_type=SpanKind.TOOL_CALL) as span:
             # Set standard attributes
@@ -71,20 +71,19 @@ def _wrap_tool(tool):
             span.set_attribute(TelemetryKeys.EVENT_NAME, tool.name)
             span.set_attribute(TelemetryKeys.TOOL_NAME, tool.name)
             span.set_attribute(TelemetryKeys.INPUTS, inputs_json)
-
+            span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+            if sha256:
+                span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
             if truncated:
                 span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
-                span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
 
             try:
                 # Execute original tool
                 result = await original_arun(*args, **kwargs)
 
                 # Capture outputs
-                outputs_json, out_truncated, out_size, _ = truncate_json({"result": result})
+                outputs_json, out_truncated, out_size, out_sha = truncate_json({"result": result})
                 span.set_attribute(TelemetryKeys.OUTPUTS, outputs_json)
-                if out_truncated:
-                    span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
 
                 return result
 

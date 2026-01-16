@@ -114,3 +114,46 @@ class TestTelemetryContract:
             assert "event.type" in span.attributes, f"Span {span.name} missing event.type"
             assert "event.name" in span.attributes, f"Span {span.name} missing event.name"
             assert "event.seq" in span.attributes, f"Span {span.name} missing event.seq"
+
+
+class TestPayloadMetadata:
+    """Test that payload size and hash metadata are emitted."""
+
+    def test_set_inputs_emits_metadata(self):
+        """Verify set_inputs emits size and hash."""
+        from unittest.mock import MagicMock
+
+        from agent_core.telemetry import OTELTelemetrySpan
+
+        mock_span = MagicMock()
+        otel_span = OTELTelemetrySpan(mock_span)
+
+        otel_span.set_inputs({"key": "value"})
+
+        # Check that set_attribute was called with metadata keys
+        calls = {call[0][0]: call[0][1] for call in mock_span.set_attribute.call_args_list}
+
+        assert "telemetry.inputs_json" in calls
+        assert "telemetry.payload_size_bytes" in calls
+        assert "telemetry.payload_sha256" in calls
+        assert calls["telemetry.payload_size_bytes"] > 0
+        assert len(calls["telemetry.payload_sha256"]) == 64  # SHA256 hex
+
+    def test_set_outputs_emits_error_json(self):
+        """Verify set_outputs with error emits structured JSON."""
+        from unittest.mock import MagicMock
+
+        from agent_core.telemetry import OTELTelemetrySpan
+
+        mock_span = MagicMock()
+        otel_span = OTELTelemetrySpan(mock_span)
+
+        otel_span.set_outputs({"error": "test_error"})
+
+        calls = {call[0][0]: call[0][1] for call in mock_span.set_attribute.call_args_list}
+
+        assert "telemetry.error_json" in calls
+        import json
+
+        error = json.loads(calls["telemetry.error_json"])
+        assert error["error"] == "test_error"
