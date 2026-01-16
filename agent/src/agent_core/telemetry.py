@@ -453,6 +453,20 @@ class TelemetryService:
             backend_type = get_env_str("TELEMETRY_BACKEND", "otel").lower()
             if backend_type == "none":
                 self._backend = NoOpTelemetryBackend()
+            elif backend_type == "dual":
+                logger.warning(
+                    "TELEMETRY_BACKEND=dual is configured but dual-mode is not implemented. "
+                    "Falling back to OTEL-only mode. Update your .env to TELEMETRY_BACKEND=otel "
+                    "to suppress this warning."
+                )
+                self._backend = OTELTelemetryBackend()
+            elif backend_type == "mlflow":
+                logger.warning(
+                    "TELEMETRY_BACKEND=mlflow is deprecated. MLflow is now a downstream sink "
+                    "via the OTEL worker. Falling back to OTEL-only mode. Update your .env to "
+                    "TELEMETRY_BACKEND=otel to suppress this warning."
+                )
+                self._backend = OTELTelemetryBackend()
             else:
                 self._backend = OTELTelemetryBackend()
 

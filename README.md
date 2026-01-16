@@ -159,11 +159,10 @@ flowchart TB
 *   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
 
 ### 📡 Observability (OTEL-First)
-*   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=dual`).
+*   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=otel`).
 *   **Durable Sink**: The OTEL worker provides persistent storage (Postgres) and raw archives (MinIO).
-*   **MLflow Run Sink**: High-level metrics and trace summaries are automatically exported to MLflow for experiment tracking.
-*   **Access Point**: Query the OTEL worker API at `http://localhost:4320/api/v1/traces`.
 *   **MLflow Run Sink**: MLflow acts solely as a downstream sink for experiment tracking. Traces are not sent directly to MLflow; they are exported by the OTEL worker to the `otel-traces` experiment.
+*   **Access Point**: Query the OTEL worker API at `http://localhost:4320/api/v1/traces`.
 
 ## Project Structure
 
