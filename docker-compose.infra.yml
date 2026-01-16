@@ -117,4 +117,4 @@ services:
 
 networks:
   text2sql_net:
-    driver: bridge
+    external: true
