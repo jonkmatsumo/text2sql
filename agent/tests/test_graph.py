@@ -16,7 +16,7 @@ def clean_agent_modules():
             if m in sys.modules:
                 del sys.modules[m]
 
-    if "agent_core" in sys.modules:
+    if "agent_core" in sys.modules and not isinstance(sys.modules["agent_core"], type(sys)):
         del sys.modules["agent_core"]
 
 
