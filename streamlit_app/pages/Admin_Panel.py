@@ -19,7 +19,14 @@ def main():
     st.sidebar.header("Navigation")
 
     view = st.sidebar.radio(
-        "View", ["Recent Interactions", "Pending Publication", "Approved Examples", "Operations"]
+        "View",
+        [
+            "Recent Interactions",
+            "Pending Publication",
+            "Approved Examples",
+            "Operations",
+            "Observability",
+        ],
     )
 
     # Optional Filters for Recent Interactions
@@ -271,6 +278,31 @@ def main():
             st.info("Re-index embeddings for cache/retrieval.")
             if st.button("Re-index Cache", disabled=True, help="Coming soon"):
                 asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
+
+    elif view == "Observability":
+        st.header("📊 Observability")
+        st.write("Monitor system performance and investigate traces.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("Dashboards")
+            st.info("View aggregated metrics (latency, errors) in Grafana.")
+            st.link_button(
+                "Open Grafana",
+                "http://localhost:3000/d/text2sql-traces/text2sql-trace-metrics",
+                type="primary",
+            )
+
+        with col2:
+            st.subheader("Trace Lookup")
+            st.info("Direct access to raw trace data via API.")
+            trace_id = st.text_input("Trace ID", placeholder="Enter 32-char Trace ID")
+            if trace_id:
+                st.link_button(
+                    f"View Trace {trace_id[:8]}...",
+                    f"http://localhost:4320/api/v1/traces/{trace_id}",
+                )
 
 
 if __name__ == "__main__":
