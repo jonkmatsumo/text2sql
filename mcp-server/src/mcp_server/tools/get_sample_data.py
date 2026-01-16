@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from mcp_server.dal.factory import get_schema_introspector
+from dal.factory import get_schema_introspector
 
 TOOL_NAME = "get_sample_data"
 

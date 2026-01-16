@@ -194,10 +194,119 @@ def get_llm(
         llm = get_llm_client(
             provider=provider, model=model, temperature=temperature, use_light_model=use_light_model
         )
+        # Apply strict telemetry parity wrapper
+        telemetric_llm = _wrap_llm(llm)
+
         # Apply sanitization wrapper exactly once at invocation boundary
-        _LLM_CACHE[key] = RunnableLambda(_sanitize_llm_input) | llm
+        _LLM_CACHE[key] = RunnableLambda(_sanitize_llm_input) | telemetric_llm
 
     return _LLM_CACHE[key]
+
+
+def _extract_prompts(input_data: Any) -> tuple[Optional[str], Optional[str]]:
+    """Extract system and user prompts from various input types."""
+    system_prompt = None
+    user_prompt = None
+
+    messages = []
+    if hasattr(input_data, "to_messages"):
+        messages = input_data.to_messages()
+    elif isinstance(input_data, list):
+        messages = input_data
+    elif isinstance(input_data, str):
+        user_prompt = input_data
+        return None, user_prompt
+
+    for msg in messages:
+        if msg.type == "system":
+            system_prompt = msg.content
+        elif msg.type == "human":
+            user_prompt = msg.content
+
+    return system_prompt, user_prompt
+
+
+def _wrap_llm(llm: BaseChatModel):
+    """Wrap an LLM with strict telemetry parity."""
+    from agent_core.telemetry import telemetry
+    from agent_core.telemetry_schema import SpanKind, TelemetryKeys, truncate_json
+
+    # Attempt to resolve model name
+    model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
+
+    def telemetric_invoke(input, config=None, **kwargs):
+        sys_prompt, user_prompt = _extract_prompts(input)
+
+        with telemetry.start_span(name="llm.call", span_type=SpanKind.LLM_CALL) as span:
+            span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.LLM_CALL)
+            span.set_attribute(TelemetryKeys.EVENT_NAME, "llm_generation")
+            span.set_attribute(TelemetryKeys.LLM_MODEL, model_name)
+
+            if sys_prompt:
+                sys_trunc, _, _, _ = truncate_json(sys_prompt)
+                span.set_attribute(TelemetryKeys.LLM_PROMPT_SYSTEM, sys_trunc)
+            if user_prompt:
+                usr_trunc, _, _, _ = truncate_json(user_prompt)
+                span.set_attribute(TelemetryKeys.LLM_PROMPT_USER, usr_trunc)
+
+            try:
+                response = llm.invoke(input, config, **kwargs)
+
+                # Capture Output
+                if hasattr(response, "content"):
+                    out_trunc, truncated, size, _ = truncate_json(response.content)
+                    span.set_attribute(TelemetryKeys.LLM_RESPONSE_TEXT, out_trunc)
+                    if truncated:
+                        span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+
+                # Capture Tokens
+                usage = extract_token_usage(response)
+                if usage:
+                    span.set_attributes(usage)
+
+                return response
+            except Exception as e:
+                error_info = {"error": str(e), "type": type(e).__name__}
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                raise e
+
+    async def telemetric_ainvoke(input, config=None, **kwargs):
+        sys_prompt, user_prompt = _extract_prompts(input)
+
+        with telemetry.start_span(name="llm.call", span_type=SpanKind.LLM_CALL) as span:
+            span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.LLM_CALL)
+            span.set_attribute(TelemetryKeys.EVENT_NAME, "llm_generation")
+            span.set_attribute(TelemetryKeys.LLM_MODEL, model_name)
+
+            if sys_prompt:
+                sys_trunc, _, _, _ = truncate_json(sys_prompt)
+                span.set_attribute(TelemetryKeys.LLM_PROMPT_SYSTEM, sys_trunc)
+            if user_prompt:
+                usr_trunc, _, _, _ = truncate_json(user_prompt)
+                span.set_attribute(TelemetryKeys.LLM_PROMPT_USER, usr_trunc)
+
+            try:
+                response = await llm.ainvoke(input, config, **kwargs)
+
+                # Capture Output
+                if hasattr(response, "content"):
+                    out_trunc, truncated, size, _ = truncate_json(response.content)
+                    span.set_attribute(TelemetryKeys.LLM_RESPONSE_TEXT, out_trunc)
+                    if truncated:
+                        span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+
+                # Capture Tokens
+                usage = extract_token_usage(response)
+                if usage:
+                    span.set_attributes(usage)
+
+                return response
+            except Exception as e:
+                error_info = {"error": str(e), "type": type(e).__name__}
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                raise e
+
+    return RunnableLambda(telemetric_invoke, telemetric_ainvoke)
 
 
 def extract_token_usage(response: Any) -> dict[str, int]:
@@ -227,9 +336,9 @@ def extract_token_usage(response: Any) -> dict[str, int]:
     if "token_usage" in meta:
         tu = meta["token_usage"]
         if "prompt_tokens" in tu:
-            usage["llm.token_usage.input_tokens"] = int(tu["prompt_tokens"])
+            usage["llm.token_usage.prompt_tokens"] = int(tu["prompt_tokens"])
         if "completion_tokens" in tu:
-            usage["llm.token_usage.output_tokens"] = int(tu["completion_tokens"])
+            usage["llm.token_usage.completion_tokens"] = int(tu["completion_tokens"])
         if "total_tokens" in tu:
             usage["llm.token_usage.total_tokens"] = int(tu["total_tokens"])
 
@@ -237,19 +346,19 @@ def extract_token_usage(response: Any) -> dict[str, int]:
     elif "usage" in meta:
         u = meta["usage"]
         if hasattr(u, "input_tokens"):  # Some are objects
-            usage["llm.token_usage.input_tokens"] = int(u.input_tokens)
-            usage["llm.token_usage.output_tokens"] = int(u.output_tokens)
+            usage["llm.token_usage.prompt_tokens"] = int(u.input_tokens)
+            usage["llm.token_usage.completion_tokens"] = int(u.output_tokens)
             usage["llm.token_usage.total_tokens"] = int(u.total_tokens)
         elif isinstance(u, dict):
             if "input_tokens" in u:
-                usage["llm.token_usage.input_tokens"] = int(u["input_tokens"])
+                usage["llm.token_usage.prompt_tokens"] = int(u["input_tokens"])
             if "prompt_token_count" in u:  # Google sometimes
-                usage["llm.token_usage.input_tokens"] = int(u["prompt_token_count"])
+                usage["llm.token_usage.prompt_tokens"] = int(u["prompt_token_count"])
 
             if "output_tokens" in u:
-                usage["llm.token_usage.output_tokens"] = int(u["output_tokens"])
+                usage["llm.token_usage.completion_tokens"] = int(u["output_tokens"])
             if "candidates_token_count" in u:  # Google sometimes
-                usage["llm.token_usage.output_tokens"] = int(u["candidates_token_count"])
+                usage["llm.token_usage.completion_tokens"] = int(u["candidates_token_count"])
 
             if "total_tokens" in u:
                 usage["llm.token_usage.total_tokens"] = int(u["total_tokens"])

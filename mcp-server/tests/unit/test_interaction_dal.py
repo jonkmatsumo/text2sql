@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from mcp_server.dal.postgres import PostgresInteractionStore
+
+from dal.postgres import PostgresInteractionStore
 
 
 @pytest.fixture

@@ -11,14 +11,14 @@ class TestPostgresRegistryStore:
     @pytest.fixture
     def store(self):
         """Fixture for PostgresRegistryStore."""
-        from mcp_server.dal.postgres.registry_store import PostgresRegistryStore
+        from dal.postgres.registry_store import PostgresRegistryStore
 
         return PostgresRegistryStore()
 
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.registry_store.Database") as mock:
+        with patch("dal.postgres.registry_store.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio

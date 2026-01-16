@@ -2,10 +2,9 @@ import json
 from contextlib import asynccontextmanager
 from typing import List
 
-from mcp_server.dal.postgres.common import _format_vector
-from mcp_server.models import SchemaEmbedding
-
 from common.interfaces.schema_store import SchemaStore
+from dal.postgres.common import _format_vector
+from schema.rag import SchemaEmbedding
 
 
 class PostgresSchemaStore(SchemaStore):
@@ -15,8 +14,8 @@ class PostgresSchemaStore(SchemaStore):
     @asynccontextmanager
     async def _get_connection():
         """Get connection from control-plane pool if available (metadata resides in control)."""
-        from mcp_server.config.control_plane import ControlPlaneDatabase
-        from mcp_server.config.database import Database
+        from dal.control_plane import ControlPlaneDatabase
+        from dal.database import Database
 
         # Schema embeddings are strictly metadata.
         # If Control Plane is configured, they should be there.

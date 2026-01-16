@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from mcp_server.dal.postgres.pattern_run_store import PostgresPatternRunStore
+
+from dal.postgres.pattern_run_store import PostgresPatternRunStore
 
 
 @pytest.fixture

@@ -4,7 +4,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -107,7 +108,7 @@ async def get_few_shot_examples(
     """
     with telemetry.start_span(
         name="recommendation.select",
-        span_type=SpanType.RETRIEVER,
+        span_type=SpanKind.CHAIN,
     ) as span:
         if tenant_id:
             span.set_attribute("tenant_id", tenant_id)
@@ -191,8 +192,10 @@ async def generate_sql_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="generate_sql",
-        span_type=SpanType.CHAT_MODEL,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "generate_sql")
         messages = state["messages"]
         context = state.get("schema_context", "")
 

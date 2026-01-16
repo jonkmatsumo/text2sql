@@ -3,8 +3,8 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from mcp_server.config.control_plane import ControlPlaneDatabase
-from mcp_server.config.database import Database
+from dal.control_plane import ControlPlaneDatabase
+from dal.database import Database
 
 
 @dataclass

@@ -18,28 +18,13 @@ Canonical Provider IDs:
     - "memgraph": Memgraph/Neo4j-based implementations
 
 Example:
-    >>> from mcp_server.dal.factory import get_cache_store, get_graph_store
+    >>> from dal.factory import get_cache_store, get_graph_store
     >>> cache = get_cache_store()  # Returns PgSemanticCache by default
     >>> graph = get_graph_store()  # Returns MemgraphStore by default
 """
 
 import logging
 from typing import Optional
-
-from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.postgres import (
-    PgSemanticCache,
-    PostgresConversationStore,
-    PostgresExampleStore,
-    PostgresFeedbackStore,
-    PostgresInteractionStore,
-    PostgresMetadataStore,
-    PostgresPatternRunStore,
-    PostgresRegistryStore,
-    PostgresSchemaIntrospector,
-    PostgresSchemaStore,
-)
-from mcp_server.dal.util.env import get_provider_env
 
 from common.interfaces import (
     CacheStore,
@@ -54,6 +39,20 @@ from common.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
+from dal.memgraph import MemgraphStore
+from dal.postgres import (
+    PgSemanticCache,
+    PostgresConversationStore,
+    PostgresExampleStore,
+    PostgresFeedbackStore,
+    PostgresInteractionStore,
+    PostgresMetadataStore,
+    PostgresPatternRunStore,
+    PostgresRegistryStore,
+    PostgresSchemaIntrospector,
+    PostgresSchemaStore,
+)
+from dal.util.env import get_provider_env
 
 logger = logging.getLogger(__name__)
 

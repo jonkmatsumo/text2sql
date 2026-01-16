@@ -142,27 +142,3 @@ class EnrichmentPipeline:
                 "new_hash": entry["new_hash"],
             },
         )
-
-
-if __name__ == "__main__":
-    import argparse
-
-    logging.basicConfig(level=logging.INFO)
-
-    parser = argparse.ArgumentParser(description="Run the Semantic Enrichment Pipeline.")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run in dry-run mode (no env var check, no actual enrichment).",
-    )
-    args = parser.parse_args()
-
-    from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
-
-    store = get_ingestion_graph_store()
-
-    pipeline = EnrichmentPipeline(store=store, dry_run=args.dry_run)
-    try:
-        asyncio.run(pipeline.run())
-    finally:
-        pipeline.close()

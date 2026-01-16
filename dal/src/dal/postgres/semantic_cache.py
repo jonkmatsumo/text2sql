@@ -2,11 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from mcp_server.config.database import Database
-from mcp_server.dal.postgres.common import _format_vector
-from mcp_server.models import CacheLookupResult
-
 from common.interfaces.cache_store import CacheStore
+from dal.database import Database
+from dal.postgres.common import _format_vector
+from schema.cache import CacheLookupResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ class PgSemanticCache(CacheStore):
     @asynccontextmanager
     async def _get_connection(tenant_id: Optional[int] = None):
         """Get connection from control-plane pool if enabled, else main pool."""
-        from mcp_server.config.control_plane import ControlPlaneDatabase
+        from dal.control_plane import ControlPlaneDatabase
 
         if ControlPlaneDatabase.is_enabled():
             async with ControlPlaneDatabase.get_connection(tenant_id) as conn:
@@ -158,7 +157,7 @@ class PgSemanticCache(CacheStore):
 
     async def _execute_dual_write(self, query: str, *args, tenant_id: Optional[int] = None):
         """Execute a write operation on both pools (Primary + Shadow)."""
-        from mcp_server.config.control_plane import ControlPlaneDatabase
+        from dal.control_plane import ControlPlaneDatabase
 
         async with self._get_connection(tenant_id) as conn:
             await conn.execute(query, *args)
@@ -259,7 +258,7 @@ class PgSemanticCache(CacheStore):
                 success = True
 
         try:
-            from mcp_server.config.control_plane import ControlPlaneDatabase
+            from dal.control_plane import ControlPlaneDatabase
 
             is_iso = ControlPlaneDatabase.is_enabled()
             is_conf = ControlPlaneDatabase.is_configured()

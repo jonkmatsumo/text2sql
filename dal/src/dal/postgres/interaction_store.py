@@ -2,9 +2,8 @@ import json
 from contextlib import asynccontextmanager
 from typing import Any, List, Optional
 
-from mcp_server.config.control_plane import ControlPlaneDatabase
-
 from common.interfaces.interaction_store import InteractionStore
+from dal.control_plane import ControlPlaneDatabase
 
 
 class PostgresInteractionStore(InteractionStore):

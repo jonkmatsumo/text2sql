@@ -451,15 +451,43 @@ class TelemetryService:
         via update_current_trace inside this span will be inherited by child
         spans but will be discarded when this span exits.
         """
-        # Snapshot current sticky metadata to prevent leaks outside this span
+        # 1. Handle Sequencing (Update Parent Context)
+        # We must increment the counter in the CURRENT context so siblings see it.
+        # This change will be preserved until THIS scope (the parent of the new span) ends,
+        # at which point the parent's own cleanup will handle it.
+
+        current_meta = _sticky_metadata.get().copy()
+        seq_counter = current_meta.get("_seq_counter", 0)
+        event_seq = seq_counter
+
+        # Increment for the next sibling
+        current_meta["_seq_counter"] = seq_counter + 1
+        _sticky_metadata.set(current_meta)
+
+        # 2. Snapshot/Isolate for Child
+        # Snapshot current sticky metadata to prevent leaks FROM Child TO Parent
         token = _sticky_metadata.set(_sticky_metadata.get().copy())
 
         try:
-            # Merge sticky metadata into attributes for this span
-            merged_attributes = _sticky_metadata.get().copy()
+            # 3. Child Scope Setup
+            # Reset counter for children of this new span
+            child_meta = _sticky_metadata.get()
+            child_meta["_seq_counter"] = 0
+            _sticky_metadata.set(child_meta)
+
+            # 4. Prepare Attributes
+            merged_attributes = child_meta.copy()
+            # Remove internal keys for emission
+            if "_seq_counter" in merged_attributes:
+                del merged_attributes["_seq_counter"]
+
             if attributes:
                 merged_attributes.update(attributes)
 
+            # Set the sequence attribute explicitly
+            merged_attributes["event.seq"] = event_seq
+
+            # 5. Start Span
             with self._backend.start_span(
                 name=name,
                 span_type=span_type,
@@ -467,8 +495,10 @@ class TelemetryService:
                 attributes=merged_attributes,
             ) as span:
                 yield span
+
         finally:
-            # Restore sticky metadata to pre-span state
+            # Restore sticky metadata to pre-span state (Child's isolation ends)
+            # This restores the context to 'current_meta' (which has count=1)
             _sticky_metadata.reset(token)
 
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:

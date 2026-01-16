@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from mcp_server.dal.factory import get_interaction_store
+from dal.factory import get_interaction_store
 
 TOOL_NAME = "update_interaction"
 

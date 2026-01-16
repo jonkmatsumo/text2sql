@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
 
 
 @pytest.fixture
@@ -21,9 +22,9 @@ async def test_list_rules_uses_control_plane_when_enabled(mock_db_context):
     mock_ctx, mock_conn = mock_db_context
     mock_conn.fetch.return_value = []
 
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.ControlPlaneDatabase"
-    ) as mock_cp, patch("mcp_server.dal.postgres.pinned_recommendations.Database") as mock_db:
+    with patch("dal.postgres.pinned_recommendations.ControlPlaneDatabase") as mock_cp, patch(
+        "dal.postgres.pinned_recommendations.Database"
+    ) as mock_db:
 
         # Setup: Isolation Enabled
         mock_cp.is_enabled.return_value = True
@@ -43,9 +44,9 @@ async def test_list_rules_uses_main_db_when_disabled(mock_db_context):
     mock_ctx, mock_conn = mock_db_context
     mock_conn.fetch.return_value = []
 
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.ControlPlaneDatabase"
-    ) as mock_cp, patch("mcp_server.dal.postgres.pinned_recommendations.Database") as mock_db:
+    with patch("dal.postgres.pinned_recommendations.ControlPlaneDatabase") as mock_cp, patch(
+        "dal.postgres.pinned_recommendations.Database"
+    ) as mock_db:
 
         # Setup: Isolation Disabled
         mock_cp.is_enabled.return_value = False
@@ -76,9 +77,9 @@ async def test_create_rule_routing(mock_db_context):
         "updated_at": None,
     }
 
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.ControlPlaneDatabase"
-    ) as mock_cp, patch("mcp_server.dal.postgres.pinned_recommendations.Database") as mock_db:
+    with patch("dal.postgres.pinned_recommendations.ControlPlaneDatabase") as mock_cp, patch(
+        "dal.postgres.pinned_recommendations.Database"
+    ) as mock_db:
 
         # Setup: Isolation Enabled
         mock_cp.is_enabled.return_value = True
@@ -100,9 +101,9 @@ async def test_update_rule_routing(mock_db_context):
         None  # Return None means row updated/found or not, doesn't matter for routing check
     )
 
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.ControlPlaneDatabase"
-    ) as mock_cp, patch("mcp_server.dal.postgres.pinned_recommendations.Database") as mock_db:
+    with patch("dal.postgres.pinned_recommendations.ControlPlaneDatabase") as mock_cp, patch(
+        "dal.postgres.pinned_recommendations.Database"
+    ) as mock_db:
 
         # Setup: Isolation Disabled
         mock_cp.is_enabled.return_value = False
@@ -122,9 +123,9 @@ async def test_delete_rule_routing(mock_db_context):
     mock_ctx, mock_conn = mock_db_context
     mock_conn.execute.return_value = "DELETE 1"
 
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.ControlPlaneDatabase"
-    ) as mock_cp, patch("mcp_server.dal.postgres.pinned_recommendations.Database") as mock_db:
+    with patch("dal.postgres.pinned_recommendations.ControlPlaneDatabase") as mock_cp, patch(
+        "dal.postgres.pinned_recommendations.Database"
+    ) as mock_db:
 
         # Setup: Isolation Enabled
         mock_cp.is_enabled.return_value = True

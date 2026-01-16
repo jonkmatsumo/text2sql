@@ -4,7 +4,8 @@ import json
 
 from agent_core.llm_client import get_llm
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -28,8 +29,10 @@ def synthesize_insight_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="synthesize_insight",
-        span_type=SpanType.CHAT_MODEL,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "synthesize_insight")
         query_result = state["query_result"]
 
         # Get the original question from the LAST user message (not first)

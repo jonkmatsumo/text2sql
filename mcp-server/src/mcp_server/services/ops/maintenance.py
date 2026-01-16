@@ -3,7 +3,7 @@
 import logging
 from typing import AsyncGenerator
 
-from mcp_server.config.database import Database
+from dal.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,8 @@ class MaintenanceService:
         # lazy import to avoid circular dependency
         from datetime import datetime
 
-        from mcp_server.dal.factory import get_pattern_run_store
-        from mcp_server.services.patterns.generator import generate_entity_patterns
+        from dal.factory import get_pattern_run_store
+        from ingestion.patterns.generator import generate_entity_patterns
 
         run_store = get_pattern_run_store()
         run_id = await run_store.create_run(status="RUNNING", config_snapshot={"dry_run": dry_run})

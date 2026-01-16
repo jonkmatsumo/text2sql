@@ -4,8 +4,9 @@ from unittest.mock import patch
 
 import pytest
 import spacy
-from mcp_server.config.database import Database
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
+
+from dal.database import Database
 
 # Ensure SpaCy is enabled for these tests
 os.environ["SPACY_ENABLED"] = "true"

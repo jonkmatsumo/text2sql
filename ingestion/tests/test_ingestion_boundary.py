@@ -5,21 +5,21 @@ import pytest
 
 FORBIDDEN_PACKAGES = {
     "mcp_server",
-    "agent_core",
-    "text2sql_synth",
-    "streamlit_app",
-    "dal",
-    "ingestion",
 }
 
 
-def test_no_downstream_imports():
-    """Ensure common/ package does not import from downstream services."""
-    common_src = Path(__file__).parent.parent / "src" / "common"
+def test_no_upstream_imports():
+    """Ensure ingestion/ package does not import from mcp_server."""
+    # Assumes ingestion/tests/test_boundary.py -> ingestion/tests -> ingestion
+    ingestion_src = Path(__file__).parent.parent / "src" / "ingestion"
 
     violations = []
 
-    for py_file in common_src.rglob("*.py"):
+    if not ingestion_src.exists():
+        # In case structure is different or empty
+        return
+
+    for py_file in ingestion_src.rglob("*.py"):
         try:
             with open(py_file, "r", encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=str(py_file))
@@ -40,5 +40,5 @@ def test_no_downstream_imports():
                         violations.append(f"{py_file.name}: from {node.module} import ...")
 
     if violations:
-        message = "Forbidden downstream imports found in common/:\n" + "\n".join(violations)
+        message = "Forbidden upstream imports found in ingestion/:\n" + "\n".join(violations)
         pytest.fail(message)

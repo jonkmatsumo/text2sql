@@ -3,9 +3,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from mcp_server.config.control_plane import ControlPlaneDatabase
-
 from common.interfaces.conversation_store import ConversationStore
+from dal.control_plane import ControlPlaneDatabase
 
 
 class PostgresConversationStore(ConversationStore):

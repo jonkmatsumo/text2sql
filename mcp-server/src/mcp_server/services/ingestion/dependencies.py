@@ -1,8 +1,7 @@
 """Dependency injection and singleton management for ingestion services."""
 
-from mcp_server.dal.factory import get_graph_store
-
 from common.interfaces import GraphStore
+from dal.factory import get_graph_store
 
 
 def get_ingestion_graph_store() -> GraphStore:

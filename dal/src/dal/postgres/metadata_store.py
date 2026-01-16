@@ -1,9 +1,8 @@
 import json
 from typing import List
 
-from mcp_server.dal.postgres.schema_introspector import PostgresSchemaIntrospector
-
 from common.interfaces.metadata_store import MetadataStore
+from dal.postgres.schema_introspector import PostgresSchemaIntrospector
 
 
 class PostgresMetadataStore(MetadataStore):

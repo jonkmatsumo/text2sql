@@ -1,13 +1,14 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.dal.postgres import (
+from mcp_server.models import CacheLookupResult
+
+from dal.postgres import (
     PgSemanticCache,
     PostgresExampleStore,
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
 )
-from mcp_server.models import CacheLookupResult
 
 MOCK_EMBEDDING = [0.1, 0.2, 0.3]
 
@@ -23,7 +24,7 @@ class TestPgSemanticCache:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.semantic_cache.Database") as mock:
+        with patch("dal.postgres.semantic_cache.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -98,7 +99,7 @@ class TestPostgresExampleStore:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.example_store.Database") as mock:
+        with patch("dal.postgres.example_store.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -147,7 +148,7 @@ class TestPostgresSchemaStore:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.config.database.Database") as mock:
+        with patch("dal.database.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio
@@ -194,7 +195,7 @@ class TestPostgresSchemaIntrospector:
     @pytest.fixture
     def mock_db(self):
         """Fixture to mock Database."""
-        with patch("mcp_server.dal.postgres.schema_introspector.Database") as mock:
+        with patch("dal.postgres.schema_introspector.Database") as mock:
             yield mock
 
     @pytest.mark.asyncio

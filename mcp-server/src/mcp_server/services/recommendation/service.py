@@ -459,7 +459,7 @@ class RecommendationService:
 
     @staticmethod
     async def _match_pin_rules(question: str, tenant_id: int):
-        from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+        from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
 
         store = PostgresPinnedRecommendationStore()
         rules = await store.list_rules(tenant_id, only_enabled=True)

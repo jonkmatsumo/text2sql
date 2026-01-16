@@ -24,6 +24,7 @@ dependencies = [
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp",
     "opentelemetry-instrumentation-starlette",
+    "text2sql-dal",
 ]
 
 [project.optional-dependencies]

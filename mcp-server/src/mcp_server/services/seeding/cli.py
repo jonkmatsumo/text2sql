@@ -8,8 +8,6 @@ import asyncio
 import sys
 from pathlib import Path
 
-from mcp_server.config.database import Database
-from mcp_server.dal.factory import get_schema_introspector
 from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
 from mcp_server.services.rag.engine import (
     RagEngine,
@@ -19,6 +17,8 @@ from mcp_server.services.rag.engine import (
 from mcp_server.services.registry import RegistryService
 from mcp_server.services.seeding.loader import load_from_directory, load_table_summaries
 
+from dal.database import Database
+from dal.factory import get_schema_introspector
 from ingestion.graph_hydrator import GraphHydrator
 
 
@@ -82,7 +82,7 @@ async def main():
     """Run the seeding process."""
     print("Starting Seeder Service...")
 
-    from mcp_server.config.control_plane import ControlPlaneDatabase
+    from dal.control_plane import ControlPlaneDatabase
 
     # Reuse the MCP Server's DB logic (inits both if configured)
     await Database.init()

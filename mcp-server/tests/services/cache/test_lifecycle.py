@@ -2,9 +2,10 @@ import json
 import time
 
 import pytest
-from mcp_server.config.database import Database
-from mcp_server.dal.factory import get_cache_store
 from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
+
+from dal.database import Database
+from dal.factory import get_cache_store
 
 TEST_QUERY = "Integration Test: Show me the hierarchy of the payment system"
 TENANT_ID = 1
@@ -82,7 +83,7 @@ async def test_cache_pruning():
         legacy_query = "Legacy Query Integration Test"
         # We need to construct a dummy embedding
         dummy_embedding = [0.1] * 384
-        from mcp_server.dal.postgres.common import _format_vector
+        from dal.postgres.common import _format_vector
 
         pg_vector = _format_vector(dummy_embedding)
 

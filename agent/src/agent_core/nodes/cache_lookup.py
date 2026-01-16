@@ -3,7 +3,8 @@
 import logging
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
 
@@ -20,8 +21,10 @@ async def cache_lookup_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="cache_lookup",
-        span_type=SpanType.RETRIEVER,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "cache_lookup")
         messages = state["messages"]
         user_query = messages[-1].content if messages else ""
         span.set_inputs({"user_query": user_query})
