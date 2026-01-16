@@ -58,4 +58,27 @@ OTEL_RESOURCE_ATTRIBUTES=environment=local,repo=text2sql
 -   **Metrics**: `duration_ms`, `span_count`, `error_count`, `input_tokens`, `output_tokens`.
 -   **Artifacts**: `trace_raw.json`, `span_summary.json`.
 
+
 To disable MLflow export after cutover, set `ENABLE_MLFLOW_EXPORT=false` in the `otel-worker` environment.
+
+## Visualization (Grafana)
+
+Grafana is included for visualizing derived metrics (latency, error rates, stages).
+
+### Access
+
+-   **URL**: `http://localhost:3000`
+-   **Credentials**: `admin` / `admin` (default)
+
+### Dashboards
+
+-   **Text2SQL Trace Metrics**: Shows p50/mean latency, error rates over time, and a list of recent traces with links to the raw API.
+
+### Metrics Aggregation
+
+The dashboards rely on the `otel.trace_metrics` and `otel.stage_metrics` tables, which are populated by an async aggregation job.
+
+**Run Aggregation Job**:
+```bash
+docker compose exec otel-worker python -m otel_worker.cli aggregate --lookback 60
+```

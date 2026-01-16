@@ -1,6 +1,6 @@
 # Docker Cleanup Tooling
 
-COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml
+COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml -f observability/docker-compose.grafana.yml
 
 .PHONY: help docker-clean docker-clean-deep docker-nuke otel-migrate otel-up
 
