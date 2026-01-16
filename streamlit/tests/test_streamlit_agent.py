@@ -47,6 +47,8 @@ class TestRunAgent:
             "error": None,
             "from_cache": False,
             "interaction_id": "int-123",
+            "viz_spec": {"mark": "bar"},
+            "viz_reason": "Data good",
         }
 
         # Use the mock from the fixture
@@ -60,6 +62,8 @@ class TestRunAgent:
         assert results["result"] == [{"count": 1000}]
         assert results["response"] == "There are 1000 films."
         assert results["interaction_id"] == "int-123"
+        assert results["viz_spec"] == {"mark": "bar"}
+        assert results["viz_reason"] == "Data good"
 
 
 class TestFeedback:
@@ -97,13 +101,18 @@ class TestFormatConversationEntry:
             "response": "Found 1 film",
             "error": None,
             "from_cache": False,
+            "from_cache": False,
             "interaction_id": "int-123",
+            "viz_spec": {"mark": "bar"},
+            "viz_reason": "Reason",
         }
 
         entry = AgentService.format_conversation_entry("Show films", results)
 
         assert entry["question"] == "Show films"
         assert entry["interaction_id"] == "int-123"
+        assert entry["viz_spec"] == {"mark": "bar"}
+        assert entry["viz_reason"] == "Reason"
 
 
 class TestValidateTenantId:

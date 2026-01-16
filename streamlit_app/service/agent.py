@@ -51,6 +51,8 @@ class AgentService:
             "error": state.get("error"),
             "from_cache": state.get("from_cache", False),
             "interaction_id": state.get("interaction_id"),
+            "viz_spec": state.get("viz_spec"),
+            "viz_reason": state.get("viz_reason"),
         }
 
         # Extract response from messages
@@ -83,6 +85,8 @@ class AgentService:
             "error": results.get("error"),
             "from_cache": results.get("from_cache", False),
             "interaction_id": results.get("interaction_id"),
+            "viz_spec": results.get("viz_spec"),
+            "viz_reason": results.get("viz_reason"),
         }
 
     @staticmethod

@@ -521,6 +521,32 @@ class TelemetryService:
         with self.use_context(ctx):
             return await func(*args, **kwargs)
 
+    def serialize_context(self, ctx: TelemetryContext) -> Dict[str, Any]:
+        """Serialize TelemetryContext to a dictionary (MsgPack safe)."""
+        carrier = {}
+        # Inject OTEL headers (requires activating the context first)
+        with self.use_context(ctx):
+            self.inject_context(carrier)
+
+        # Add sticky metadata
+        if ctx.sticky_metadata:
+            carrier["_sticky_metadata"] = ctx.sticky_metadata
+
+        return carrier
+
+    def deserialize_context(self, data: Dict[str, Any]) -> TelemetryContext:
+        """Deserialize TelemetryContext from a dictionary."""
+        if not data:
+            return TelemetryContext()
+
+        # Extract metadata
+        sticky_metadata = data.pop("_sticky_metadata", None)
+
+        # Extract OTEL context (headers are in data)
+        ctx = self.extract_context(data)
+        ctx.sticky_metadata = sticky_metadata
+        return ctx
+
 
 # Global instance for easy access
 telemetry = TelemetryService()

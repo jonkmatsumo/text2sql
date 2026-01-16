@@ -26,6 +26,7 @@ test = [
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.11.0",
     "pytest-cov>=4.1.0",
+    "msgpack",
 ]
 llm-providers = [
     "langchain-anthropic>=0.3.0",

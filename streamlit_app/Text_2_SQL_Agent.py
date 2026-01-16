@@ -147,6 +147,13 @@ def main():
                     if entry.get("from_cache"):
                         st.info("✓ Used cached SQL")
 
+                if entry.get("viz_spec"):
+                    st.vega_lite_chart(entry["viz_spec"], use_container_width=True)
+                elif entry.get("viz_reason") and entry.get("result"):
+                    # Only show reason if we have results but no chart (optional, maybe too noisy?)
+                    # st.caption(f"Visualization skipped: {entry['viz_reason']}")
+                    pass
+
                 if entry.get("result"):
                     st.dataframe(entry["result"], use_container_width=True)
 
@@ -216,6 +223,9 @@ def main():
                                 st.code(results["sql"], language="sql")
                             if results.get("from_cache"):
                                 st.info("✓ Used cached SQL (similarity >= 0.95)")
+
+                        if results.get("viz_spec"):
+                            st.vega_lite_chart(results["viz_spec"], use_container_width=True)
 
                         if results.get("result"):
                             st.dataframe(results["result"], use_container_width=True)
