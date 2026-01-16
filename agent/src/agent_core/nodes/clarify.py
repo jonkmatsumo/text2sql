@@ -7,7 +7,8 @@ This module implements the clarification flow that:
 """
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 
 # Try to import interrupt from langgraph.types (LangGraph 0.2+)
 try:
@@ -40,8 +41,10 @@ async def clarify_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="clarify",
-        span_type=SpanType.CHAIN,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "clarify")
         clarification_question = state.get("clarification_question")
         ambiguity_type = state.get("ambiguity_type")
 

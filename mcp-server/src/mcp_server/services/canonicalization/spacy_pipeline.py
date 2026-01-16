@@ -185,7 +185,7 @@ class CanonicalizationService:
         if not SPACY_ENABLED:
             return 0
 
-        from mcp_server.config.database import Database
+        from dal.database import Database
 
         logger.info("Reloading patterns from database...")
         patterns = []

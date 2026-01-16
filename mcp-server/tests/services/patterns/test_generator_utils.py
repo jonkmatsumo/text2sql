@@ -1,13 +1,13 @@
 """Unit tests for pattern generator utilities."""
 
 import pytest
-from mcp_server.services.patterns.generator import (
+
+from ingestion.patterns.generator import (
     generate_column_patterns,
     generate_table_patterns,
     get_target_tables,
     normalize_name,
 )
-
 from schema import ColumnDef
 
 
@@ -91,7 +91,7 @@ async def test_fetch_distinct_values_replacement():
     """Test sample_distinct_values fetching."""
     from unittest.mock import AsyncMock
 
-    from mcp_server.services.patterns.generator import sample_distinct_values
+    from ingestion.patterns.generator import sample_distinct_values
 
     mock_conn = AsyncMock()
     mock_conn.fetch.return_value = [["Active"], ["Inactive"]]
@@ -107,7 +107,7 @@ async def test_enrich_with_retry():
     """Test enrichment retry logic."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from mcp_server.services.patterns.generator import enrich_values_with_llm
+    from ingestion.patterns.generator import enrich_values_with_llm
 
     client = MagicMock()
     client.chat.completions.create = AsyncMock()

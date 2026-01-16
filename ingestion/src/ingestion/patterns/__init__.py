@@ -1,1 +1,1 @@
-"""Pattern generation module placeholder."""
+"""Pattern generation service for NLP enhancements."""

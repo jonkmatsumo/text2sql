@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from mcp_server.config.database import Database
 from mcp_server.tools.registry import register_all
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -19,6 +18,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from common.config.env import get_env_int, get_env_str
+from dal.database import Database
 
 logger = logging.getLogger(__name__)
 

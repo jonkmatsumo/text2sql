@@ -1,6 +1,6 @@
 """MCP tool: export_approved_to_fewshot - Sync approved interactions to Few-Shot Registry."""
 
-from mcp_server.dal.factory import get_feedback_store
+from dal.factory import get_feedback_store
 
 TOOL_NAME = "export_approved_to_fewshot"
 

@@ -4,7 +4,16 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.dal.factory import (
+
+from common.interfaces import (
+    CacheStore,
+    ExampleStore,
+    GraphStore,
+    MetadataStore,
+    SchemaIntrospector,
+    SchemaStore,
+)
+from dal.factory import (
     CACHE_STORE_PROVIDERS,
     EXAMPLE_STORE_PROVIDERS,
     GRAPH_STORE_PROVIDERS,
@@ -19,22 +28,13 @@ from mcp_server.dal.factory import (
     get_schema_store,
     reset_singletons,
 )
-from mcp_server.dal.memgraph import MemgraphStore
-from mcp_server.dal.postgres import (
+from dal.memgraph import MemgraphStore
+from dal.postgres import (
     PgSemanticCache,
     PostgresExampleStore,
     PostgresMetadataStore,
     PostgresSchemaIntrospector,
     PostgresSchemaStore,
-)
-
-from common.interfaces import (
-    CacheStore,
-    ExampleStore,
-    GraphStore,
-    MetadataStore,
-    SchemaIntrospector,
-    SchemaStore,
 )
 
 
@@ -117,7 +117,7 @@ class TestGraphStoreProvider:
         # Create a mock class that we'll use in the registry
         mock_cls = MagicMock(return_value=MagicMock(spec=GraphStore))
 
-        with patch.dict("mcp_server.dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
+        with patch.dict("dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
             store = get_graph_store()
 
         mock_cls.assert_called_once()
@@ -134,7 +134,7 @@ class TestGraphStoreProvider:
         }
 
         with patch.dict(os.environ, env_vars):
-            with patch.dict("mcp_server.dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
+            with patch.dict("dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
                 get_graph_store()
 
         mock_cls.assert_called_once_with("bolt://custom:7687", "testuser", "testpass")
@@ -153,7 +153,7 @@ class TestGraphStoreProvider:
             for key in ["MEMGRAPH_URI", "MEMGRAPH_USER", "MEMGRAPH_PASSWORD"]:
                 os.environ.pop(key, None)
 
-            with patch.dict("mcp_server.dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
+            with patch.dict("dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
                 get_graph_store()
 
         mock_cls.assert_called_once_with("bolt://localhost:7687", "", "")
@@ -197,7 +197,7 @@ class TestSingletonBehavior:
         mock_instance = MagicMock(spec=GraphStore)
         mock_cls = MagicMock(return_value=mock_instance)
 
-        with patch.dict("mcp_server.dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
+        with patch.dict("dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
             store1 = get_graph_store()
             store2 = get_graph_store()
 
@@ -230,7 +230,7 @@ class TestResetSingletons:
 
         mock_cls = MagicMock(side_effect=create_instance)
 
-        with patch.dict("mcp_server.dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
+        with patch.dict("dal.factory.GRAPH_STORE_PROVIDERS", {"memgraph": mock_cls}):
             store1 = get_graph_store()
             reset_singletons()
             store2 = get_graph_store()

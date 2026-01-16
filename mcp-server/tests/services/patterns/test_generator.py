@@ -3,7 +3,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from mcp_server.services.patterns.generator import enrich_values_with_llm, generate_entity_patterns
+
+from ingestion.patterns.generator import enrich_values_with_llm, generate_entity_patterns
 
 
 @pytest.mark.asyncio
@@ -69,14 +70,10 @@ async def test_generate_entity_patterns():
     ]
     mock_client.chat.completions.create.return_value = mock_llm_resp
 
-    with patch(
-        "mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx
-    ), patch(
-        "mcp_server.config.database.Database.get_schema_introspector",
+    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
+        "dal.database.Database.get_schema_introspector",
         return_value=mock_introspector,
-    ), patch(
-        "mcp_server.services.patterns.generator.get_openai_client", return_value=mock_client
-    ):
+    ), patch("ingestion.patterns.generator.get_openai_client", return_value=mock_client):
 
         patterns = await generate_entity_patterns()
 

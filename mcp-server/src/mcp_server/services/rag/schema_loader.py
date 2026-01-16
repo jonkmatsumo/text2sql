@@ -3,11 +3,11 @@
 import logging
 
 import numpy as np
-from mcp_server.config.database import Database
 
 # from ingestion.vector_indexes import VectorIndex  # If needed
 # Note: Check if generic usage or specific.
 from common.interfaces.vector_index import VectorIndex
+from dal.database import Database
 
 logger = logging.getLogger(__name__)
 

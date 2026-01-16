@@ -8,6 +8,8 @@ FORBIDDEN_PACKAGES = {
     "agent_core",
     "text2sql_synth",
     "streamlit_app",
+    "dal",
+    "ingestion",
 }
 
 

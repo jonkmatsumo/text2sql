@@ -18,9 +18,7 @@ def mock_registry():
 @pytest.fixture(autouse=True)
 def mock_pin_store():
     """Mock the PostgresPinnedRecommendationStore."""
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.PostgresPinnedRecommendationStore"
-    ) as mock:
+    with patch("dal.postgres.pinned_recommendations.PostgresPinnedRecommendationStore") as mock:
         mock.return_value.list_rules = AsyncMock(return_value=[])
         yield mock
 

@@ -2,7 +2,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from mcp_server.services.patterns.generator import enrich_values_with_llm
+
+from ingestion.patterns.generator import enrich_values_with_llm
 
 
 @pytest.mark.asyncio

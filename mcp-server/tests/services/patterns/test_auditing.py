@@ -2,13 +2,14 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from mcp_server.services.patterns.auditing import PatternAuditingService
+
+from ingestion.patterns.auditing import PatternAuditingService
 
 
 @pytest.mark.asyncio
 async def test_compare_runs():
     """Test comparing runs."""
-    with patch("mcp_server.services.patterns.auditing.get_pattern_run_store") as mock_get:
+    with patch("ingestion.patterns.auditing.get_pattern_run_store") as mock_get:
         store = AsyncMock()
         mock_get.return_value = store
 
@@ -40,7 +41,7 @@ async def test_compare_runs():
 @pytest.mark.asyncio
 async def test_get_run_details():
     """Test retrieving run details."""
-    with patch("mcp_server.services.patterns.auditing.get_pattern_run_store") as mock_get:
+    with patch("ingestion.patterns.auditing.get_pattern_run_store") as mock_get:
         store = AsyncMock()
         mock_get.return_value = store
 

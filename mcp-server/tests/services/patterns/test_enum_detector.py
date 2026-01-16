@@ -1,7 +1,6 @@
 """Unit tests for EnumLikeColumnDetector."""
 
-from mcp_server.services.patterns.enum_detector import EnumLikeColumnDetector
-
+from ingestion.patterns.enum_detector import EnumLikeColumnDetector
 from schema import ColumnDef
 
 

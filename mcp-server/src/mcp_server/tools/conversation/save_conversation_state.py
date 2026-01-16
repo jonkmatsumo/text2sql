@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from mcp_server.dal.factory import get_conversation_store
+from dal.factory import get_conversation_store
 
 TOOL_NAME = "save_conversation_state"
 

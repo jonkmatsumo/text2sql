@@ -2,7 +2,7 @@
 name = "text2sql-ingestion"
 version = "0.1.0"
 description = "Ingestion pipeline for Text 2 SQL"
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.0",
     "numpy",

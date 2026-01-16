@@ -1,10 +1,9 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from mcp_server.dal.factory import get_graph_store, reset_singletons
-from mcp_server.dal.memgraph import MemgraphStore
-
 from common.interfaces import GraphStore
+from dal.factory import get_graph_store, reset_singletons
+from dal.memgraph import MemgraphStore
 from ingestion.vector_indexer import VectorIndexer
 
 
@@ -36,7 +35,7 @@ def test_direct_import_check():
     files_with_direct_imports = []
     for py_file in ingestion_path.glob("**/*.py"):
         content = py_file.read_text()
-        if "from mcp_server.dal.memgraph import MemgraphStore" in content:
+        if "from dal.memgraph import MemgraphStore" in content:
             files_with_direct_imports.append(str(py_file))
 
     # We expect these to be zero now that refactoring is complete

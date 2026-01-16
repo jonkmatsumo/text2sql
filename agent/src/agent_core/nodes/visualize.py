@@ -18,31 +18,50 @@ def visualize_query_node(state: AgentState) -> dict:
     """
     logger.info("Entering visualization node")
 
-    query_result = state.get("query_result")
+    from agent_core.telemetry import telemetry
+    from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 
-    if not query_result or not isinstance(query_result, list):
-        return {"viz_spec": None, "viz_reason": "No valid query result to visualize"}
+    with telemetry.start_span(
+        name="visualize_query",
+        span_type=SpanKind.AGENT_NODE,
+    ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "visualize_query")
 
-    try:
-        # Generate spec
-        spec = build_vega_lite_spec(query_result)
+        query_result = state.get("query_result")
 
-        if spec:
-            logger.info(f"Generated visualization: {spec.get('mark')} chart")
-            return {
-                "viz_spec": spec,
-                "viz_reason": f"Generated {spec.get('mark')} chart based on data shape",
-            }
-        else:
-            logger.info("Data not suitable for visualization")
-            return {
-                "viz_spec": None,
-                "viz_reason": (
-                    "Data shape not suitable for automatic visualization "
-                    "(need 2 cols: cat/num, num/num, date/num)"
-                ),
-            }
+        # Simple input logging
+        if isinstance(query_result, list):
+            span.set_attribute("result_row_count", len(query_result))
 
-    except Exception as e:
-        logger.error(f"Visualization generation failed: {e}")
-        return {"viz_spec": None, "viz_reason": f"Visualization generation failed: {str(e)}"}
+        if not query_result or not isinstance(query_result, list):
+            span.set_attribute("viz_generated", False)
+            return {"viz_spec": None, "viz_reason": "No valid query result to visualize"}
+
+        try:
+            # Generate spec
+            spec = build_vega_lite_spec(query_result)
+
+            if spec:
+                logger.info(f"Generated visualization: {spec.get('mark')} chart")
+                span.set_attribute("viz_generated", True)
+                span.set_attribute("viz_type", spec.get("mark"))
+                return {
+                    "viz_spec": spec,
+                    "viz_reason": f"Generated {spec.get('mark')} chart based on data shape",
+                }
+            else:
+                logger.info("Data not suitable for visualization")
+                span.set_attribute("viz_generated", False)
+                return {
+                    "viz_spec": None,
+                    "viz_reason": (
+                        "Data shape not suitable for automatic visualization "
+                        "(need 2 cols: cat/num, num/num, date/num)"
+                    ),
+                }
+
+        except Exception as e:
+            logger.error(f"Visualization generation failed: {e}")
+            span.set_attribute(TelemetryKeys.ERROR, str(e))
+            return {"viz_spec": None, "viz_reason": f"Visualization generation failed: {str(e)}"}

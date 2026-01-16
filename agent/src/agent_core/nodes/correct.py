@@ -5,7 +5,8 @@ Enhanced with error taxonomy for targeted correction strategies.
 
 from agent_core.state import AgentState
 from agent_core.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -33,8 +34,10 @@ def correct_sql_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="correct_sql",
-        span_type=SpanType.CHAIN,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "correct_sql")
         error = state.get("error")
         current_sql = state.get("current_sql")
         schema_context = state.get("schema_context", "")

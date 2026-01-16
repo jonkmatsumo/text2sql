@@ -60,7 +60,7 @@ async def test_canonicalization_service_reload_returns_count():
     # This test verifies the refactor of spacy_pipeline.py logic, but we need to mock DB.
     # We can mock the database connection to return some rows.
 
-    with patch("mcp_server.config.database.Database") as MockDB, patch(
+    with patch("dal.database.Database") as MockDB, patch(
         "mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True
     ):
         # Setup DB mock
@@ -122,7 +122,7 @@ async def test_canonicalization_service_reload_returns_count():
 @pytest.mark.asyncio
 async def test_reload_concurrency():
     """Test reloading while extracting constraints concurrently."""
-    with patch("mcp_server.config.database.Database") as MockDB, patch(
+    with patch("dal.database.Database") as MockDB, patch(
         "mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True
     ):
 

@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest
-from mcp_server.config.control_plane import ControlPlaneDatabase
+
+from dal.control_plane import ControlPlaneDatabase
 
 
 class TestControlPlaneDatabase:
@@ -38,9 +39,7 @@ class TestControlPlaneDatabase:
             "CONTROL_DB_PASSWORD": "control_password",
         }
 
-        with patch(
-            "mcp_server.config.control_plane.asyncpg.create_pool", new_callable=AsyncMock
-        ) as mock_create:
+        with patch("dal.control_plane.asyncpg.create_pool", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_pool
             with patch(
                 "common.config.env.os.getenv",

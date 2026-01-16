@@ -2,7 +2,7 @@
 name = "text2sql-mcp"
 version = "0.1.0"
 description = "MCP Server for Text 2 SQL"
-requires-python = ">=3.12"
+requires-python = ">=3.9"
 dependencies = [
     "fastmcp>=0.9.0",
     "uvicorn>=0.24.0",
@@ -24,6 +24,7 @@ dependencies = [
     "opentelemetry-sdk",
     "opentelemetry-exporter-otlp",
     "opentelemetry-instrumentation-starlette",
+    "text2sql-dal",
 ]
 
 [project.optional-dependencies]

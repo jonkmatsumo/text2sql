@@ -1,6 +1,6 @@
 """MCP tool: get_interaction_details - Get full details for an interaction."""
 
-from mcp_server.dal.factory import get_feedback_store, get_interaction_store
+from dal.factory import get_feedback_store, get_interaction_store
 
 TOOL_NAME = "get_interaction_details"
 

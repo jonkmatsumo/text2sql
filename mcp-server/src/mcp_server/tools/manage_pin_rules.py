@@ -3,7 +3,7 @@
 from typing import Any, List, Optional
 from uuid import UUID
 
-from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
 
 TOOL_NAME = "manage_pin_rules"
 

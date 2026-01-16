@@ -2,7 +2,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from mcp_server.dal.postgres import PostgresConversationStore
+
+from dal.postgres import PostgresConversationStore
 
 
 @pytest.fixture

@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e common -e schema -e ingestion
+          pip install -e common -e schema -e dal -e ingestion
           cd mcp-server
           pip install -e ".[test]"
           # Install agent dependencies (for agent tests)

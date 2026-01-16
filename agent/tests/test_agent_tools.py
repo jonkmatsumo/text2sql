@@ -31,9 +31,23 @@ class TestGetMcpTools:
 
     @pytest.fixture(autouse=True)
     def clean_env(self):
-        """Clean environment variables before each test."""
-        with patch.dict(os.environ, {}, clear=True):
-            yield
+        """Clean environment variables and ensure modules are mocked."""
+        # Setup mocks for langchain_mcp_adapters if not present or overwritten
+        mock_pkg = ModuleType("langchain_mcp_adapters")
+        mock_client_mod = ModuleType("langchain_mcp_adapters.client")
+        mock_client_mod.MultiServerMCPClient = MagicMock()
+        mock_pkg.client = mock_client_mod
+
+        # We use patch.dict to safely modify sys.modules for the duration of the test
+        with patch.dict(
+            sys.modules,
+            {
+                "langchain_mcp_adapters": mock_pkg,
+                "langchain_mcp_adapters.client": mock_client_mod,
+            },
+        ):
+            with patch.dict(os.environ, {}, clear=True):
+                yield
 
     @pytest.mark.asyncio
     async def test_get_mcp_tools_success(self):

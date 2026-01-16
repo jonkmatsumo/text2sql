@@ -5,7 +5,8 @@ import re
 from typing import Optional
 
 import asyncpg
-from mcp_server.config.database import Database
+
+from dal.database import Database
 
 TOOL_NAME = "execute_sql_query"
 

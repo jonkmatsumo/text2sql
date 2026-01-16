@@ -3,8 +3,8 @@ import random
 from unittest.mock import AsyncMock
 
 import pytest
-from mcp_server.dal.memgraph import MemgraphStore
 
+from dal.memgraph import MemgraphStore
 from ingestion.vector_indexer import VectorIndexer
 
 # Skip if explicit env var not set (default skip in CI unless configured)

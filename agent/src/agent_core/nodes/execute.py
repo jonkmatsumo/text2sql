@@ -3,7 +3,8 @@
 import logging
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from agent_core.tools import get_mcp_tools
 from agent_core.validation.policy_enforcer import PolicyEnforcer
 from agent_core.validation.tenant_rewriter import TenantRewriter
@@ -26,8 +27,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="execute_sql",
-        span_type=SpanType.TOOL,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "execute_sql")
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")
 

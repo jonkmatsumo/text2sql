@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.dal.memgraph.graph_store import MemgraphStore
+
+from dal.memgraph.graph_store import MemgraphStore
 
 
 class MockNode(dict):
@@ -20,7 +21,7 @@ class TestMemgraphStoreANN:
     @pytest.fixture
     def store(self):
         """Create a MemgraphStore instance with mocked driver."""
-        with patch("mcp_server.dal.memgraph.graph_store.GraphDatabase.driver"):
+        with patch("dal.memgraph.graph_store.GraphDatabase.driver"):
             store = MemgraphStore("bolt://localhost:7687", "user", "pass")
             return store
 

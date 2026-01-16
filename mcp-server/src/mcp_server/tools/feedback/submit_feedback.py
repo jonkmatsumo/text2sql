@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from mcp_server.dal.factory import get_feedback_store
+from dal.factory import get_feedback_store
 
 TOOL_NAME = "submit_feedback"
 

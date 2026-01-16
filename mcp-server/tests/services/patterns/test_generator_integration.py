@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # Import the module under test to ensure patching works on it
-from mcp_server.services.patterns import generator
-
+from ingestion.patterns import generator
 from schema import ColumnDef, TableDef
 
 
@@ -41,14 +40,12 @@ async def test_generator_validation_integration():
     mock_conn = AsyncMock()
 
     # Patch dependencies
-    with patch("mcp_server.services.patterns.generator.Database") as MockDB, patch(
-        "mcp_server.services.patterns.generator.get_openai_client", return_value=mock_client
+    with patch("ingestion.patterns.generator.Database") as MockDB, patch(
+        "ingestion.patterns.generator.get_openai_client", return_value=mock_client
+    ), patch("ingestion.patterns.generator.EnumLikeColumnDetector") as MockDetectorCls, patch(
+        "ingestion.patterns.generator.sample_distinct_values", return_value=["ACTIVE"]
     ), patch(
-        "mcp_server.services.patterns.generator.EnumLikeColumnDetector"
-    ) as MockDetectorCls, patch(
-        "mcp_server.services.patterns.generator.sample_distinct_values", return_value=["ACTIVE"]
-    ), patch(
-        "mcp_server.services.patterns.generator.get_native_enum_values", return_value=[]
+        "ingestion.patterns.generator.get_native_enum_values", return_value=[]
     ):
 
         MockDB.get_schema_introspector.return_value = mock_introspector

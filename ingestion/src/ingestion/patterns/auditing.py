@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from mcp_server.dal.factory import get_pattern_run_store
+from dal.factory import get_pattern_run_store
 
 
 class PatternAuditingService:

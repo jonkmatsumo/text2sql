@@ -222,25 +222,3 @@ class VectorIndexer:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _run_search)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
-    from mcp_server.services.ingestion.dependencies import get_ingestion_graph_store
-
-    store = get_ingestion_graph_store()
-
-    indexer = VectorIndexer(store=store)
-    try:
-        indexer.create_indexes()
-        print("✓ Indexes created.")
-
-        print("Testing search...")
-        results = indexer.search_nodes("test query", k=5)
-        print(f"✓ Search executed successfully. Hits: {len(results)}")
-        for r in results:
-            print(f"  - {r['node'].get('name', 'N/A')}: {r['score']:.3f}")
-
-    finally:
-        indexer.close()

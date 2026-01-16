@@ -10,7 +10,8 @@ This module implements the "Plan-Then-Generate" pattern:
 import json
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -94,8 +95,10 @@ async def plan_sql_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="plan_sql",
-        span_type=SpanType.CHAIN,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "plan_sql")
         messages = state["messages"]
         schema_context = state.get("schema_context", "")
         # Use active_query if available, otherwise fallback to last message + clarification

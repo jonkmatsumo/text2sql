@@ -1,10 +1,14 @@
 """Unit tests for MCP server main entrypoint."""
 
+import importlib.util
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+fastmcp_available = importlib.util.find_spec("fastmcp") is not None
 
+
+@pytest.mark.skipif(not fastmcp_available, reason="fastmcp not installed")
 class TestMain:
     """Unit tests for main.py MCP server setup."""
 
@@ -71,7 +75,7 @@ class TestMain:
     async def test_init_database_triggers_indexing_when_empty(self):
         """Test that indexing is triggered when schema_embeddings table is empty."""
         # Import Database here to use patch.object for correct module resolution
-        from mcp_server.config.database import Database
+        from dal.database import Database
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=0)  # Empty table
@@ -111,7 +115,7 @@ class TestMain:
     async def test_init_database_skips_indexing_when_populated(self):
         """Test that indexing is skipped when schema_embeddings table has data."""
         # Import Database here to use patch.object for correct module resolution
-        from mcp_server.config.database import Database
+        from dal.database import Database
 
         mock_conn = AsyncMock()
         mock_conn.fetchval = AsyncMock(return_value=15)  # 15 tables already indexed

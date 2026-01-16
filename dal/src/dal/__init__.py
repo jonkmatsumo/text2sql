@@ -4,12 +4,7 @@ This package exposes the core interfaces and implementation-agnostic contexts fo
 including the Function Call Context for tenant isolation.
 """
 
-from mcp_server.utils.tenant_context import (
-    get_current_tenant,
-    reset_tenant_context,
-    set_current_tenant,
-    tenant_context,
-)
+from dal.context import get_current_tenant, reset_tenant_context, set_current_tenant, tenant_context
 
 __all__ = [
     "get_current_tenant",

@@ -3,8 +3,8 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.services.patterns.generator import generate_entity_patterns
 
+from ingestion.patterns.generator import generate_entity_patterns
 from schema import ColumnDef, TableDef
 
 
@@ -41,14 +41,10 @@ async def test_cardinality_boundary():
     mock_conn.fetch.side_effect = side_effect_fetch
 
     # 3. Execution (Threshold=10 default)
-    with patch(
-        "mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx
-    ), patch(
-        "mcp_server.config.database.Database.get_schema_introspector",
+    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
+        "dal.database.Database.get_schema_introspector",
         return_value=mock_introspector,
-    ), patch(
-        "mcp_server.services.patterns.generator.get_openai_client", return_value=None
-    ):
+    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
 
         patterns = await generate_entity_patterns()
 
@@ -82,14 +78,10 @@ async def test_timeout_handling():
         foreign_keys=[],
     )
 
-    with patch(
-        "mcp_server.config.database.Database.get_connection", return_value=mock_db_ctx
-    ), patch(
-        "mcp_server.config.database.Database.get_schema_introspector",
+    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
+        "dal.database.Database.get_schema_introspector",
         return_value=mock_introspector,
-    ), patch(
-        "mcp_server.services.patterns.generator.get_openai_client", return_value=None
-    ):
+    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
 
         patterns = await generate_entity_patterns()
 
@@ -102,7 +94,7 @@ async def test_timeout_handling():
 async def test_sampling_timeout_setting():
     """Test that SET LOCAL statement_timeout is generated."""
     # We call sample_distinct_values directly to inspect execute calls
-    from mcp_server.services.patterns.generator import sample_distinct_values
+    from ingestion.patterns.generator import sample_distinct_values
 
     mock_conn = AsyncMock()
     mock_conn.fetch.return_value = []  # Empty result

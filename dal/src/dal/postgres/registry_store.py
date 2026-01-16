@@ -3,11 +3,10 @@ import logging
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from mcp_server.config.database import Database
-from mcp_server.dal.postgres.common import _format_vector
-from mcp_server.models import QueryPair
-
 from common.interfaces.registry_store import RegistryStore
+from dal.database import Database
+from dal.postgres.common import _format_vector
+from schema.registry import QueryPair
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ class PostgresRegistryStore(RegistryStore):
     @asynccontextmanager
     async def _get_connection(tenant_id: Optional[int] = None):
         """Get connection from control-plane pool if enabled, else main pool."""
-        from mcp_server.config.control_plane import ControlPlaneDatabase
+        from dal.control_plane import ControlPlaneDatabase
 
         if ControlPlaneDatabase.is_enabled():
             async with ControlPlaneDatabase.get_connection(tenant_id) as conn:

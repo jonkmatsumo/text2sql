@@ -1,7 +1,8 @@
 import os
 
 import pytest
-from mcp_server.config.database import Database
+
+from dal.database import Database
 
 
 def pytest_configure(config):

@@ -88,8 +88,7 @@ async def test_recommendation_flow_e2e_happy_path():
     ) as mock_lookup, patch(
         "mcp_server.services.registry.RegistryService.fetch_by_signatures"
     ) as mock_fetch, patch(
-        "mcp_server.dal.postgres.pinned_recommendations."
-        "PostgresPinnedRecommendationStore.list_rules"
+        "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
     ) as mock_list_rules:
 
         # Setup Mocks
@@ -160,8 +159,7 @@ async def test_recommendation_flow_fallback_disabled():
     with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config), patch(
         "mcp_server.services.registry.RegistryService.lookup_semantic"
     ) as mock_lookup, patch(
-        "mcp_server.dal.postgres.pinned_recommendations."
-        "PostgresPinnedRecommendationStore.list_rules"
+        "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
     ) as mock_list_rules:
 
         mock_lookup.side_effect = [

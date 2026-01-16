@@ -31,7 +31,7 @@ OTEL_SERVICE_NAME = get_env_str("OTEL_SERVICE_NAME", "text2sql-agent")
 _otel_initialized = False
 
 # "Sticky" metadata that persists across spans in the same execution context
-_sticky_metadata: ContextVar[Dict[str, Any]] = ContextVar("sticky_metadata", default={})
+_sticky_metadata: ContextVar[Optional[Dict[str, Any]]] = ContextVar("sticky_metadata", default=None)
 
 
 def _setup_otel_sdk():
@@ -451,15 +451,48 @@ class TelemetryService:
         via update_current_trace inside this span will be inherited by child
         spans but will be discarded when this span exits.
         """
-        # Snapshot current sticky metadata to prevent leaks outside this span
-        token = _sticky_metadata.set(_sticky_metadata.get().copy())
+        # 1. Handle Sequencing (Update Parent Context)
+        # We must increment the counter in the CURRENT context so siblings see it.
+        # We mutate the specific dictionary object shared by the context.
+        current_meta = _sticky_metadata.get()
+        if current_meta is None:
+            # Root span (or first span in a disconnected context)
+            current_meta = {}
+            # Note: For root spans, there are no siblings sharing this context object yet,
+            # so local mutation is safe/correct.
+
+        seq_counter = current_meta.get("_seq_counter", 0)
+        event_seq = seq_counter
+
+        # Increment for the next sibling IN PLACE
+        current_meta["_seq_counter"] = seq_counter + 1
+
+        # 2. Snapshot/Isolate for Child
+        # Snapshot current sticky metadata to prevent leaks FROM Child TO Parent.
+        # We create a COPY for the child to mutate safely.
+        child_meta = current_meta.copy()
+
+        # 3. Child Scope Setup
+        # Reset counter for children of this new span
+        child_meta["_seq_counter"] = 0
+
+        # Install Child Meta
+        token = _sticky_metadata.set(child_meta)
 
         try:
-            # Merge sticky metadata into attributes for this span
-            merged_attributes = _sticky_metadata.get().copy()
+            # 4. Prepare Attributes
+            merged_attributes = child_meta.copy()
+            # Remove internal keys for emission
+            if "_seq_counter" in merged_attributes:
+                del merged_attributes["_seq_counter"]
+
             if attributes:
                 merged_attributes.update(attributes)
 
+            # Set the sequence attribute explicitly
+            merged_attributes["event.seq"] = event_seq
+
+            # 5. Start Span
             with self._backend.start_span(
                 name=name,
                 span_type=span_type,
@@ -467,16 +500,23 @@ class TelemetryService:
                 attributes=merged_attributes,
             ) as span:
                 yield span
+
         finally:
-            # Restore sticky metadata to pre-span state
+            # Restore sticky metadata to pre-span state (Child's isolation ends)
+            # This restores the context to the previous state (before 'set').
             _sticky_metadata.reset(token)
 
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update current trace with metadata and make it sticky."""
         # Update sticky metadata for future spans
-        current = _sticky_metadata.get().copy()
+        current = _sticky_metadata.get()
+        if current is None:
+            # Check if we need to initialize
+            current = {}
+            _sticky_metadata.set(current)
+
+        # Mutate in place (context-local copy)
         current.update(metadata)
-        _sticky_metadata.set(current)
 
         # Update current span/trace in backend
         self._backend.update_current_trace(metadata)
@@ -484,7 +524,8 @@ class TelemetryService:
     def capture_context(self) -> TelemetryContext:
         """Capture current tracing context including sticky metadata."""
         ctx = self._backend.capture_context()
-        ctx.sticky_metadata = _sticky_metadata.get().copy()
+        meta = _sticky_metadata.get()
+        ctx.sticky_metadata = meta.copy() if meta else {}
         return ctx
 
     def inject_context(self, carrier: Dict[str, str]) -> None:

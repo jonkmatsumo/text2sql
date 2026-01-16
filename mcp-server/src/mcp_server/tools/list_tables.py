@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from mcp_server.config.database import Database
+from dal.database import Database
 
 TOOL_NAME = "list_tables"
 

@@ -1,7 +1,8 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
 from agent_core.state import AgentState
-from agent_core.telemetry import SpanType, telemetry
+from agent_core.telemetry import telemetry
+from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from agent_core.validation.ast_validator import validate_sql
 
 
@@ -23,8 +24,10 @@ async def validate_sql_node(state: AgentState) -> dict:
     """
     with telemetry.start_span(
         name="validate_sql",
-        span_type=SpanType.CHAIN,
+        span_type=SpanKind.AGENT_NODE,
     ) as span:
+        span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
+        span.set_attribute(TelemetryKeys.EVENT_NAME, "validate_sql")
         sql_query = state.get("current_sql")
 
         span.set_inputs({"sql": sql_query})

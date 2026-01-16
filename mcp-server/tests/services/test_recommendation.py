@@ -18,9 +18,7 @@ def mock_registry():
 @pytest.fixture(autouse=True)
 def mock_pin_store_global():
     """Mock Persistent Store globally to avoid DB init errors."""
-    with patch(
-        "mcp_server.dal.postgres.pinned_recommendations.PostgresPinnedRecommendationStore"
-    ) as mock:
+    with patch("dal.postgres.pinned_recommendations.PostgresPinnedRecommendationStore") as mock:
         mock.return_value.list_rules = AsyncMock(return_value=[])
         yield mock
 
@@ -823,7 +821,7 @@ async def test_pinned_recommendation_override(mock_registry, mock_pin_store_glob
     from datetime import datetime
     from uuid import uuid4
 
-    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+    from dal.postgres.pinned_recommendations import PinRule
 
     # 1. Setup Pin Rule
     pin_rule = PinRule(
@@ -878,7 +876,7 @@ async def test_pinned_recommendation_safety(mock_registry, mock_pin_store_global
     from datetime import datetime
     from uuid import uuid4
 
-    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+    from dal.postgres.pinned_recommendations import PinRule
 
     pin_rule = PinRule(
         id=uuid4(),
@@ -912,7 +910,7 @@ async def test_pinned_recommendation_bypass_diversity_cap(mock_registry, mock_pi
     from datetime import datetime
     from uuid import uuid4
 
-    from mcp_server.dal.postgres.pinned_recommendations import PinRule
+    from dal.postgres.pinned_recommendations import PinRule
 
     # Cap approved at 0 (to prove bypass)
     config = RecommendationConfig(
