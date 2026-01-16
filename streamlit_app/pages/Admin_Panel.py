@@ -290,7 +290,7 @@ def main():
             st.info("View aggregated metrics (latency, errors) in Grafana.")
             st.link_button(
                 "Open Grafana",
-                "http://localhost:3000/d/text2sql-traces/text2sql-trace-metrics",
+                "http://localhost:3001/d/text2sql-traces/text2sql-trace-metrics",
                 type="primary",
             )
 

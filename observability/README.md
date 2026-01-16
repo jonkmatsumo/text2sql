@@ -67,7 +67,7 @@ Grafana is included for visualizing derived metrics (latency, error rates, stage
 
 ### Access
 
--   **URL**: `http://localhost:3000`
+-   **URL**: `http://localhost:3001`
 -   **Credentials**: `admin` / `admin` (default)
 
 ### Dashboards
