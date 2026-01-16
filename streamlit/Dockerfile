@@ -26,6 +26,8 @@ COPY streamlit/pyproject.toml ./streamlit/
 COPY agent/pyproject.toml ./agent/
 # 6. MCP Server deps
 COPY mcp-server/pyproject.toml ./mcp-server/
+# 7. DAL deps
+COPY dal/pyproject.toml ./dal/
 
 # Create dummy source files for local dependencies enable caching
 # Common expects src/common
@@ -34,10 +36,11 @@ RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
 RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
+RUN mkdir -p dal/src/dal && touch dal/src/dal/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./common ./schema ./ingestion ./streamlit ./agent ./mcp-server
+    pip install ./common ./schema ./ingestion ./streamlit ./agent ./mcp-server ./dal
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
@@ -62,6 +65,9 @@ COPY agent/src/ ./agent/src/
 # MCP Server source
 COPY mcp-server/src/ ./mcp-server/src/
 
+# DAL source
+COPY dal/src/ ./dal/src/
+
 # --- EDITABLE INSTALL LAYER ---
 # Re-install in editable mode so that imports resolve correctly to the /app/x/src locations
 # and standard development workflows (bind mounts) work as expected.
@@ -73,7 +79,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install -e ./ingestion \
     && pip install -e ./streamlit \
     && pip install -e ./mcp-server \
-    && pip install -e ./agent
+    && pip install -e ./agent \
+    && pip install -e ./dal
 
 # Expose Streamlit port
 EXPOSE 8501

@@ -326,7 +326,8 @@ async def run_agent_with_tracing(
                                 "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                                 "prompt_version": "v1.0",
                                 "trace_id": thread_id,
-                            }
+                            },
+                            config=config,
                         )
 
                     if telemetry.get_current_span():
@@ -431,7 +432,7 @@ async def run_agent_with_tracing(
                         }
 
                         async def _update_interaction():
-                            return await update_tool.ainvoke(update_payload)
+                            return await update_tool.ainvoke(update_payload, config=config)
 
                         if telemetry.get_current_span():
                             telemetry.get_current_span().add_event(

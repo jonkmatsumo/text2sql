@@ -158,6 +158,11 @@ class TelemetryBackend(abc.ABC):
         """Use a previously captured context as active."""
         yield
 
+    @abc.abstractmethod
+    def get_current_span(self) -> Optional[TelemetrySpan]:
+        """Get the current active span if one exists."""
+        pass
+
 
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
@@ -275,6 +280,13 @@ class OTELTelemetryBackend(TelemetryBackend):
             if token:
                 context.detach(token)
 
+    def get_current_span(self) -> Optional[TelemetrySpan]:
+        """Get current OTEL span wrapped in OTELTelemetrySpan."""
+        otel_span = trace.get_current_span()
+        if otel_span == trace.INVALID_SPAN:
+            return None
+        return OTELTelemetrySpan(otel_span)
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -356,6 +368,14 @@ class InMemoryTelemetryBackend(TelemetryBackend):
         """Use in-memory context."""
         yield
 
+    def get_current_span(self) -> Optional[TelemetrySpan]:
+        """Get current in-memory span."""
+        # For simple in-memory backend, we might just return the last started span
+        # if it's not finished. This is valid for simple sequential tests.
+        if self.spans and not self.spans[-1].is_finished:
+            return self.spans[-1]
+        return None
+
 
 class NoOpTelemetrySpan(TelemetrySpan):
     """No-op implementation of TelemetrySpan."""
@@ -411,6 +431,10 @@ class NoOpTelemetryBackend(TelemetryBackend):
     def use_context(self, ctx: TelemetryContext):
         """No-op context usage."""
         yield
+
+    def get_current_span(self) -> Optional[TelemetrySpan]:
+        """Get no-op span."""
+        return NoOpTelemetrySpan()
 
 
 class TelemetryService:
@@ -606,6 +630,10 @@ class TelemetryService:
         ctx = self.extract_context(data)
         ctx.sticky_metadata = sticky_metadata
         return ctx
+
+    def get_current_span(self) -> Optional[TelemetrySpan]:
+        """Get the current active span from the backend."""
+        return self._backend.get_current_span()
 
 
 # Global instance for easy access
