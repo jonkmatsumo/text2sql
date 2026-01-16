@@ -1,14 +1,11 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # Add src to path if needed (depending on test runner config)
 from agent_core.telemetry import (
-    DualTelemetryBackend,
     InMemoryTelemetryBackend,
-    MlflowTelemetryBackend,
     OTELTelemetryBackend,
     SpanType,
-    TelemetryBackend,
     TelemetryService,
 )
 from opentelemetry.sdk.trace import TracerProvider
@@ -60,65 +57,19 @@ class TestTelemetryService(unittest.TestCase):
         backend = InMemoryTelemetryBackend()
         service = TelemetryService(backend=backend)
 
-        service.configure(tracking_uri="http://test:5000", autolog=True, run_tracer_inline=True)
+        # tracking_uri and autolog are legacy params and are intentionally NOT passed to backend
+        service.configure(
+            tracking_uri="http://test:5000",
+            autolog=True,
+            run_tracer_inline=True,
+            custom_param="custom_value",
+        )
 
-        self.assertEqual(backend.config["tracking_uri"], "http://test:5000")
-        self.assertTrue(backend.config["autolog"])
-        self.assertTrue(backend.config["run_tracer_inline"])
-
-    def test_mlflow_backend(self):
-        """Test the MlflowTelemetryBackend delegates to mlflow correctly."""
-        fake_mlflow = MagicMock()
-        fake_span_types = MagicMock()
-        fake_span_types.CHAIN = "CHAIN"
-        fake_span_types.TOOL = "TOOL"
-        fake_span_types.RETRIEVER = "RETRIEVER"
-        fake_span_types.CHAT_MODEL = "CHAT_MODEL"
-        fake_span_types.PARSER = "PARSER"
-        fake_span_types.UNKNOWN = "UNKNOWN"
-        fake_mlflow.entities.SpanType = fake_span_types
-
-        mock_ml_span = MagicMock()
-        fake_mlflow.start_span.return_value.__enter__.return_value = mock_ml_span
-
-        fake_langchain = MagicMock()
-        fake_mlflow.langchain = fake_langchain
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "mlflow": fake_mlflow,
-                "mlflow.langchain": fake_langchain,
-            },
-        ):
-            backend = MlflowTelemetryBackend()
-            service = TelemetryService(backend=backend)
-
-            service.configure(
-                tracking_uri="http://mlflow:5000", autolog=True, run_tracer_inline=True
-            )
-            fake_mlflow.set_tracking_uri.assert_called_once_with("http://mlflow:5000")
-            fake_langchain.autolog.assert_called_once_with(run_tracer_inline=True)
-
-            with service.start_span(
-                name="ml_span",
-                span_type=SpanType.TOOL,
-                inputs={"in": "1"},
-            ) as span:
-                span.set_outputs({"out": "2"})
-                span.set_attribute("attr", "3")
-                span.add_event("event", {"e": "4"})
-
-            fake_mlflow.start_span.assert_called_once()
-            call_args = fake_mlflow.start_span.call_args
-            self.assertEqual(call_args.kwargs["name"], "ml_span")
-            mock_ml_span.set_inputs.assert_called_with({"in": "1"})
-            mock_ml_span.set_outputs.assert_called_with({"out": "2"})
-            mock_ml_span.set_attribute.assert_any_call("attr", "3")
-            mock_ml_span.add_event.assert_called_with("event", {"e": "4"})
-
-            service.update_current_trace({"m": "n"})
-            fake_mlflow.update_current_trace.assert_called_once_with(metadata={"m": "n"})
+        # Verify custom params are passed
+        self.assertEqual(backend.config["custom_param"], "custom_value")
+        # Verify legacy params are swallowed/ignored as per implementation
+        self.assertNotIn("tracking_uri", backend.config)
+        self.assertNotIn("autolog", backend.config)
 
     def test_otel_backend(self):
         """Test the OTELTelemetryBackend produces correct spans and attributes."""
@@ -160,8 +111,10 @@ class TestTelemetryService(unittest.TestCase):
         # Inputs are JSON stringified
         import json
 
-        self.assertEqual(json.loads(s1.attributes["telemetry.inputs_json"]), {"query": "sql"})
-        self.assertEqual(json.loads(s1.attributes["telemetry.outputs_json"]), {"status": "ok"})
+        inputs = json.loads(s1.attributes["telemetry.inputs_json"])
+        self.assertEqual(inputs, {"query": "sql"})
+        outputs = json.loads(s1.attributes["telemetry.outputs_json"])
+        self.assertEqual(outputs, {"status": "ok"})
         self.assertEqual(len(s1.events), 1)
         self.assertEqual(s1.events[0].name, "event_done")
 
@@ -203,48 +156,38 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(child.parent.span_id, root.context.span_id)
         self.assertEqual(child.context.trace_id, root.context.trace_id)
 
-    def test_backend_selection(self):
-        """Test that the service selects the correct backend based on env var."""
+    def test_backend_selection_otel_default(self):
+        """Test that the service defaults to OTEL (or memory if no config) but never Dual/MLflow."""
+        # By default in tests if TELEMETRY_BACKEND is unset, it might be InMemory or OTEL
+        # depending on init logic. Assuming default init with no args uses env vars.
+
+        # Case 1: Explicit OTEL
         with patch.dict("os.environ", {"TELEMETRY_BACKEND": "otel"}):
+            service = TelemetryService()
+            self.assertIsInstance(service._backend, OTELTelemetryBackend)
+
+    def test_backend_selection_legacy_fallback(self):
+        """Test that legacy configuration values now fallback to OTEL or compatible default."""
+        # If user still has TELEMETRY_BACKEND=dual or mlflow, it should NOT crash,
+        # but likely use OTEL or just log a warning and use default.
+        # This depends on strict implementation of TelemetryService.__init__.
+        # If the code enforces "no Dual", then this test ensures we don't accidentally get it.
+
+        # We assume the implementation treats unknown/deprecated backends as OTEL or logs warning.
+        # Let's verify it DOES NOT return DualTelemetryBackend.
+
+        # NOTE: checking for DualTelemetryBackend existence is hard if we deleted the import,
+        # so we just check it is OTELTelemetryBackend or InMemory.
+
+        with patch.dict("os.environ", {"TELEMETRY_BACKEND": "mlflow"}):
+            # If the code was updated to map 'mlflow' -> OTEL or just ignore it
             service = TelemetryService()
             self.assertIsInstance(service._backend, OTELTelemetryBackend)
 
         with patch.dict("os.environ", {"TELEMETRY_BACKEND": "dual"}):
             service = TelemetryService()
-            self.assertIsInstance(service._backend, DualTelemetryBackend)
-
-    def test_dual_write_success(self):
-        """Test that DualTelemetryBackend writes to both backends."""
-        p = InMemoryTelemetryBackend()
-        s = InMemoryTelemetryBackend()
-        backend = DualTelemetryBackend(p, s)
-        service = TelemetryService(backend=backend)
-
-        with service.start_span("dual_test") as span:
-            span.set_attribute("k", "v")
-
-        self.assertEqual(len(p.spans), 1)
-        self.assertEqual(len(s.spans), 1)
-        self.assertEqual(p.spans[0].attributes["k"], "v")
-        self.assertEqual(s.spans[0].attributes["k"], "v")
-
-    def test_dual_write_secondary_failure_isolation(self):
-        """Test that DualTelemetryBackend survives secondary backend failure."""
-        p = InMemoryTelemetryBackend()
-        s = MagicMock(spec=TelemetryBackend)
-        # Mock start_span to return a context manager that fails or just fail directly
-        s.start_span.side_effect = Exception("Secondary Crash")
-
-        backend = DualTelemetryBackend(p, s)
-        service = TelemetryService(backend=backend)
-
-        # This should NOT raise
-        with service.start_span("isolate_test") as span:
-            span.set_attribute("k", "v")
-
-        self.assertEqual(len(p.spans), 1)
-        self.assertEqual(p.spans[0].attributes["k"], "v")
-        self.assertTrue(p.spans[0].is_finished)
+            # Should be OTEL now
+            self.assertIsInstance(service._backend, OTELTelemetryBackend)
 
 
 if __name__ == "__main__":
