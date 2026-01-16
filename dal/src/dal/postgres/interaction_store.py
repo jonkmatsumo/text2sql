@@ -32,16 +32,36 @@ class PostgresInteractionStore(InteractionStore):
         prompt_version: Optional[str] = None,
         trace_id: Optional[str] = None,
     ) -> str:
-        """Create a new interaction record."""
-        sql = """
-            INSERT INTO query_interactions (
-                conversation_id, schema_snapshot_id, user_nlq_text,
-                tenant_id, model_version, prompt_version, trace_id, created_at
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, NOW()
-            )
-            RETURNING id::text
+        """Create a new interaction record with idempotency support.
+
+        If trace_id is provided, uses ON CONFLICT to ensure idempotency:
+        - Returns existing interaction ID if trace_id already exists
+        - Creates new interaction if trace_id is new or NULL
         """
+        # Use idempotent upsert when trace_id is provided
+        if trace_id:
+            sql = """
+                INSERT INTO query_interactions (
+                    conversation_id, schema_snapshot_id, user_nlq_text,
+                    tenant_id, model_version, prompt_version, trace_id, created_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, NOW()
+                )
+                ON CONFLICT (trace_id) WHERE trace_id IS NOT NULL
+                DO UPDATE SET trace_id = EXCLUDED.trace_id
+                RETURNING id::text
+            """
+        else:
+            # No idempotency without trace_id
+            sql = """
+                INSERT INTO query_interactions (
+                    conversation_id, schema_snapshot_id, user_nlq_text,
+                    tenant_id, model_version, prompt_version, trace_id, created_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, NOW()
+                )
+                RETURNING id::text
+            """
         async with self._get_connection() as conn:
             return await conn.fetchval(
                 sql,
