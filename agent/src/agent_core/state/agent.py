@@ -127,3 +127,13 @@ class AgentState(TypedDict):
 
     # Raw user input stored separately for debugging/telemetry
     raw_user_input: Optional[str]
+
+    # =========================================================================
+    # Visualization Fields
+    # =========================================================================
+
+    # Generated Vega-Lite specification for the query result
+    viz_spec: Optional[dict]
+
+    # Reason for generating (or skipping) visualization
+    viz_reason: Optional[str]
