@@ -6,7 +6,6 @@ logging, allowing the agent to be agnostic of the underlying backend (e.g., MLfl
 
 import abc
 import contextlib
-import json
 import logging
 import os
 from contextvars import ContextVar
@@ -168,17 +167,29 @@ class OTELTelemetrySpan(TelemetrySpan):
         self._span = otel_span
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
-        """Set span inputs as JSON attribute."""
-        self._span.set_attribute("telemetry.inputs_json", json.dumps(inputs))
+        """Set span inputs with redaction, truncation, and metadata."""
+        from agent_core.telemetry_schema import TelemetryKeys, truncate_json
+
+        json_str, truncated, size, sha256 = truncate_json(inputs)
+        self._span.set_attribute(TelemetryKeys.INPUTS, json_str)
+        self._span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+        if sha256:
+            self._span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
+        if truncated:
+            self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
-        """Set span outputs as JSON attribute and handle error status."""
-        self._span.set_attribute("telemetry.outputs_json", json.dumps(outputs))
+        """Set span outputs with redaction, truncation, and error handling."""
+        from agent_core.telemetry_schema import TelemetryKeys, truncate_json
+
+        json_str, truncated, size, sha256 = truncate_json(outputs)
+        self._span.set_attribute(TelemetryKeys.OUTPUTS, json_str)
 
         # Check for error in outputs
         error = outputs.get("error")
         if error:
-            self._span.set_attribute("telemetry.error", str(error))
+            error_json, _, _, _ = truncate_json({"error": str(error), "type": type(error).__name__})
+            self._span.set_attribute(TelemetryKeys.ERROR, error_json)
             self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
 
     def set_attribute(self, key: str, value: Any) -> None:
