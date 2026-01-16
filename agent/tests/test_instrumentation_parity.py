@@ -152,3 +152,73 @@ class TestInstrumentationParity:
         assert children[0].attributes["event.seq"] == 0
         assert children[1].attributes["event.seq"] == 1
         assert children[2].attributes["event.seq"] == 2
+
+    @pytest.mark.asyncio
+    async def test_deep_nesting_execution_order(self):
+        """Verify execution order is reconstructable from nested spans.
+
+        Tests pattern: 1 → 2 → 2a → 2b → 3
+        """
+        with telemetry.start_span(name="root", span_type=SpanKind.AGENT_NODE):
+            with telemetry.start_span(name="step1"):
+                pass
+            with telemetry.start_span(name="step2"):
+                with telemetry.start_span(name="step2a"):
+                    pass
+                with telemetry.start_span(name="step2b"):
+                    pass
+            with telemetry.start_span(name="step3"):
+                pass
+
+        spans = self.backend.spans
+
+        # Verify names in execution order
+        names = [s.name for s in spans]
+        assert names == ["root", "step1", "step2", "step2a", "step2b", "step3"]
+
+        # Verify sibling sequences
+        step1 = spans[1]
+        step2 = spans[2]
+        step3 = spans[5]
+        assert step1.attributes["event.seq"] == 0
+        assert step2.attributes["event.seq"] == 1
+        assert step3.attributes["event.seq"] == 2
+
+        # Verify nested sequences reset
+        step2a = spans[3]
+        step2b = spans[4]
+        assert step2a.attributes["event.seq"] == 0
+        assert step2b.attributes["event.seq"] == 1
+
+    def test_redaction_in_tool_wrapper(self):
+        """Verify sensitive data is redacted in tool spans."""
+        mock_tool = MagicMock()
+        mock_tool.name = "auth_tool"
+        mock_tool._run = MagicMock(return_value={"result": "ok"})
+
+        wrapped_tool = _wrap_tool(mock_tool)
+
+        # Input with sensitive key
+        wrapped_tool._run(api_key="secret123", normal_param="visible")
+
+        span = self.backend.spans[0]
+        inputs = span.attributes[TelemetryKeys.INPUTS]
+
+        assert "[REDACTED]" in inputs
+        assert "secret123" not in inputs
+        assert "visible" in inputs
+
+    def test_all_spans_have_required_contract_attributes(self):
+        """Verify every span has event.type, event.name, event.seq."""
+        # Create various span types
+        with telemetry.start_span(name="node", span_type=SpanKind.AGENT_NODE):
+            with telemetry.start_span(name="tool", span_type=SpanKind.TOOL_CALL):
+                pass
+            with telemetry.start_span(name="llm", span_type=SpanKind.LLM_CALL):
+                pass
+
+        for span in self.backend.spans:
+            attrs = span.attributes
+            assert "event.type" in attrs, f"Missing event.type in {span.name}"
+            assert "event.name" in attrs, f"Missing event.name in {span.name}"
+            assert "event.seq" in attrs, f"Missing event.seq in {span.name}"

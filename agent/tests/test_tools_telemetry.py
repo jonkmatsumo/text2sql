@@ -81,3 +81,41 @@ class TestToolTelemetry:
 
         span = self.backend.spans[0]
         assert span.attributes.get(TelemetryKeys.PAYLOAD_TRUNCATED) is True
+
+    def test_sync_tool_wrapper(self):
+        """Test sync tool wrapper captures inputs and outputs."""
+        mock_tool = MagicMock()
+        mock_tool.name = "sync_tool"
+        mock_tool._run = MagicMock(return_value="sync_result")
+
+        wrapped_tool = _wrap_tool(mock_tool)
+
+        result = wrapped_tool._run(arg1="value1")
+
+        assert result == "sync_result"
+
+        # Verify Span
+        assert len(self.backend.spans) == 1
+        span = self.backend.spans[0]
+
+        assert span.name == "tool.sync_tool"
+        assert span.attributes[TelemetryKeys.EVENT_TYPE] == SpanKind.TOOL_CALL
+        assert span.attributes[TelemetryKeys.TOOL_NAME] == "sync_tool"
+        assert "value1" in span.attributes[TelemetryKeys.INPUTS]
+        assert "sync_result" in span.attributes[TelemetryKeys.OUTPUTS]
+
+    def test_sync_tool_error(self):
+        """Test sync tool wrapper captures errors."""
+        mock_tool = MagicMock()
+        mock_tool.name = "sync_fail"
+        mock_tool._run = MagicMock(side_effect=RuntimeError("sync failed"))
+
+        wrapped_tool = _wrap_tool(mock_tool)
+
+        with pytest.raises(RuntimeError):
+            wrapped_tool._run(x=1)
+
+        span = self.backend.spans[0]
+        error_json = span.attributes.get(TelemetryKeys.ERROR)
+        assert "sync failed" in error_json
+        assert "RuntimeError" in error_json

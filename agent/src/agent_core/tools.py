@@ -63,7 +63,7 @@ def _wrap_tool(tool):
             inputs.update(kwargs)
 
         # Truncate inputs if necessary
-        inputs_json, truncated, size, _ = truncate_json(inputs)
+        inputs_json, truncated, size, sha256 = truncate_json(inputs)
 
         with telemetry.start_span(name=f"tool.{tool.name}", span_type=SpanKind.TOOL_CALL) as span:
             # Set standard attributes
@@ -71,20 +71,19 @@ def _wrap_tool(tool):
             span.set_attribute(TelemetryKeys.EVENT_NAME, tool.name)
             span.set_attribute(TelemetryKeys.TOOL_NAME, tool.name)
             span.set_attribute(TelemetryKeys.INPUTS, inputs_json)
-
+            span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+            if sha256:
+                span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
             if truncated:
                 span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
-                span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
 
             try:
                 # Execute original tool
                 result = await original_arun(*args, **kwargs)
 
                 # Capture outputs
-                outputs_json, out_truncated, out_size, _ = truncate_json({"result": result})
+                outputs_json, out_truncated, out_size, out_sha = truncate_json({"result": result})
                 span.set_attribute(TelemetryKeys.OUTPUTS, outputs_json)
-                if out_truncated:
-                    span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
 
                 return result
 
@@ -95,10 +94,46 @@ def _wrap_tool(tool):
                 # Re-raise to maintain agent behavior
                 raise e
 
-    # Patch the async run method
-    # Note: We only patch async because our agent is async-first.
-    # If sync usage is needed, _run should be patched similarly.
+    # Sync wrapper with identical behavior
+    original_run = getattr(tool, "_run", None)
+
+    def wrapped_run(*args, **kwargs):
+        inputs = {}
+        if args:
+            inputs["args"] = args
+        if kwargs:
+            inputs.update(kwargs)
+
+        inputs_json, truncated, size, sha256 = truncate_json(inputs)
+
+        with telemetry.start_span(name=f"tool.{tool.name}", span_type=SpanKind.TOOL_CALL) as span:
+            span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.TOOL_CALL)
+            span.set_attribute(TelemetryKeys.EVENT_NAME, tool.name)
+            span.set_attribute(TelemetryKeys.TOOL_NAME, tool.name)
+            span.set_attribute(TelemetryKeys.INPUTS, inputs_json)
+            span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+            if sha256:
+                span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
+            if truncated:
+                span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+
+            try:
+                result = original_run(*args, **kwargs)
+
+                outputs_json, out_truncated, out_size, out_sha = truncate_json({"result": result})
+                span.set_attribute(TelemetryKeys.OUTPUTS, outputs_json)
+
+                return result
+
+            except Exception as e:
+                error_info = {"error": str(e), "type": type(e).__name__}
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                raise e
+
+    # Patch both async and sync run methods
     tool._arun = wrapped_arun
+    if original_run is not None:
+        tool._run = wrapped_run
     return tool
 
 

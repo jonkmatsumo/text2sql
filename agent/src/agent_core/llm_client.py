@@ -231,11 +231,18 @@ def _extract_prompts(input_data: Any) -> tuple[Optional[str], Optional[str]]:
 
 def _wrap_llm(llm: BaseChatModel):
     """Wrap an LLM with strict telemetry parity."""
+    import logging
+
     from agent_core.telemetry import telemetry
     from agent_core.telemetry_schema import SpanKind, TelemetryKeys, truncate_json
 
-    # Attempt to resolve model name
-    model_name = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
+    logger = logging.getLogger(__name__)
+
+    # Attempt to resolve model name with fallback
+    model_name = getattr(llm, "model_name", getattr(llm, "model", None))
+    if model_name is None:
+        model_name = "unknown"
+        logger.warning("LLM model name not detected, using 'unknown' for telemetry")
 
     def telemetric_invoke(input, config=None, **kwargs):
         sys_prompt, user_prompt = _extract_prompts(input)

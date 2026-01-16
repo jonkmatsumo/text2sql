@@ -39,9 +39,11 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(span_data.outputs, {"output_key": "output_val"})
         self.assertEqual(span_data.inputs, {"input_key": "input_val"})
         self.assertEqual(span_data.outputs, {"output_key": "output_val"})
-        # Verify attributes match (ignoring auto-injected event.seq)
+        # Verify attributes match (ignoring auto-injected contract attrs)
         attrs = span_data.attributes.copy()
         attrs.pop("event.seq", None)
+        attrs.pop("event.type", None)
+        attrs.pop("event.name", None)
         self.assertEqual(attrs, {"attr_key": "attr_val"})
         self.assertEqual(len(span_data.events), 1)
         self.assertEqual(span_data.events[0]["name"], "test_event")
@@ -128,7 +130,9 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(s2.name, "otel_error")
         self.assertEqual(s2.status.status_code, StatusCode.ERROR)
         self.assertEqual(s2.status.description, "failed_check")
-        self.assertEqual(s2.attributes["telemetry.error"], "failed_check")
+        # Error is now JSON structured
+        error_json = json.loads(s2.attributes["telemetry.error_json"])
+        self.assertEqual(error_json["error"], "failed_check")
 
     def test_context_propagation(self):
         """Test that context can be captured and restored in OTEL."""
