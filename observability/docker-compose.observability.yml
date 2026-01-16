@@ -6,7 +6,7 @@ services:
     container_name: otel_collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     environment:
       - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-local}
     ports:
