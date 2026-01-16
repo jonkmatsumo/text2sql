@@ -3,8 +3,8 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from mcp_server.services.patterns.generator import generate_entity_patterns
 
+from ingestion.patterns.generator import generate_entity_patterns
 from schema import ColumnDef, TableDef
 
 
@@ -49,7 +49,7 @@ async def test_native_enum_extraction():
     with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
         "dal.database.Database.get_schema_introspector",
         return_value=mock_introspector,
-    ), patch("mcp_server.services.patterns.generator.get_openai_client", return_value=None):
+    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
 
         patterns = await generate_entity_patterns()
 
@@ -95,7 +95,7 @@ async def test_native_enum_fallback():
     with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
         "dal.database.Database.get_schema_introspector",
         return_value=mock_introspector,
-    ), patch("mcp_server.services.patterns.generator.get_openai_client", return_value=None):
+    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
 
         patterns = await generate_entity_patterns()
 

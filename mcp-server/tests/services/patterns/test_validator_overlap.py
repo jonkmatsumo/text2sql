@@ -1,6 +1,6 @@
 """Tests for overlap detection in PatternValidator."""
 
-from mcp_server.services.patterns.validator import PatternValidator
+from ingestion.patterns.validator import PatternValidator
 
 
 def test_validator_short_patterns():

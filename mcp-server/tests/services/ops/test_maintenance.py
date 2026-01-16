@@ -10,11 +10,9 @@ from mcp_server.services.ops.maintenance import MaintenanceService
 async def test_generate_patterns_run():
     """Test that generate_patterns runs and reports success."""
     # Mock the generator function
-    with patch(
-        "mcp_server.services.patterns.generator.generate_entity_patterns"
-    ) as mock_gen, patch("dal.database.Database.get_connection") as mock_db, patch(
-        "dal.factory.get_pattern_run_store"
-    ) as mock_get_store:
+    with patch("ingestion.patterns.generator.generate_entity_patterns") as mock_gen, patch(
+        "dal.database.Database.get_connection"
+    ) as mock_db, patch("dal.factory.get_pattern_run_store") as mock_get_store:
 
         mock_gen.return_value = [{"label": "TEST", "pattern": "p", "id": "t"}]
 
@@ -52,9 +50,9 @@ async def test_generate_patterns_run():
 @pytest.mark.asyncio
 async def test_generate_patterns_dry_run():
     """Test dry run mode."""
-    with patch(
-        "mcp_server.services.patterns.generator.generate_entity_patterns"
-    ) as mock_gen, patch("dal.factory.get_pattern_run_store") as mock_get_store:
+    with patch("ingestion.patterns.generator.generate_entity_patterns") as mock_gen, patch(
+        "dal.factory.get_pattern_run_store"
+    ) as mock_get_store:
 
         mock_gen.return_value = [{"label": "TEST", "pattern": "p", "id": "t"}]
         mock_store = AsyncMock()

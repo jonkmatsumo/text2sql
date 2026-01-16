@@ -1,4 +1,4 @@
-from mcp_server.services.patterns.validator import PatternValidator
+from ingestion.patterns.validator import PatternValidator
 
 
 def test_validator_basic_success():
