@@ -42,7 +42,64 @@ async def get_mcp_tools():
 
     # Returns tools: list_tables, execute_sql_query, get_semantic_definitions,
     # get_table_schema, search_relevant_tables
-    return await client.get_tools()
+    tools = await client.get_tools()
+    return [_wrap_tool(t) for t in tools]
+
+
+def _wrap_tool(tool):
+    """Wrap a LangChain tool with strict telemetry parity."""
+    from agent_core.telemetry import telemetry
+    from agent_core.telemetry_schema import SpanKind, TelemetryKeys, truncate_json
+
+    original_arun = tool._arun
+
+    async def wrapped_arun(*args, **kwargs):
+        # Tools typically take a single string argument or a dict of args
+        # We need to capture this input safely
+        inputs = {}
+        if args:
+            inputs["args"] = args
+        if kwargs:
+            inputs.update(kwargs)
+
+        # Truncate inputs if necessary
+        inputs_json, truncated, size, _ = truncate_json(inputs)
+
+        with telemetry.start_span(name=f"tool.{tool.name}", span_type=SpanKind.TOOL_CALL) as span:
+            # Set standard attributes
+            span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.TOOL_CALL)
+            span.set_attribute(TelemetryKeys.EVENT_NAME, tool.name)
+            span.set_attribute(TelemetryKeys.TOOL_NAME, tool.name)
+            span.set_attribute(TelemetryKeys.INPUTS, inputs_json)
+
+            if truncated:
+                span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+                span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+
+            try:
+                # Execute original tool
+                result = await original_arun(*args, **kwargs)
+
+                # Capture outputs
+                outputs_json, out_truncated, out_size, _ = truncate_json({"result": result})
+                span.set_attribute(TelemetryKeys.OUTPUTS, outputs_json)
+                if out_truncated:
+                    span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+
+                return result
+
+            except Exception as e:
+                # Capture structured error
+                error_info = {"error": str(e), "type": type(e).__name__}
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                # Re-raise to maintain agent behavior
+                raise e
+
+    # Patch the async run method
+    # Note: We only patch async because our agent is async-first.
+    # If sync usage is needed, _run should be patched similarly.
+    tool._arun = wrapped_arun
+    return tool
 
 
 @asynccontextmanager
