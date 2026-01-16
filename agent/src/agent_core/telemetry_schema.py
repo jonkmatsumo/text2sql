@@ -40,8 +40,8 @@ class TelemetryKeys(str, Enum):
     LLM_PROMPT_SYSTEM = "llm.prompt.system"
     LLM_PROMPT_USER = "llm.prompt.user"
     LLM_RESPONSE_TEXT = "llm.response.text"
-    LLM_TOKEN_INPUT = "llm.token_usage.prompt_tokens"
-    LLM_TOKEN_OUTPUT = "llm.token_usage.completion_tokens"
+    LLM_TOKEN_INPUT = "llm.token_usage.input_tokens"
+    LLM_TOKEN_OUTPUT = "llm.token_usage.output_tokens"
     LLM_TOKEN_TOTAL = "llm.token_usage.total_tokens"
 
     # Tool Specific

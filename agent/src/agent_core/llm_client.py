@@ -192,7 +192,10 @@ def get_llm(
 
     if key not in _LLM_CACHE:
         llm = get_llm_client(
-            provider=provider, model=model, temperature=temperature, use_light_model=use_light_model
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            use_light_model=use_light_model,
         )
         # Apply strict telemetry parity wrapper
         telemetric_llm = _wrap_llm(llm)
@@ -331,38 +334,50 @@ def extract_token_usage(response: Any) -> dict[str, int]:
 
     meta = response.response_metadata
 
+    # Keys for input/output/total
+    k_input = "llm.token_usage.input_tokens"
+    k_output = "llm.token_usage.output_tokens"
+    k_total = "llm.token_usage.total_tokens"
+
     # OpenAI format:
     # 'token_usage': {'completion_tokens': 15, 'prompt_tokens': 561, 'total_tokens': 576}
     if "token_usage" in meta:
         tu = meta["token_usage"]
         if "prompt_tokens" in tu:
-            usage["llm.token_usage.prompt_tokens"] = int(tu["prompt_tokens"])
+            usage[k_input] = int(tu["prompt_tokens"])
         if "completion_tokens" in tu:
-            usage["llm.token_usage.completion_tokens"] = int(tu["completion_tokens"])
+            usage[k_output] = int(tu["completion_tokens"])
         if "total_tokens" in tu:
-            usage["llm.token_usage.total_tokens"] = int(tu["total_tokens"])
+            usage[k_total] = int(tu["total_tokens"])
 
     # Anthropic/Google format: 'usage': {'input_tokens': 20, 'output_tokens': 20, ...}
     elif "usage" in meta:
         u = meta["usage"]
         if hasattr(u, "input_tokens"):  # Some are objects
-            usage["llm.token_usage.prompt_tokens"] = int(u.input_tokens)
-            usage["llm.token_usage.completion_tokens"] = int(u.output_tokens)
-            usage["llm.token_usage.total_tokens"] = int(u.total_tokens)
+            usage[k_input] = int(u.input_tokens)
+            usage[k_output] = int(u.output_tokens)
+            # Total tokens might be inferred or present
+            if hasattr(u, "total_tokens"):
+                usage[k_total] = int(u.total_tokens)
+            else:
+                usage[k_total] = int(u.input_tokens) + int(u.output_tokens)
         elif isinstance(u, dict):
+            # Input
             if "input_tokens" in u:
-                usage["llm.token_usage.prompt_tokens"] = int(u["input_tokens"])
-            if "prompt_token_count" in u:  # Google sometimes
-                usage["llm.token_usage.prompt_tokens"] = int(u["prompt_token_count"])
+                usage[k_input] = int(u["input_tokens"])
+            elif "prompt_token_count" in u:  # Google
+                usage[k_input] = int(u["prompt_token_count"])
 
+            # Output
             if "output_tokens" in u:
-                usage["llm.token_usage.completion_tokens"] = int(u["output_tokens"])
-            if "candidates_token_count" in u:  # Google sometimes
-                usage["llm.token_usage.completion_tokens"] = int(u["candidates_token_count"])
+                usage[k_output] = int(u["output_tokens"])
+            elif "candidates_token_count" in u:  # Google
+                usage[k_output] = int(u["candidates_token_count"])
 
+            # Total
             if "total_tokens" in u:
-                usage["llm.token_usage.total_tokens"] = int(u["total_tokens"])
-            if "total_token_count" in u:  # Google sometimes
-                usage["llm.token_usage.total_tokens"] = int(u["total_token_count"])
+                usage[k_total] = int(u["total_tokens"])
+            elif "total_token_count" in u:  # Google
+                usage[k_total] = int(u["total_token_count"])
 
     return usage
