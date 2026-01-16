@@ -1,10 +1,14 @@
 """Unit tests for MCP server main entrypoint."""
 
+import importlib.util
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+fastmcp_available = importlib.util.find_spec("fastmcp") is not None
 
+
+@pytest.mark.skipif(not fastmcp_available, reason="fastmcp not installed")
 class TestMain:
     """Unit tests for main.py MCP server setup."""
 
