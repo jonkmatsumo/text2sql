@@ -1,6 +1,6 @@
 """Agent state definition for LangGraph workflow."""
 
-from typing import Annotated, Any, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -122,8 +122,8 @@ class AgentState(TypedDict):
     # Unique identifier for the current query interaction (for feedback logging)
     interaction_id: Optional[str]
 
-    # Opaque tracing context for propagation across nodes/tools
-    telemetry_context: Optional[Any]
+    # Opaque tracing context for propagation (Serialized as Dict)
+    telemetry_context: Optional[Dict[str, Any]]
 
     # Raw user input stored separately for debugging/telemetry
     raw_user_input: Optional[str]

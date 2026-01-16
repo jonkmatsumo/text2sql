@@ -33,8 +33,10 @@ def with_telemetry_context(node_func):
     """Wrap a node function to restore telemetry context."""
 
     async def wrapped_node(state: AgentState):
-        ctx = state.get("telemetry_context")
-        if ctx:
+        raw_ctx = state.get("telemetry_context")
+        if raw_ctx:
+            # Deserialize the context from the state
+            ctx = telemetry.deserialize_context(raw_ctx)
             with telemetry.use_context(ctx):
                 ret = node_func(state)
                 if inspect.isawaitable(ret):
@@ -272,8 +274,9 @@ async def run_agent_with_tracing(
         # Make metadata sticky for all child spans
         telemetry.update_current_trace(base_metadata)
 
-        # Capture context for nodes to use later (includes sticky metadata)
+        # Capture context and serialize it for state persistence
         telemetry_context = telemetry.capture_context()
+        serialized_ctx = telemetry.serialize_context(telemetry_context)
 
         # Prepare initial state
         inputs = {
@@ -290,7 +293,7 @@ async def run_agent_with_tracing(
             "clause_map": None,
             "tenant_id": tenant_id,
             "from_cache": False,
-            "telemetry_context": telemetry_context,
+            "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
         }
 
