@@ -60,22 +60,41 @@ async def _process_seed_data(base_path: Path):
         print("No seed files found.")
         return
 
+    registered = 0
+    skipped_duplicate = 0
+    skipped_error = 0
+
     print(f"Processing {len(items)} items from {base_path}...")
     for item in items:
-        # Register in Unified Registry with both 'example' and 'golden' roles
-        await RegistryService.register_pair(
-            question=item["question"],
-            sql_query=item["query"],
-            tenant_id=item.get("tenant_id", 1),
-            roles=["example", "golden"],
-            status="verified",
-            metadata={
-                "category": item.get("category"),
-                "difficulty": item.get("difficulty", "medium"),
-                "expected_row_count": item.get("expected_row_count"),
-            },
-        )
-    print(f"✓ Registered {len(items)} items in Unified Registry.")
+        try:
+            # Register in Unified Registry with both 'example' and 'golden' roles
+            await RegistryService.register_pair(
+                question=item["question"],
+                sql_query=item["query"],
+                tenant_id=item.get("tenant_id", 1),
+                roles=["example", "golden"],
+                status="verified",
+                metadata={
+                    "category": item.get("category"),
+                    "difficulty": item.get("difficulty", "medium"),
+                    "expected_row_count": item.get("expected_row_count"),
+                },
+            )
+            registered += 1
+        except Exception as e:
+            error_str = str(e).lower()
+            # Detect duplicate/unique constraint violations (idempotency)
+            if "duplicate" in error_str or "unique" in error_str or "conflict" in error_str:
+                skipped_duplicate += 1
+            else:
+                skipped_error += 1
+                question_preview = item.get("question", "unknown")[:50]
+                print(f"  ⚠ Error registering '{question_preview}...': {e}")
+
+    print(
+        f"✓ Seeding complete: {registered} registered, "
+        f"{skipped_duplicate} skipped (duplicate), {skipped_error} errors"
+    )
 
 
 async def main():
@@ -101,6 +120,11 @@ async def main():
                 f"{get_env_str('POSTGRES_USER')}@{get_env_str('DB_HOST')}/"
                 f"{get_env_str('POSTGRES_DB')}"
             )
+
+            # Validate query-target database structure before proceeding
+            from mcp_server.services.seeding.validation import run_startup_validation
+
+            await run_startup_validation(conn_main, base_path=Path("/app/queries"))
 
             # Control Connection (Direct Write)
             # If Control Plane is maintained by Database.init(), we can request it.
