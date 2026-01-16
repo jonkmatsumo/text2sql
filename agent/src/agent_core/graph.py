@@ -2,6 +2,7 @@
 
 import inspect
 import json
+import logging
 import uuid
 
 from agent_core.nodes.cache_lookup import cache_lookup_node
@@ -20,7 +21,9 @@ from agent_core.telemetry import SpanType, telemetry
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from common.config.env import get_env_str
+from common.config.env import get_env_bool, get_env_str
+
+logger = logging.getLogger(__name__)
 
 
 def run_telemetry_configure():
@@ -303,12 +306,15 @@ async def run_agent_with_tracing(
         # Execute workflow within MCP context to ensure connections are closed
         from agent_core.tools import mcp_tools_context, unpack_mcp_result
 
+        # Check fail-open mode (default: fail-closed for reliability)
+        persistence_fail_open = get_env_bool("PERSISTENCE_FAIL_OPEN", False)
+
         async with mcp_tools_context() as tools:
             # 1. Start Interaction Logging (Pre-execution)
             interaction_id = None
-            try:
-                create_tool = next((t for t in tools if t.name == "create_interaction"), None)
-                if create_tool:
+            create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+            if create_tool:
+                try:
                     raw_interaction_id = await create_tool.ainvoke(
                         {
                             "conversation_id": session_id or thread_id,
@@ -323,15 +329,45 @@ async def run_agent_with_tracing(
                     inputs["interaction_id"] = interaction_id
                     # Also make interaction_id sticky
                     telemetry.update_current_trace({"interaction_id": interaction_id})
-            except Exception as e:
-                print(f"Warning: Failed to create interaction log: {e}")
+                except Exception as e:
+                    # Structured logging with context
+                    logger.error(
+                        "Failed to create interaction",
+                        extra={
+                            "operation": "create_interaction",
+                            "trace_id": thread_id,
+                            "exception_type": type(e).__name__,
+                            "exception_message": str(e),
+                        },
+                        exc_info=True,
+                    )
+                    if not persistence_fail_open:
+                        # Default: fail-closed - interaction persistence is required
+                        raise RuntimeError(
+                            f"Interaction creation failed (persistence_fail_open=False): {e}"
+                        ) from e
+                    # Fail-open mode: continue without interaction_id but emit warning
+                    logger.warning(
+                        "Continuing without interaction_id (PERSISTENCE_FAIL_OPEN=true)",
+                        extra={"trace_id": thread_id},
+                    )
+            else:
+                logger.warning("create_interaction tool not available")
 
             # Execute workflow
             result = inputs.copy()
             try:
                 result = await app.ainvoke(inputs, config=config)
             except Exception as execute_err:
-                print(f"Critical Error in Agent Workflow: {execute_err}")
+                logger.error(
+                    "Critical error in agent workflow",
+                    extra={
+                        "trace_id": thread_id,
+                        "interaction_id": interaction_id,
+                        "exception_type": type(execute_err).__name__,
+                    },
+                    exc_info=True,
+                )
                 result["error"] = str(execute_err)
                 result["error_category"] = "SYSTEM_CRASH"
                 if "messages" not in result:
