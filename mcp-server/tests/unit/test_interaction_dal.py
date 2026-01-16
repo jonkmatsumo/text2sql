@@ -105,3 +105,43 @@ async def test_get_interaction_detail(dal, mock_db):
     assert result["id"] == "int-1"
     mock_db.fetchrow.assert_called_once()
     assert "WHERE id = $1::uuid" in mock_db.fetchrow.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_with_trace_id_uses_on_conflict(dal, mock_db):
+    """Verify create_interaction uses ON CONFLICT when trace_id is provided."""
+    interaction_id = str(uuid4())
+    trace_id = "trace-123"
+    mock_db.fetchval.return_value = interaction_id
+
+    result_id = await dal.create_interaction(
+        conversation_id="conv-1",
+        schema_snapshot_id="snap-1",
+        user_nlq_text="test query",
+        trace_id=trace_id,
+    )
+
+    assert result_id == interaction_id
+    mock_db.fetchval.assert_called_once()
+    sql = mock_db.fetchval.call_args[0][0]
+    assert "ON CONFLICT" in sql
+    assert "trace_id" in sql
+
+
+@pytest.mark.asyncio
+async def test_create_interaction_without_trace_id_no_on_conflict(dal, mock_db):
+    """Verify create_interaction does not use ON CONFLICT when trace_id is None."""
+    interaction_id = str(uuid4())
+    mock_db.fetchval.return_value = interaction_id
+
+    result_id = await dal.create_interaction(
+        conversation_id="conv-1",
+        schema_snapshot_id="snap-1",
+        user_nlq_text="test query",
+        trace_id=None,
+    )
+
+    assert result_id == interaction_id
+    mock_db.fetchval.assert_called_once()
+    sql = mock_db.fetchval.call_args[0][0]
+    assert "ON CONFLICT" not in sql
