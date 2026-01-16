@@ -489,8 +489,16 @@ class TelemetryService:
             if attributes:
                 merged_attributes.update(attributes)
 
-            # Set the sequence attribute explicitly
+            # Set standard contract attributes explicitly
             merged_attributes["event.seq"] = event_seq
+            # Auto-set event.type from span_type (unless already provided)
+            if "event.type" not in merged_attributes:
+                merged_attributes["event.type"] = (
+                    span_type.value if hasattr(span_type, "value") else str(span_type)
+                )
+            # Auto-set event.name from span name (unless already provided)
+            if "event.name" not in merged_attributes:
+                merged_attributes["event.name"] = name
 
             # 5. Start Span
             with self._backend.start_span(

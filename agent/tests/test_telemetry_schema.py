@@ -55,3 +55,62 @@ class TestTelemetrySchema:
         obj = {"b": 2, "a": 1}
         json_str, _, _, _ = truncate_json(obj)
         assert json_str == '{"a": 1, "b": 2}'
+
+
+class TestTelemetryContract:
+    """Test that span contract attributes are auto-set."""
+
+    def test_span_auto_sets_event_type_and_name(self):
+        """Verify start_span auto-sets event.type and event.name."""
+        from agent_core.telemetry import InMemoryTelemetryBackend, telemetry
+        from agent_core.telemetry_schema import SpanKind
+
+        backend = InMemoryTelemetryBackend()
+        telemetry.set_backend(backend)
+
+        with telemetry.start_span(name="test.span", span_type=SpanKind.TOOL_CALL):
+            pass
+
+        span = backend.spans[0]
+        assert span.attributes["event.type"] == SpanKind.TOOL_CALL
+        assert span.attributes["event.name"] == "test.span"
+        assert "event.seq" in span.attributes
+
+    def test_span_does_not_override_explicit_event_type(self):
+        """Verify explicit attributes are not overridden."""
+        from agent_core.telemetry import InMemoryTelemetryBackend, telemetry
+        from agent_core.telemetry_schema import SpanKind
+
+        backend = InMemoryTelemetryBackend()
+        telemetry.set_backend(backend)
+
+        with telemetry.start_span(
+            name="test.span",
+            span_type=SpanKind.AGENT_NODE,
+            attributes={"event.type": "custom.type", "event.name": "custom.name"},
+        ):
+            pass
+
+        span = backend.spans[0]
+        assert span.attributes["event.type"] == "custom.type"
+        assert span.attributes["event.name"] == "custom.name"
+
+    def test_all_spans_have_contract_attributes(self):
+        """Verify nested spans all have required contract attributes."""
+        from agent_core.telemetry import InMemoryTelemetryBackend, telemetry
+        from agent_core.telemetry_schema import SpanKind
+
+        backend = InMemoryTelemetryBackend()
+        telemetry.set_backend(backend)
+
+        with telemetry.start_span(name="parent", span_type=SpanKind.AGENT_NODE):
+            with telemetry.start_span(name="child1", span_type=SpanKind.TOOL_CALL):
+                pass
+            with telemetry.start_span(name="child2", span_type=SpanKind.LLM_CALL):
+                pass
+
+        # All 3 spans should have contract attributes
+        for span in backend.spans:
+            assert "event.type" in span.attributes, f"Span {span.name} missing event.type"
+            assert "event.name" in span.attributes, f"Span {span.name} missing event.name"
+            assert "event.seq" in span.attributes, f"Span {span.name} missing event.seq"
