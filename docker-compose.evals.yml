@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  postgres-airflow:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  redis-airflow:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    restart: always
+
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://:@redis-airflow:6379/0
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./evaluation/airflow/dags:/opt/airflow/dags
+      - ./evaluation/airflow/logs:/opt/airflow/logs
+      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/health" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://:@redis-airflow:6379/0
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./evaluation/airflow/dags:/opt/airflow/dags
+      - ./evaluation/airflow/logs:/opt/airflow/logs
+      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+    command: scheduler
+    restart: always
+
+  airflow-worker:
+    image: apache/airflow:2.8.0
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://:@redis-airflow:6379/0
+      - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./evaluation/airflow/dags:/opt/airflow/dags
+      - ./evaluation/airflow/logs:/opt/airflow/logs
+      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+    command: celery worker
+    restart: always
+
+  airflow-init:
+    image: apache/airflow:2.8.0
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres-airflow/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://:@redis-airflow:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - _AIRFLOW_DB_UPGRADE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+    command: version
+
+volumes:
+  postgres-airflow-data:
