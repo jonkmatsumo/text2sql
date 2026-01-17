@@ -76,6 +76,8 @@ async def clarify_node(state: AgentState) -> dict:
                 {
                     "user_response_received": True,
                     "response_length": len(str(user_response)) if user_response else 0,
+                    # Capture actual response for debugging (truncated for safety)
+                    "user_response": str(user_response)[:1000] if user_response else None,
                 }
             )
 
