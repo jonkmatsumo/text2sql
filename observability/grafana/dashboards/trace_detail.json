@@ -8,7 +8,114 @@
     "id": null,
     "links": [],
     "liveNow": false,
-    "panels": [],
+    "panels": [
+        {
+            "datasource": {
+                "type": "postgres",
+                "uid": "Postgres"
+            },
+            "description": "All spans for this trace ordered by start time and sequence number",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "custom": {
+                        "align": "auto",
+                        "cellOptions": {
+                            "type": "auto"
+                        },
+                        "inspect": false
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "status_code"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.cellOptions",
+                                "value": {
+                                    "type": "color-background"
+                                }
+                            },
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "options": {
+                                            "STATUS_CODE_ERROR": {
+                                                "color": "red",
+                                                "index": 0
+                                            },
+                                            "STATUS_CODE_OK": {
+                                                "color": "green",
+                                                "index": 1
+                                            }
+                                        },
+                                        "type": "value"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 12,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "options": {
+                "cellHeight": "sm",
+                "footer": {
+                    "countRows": false,
+                    "fields": "",
+                    "reducer": [
+                        "sum"
+                    ],
+                    "show": false
+                },
+                "showHeader": true,
+                "sortBy": []
+            },
+            "pluginVersion": "10.0.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "Postgres"
+                    },
+                    "editorMode": "code",
+                    "format": "table",
+                    "rawQuery": true,
+                    "refId": "A",
+                    "rawSql": "SELECT\n  name,\n  span_id,\n  COALESCE(parent_span_id, '-') AS parent_span_id,\n  start_time,\n  end_time,\n  duration_ms,\n  status_code,\n  span_attributes->>'event.type' AS event_type,\n  span_attributes->>'event.seq' AS event_seq\nFROM otel.spans\nWHERE trace_id = '$trace_id'\nORDER BY start_time ASC, (span_attributes->>'event.seq')::int ASC NULLS LAST"
+                }
+            ],
+            "title": "Span Sequence",
+            "transformations": [],
+            "type": "table"
+        }
+    ],
     "refresh": "",
     "schemaVersion": 38,
     "style": "dark",

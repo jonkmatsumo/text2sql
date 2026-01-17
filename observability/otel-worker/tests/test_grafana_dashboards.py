@@ -91,3 +91,52 @@ class TestTraceDetailDashboard:
     def test_uid_matches_expected(self, trace_detail_json: dict):
         """Verify dashboard uid is correct for linking."""
         assert trace_detail_json.get("uid") == "text2sql-trace-detail"
+
+    def test_has_span_sequence_panel(self, trace_detail_json: dict):
+        """Verify span sequence table panel exists."""
+        panels = trace_detail_json.get("panels", [])
+        panel_titles = [p.get("title") for p in panels]
+        assert "Span Sequence" in panel_titles, "Should have Span Sequence panel"
+
+    def test_span_sequence_queries_otel_spans(self, trace_detail_json: dict):
+        """Verify SQL query references otel.spans table."""
+        panels = trace_detail_json.get("panels", [])
+        span_panels = [p for p in panels if p.get("title") == "Span Sequence"]
+        assert span_panels, "Span Sequence panel not found"
+
+        targets = span_panels[0].get("targets", [])
+        assert targets, "Span Sequence panel should have targets"
+
+        raw_sql = targets[0].get("rawSql", "")
+        assert "otel.spans" in raw_sql, "SQL should query otel.spans table"
+        assert "$trace_id" in raw_sql, "SQL should filter by $trace_id"
+
+    def test_span_sequence_orders_by_start_time(self, trace_detail_json: dict):
+        """Verify SQL query orders by start_time."""
+        panels = trace_detail_json.get("panels", [])
+        span_panels = [p for p in panels if p.get("title") == "Span Sequence"]
+        targets = span_panels[0].get("targets", [])
+        raw_sql = targets[0].get("rawSql", "")
+
+        assert "ORDER BY" in raw_sql, "SQL should have ORDER BY clause"
+        assert "start_time" in raw_sql, "SQL should order by start_time"
+
+    def test_span_sequence_attempts_event_seq_ordering(self, trace_detail_json: dict):
+        """Verify SQL query attempts secondary ordering by event.seq."""
+        panels = trace_detail_json.get("panels", [])
+        span_panels = [p for p in panels if p.get("title") == "Span Sequence"]
+        targets = span_panels[0].get("targets", [])
+        raw_sql = targets[0].get("rawSql", "")
+
+        assert "event.seq" in raw_sql, "SQL should reference event.seq for ordering"
+
+    def test_span_sequence_has_required_columns(self, trace_detail_json: dict):
+        """Verify SQL query includes required columns."""
+        panels = trace_detail_json.get("panels", [])
+        span_panels = [p for p in panels if p.get("title") == "Span Sequence"]
+        targets = span_panels[0].get("targets", [])
+        raw_sql = targets[0].get("rawSql", "")
+
+        required_columns = ["name", "span_id", "parent_span_id", "start_time", "duration_ms"]
+        for col in required_columns:
+            assert col in raw_sql, f"SQL should include {col} column"
