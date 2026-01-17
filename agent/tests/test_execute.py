@@ -188,8 +188,17 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_missing_tool(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_missing_tool(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test error handling when execute_sql_query is not found."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         # Return tools without execute_sql_query
         mock_tool = MagicMock()
         mock_tool.name = "list_tables"
@@ -255,8 +264,17 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_execution_exception(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_execution_exception(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test error handling when tool execution raises exception."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(side_effect=Exception("Connection timeout"))
@@ -279,8 +297,17 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_invalid_json(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_invalid_json(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test handling when result is string but not valid JSON."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
         mock_tool.ainvoke = AsyncMock(return_value="Error: Invalid JSON string")
@@ -304,8 +331,17 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.get_mcp_tools")
-    async def test_validate_and_execute_node_empty_tools(self, mock_get_tools):
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    @patch("agent_core.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_empty_tools(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
         """Test error handling when no tools are returned."""
+        # Mock enforcer to pass
+        mock_enforcer.validate_sql.return_value = None
+        # Mock rewriter to return same SQL
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
         mock_get_tools.return_value = []
 
         state = AgentState(
@@ -320,4 +356,25 @@ class TestValidateAndExecuteNode:
         result = await validate_and_execute_node(state)
 
         assert result["error"] == "execute_sql_query tool not found in MCP server"
+        assert result["query_result"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent_core.nodes.execute.PolicyEnforcer")
+    async def test_validate_and_execute_node_blocks_unsafe_sql(self, mock_enforcer):
+        """Test that PolicyEnforcer blocks unsafe SQL before tool invocation."""
+        mock_enforcer.validate_sql.side_effect = ValueError("Access to table 'film' is not allowed")
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM film",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert "Security Policy Violation" in result["error"]
+        assert "Access to table 'film' is not allowed" in result["error"]
         assert result["query_result"] is None

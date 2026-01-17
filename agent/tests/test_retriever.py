@@ -196,3 +196,23 @@ class TestGetVectorStore:
         assert "5432" in connection  # default port
         assert "text2sql_ro" in connection  # default user
         assert "secure_agent_pass" in connection  # default password
+
+    @patch("agent_core.retriever.PGVector")
+    @patch("agent_core.retriever.OpenAIEmbeddings")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_get_vector_store_synthetic_db_name(self, mock_openai, mock_pgvector):
+        """Test with synthetic data DB name (non-pagila)."""
+        mock_store = MagicMock()
+        mock_pgvector.return_value = mock_store
+        mock_openai.return_value = MagicMock()
+
+        # Use synthetic financial data database
+        os.environ["DB_NAME"] = "synth_financial"
+        os.environ["DB_HOST"] = "localhost"
+
+        get_vector_store()
+
+        # Verify synthetic DB name is used
+        call_kwargs = mock_pgvector.call_args[1]
+        assert "synth_financial" in call_kwargs["connection"]
+        assert "pagila" not in call_kwargs["connection"]
