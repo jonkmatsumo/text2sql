@@ -122,6 +122,15 @@ def log_validation_summary(result: ValidationResult) -> None:
     logger.info(f"  Columns:          {result.column_count}")
     logger.info(f"  Foreign Keys:     {result.fk_count}")
 
+    # P2: Warn when FK constraints are missing (non-fatal)
+    if result.fk_count == 0 and result.table_count > 0:
+        logger.warning(
+            "event=fk_constraints_missing_or_undetected "
+            f"fk_edges=0 tables_scanned={result.table_count} "
+            "impact='Join discovery will be degraded. FK constraints are optional but "
+            "strongly recommended.'"
+        )
+
     if result.queries_present:
         logger.info("  Queries:          ✓ Present")
     if result.tables_json_present:
@@ -169,3 +178,71 @@ async def run_startup_validation(
         return False
 
     return True
+
+
+async def run_mcp_startup_validation(conn) -> None:
+    """Validate query-target schema at MCP startup (fail-fast mandatory).
+
+    This function is designed for MCP server startup where fail-fast is always
+    required. The server should not start if the query-target schema is missing.
+
+    Args:
+        conn: Active database connection
+
+    Raises:
+        SystemExit: If validation fails (table_count == 0 or db unreachable)
+    """
+    result = await validate_query_target(conn)
+
+    # Log structured summary
+    log_validation_summary(result)
+
+    # MCP startup is ALWAYS fail-fast
+    if not result.db_reachable:
+        logger.error(
+            "event=query_target_schema_missing "
+            "reason=database_unreachable "
+            "remediation='Ensure Postgres is running and DB_HOST is correct'"
+        )
+        sys.exit(1)
+
+    if result.table_count == 0:
+        logger.error(
+            "event=query_target_schema_missing "
+            "reason=no_tables_found "
+            "remediation='Ensure init SQL is mounted to /docker-entrypoint-initdb.d "
+            "and volume is fresh (docker compose down -v to reset)'"
+        )
+        sys.exit(1)
+
+
+# Guard to ensure tables.json warning is emitted only once
+_tables_json_warning_emitted = False
+
+
+def warn_if_quality_files_missing(base_path: Optional[Path] = None) -> None:
+    """Emit single startup warning if tables.json is absent.
+
+    This is a quality-only input; absence degrades retrieval quality but
+    should not prevent the server from running.
+
+    Args:
+        base_path: Path to queries directory. Defaults to /app/queries.
+    """
+    global _tables_json_warning_emitted
+    if _tables_json_warning_emitted:
+        return
+
+    if base_path is None:
+        base_path = Path("/app/queries")
+
+    tables_json = base_path / "tables.json"
+
+    if not tables_json.exists():
+        logger.warning(
+            "event=tables_json_missing "
+            f"expected_path={tables_json} "
+            "impact='Schema embeddings will not be seeded. Retrieval quality may be degraded.'"
+        )
+
+    _tables_json_warning_emitted = True

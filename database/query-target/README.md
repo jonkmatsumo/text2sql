@@ -13,6 +13,21 @@ To run the system, you must populate this directory with:
     *   `02-data.sql`: DML/Data for the target database.
     *   (Optional) Run `./download_data.sh` to fetch the Pagila dataset (if you want to use the default demo).
 
+> [!IMPORTANT]
+> **FK Constraints**: Foreign key constraints in your schema are **optional but strongly recommended**.
+> They drive join discovery for multi-table queries. Without FKs, the agent may generate
+> incorrect or incomplete JOIN clauses. A warning will be logged at startup if no FKs are detected.
+
+> [!NOTE]
+> **tables.json (Quality-Only)**: The `queries/tables.json` file provides table descriptions
+> for schema embeddings. Its absence degrades retrieval quality but does **not** prevent
+> the server from running. A warning will be logged at startup if missing.
+
+> [!NOTE]
+> **Query Examples (Quality-Only)**: Few-shot query examples in `queries/*.json` improve
+> SQL generation accuracy. Their absence does **not** prevent the server from running,
+> but generation quality will be degraded. Registry size is logged at startup.
+
 2.  **Queries** (`queries/`):
     *   Place your `.json` or `.sql` query files here for seeding.
     *   See `queries/example.json` for format.

@@ -96,8 +96,19 @@ class CanonicalizationService:
             )
             return None
 
-        self._setup_entity_ruler(nlp, extra_patterns)
-        matcher = self._setup_dependency_matcher(nlp)
+        custom_patterns_count = self._setup_entity_ruler(nlp, extra_patterns)
+
+        # Hardening: Ensure count is an integer (protects against bad mocks/tests)
+        if not isinstance(custom_patterns_count, int):
+            logger.debug(
+                f"Expected int from _setup_entity_ruler, got {type(custom_patterns_count)}. "
+                "Treating as 0."
+            )
+            custom_patterns_count = 0
+
+        matcher = self._setup_dependency_matcher(
+            nlp, has_custom_patterns=(custom_patterns_count > 0)
+        )
 
         return self.PipelineState(nlp, matcher)
 
@@ -114,8 +125,12 @@ class CanonicalizationService:
         cls._instance = None
         cls._initialized = False
 
-    def _setup_entity_ruler(self, nlp, extra_patterns: list = None) -> None:
-        """Load entity patterns from JSONL files and optional extra patterns."""
+    def _setup_entity_ruler(self, nlp, extra_patterns: list = None) -> int:
+        """Load entity patterns from JSONL files and optional extra patterns.
+
+        Returns:
+            int: Total number of custom patterns loaded (file + extra)
+        """
         # Add entity ruler before NER
         ruler = nlp.add_pipe("entity_ruler", before="ner")
 
@@ -128,6 +143,8 @@ class CanonicalizationService:
             / "database/query-target/patterns"
         )
         package_path = Path(__file__).parent.parent.parent / "patterns"
+
+        total_custom_patterns = 0
 
         if env_path and Path(env_path).exists():
             patterns_dir = Path(env_path)
@@ -156,6 +173,7 @@ class CanonicalizationService:
 
             if all_patterns:
                 ruler.add_patterns(all_patterns)
+                total_custom_patterns += len(all_patterns)
                 logger.info(f"Total file entity patterns loaded: {len(all_patterns)}")
         else:
             logger.warning(f"Patterns directory not found at {patterns_dir}")
@@ -163,16 +181,34 @@ class CanonicalizationService:
         # Add extra patterns (e.g. from DB)
         if extra_patterns:
             ruler.add_patterns(extra_patterns)
+            total_custom_patterns += len(extra_patterns)
             logger.info(f"Added {len(extra_patterns)} extra patterns")
 
-    def _setup_dependency_matcher(self, nlp):
-        """Register structural patterns for constraint extraction."""
+        return total_custom_patterns
+
+    def _setup_dependency_matcher(self, nlp, has_custom_patterns: bool = False):
+        """Register structural patterns for constraint extraction.
+
+        Args:
+            nlp: SpaCy NLP object
+            has_custom_patterns: Whether custom entity patterns were loaded
+        """
         from mcp_server.services.canonicalization.dependency_patterns import (
             ENTITY_PATTERNS,
             LIMIT_PATTERNS,
             RATING_PATTERNS,
         )
         from spacy.matcher import DependencyMatcher
+
+        # P2: Warn if using default patterns only (domain mismatch risk)
+        if not has_custom_patterns:
+            logger.warning(
+                "event=nlp_dependency_patterns_default_only "
+                "patterns_source=default_only "
+                "domain_assumption=film_schema "
+                "recommended_action='Provide domain-specific patterns file "
+                "via PATTERNS_DIR env var'"
+            )
 
         matcher = DependencyMatcher(nlp.vocab)
         matcher.add("RATING_CONSTRAINT", RATING_PATTERNS)

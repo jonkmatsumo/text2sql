@@ -208,3 +208,133 @@ class TestRunStartupValidation:
         with patch.dict("os.environ", {"SEEDING_FAIL_FAST": "true"}):
             with pytest.raises(SystemExit):
                 await run_startup_validation(mock_conn)
+
+
+class TestRunMcpStartupValidation:
+    """Tests for run_mcp_startup_validation function."""
+
+    @pytest.mark.asyncio
+    async def test_exits_on_empty_db(self):
+        """Test MCP validation exits when no tables found."""
+        from mcp_server.services.seeding.validation import run_mcp_startup_validation
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.side_effect = [
+            [{"cnt": 0}],  # tables
+            [{"cnt": 0}],  # columns
+            [{"cnt": 0}],  # foreign keys
+        ]
+
+        with pytest.raises(SystemExit) as exc_info:
+            await run_mcp_startup_validation(mock_conn)
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_exits_on_db_unreachable(self):
+        """Test MCP validation exits when DB is unreachable."""
+        from mcp_server.services.seeding.validation import run_mcp_startup_validation
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.side_effect = Exception("Connection refused")
+
+        with pytest.raises(SystemExit) as exc_info:
+            await run_mcp_startup_validation(mock_conn)
+
+        assert exc_info.value.code == 1
+
+    @pytest.mark.asyncio
+    async def test_passes_with_tables(self):
+        """Test MCP validation passes with healthy DB."""
+        from mcp_server.services.seeding.validation import run_mcp_startup_validation
+
+        mock_conn = AsyncMock()
+        mock_conn.fetch.side_effect = [
+            [{"cnt": 15}],
+            [{"cnt": 120}],
+            [{"cnt": 10}],
+        ]
+
+        # Should not raise
+        await run_mcp_startup_validation(mock_conn)
+
+
+class TestFkWarning:
+    """Tests for FK constraint warning."""
+
+    def test_fk_warning_logged_when_zero(self, caplog):
+        """Test that FK warning is logged when fk_count is 0."""
+        result = ValidationResult(
+            db_reachable=True,
+            table_count=15,
+            column_count=120,
+            fk_count=0,
+        )
+
+        with caplog.at_level("WARNING"):
+            log_validation_summary(result)
+
+        assert "fk_constraints_missing_or_undetected" in caplog.text
+        assert "fk_edges=0" in caplog.text
+
+    def test_no_fk_warning_when_fks_present(self, caplog):
+        """Test that no FK warning is logged when FKs are present."""
+        result = ValidationResult(
+            db_reachable=True,
+            table_count=15,
+            column_count=120,
+            fk_count=10,
+        )
+
+        with caplog.at_level("WARNING"):
+            log_validation_summary(result)
+
+        assert "fk_constraints_missing_or_undetected" not in caplog.text
+
+
+class TestWarnIfQualityFilesMissing:
+    """Tests for warn_if_quality_files_missing function."""
+
+    def test_warns_when_tables_json_missing(self, tmp_path, caplog):
+        """Test warning is logged when tables.json is missing."""
+        import mcp_server.services.seeding.validation as validation_module
+        from mcp_server.services.seeding.validation import warn_if_quality_files_missing
+
+        # Reset the guard
+        validation_module._tables_json_warning_emitted = False
+
+        with caplog.at_level("WARNING"):
+            warn_if_quality_files_missing(tmp_path)
+
+        assert "tables_json_missing" in caplog.text
+
+    def test_no_warn_when_tables_json_present(self, tmp_path, caplog):
+        """Test no warning when tables.json exists."""
+        import mcp_server.services.seeding.validation as validation_module
+        from mcp_server.services.seeding.validation import warn_if_quality_files_missing
+
+        # Create tables.json
+        (tmp_path / "tables.json").write_text("[]")
+
+        # Reset the guard
+        validation_module._tables_json_warning_emitted = False
+
+        with caplog.at_level("WARNING"):
+            warn_if_quality_files_missing(tmp_path)
+
+        assert "tables_json_missing" not in caplog.text
+
+    def test_warns_only_once(self, tmp_path, caplog):
+        """Test that warning is emitted only once."""
+        import mcp_server.services.seeding.validation as validation_module
+        from mcp_server.services.seeding.validation import warn_if_quality_files_missing
+
+        # Reset the guard
+        validation_module._tables_json_warning_emitted = False
+
+        with caplog.at_level("WARNING"):
+            warn_if_quality_files_missing(tmp_path)
+            warn_if_quality_files_missing(tmp_path)
+
+        # Should only appear once
+        assert caplog.text.count("tables_json_missing") == 1

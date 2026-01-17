@@ -56,6 +56,44 @@ async def lifespan(app):
     # Startup: Initialize database connection pool
     await Database.init()
 
+    # P0: Fail-fast validation — ensure query-target schema exists
+    # This MUST run before any other startup logic that depends on schema
+    try:
+        from mcp_server.services.seeding.validation import (
+            run_mcp_startup_validation,
+            warn_if_quality_files_missing,
+        )
+
+        async with Database.get_connection() as conn:
+            await run_mcp_startup_validation(conn)
+
+        # P2: Warn about optional quality files (non-fatal)
+        warn_if_quality_files_missing()
+
+    except SystemExit:
+        raise  # Re-raise for hard failure (validation failed)
+    except Exception as e:
+        logger.error(f"Startup validation failed unexpectedly: {e}")
+        raise RuntimeError("Query-target schema validation failed") from e
+
+    # P3: Emit few-shot registry status (quality observability)
+    try:
+        from mcp_server.services.registry import RegistryService
+
+        examples = await RegistryService.list_examples(tenant_id=1, limit=1000)
+        examples_count = len(examples)
+        logger.info(
+            f"event=fewshot_registry_status examples_count={examples_count} "
+            f"examples_source=query_pairs loaded={examples_count > 0}"
+        )
+        if examples_count == 0:
+            logger.warning(
+                "event=fewshot_registry_empty "
+                "impact='Generation quality may be degraded without few-shot examples'"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to check registry status: {e}")
+
     # Initialize NLP patterns from DB
     try:
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService

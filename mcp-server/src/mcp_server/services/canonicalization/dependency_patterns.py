@@ -2,6 +2,13 @@
 
 These patterns use SpaCy's DependencyMatcher to identify constraints
 based on grammatical relationships, not string adjacency.
+
+NOTE: These default patterns are tuned for a FILM/MOVIE domain schema
+(e.g., Pagila dataset). They match terms like "movie", "film", "actor",
+and film rating codes (G, PG, PG-13, R, NC-17).
+
+For other domains, provide custom patterns via PATTERNS_DIR env var
+pointing to a directory containing domain-specific .jsonl pattern files.
 """
 
 # Pattern 1a: Adjectival modification - Entity based
