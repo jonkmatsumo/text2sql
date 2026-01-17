@@ -5,11 +5,11 @@ services:
   postgres-db:
     # Upgrade to pgvector image to support vector extension
     image: pgvector/pgvector:0.7.0-pg16
-    container_name: pagila_db
+    container_name: query_target_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-root_password}
-      POSTGRES_DB: pagila
+      POSTGRES_DB: ${DB_NAME:-pagila}
     volumes:
       # Mount initialization scripts (Schema -> Data -> Permissions)
       # They execute in alphanumeric order of filenames
@@ -18,7 +18,7 @@ services:
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d pagila"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-pagila}"]
       interval: 5s
       timeout: 5s
       retries: 10
