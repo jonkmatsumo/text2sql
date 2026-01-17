@@ -97,6 +97,15 @@ class CanonicalizationService:
             return None
 
         custom_patterns_count = self._setup_entity_ruler(nlp, extra_patterns)
+
+        # Hardening: Ensure count is an integer (protects against bad mocks/tests)
+        if not isinstance(custom_patterns_count, int):
+            logger.debug(
+                f"Expected int from _setup_entity_ruler, got {type(custom_patterns_count)}. "
+                "Treating as 0."
+            )
+            custom_patterns_count = 0
+
         matcher = self._setup_dependency_matcher(
             nlp, has_custom_patterns=(custom_patterns_count > 0)
         )

@@ -92,7 +92,7 @@ async def test_canonicalization_service_reload_returns_count():
 
             # Mock _setup_entity_ruler and _setup_dependency_matcher to avoid IO/Cython issues
             with patch.object(
-                CanonicalizationService, "_setup_entity_ruler"
+                CanonicalizationService, "_setup_entity_ruler", return_value=2
             ) as mock_setup, patch.object(CanonicalizationService, "_setup_dependency_matcher"):
                 service = CanonicalizationService("en_core_web_sm")
 
@@ -144,9 +144,9 @@ async def test_reload_concurrency():
             # Init service
             CanonicalizationService.reset_instance()
 
-            with patch.object(CanonicalizationService, "_setup_entity_ruler"), patch.object(
-                CanonicalizationService, "_setup_dependency_matcher"
-            ):
+            with patch.object(
+                CanonicalizationService, "_setup_entity_ruler", return_value=0
+            ), patch.object(CanonicalizationService, "_setup_dependency_matcher"):
 
                 service = CanonicalizationService("en_core_web_sm")
 
