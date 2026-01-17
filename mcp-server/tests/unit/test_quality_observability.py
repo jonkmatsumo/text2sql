@@ -1,6 +1,5 @@
 """Tests for quality observability features."""
 
-import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -85,6 +84,8 @@ class TestGoldenDatasetIsolation:
 
     def test_no_golden_dataset_in_runtime_imports(self):
         """Ensure runtime modules don't reference golden_dataset."""
+        from pathlib import Path
+
         # List of runtime modules that should NOT reference golden_dataset
         runtime_modules = [
             "mcp_server.main",
@@ -92,20 +93,23 @@ class TestGoldenDatasetIsolation:
             "mcp_server.services.seeding.cli",
         ]
 
-        # Check via grep (static analysis)
+        # Resolve repo root relative to this test file
+        # tests/unit/test_quality_observability.py -> ../.. -> mcp-server root
+        mcp_server_root = Path(__file__).parent.parent.parent
+        src_root = mcp_server_root / "src"
+
         for module_path in runtime_modules:
             # Convert module path to file path
-            file_path = module_path.replace(".", "/") + ".py"
-            full_path = f"/Users/jonathan/git/text2sql/mcp-server/src/{file_path}"
+            relative_path = module_path.replace(".", "/") + ".py"
+            full_path = src_root / relative_path
 
-            result = subprocess.run(
-                ["grep", "-l", "golden_dataset", full_path],
-                capture_output=True,
-                text=True,
-            )
+            # Ensure file exists so test remains valid
+            assert full_path.exists(), f"Runtime module {module_path} not found at {full_path}"
 
-            # grep returns 0 if found, 1 if not found
-            assert result.returncode == 1, (
+            # Read content natively (no subprocess/grep)
+            content = full_path.read_text("utf-8")
+
+            assert "golden_dataset" not in content, (
                 f"Runtime module {module_path} references golden_dataset! "
                 "golden_dataset should only be used in evaluation scripts."
             )
