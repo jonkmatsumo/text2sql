@@ -21,10 +21,11 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = []
+packages = ["streamlit_app"]
+package-dir = {"" = ".."}
 
 [tool.coverage.run]
-source = ["streamlit"]
+source = ["streamlit_app"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
