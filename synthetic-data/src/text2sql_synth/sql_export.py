@@ -136,6 +136,8 @@ def generate_data_sql(
         "",
         f"SET search_path TO {target_schema};",
         "",
+        "BEGIN;",
+        "",
     ]
 
     for table_name in GENERATION_ORDER:
@@ -161,6 +163,9 @@ def generate_data_sql(
             lines.append(f"INSERT INTO {table_name} ({columns_list}) VALUES")
             lines.append(",\n".join(values_list) + ";")
             lines.append("")
+
+    lines.append("COMMIT;")
+    lines.append("")
 
     return "\n".join(lines)
 
