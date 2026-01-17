@@ -323,6 +323,16 @@ class CanonicalizationService:
                             constraints["entity"] = "FILM"
                         elif lemma in ("actor", "actress", "performer"):
                             constraints["entity"] = "ACTOR"
+                        elif lemma in ("merchant", "store", "vendor"):
+                            constraints["entity"] = "MERCHANT"
+                        elif lemma in ("transaction", "payment", "purchase"):
+                            constraints["entity"] = "TRANSACTION"
+                        elif lemma in ("account", "balance"):
+                            constraints["entity"] = "ACCOUNT"
+                        elif lemma in ("institution", "bank"):
+                            constraints["entity"] = "INSTITUTION"
+                        elif lemma in ("customer", "client", "user"):
+                            constraints["entity"] = "CUSTOMER"
 
                 elif pattern_name == "RATING_CONSTRAINT":
                     # Pattern matches [film] -> [rated] -> [PG] or similar

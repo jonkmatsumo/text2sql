@@ -126,4 +126,23 @@ ENTITY_PATTERN_ACTOR = [
     }
 ]
 
-ENTITY_PATTERNS = [ENTITY_PATTERN_FILM, ENTITY_PATTERN_ACTOR]
+ENTITY_PATTERN_FINANCIAL = [
+    {
+        "RIGHT_ID": "entity",
+        "RIGHT_ATTRS": {
+            "LEMMA": {
+                "IN": [
+                    "merchant",
+                    "transaction",
+                    "account",
+                    "institution",
+                    "bank",
+                    "customer",
+                    "payment",
+                ]
+            }
+        },
+    }
+]
+
+ENTITY_PATTERNS = [ENTITY_PATTERN_FILM, ENTITY_PATTERN_ACTOR, ENTITY_PATTERN_FINANCIAL]

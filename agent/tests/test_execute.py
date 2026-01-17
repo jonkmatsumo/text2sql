@@ -16,7 +16,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_success_json_string(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test successful query execution with JSON string result."""
         # Mock enforcer to pass
@@ -34,7 +34,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT COUNT(*) as count FROM film",
+            current_sql=schema_fixture.count_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -46,7 +46,7 @@ class TestValidateAndExecuteNode:
         # Verify tool was called with correct query (tenant_id is extracted from context)
         mock_tool.ainvoke.assert_called_once()
         call_args = mock_tool.ainvoke.call_args[0][0]
-        assert call_args["sql_query"] == "SELECT COUNT(*) as count FROM film"
+        assert call_args["sql_query"] == schema_fixture.count_query
         assert call_args["tenant_id"] is None  # Mocks state tenant_id which is None here
 
         # Verify result was parsed and returned
@@ -59,7 +59,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_success_dict_result(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test successful query execution with dict result."""
         # Mock enforcer to pass
@@ -76,7 +76,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film LIMIT 1",
+            current_sql=schema_fixture.sample_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -126,7 +126,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_error_string(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test error handling when tool returns error string."""
         # Mock enforcer to pass
@@ -135,14 +135,15 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value="Error: relation 'films' does not exist")
+        error_msg = f"Error: relation '{schema_fixture.invalid_table}' does not exist"
+        mock_tool.ainvoke = AsyncMock(return_value=error_msg)
 
         mock_get_tools.return_value = [mock_tool]
 
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM films",
+            current_sql=f"SELECT * FROM {schema_fixture.invalid_table}",
             query_result=None,
             error=None,
             retry_count=0,
@@ -150,7 +151,7 @@ class TestValidateAndExecuteNode:
 
         result = await validate_and_execute_node(state)
 
-        assert result["error"] == "Error: relation 'films' does not exist"
+        assert result["error"] == error_msg
         assert result["query_result"] is None
 
     @pytest.mark.asyncio
@@ -191,7 +192,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_missing_tool(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test error handling when execute_sql_query is not found."""
         # Mock enforcer to pass
@@ -207,7 +208,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film",
+            current_sql=schema_fixture.sample_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -267,7 +268,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_execution_exception(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test error handling when tool execution raises exception."""
         # Mock enforcer to pass
@@ -284,7 +285,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film",
+            current_sql=schema_fixture.sample_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -300,7 +301,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_invalid_json(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test handling when result is string but not valid JSON."""
         # Mock enforcer to pass
@@ -317,7 +318,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film",
+            current_sql=schema_fixture.sample_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -334,7 +335,7 @@ class TestValidateAndExecuteNode:
     @patch("agent_core.nodes.execute.PolicyEnforcer")
     @patch("agent_core.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_empty_tools(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
         """Test error handling when no tools are returned."""
         # Mock enforcer to pass
@@ -347,7 +348,7 @@ class TestValidateAndExecuteNode:
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film",
+            current_sql=schema_fixture.sample_query,
             query_result=None,
             error=None,
             retry_count=0,
@@ -360,14 +361,15 @@ class TestValidateAndExecuteNode:
 
     @pytest.mark.asyncio
     @patch("agent_core.nodes.execute.PolicyEnforcer")
-    async def test_validate_and_execute_node_blocks_unsafe_sql(self, mock_enforcer):
+    async def test_validate_and_execute_node_blocks_unsafe_sql(self, mock_enforcer, schema_fixture):
         """Test that PolicyEnforcer blocks unsafe SQL before tool invocation."""
-        mock_enforcer.validate_sql.side_effect = ValueError("Access to table 'film' is not allowed")
+        error_msg = f"Access to table '{schema_fixture.valid_table}' is not allowed"
+        mock_enforcer.validate_sql.side_effect = ValueError(error_msg)
 
         state = AgentState(
             messages=[],
             schema_context="",
-            current_sql="SELECT * FROM film",
+            current_sql=f"SELECT * FROM {schema_fixture.valid_table}",
             query_result=None,
             error=None,
             retry_count=0,
@@ -376,5 +378,5 @@ class TestValidateAndExecuteNode:
         result = await validate_and_execute_node(state)
 
         assert "Security Policy Violation" in result["error"]
-        assert "Access to table 'film' is not allowed" in result["error"]
+        assert error_msg in result["error"]
         assert result["query_result"] is None

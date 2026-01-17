@@ -88,13 +88,15 @@ def build_signature_from_constraints(
     """Build an IntentSignature from extracted constraints."""
     intent = None
     query_lower = query.lower()
-    if "top" in query_lower and entity == "actor":
-        if "film" in query_lower or "movie" in query_lower:
-            intent = "top_actors_by_film_count"
-        else:
-            intent = "top_actors"
-    elif "top" in query_lower and entity == "film":
-        intent = "top_films"
+    if "top" in query_lower:
+        if entity:
+            # Special case: Actors by film count (legacy contract)
+            if entity == "actor" and ("film" in query_lower or "movie" in query_lower):
+                intent = "top_actors_by_film_count"
+            else:
+                intent = f"top_{entity}s"
+        elif "film" in query_lower or "movie" in query_lower:
+            intent = "top_films"
 
     filters = {}
     if rating:
@@ -111,7 +113,11 @@ def build_signature_from_constraints(
     return IntentSignature(
         intent=intent,
         entity=entity,
-        item="film" if "film" in query_lower or "movie" in query_lower else None,
+        item=(
+            "film"
+            if "film" in query_lower or "movie" in query_lower
+            else (entity if entity else None)
+        ),
         metric=metric,
         filters=filters,
         ranking=ranking,

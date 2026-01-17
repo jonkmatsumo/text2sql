@@ -186,6 +186,55 @@ def cmd_export_sql(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_export_tables_json(args: argparse.Namespace) -> int:
+    """Export tables.json."""
+    import json
+
+    from text2sql_synth.tables_summary import generate_tables_summary
+
+    try:
+        data = generate_tables_summary()
+        output_path = Path(args.out) / "tables.json"
+
+        # Ensure directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        print(f"Exported tables.json to {output_path}")
+        print(f"Generated summaries for {len(data)} tables.")
+        return 0
+    except Exception as e:
+        logger.exception("Failed to export tables.json: %s", e)
+        return 1
+
+
+def cmd_export_examples(args: argparse.Namespace) -> int:
+    """Export few-shot examples."""
+    import json
+
+    from text2sql_synth.examples_generator import generate_examples
+
+    try:
+        examples = generate_examples()
+        output_dir = Path(args.out)
+
+        # Ensure directory exists
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        for filename, content in examples.items():
+            output_path = output_dir / filename
+            with open(output_path, "w") as f:
+                json.dump(content, f, indent=2)
+
+        print(f"Exported {len(examples)} example files to {output_dir}")
+        return 0
+    except Exception as e:
+        logger.exception("Failed to export examples: %s", e)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
@@ -301,6 +350,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target schema in SQL statements (default: public)",
     )
     sql_parser.set_defaults(func=cmd_export_sql)
+
+    # export-tables-json subcommand
+    json_parser = subparsers.add_parser(
+        "export-tables-json",
+        help="Export tables.json containing table summaries",
+    )
+    json_parser.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Output directory for tables.json",
+    )
+    json_parser.set_defaults(func=cmd_export_tables_json)
+
+    # export-examples subcommand
+    ex_parser = subparsers.add_parser(
+        "export-examples",
+        help="Export few-shot example JSON files",
+    )
+    ex_parser.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Output directory for example files",
+    )
+    ex_parser.set_defaults(func=cmd_export_examples)
 
     return parser
 
