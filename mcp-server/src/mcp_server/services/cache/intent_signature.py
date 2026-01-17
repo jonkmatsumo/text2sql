@@ -90,7 +90,11 @@ def build_signature_from_constraints(
     query_lower = query.lower()
     if "top" in query_lower:
         if entity:
-            intent = f"top_{entity}s"
+            # Special case: Actors by film count (legacy contract)
+            if entity == "actor" and ("film" in query_lower or "movie" in query_lower):
+                intent = "top_actors_by_film_count"
+            else:
+                intent = f"top_{entity}s"
         elif "film" in query_lower or "movie" in query_lower:
             intent = "top_films"
 
