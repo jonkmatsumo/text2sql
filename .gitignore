@@ -56,6 +56,7 @@ database/query-target/*
 !database/query-target/queries/
 !database/query-target/patterns/
 !database/query-target/corpus/
+!database/query-target/golden/
 
 # Ignore contents but allow examples
 database/query-target/queries/*
