@@ -1,0 +1,42 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "EvaluationMetricsV1",
+    "type": "object",
+    "properties": {
+        "run_id": {
+            "type": "string"
+        },
+        "timestamp": {
+            "type": "number"
+        },
+        "config": {
+            "type": "object"
+        },
+        "total_cases": {
+            "type": "integer"
+        },
+        "successful_cases": {
+            "type": "integer"
+        },
+        "failed_cases": {
+            "type": "integer"
+        },
+        "accuracy": {
+            "type": "number"
+        },
+        "avg_latency_ms": {
+            "type": "number"
+        },
+        "p95_latency_ms": {
+            "type": "number"
+        }
+    },
+    "required": [
+        "run_id",
+        "timestamp",
+        "total_cases",
+        "successful_cases",
+        "failed_cases",
+        "accuracy"
+    ]
+}

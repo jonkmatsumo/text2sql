@@ -43,9 +43,9 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
     volumes:
-      - ./evaluation/airflow/dags:/opt/airflow/dags
-      - ./evaluation/airflow/logs:/opt/airflow/logs
-      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+      - ./airflow_evals/airflow/dags:/opt/airflow/dags
+      - ./airflow_evals/airflow/logs:/opt/airflow/logs
+      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
     ports:
       - "8080:8080"
     command: webserver
@@ -73,9 +73,9 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
     volumes:
-      - ./evaluation/airflow/dags:/opt/airflow/dags
-      - ./evaluation/airflow/logs:/opt/airflow/logs
-      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+      - ./airflow_evals/airflow/dags:/opt/airflow/dags
+      - ./airflow_evals/airflow/logs:/opt/airflow/logs
+      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
     command: scheduler
     restart: always
 
@@ -96,9 +96,9 @@ services:
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
     volumes:
-      - ./evaluation/airflow/dags:/opt/airflow/dags
-      - ./evaluation/airflow/logs:/opt/airflow/logs
-      - ./evaluation/airflow/plugins:/opt/airflow/plugins
+      - ./airflow_evals/airflow/dags:/opt/airflow/dags
+      - ./airflow_evals/airflow/logs:/opt/airflow/logs
+      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
     command: celery worker
     restart: always
 

@@ -15,8 +15,8 @@ if ! grep -q "airflow-webserver" docker-compose.evals.yml; then
     exit 1
 fi
 
-if ! grep -q "airflow-scheduler" docker-compose.evals.yml; then
-    echo "ERROR: airflow-scheduler service missing in compose file"
+if ! grep -q "airflow_evals/airflow/dags" docker-compose.evals.yml; then
+    echo "ERROR: dags volume mount missing or incorrect in compose file"
     exit 1
 fi
 

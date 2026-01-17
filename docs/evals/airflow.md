@@ -1,63 +1,69 @@
-# Airflow Evaluation Architecture Design
+# Airflow Evaluation Orchestration
 
-## 1. Overview
-This document outlines the design for the "On-Demand" Airflow stack used for orchestrating agent evaluations.
-The goal is to provide a robust, reproducible evaluation pipeline that does NOT burden the daily local development loop.
+This document describes the design and usage of the Airflow-based evaluation system.
 
-## 2. Run Modes
-We support two modes of execution:
+## Overview
 
-### A. CLI Mode (Local / Debug)
-*   **Command**: `python -m evaluation.runner ...`
-*   **Use Case**: Fast inner-loop testing of the evaluation logic or running a specific test case without spinning up Airflow.
-*   **Dependencies**: Requires the application stack (agent, DB, etc.) to be runnable or mocked, but does NOT require Airflow.
+The system allows running automated evaluations of the Text-to-SQL agent against a golden dataset using Apache Airflow for orchestration. It supports:
+- **On-demand Runtime**: Airflow stack spins up only when needed (`make eval-airflow-up`).
+- **Deterministic Runner**: A standalone library (`airflow_evals`) to run cases and compute metrics.
+- **Persistence**: Results stored as JSON artifacts and logged to MLflow (optional).
+- **Regression Detection**: Fails the pipeline if accuracy drops or latency spikes.
 
-### B. Orchestrated Mode (Airflow)
-*   **Command**: `make eval-airflow-trigger` (or via UI)
-*   **Use Case**: Formal evaluation runs, regression testing, history tracking.
-*   **Mechanism**: A DAG (`eval_dag`) invokes the CLI runner (via `PythonOperator` or `DockerOperator`) and manages side-effects (regression checks, alerts).
+## Architecture
 
-## 3. Architecture & Components
+- **Directory**: `airflow_evals/` (root for evaluation logic and DAGs).
+- **Compose**: `docker-compose.evals.yml` (isolated stack).
+- **DAG**: `eval_dag.py` triggers the `airflow_evals.runner`.
 
-### Directory Structure
-```
-evaluation/
-├── runner/           # The core logic library
-│   ├── __main__.py   # CLI entrypoint
-│   ├── core.py       # run_evaluation()
-│   └── config.py     # Pydantic models
-├── airflow/
-│   └── dags/         # Mounted to Airflow containers
-│       └── eval_dag.py
-├── schema/           # JSON schemas for metrics/artifacts
-└── tests/            # Tests for runner and DAGs
-```
+## Quick Start
 
-### Infrastructure (On-Demand)
-*   **Compose File**: `docker-compose.evals.yml`
-*   **Services**:
-    *   `airflow-webserver`
-    *   `airflow-scheduler`
-    *   `airflow-worker` (or LocalExecutor)
-    *   `postgres-airflow` (dedicated metadata DB)
-*   **Isolation**: These services are NOT part of the default `docker-compose.app.yml`. They are started explicitly via `make eval-airflow-up`.
+1. **Start Airflow Stack**:
+   ```bash
+   make eval-airflow-up
+   ```
+   Access Airflow UI at http://localhost:8080 (airflow/airflow).
 
-## 4. Artifacts & Persistence
-Every run produces a directory: `artifacts/evals/<run_id>/`
+2. **Trigger Evaluation**:
+   - Go to Airflow UI -> DAGs -> `text2sql_evaluation`.
+   - Trigger DAG.
+   - Or via CLI (inside container):
+     ```bash
+     airflow dags trigger text2sql_evaluation
+     ```
 
-*   `results.json`: Detailed outputs for every test case.
-*   `summary.json`: Aggregated metrics (accuracy, latency, etc.).
-*   `regression_report.json` (Phase 5): Diff against baseline.
+3. **View Results**:
+   - Local Artifacts: `airflow_evals/airflow/logs/eval_artifacts/<run_id>/`
+   - MLflow: If configured, check the `text2sql_evaluations` experiment.
 
-**MLflow Integration**:
-*   The runner is responsible for logging `summary.json` metrics to MLflow.
-*   Artifacts are uploaded to MLflow Artifact Store.
+4. **Stop Stack**:
+   ```bash
+   make eval-airflow-down
+   ```
 
-## 5. Configuration Strategy
-*   **EvaluationConfig**: A Pydantic model defining:
-    *   `dataset_path`: Path to golden dataset.
-    *   `agent_config`: Hash/Pointer to agent configuration.
-    *   `concurrency`: Parallelism for runner.
-    *   `seed`: For deterministic playback.
+## Configuration
 
-This config can be passed as a JSON blob or loaded from a file.
+The runner uses `EvaluationConfig` which can be populated via Airflow params:
+- `dataset_path`: Path to golden dataset.
+- `limit`: Run only N cases.
+- `concurrency`: Async concurrency level.
+
+## Regression Detection
+
+The system automatically compares the current run against a baseline (if configured via `EVAL_BASELINE_PATH`).
+Thresholds:
+- Accuracy Drop > 5%
+- P95 Latency Increase > 20%
+
+If a regression is detected, the `compute_regression` task in the DAG will fail.
+
+## Development
+
+- **Run Tests**:
+  ```bash
+  pytest airflow_evals/tests/
+  ```
+- **CLI Usage**:
+  ```bash
+  python -m airflow_evals.runner --dataset queries/golden.jsonl --output results/
+  ```
