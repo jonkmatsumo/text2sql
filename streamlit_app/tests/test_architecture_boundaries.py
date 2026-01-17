@@ -13,6 +13,9 @@ def test_no_dal_imports_in_streamlit_app():
     violating_files = []
 
     for file_path in STREAMLIT_APP_DIR.rglob("*.py"):
+        # Skip test files - they may contain violation strings as patterns
+        if "tests" in file_path.parts:
+            continue
         # Skip __init__.py if empty or minimal
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()

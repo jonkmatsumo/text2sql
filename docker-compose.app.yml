@@ -73,7 +73,7 @@ services:
   streamlit:
     build:
       context: .
-      dockerfile: streamlit/Dockerfile
+      dockerfile: streamlit_app/Dockerfile
     container_name: text2sql_streamlit
     depends_on:
       mcp-server:

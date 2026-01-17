@@ -73,7 +73,7 @@ async def reindex_embeddings(dry_run: bool = True) -> dict:
                         new_embedding = RagEngine.embed_text(canonical)
 
                         # Update in database
-                        from mcp_server.dal.postgres.common import _format_vector
+                        from dal.postgres.common import _format_vector
 
                         pg_vector = _format_vector(new_embedding)
                         update_query = """

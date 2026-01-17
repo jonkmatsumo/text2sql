@@ -4,7 +4,8 @@ import os
 
 import pytest
 from mcp_server.config.control_plane import ControlPlaneDatabase
-from mcp_server.dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
+
+from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
 
 
 # This marker ensures it is excluded from default CI runs unless -m integration is used
