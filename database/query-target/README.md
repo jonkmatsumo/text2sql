@@ -2,16 +2,22 @@
 
 This directory contains the schema, data, and queries for the **Target Database** (the database the agent queries against).
 
-## Dataset Agostic
-This repository is configured to be dataset-agnostic. The actual schema, data, and specific query files are git-ignored.
+## Dataset Mode
+
+The default dataset is **synthetic** (financial transactions domain). This is controlled by the `DATASET_MODE` environment variable:
+
+- `DATASET_MODE=synthetic` (default): Uses the synthetic financial dataset with tables like `dim_customer`, `fact_transaction`, `dim_merchant`, etc.
+- `DATASET_MODE=pagila` (legacy): Uses the Pagila film rental dataset.
 
 ## Required Files
+
 To run the system, you must populate this directory with:
 
 1.  **Schema & Data**:
     *   `01-schema.sql`: DDL for the target database.
     *   `02-data.sql`: DML/Data for the target database.
-    *   (Optional) Run `./download_data.sh` to fetch the Pagila dataset (if you want to use the default demo).
+    *   For synthetic data: Run `scripts/generate_synthetic_artifacts.sh` to generate schema and data.
+    *   For legacy Pagila: Run `./download_data.sh` to fetch the Pagila dataset (requires `DATASET_MODE=pagila`).
 
 > [!IMPORTANT]
 > **FK Constraints**: Foreign key constraints in your schema are **optional but strongly recommended**.

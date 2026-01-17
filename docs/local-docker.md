@@ -6,7 +6,7 @@ Data is now persisted to the host filesystem at:
 
 ```
 ./local-data/
-  ├── postgres-db/      # pagila query target data
+  ├── postgres-db/      # query-target database (synthetic or pagila)
   ├── agent-control-db/ # agent control plane data
   ├── minio/            # MLflow artifacts
   └── memgraph/         # graph db data

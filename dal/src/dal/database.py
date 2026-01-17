@@ -32,7 +32,9 @@ class Database:
         # Postgres Config
         db_host = get_env_str("DB_HOST", "localhost")
         db_port = get_env_int("DB_PORT", 5432)
-        db_name = get_env_str("DB_NAME", "pagila")
+        from common.config.dataset import get_default_db_name
+
+        db_name = get_env_str("DB_NAME", get_default_db_name())
         db_user = get_env_str("DB_USER", "text2sql_ro")
         db_pass = get_env_str("DB_PASS", "secure_agent_pass")
 

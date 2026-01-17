@@ -94,7 +94,7 @@ flowchart TB
     end
 
     subgraph TargetDB["🗄️ Query-Target (Postgres)"]
-        PagilaDB["Pagila Database<br/>Sample data"]
+        QueryTargetDB["Synthetic Dataset<br/>Financial domain"]
         Target_RO["Read-only User<br/>(text2sql_ro)"]
     end
 
@@ -112,7 +112,7 @@ flowchart TB
     Impl_PG --> QueryRegistry
     Impl_PG --> SchemaEmbeddings
     Impl_PG --> Tenants
-    Impl_PG --> PagilaDB
+    Impl_PG --> QueryTargetDB
     Impl_PG -.-> PatternGen
 
     Impl_MG --> SchemaGraph
@@ -121,7 +121,7 @@ flowchart TB
     MCPTools -->|"1. Validate Logic"| PolicyEnforcer
     PolicyEnforcer -->|"2. Inject Context"| TenantRewriter
     TenantRewriter -->|"3. Execute Read"| Target_RO
-    Target_RO --> PagilaDB
+    Target_RO --> QueryTargetDB
 
     style Agent fill:#5B9BD5
     style MCPServer fill:#FF9800
