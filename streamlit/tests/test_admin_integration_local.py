@@ -17,33 +17,70 @@ async def test_admin_service_e2e_flow():
     if "DB_ISOLATION_ENABLED" not in os.environ:
         os.environ["DB_ISOLATION_ENABLED"] = "true"
 
-    try:
-        # 1. Create
-        rule = await AdminService.upsert_pin_rule(
-            tenant_id=tenant_id,
-            match_type="exact",
-            match_value="integration_ui_test",
-            registry_example_ids=["ex_ui"],
-            priority=100,
-            enabled=True,
-        )
-        assert rule.match_value == "integration_ui_test"
-        assert rule.id is not None
+    from unittest.mock import patch
 
-        # 2. List
-        rules = await AdminService.list_pin_rules(tenant_id)
-        assert len(rules) >= 1
-        found = next((r for r in rules if r.id == rule.id), None)
-        assert found is not None
-        assert found.match_value == "integration_ui_test"
+    from mcp_server.tools.manage_pin_rules import handler as pin_handler
 
-        # 3. Delete
-        success = await AdminService.delete_pin_rule(str(rule.id), tenant_id)
-        assert success is True
+    from dal.database import Database
 
-        # Verify deletion
-        rules = await AdminService.list_pin_rules(tenant_id)
-        assert not any(r.id == rule.id for r in rules)
+    async def mock_call_tool(tool_name, args):
+        if tool_name == "manage_pin_rules":
+            return await pin_handler(**args)
+        raise ValueError(f"Unexpected tool call: {tool_name}")
 
-    except Exception as e:
-        pytest.fail(f"Integration test failed: {e}")
+    with patch("streamlit_app.service.admin.AdminService._call_tool", side_effect=mock_call_tool):
+        # Initialize DAL since we are bypassing the server
+        await Database.init()
+
+        # Ensure schema table exists for test (local env might be missing it)
+        pool = Database._pool
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pinned_recommendations (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        tenant_id INTEGER NOT NULL,
+                        match_type TEXT NOT NULL,
+                        match_value TEXT NOT NULL,
+                        registry_example_ids JSONB NOT NULL,
+                        priority INTEGER DEFAULT 0,
+                        enabled BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    );
+                """
+                )
+
+        try:
+            # 1. Create
+            rule = await AdminService.upsert_pin_rule(
+                tenant_id=tenant_id,
+                match_type="exact",
+                match_value="integration_ui_test",
+                registry_example_ids=["ex_ui"],
+                priority=100,
+                enabled=True,
+            )
+            assert rule.match_value == "integration_ui_test"
+            assert rule.id is not None
+
+            # 2. List
+            rules = await AdminService.list_pin_rules(tenant_id)
+            assert len(rules) >= 1
+            found = next((r for r in rules if r.id == rule.id), None)
+            assert found is not None
+            assert found.match_value == "integration_ui_test"
+
+            # 3. Delete
+            success = await AdminService.delete_pin_rule(str(rule.id), tenant_id)
+            assert success is True
+
+            # Verify deletion
+            rules = await AdminService.list_pin_rules(tenant_id)
+            assert not any(r.id == rule.id for r in rules)
+
+        except Exception as e:
+            pytest.fail(f"Integration test failed: {e}")
+        finally:
+            await Database.close()
