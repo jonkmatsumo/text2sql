@@ -14,6 +14,166 @@
                 "type": "postgres",
                 "uid": "Postgres"
             },
+            "description": "Trace summary information",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "custom": {
+                        "align": "auto",
+                        "cellOptions": {
+                            "type": "auto"
+                        },
+                        "inspect": false
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "status"
+                        },
+                        "properties": [
+                            {
+                                "id": "mappings",
+                                "value": [
+                                    {
+                                        "options": {
+                                            "ERROR": {
+                                                "color": "red",
+                                                "index": 0
+                                            },
+                                            "OK": {
+                                                "color": "green",
+                                                "index": 1
+                                            }
+                                        },
+                                        "type": "value"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 16,
+                "x": 0,
+                "y": 0
+            },
+            "id": 2,
+            "options": {
+                "cellHeight": "sm",
+                "footer": {
+                    "countRows": false,
+                    "fields": "",
+                    "reducer": [
+                        "sum"
+                    ],
+                    "show": false
+                },
+                "showHeader": true
+            },
+            "pluginVersion": "10.0.0",
+            "targets": [
+                {
+                    "datasource": {
+                        "type": "postgres",
+                        "uid": "Postgres"
+                    },
+                    "editorMode": "code",
+                    "format": "table",
+                    "rawQuery": true,
+                    "refId": "A",
+                    "rawSql": "SELECT\n  trace_id,\n  service_name,\n  start_time,\n  end_time,\n  duration_ms,\n  status,\n  span_count,\n  error_count\nFROM otel.traces\nWHERE trace_id = '$trace_id'"
+                }
+            ],
+            "title": "Trace Summary",
+            "type": "table"
+        },
+        {
+            "datasource": {
+                "type": "datasource",
+                "uid": "-- Dashboard --"
+            },
+            "description": "Quick links to OTEL Worker API endpoints",
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "custom": {
+                        "align": "auto",
+                        "cellOptions": {
+                            "type": "auto"
+                        },
+                        "inspect": false
+                    },
+                    "links": [],
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "blue",
+                                "value": null
+                            }
+                        ]
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "url"
+                        },
+                        "properties": [
+                            {
+                                "id": "links",
+                                "value": [
+                                    {
+                                        "title": "Open API",
+                                        "url": "${__value.text}",
+                                        "targetBlank": true
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 8,
+                "x": 16,
+                "y": 0
+            },
+            "id": 3,
+            "options": {
+                "content": "### API Links\n\n- [View Trace](http://localhost:4320/api/v1/traces/${trace_id})\n- [View Spans](http://localhost:4320/api/v1/traces/${trace_id}/spans?include=attributes)\n- [Raw OTLP](http://localhost:4320/api/v1/traces/${trace_id}/raw)",
+                "mode": "markdown"
+            },
+            "pluginVersion": "10.0.0",
+            "title": "API Links",
+            "type": "text"
+        },
+        {
+            "datasource": {
+                "type": "postgres",
+                "uid": "Postgres"
+            },
             "description": "All spans for this trace ordered by start time and sequence number",
             "fieldConfig": {
                 "defaults": {
@@ -81,7 +241,7 @@
                 "h": 12,
                 "w": 24,
                 "x": 0,
-                "y": 0
+                "y": 4
             },
             "id": 1,
             "options": {

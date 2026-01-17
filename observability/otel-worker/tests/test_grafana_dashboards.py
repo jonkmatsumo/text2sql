@@ -140,3 +140,48 @@ class TestTraceDetailDashboard:
         required_columns = ["name", "span_id", "parent_span_id", "start_time", "duration_ms"]
         for col in required_columns:
             assert col in raw_sql, f"SQL should include {col} column"
+
+    def test_has_trace_summary_panel(self, trace_detail_json: dict):
+        """Verify trace summary panel exists."""
+        panels = trace_detail_json.get("panels", [])
+        panel_titles = [p.get("title") for p in panels]
+        assert "Trace Summary" in panel_titles, "Should have Trace Summary panel"
+
+    def test_trace_summary_queries_otel_traces(self, trace_detail_json: dict):
+        """Verify trace summary SQL queries otel.traces table."""
+        panels = trace_detail_json.get("panels", [])
+        summary_panels = [p for p in panels if p.get("title") == "Trace Summary"]
+        assert summary_panels, "Trace Summary panel not found"
+
+        targets = summary_panels[0].get("targets", [])
+        assert targets, "Trace Summary panel should have targets"
+
+        raw_sql = targets[0].get("rawSql", "")
+        assert "otel.traces" in raw_sql, "SQL should query otel.traces table"
+        assert "$trace_id" in raw_sql, "SQL should filter by $trace_id"
+
+    def test_has_api_links_panel(self, trace_detail_json: dict):
+        """Verify API links panel exists."""
+        panels = trace_detail_json.get("panels", [])
+        panel_titles = [p.get("title") for p in panels]
+        assert "API Links" in panel_titles, "Should have API Links panel"
+
+    def test_api_links_contain_trace_id_substitution(self, trace_detail_json: dict):
+        """Verify API links contain ${trace_id} substitution."""
+        panels = trace_detail_json.get("panels", [])
+        api_panels = [p for p in panels if p.get("title") == "API Links"]
+        assert api_panels, "API Links panel not found"
+
+        # Check markdown content for trace_id substitution
+        options = api_panels[0].get("options", {})
+        content = options.get("content", "")
+        assert "${trace_id}" in content, "API links should include ${trace_id} substitution"
+
+    def test_api_links_include_otel_api_patterns(self, trace_detail_json: dict):
+        """Verify API links include OTEL Worker API endpoint patterns."""
+        panels = trace_detail_json.get("panels", [])
+        api_panels = [p for p in panels if p.get("title") == "API Links"]
+        options = api_panels[0].get("options", {})
+        content = options.get("content", "")
+
+        assert "/api/v1/traces/" in content, "Should include trace API pattern"
