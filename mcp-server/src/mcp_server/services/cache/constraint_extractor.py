@@ -125,6 +125,12 @@ ENTITY_PATTERNS = [
     (r"\bstores?\b", "store"),
     (r"\bpayments?\b", "payment"),
     (r"\brentals?\b", "rental"),
+    # Synthetic / Financial Entities
+    (r"\bmerchants?\b", "merchant"),
+    (r"\btransactions?\b", "transaction"),
+    (r"\baccounts?\b", "account"),
+    (r"\binstitutions?\b", "institution"),
+    (r"\bbanks?\b", "institution"),
 ]
 
 METRIC_PATTERNS = [
