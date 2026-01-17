@@ -18,54 +18,72 @@ class RagEngine:
     _model: Optional[TextEmbedding] = None
 
     @classmethod
-    def _get_model(cls) -> TextEmbedding:
+    def _get_model(cls):
         """Lazy load the embedding model."""
         if cls._model is None:
-            # BAAI/bge-small-en-v1.5: 384 dimensions, optimized for retrieval
-            cls._model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-            print("✓ Embedding model loaded: BAAI/bge-small-en-v1.5")
+            from common.config.env import get_env_str
+
+            provider = get_env_str("RAG_EMBEDDING_PROVIDER", "fastembed")
+
+            if provider == "mock":
+                cls._model = MockEmbeddingModel()
+                print("✓ Embedding model loaded: MockEmbeddingModel")
+            else:
+                # BAAI/bge-small-en-v1.5: 384 dimensions, optimized for retrieval
+                cls._model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                print("✓ Embedding model loaded: BAAI/bge-small-en-v1.5")
         return cls._model
 
     @classmethod
     async def embed_text(cls, text: str) -> list[float]:
-        """
-        Generate embedding vector for a text string.
-
-        Args:
-            text: Input text to embed.
-
-        Returns:
-            List of 384 float values representing the embedding.
-        """
+        """Generate embedding vector for a text string."""
 
         def _embed():
             model = cls._get_model()
+            # Handle different model interfaces if necessary
+            if isinstance(model, MockEmbeddingModel):
+                return list(model.embed([text]))[0]
+
             # fastembed returns an iterator, convert to list
             embedding = list(model.embed([text]))[0]
-            return embedding.tolist()
+            if hasattr(embedding, "tolist"):
+                return embedding.tolist()
+            return embedding
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _embed)
 
     @classmethod
     async def embed_batch(cls, texts: list[str]) -> list[list[float]]:
-        """
-        Generate embeddings for multiple texts efficiently.
-
-        Args:
-            texts: List of input texts to embed.
-
-        Returns:
-            List of embedding vectors.
-        """
+        """Generate embeddings for multiple texts efficiently."""
 
         def _embed_batch():
             model = cls._get_model()
             embeddings = list(model.embed(texts))
-            return [emb.tolist() for emb in embeddings]
+
+            # Convert to list of lists
+            results = []
+            for emb in embeddings:
+                if hasattr(emb, "tolist"):
+                    results.append(emb.tolist())
+                else:
+                    results.append(emb)
+            return results
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _embed_batch)
+
+
+class MockEmbeddingModel:
+    """Mock embedding model for testing."""
+
+    def embed(self, texts: list[str]):
+        """Yield deterministic mock embeddings."""
+        for text in texts:
+            # Deterministic pseudo-random based on text length/content
+            seed = sum(ord(c) for c in text)
+            np.random.seed(seed % 2**32)
+            yield np.random.rand(384).tolist()
 
 
 def generate_schema_document(
