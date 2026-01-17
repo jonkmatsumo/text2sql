@@ -71,7 +71,7 @@ class AdminService:
                 if not tool:
                     return {"error": f"Tool {tool_name} not found"}
 
-                result = await tool.ainvoke(args)
+                result = await tool.ainvoke(args, config={})
 
             # Use central unpacking utility
             return unpack_mcp_result(result)

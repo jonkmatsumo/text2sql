@@ -40,7 +40,9 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
         try:
             tenant_id = state.get("tenant_id")
-            cache_json = await cache_tool.ainvoke({"query": user_query, "tenant_id": tenant_id})
+            cache_json = await cache_tool.ainvoke(
+                {"query": user_query, "tenant_id": tenant_id}, config={}
+            )
             cache_data = parse_tool_output(cache_json)
 
             if not cache_data:

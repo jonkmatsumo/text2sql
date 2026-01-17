@@ -53,7 +53,11 @@ def _wrap_tool(tool):
 
     original_arun = tool._arun
 
-    async def wrapped_arun(*args, **kwargs):
+    async def wrapped_arun(*args, config=None, **kwargs):
+        # Ensure config is always provided (required by StructuredTool._arun)
+        if config is None:
+            config = {}
+
         # Tools typically take a single string argument or a dict of args
         # We need to capture this input safely
         inputs = {}
@@ -78,8 +82,8 @@ def _wrap_tool(tool):
                 span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
 
             try:
-                # Execute original tool
-                result = await original_arun(*args, **kwargs)
+                # Execute original tool with config explicitly
+                result = await original_arun(*args, config=config, **kwargs)
 
                 # Capture outputs
                 outputs_json, out_truncated, out_size, out_sha = truncate_json({"result": result})
