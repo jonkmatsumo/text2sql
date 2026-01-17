@@ -117,6 +117,36 @@ def main():
                                 }
                             )
 
+                        # Trace ID and Observability Links
+                        trace_id = detail.get("trace_id")
+                        if trace_id:
+                            from streamlit_app.service.observability_links import (
+                                grafana_trace_detail_url,
+                                otel_spans_url,
+                                otel_trace_url,
+                            )
+
+                            st.markdown("**Trace Observability:**")
+                            st.text(f"Trace ID: {trace_id}")
+                            link_col1, link_col2, link_col3 = st.columns(3)
+                            with link_col1:
+                                st.link_button(
+                                    "📊 View in Grafana",
+                                    grafana_trace_detail_url(trace_id),
+                                )
+                            with link_col2:
+                                st.link_button(
+                                    "🔍 Trace API",
+                                    otel_trace_url(trace_id),
+                                )
+                            with link_col3:
+                                st.link_button(
+                                    "📋 Spans API",
+                                    otel_spans_url(trace_id),
+                                )
+                        else:
+                            st.caption("ℹ️ Trace ID not available for this interaction")
+
                         # Feedback list
                         if detail.get("feedback"):
                             st.markdown("**User Feedback:**")
