@@ -32,6 +32,9 @@ def _introspect_allowed_tables() -> Set[str]:
     Returns tables from the public schema only.
     Caches result to avoid per-query overhead.
 
+    Cache is process-lifetime (lru_cache) and assumes schema stability.
+    Call clear_table_cache() if schema changes at runtime (e.g. migrations).
+
     Returns:
         Set of lowercase table names allowed for querying.
     """
