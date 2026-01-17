@@ -140,6 +140,52 @@ def cmd_load_postgres(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_export_sql(args: argparse.Namespace) -> int:
+    """Export SQL files for compose bootstrap."""
+    from text2sql_synth.sql_export import export_sql_files
+
+    try:
+        config = resolve_config(args)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    logger.info("Configuration resolved.")
+
+    try:
+        # Run generation
+        ctx, tables = generate_tables(config)
+
+        # Export SQL files
+        paths = export_sql_files(ctx, args.out, target_schema=args.schema)
+
+        logger.info("SQL export successful!")
+
+        # Print summary
+        print("\n" + "=" * 50)
+        print("SYNTHETIC DATA SQL EXPORT")
+        print("=" * 50)
+        print(f"Output Directory: {args.out}")
+        print(f"Schema File:      {paths['schema']}")
+        print(f"Data File:        {paths['data']}")
+        print(f"Tables Exported:  {len(tables)}")
+        print("-" * 50)
+        print("")
+        print("To use with Docker Compose, copy files to:")
+        print("  database/query-target/")
+        print("")
+        print("Files will be executed in order when container starts.")
+        print("=" * 50 + "\n")
+
+        return 0
+    except Exception as e:
+        logger.exception("Failed to export SQL: %s", e)
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
@@ -225,6 +271,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the manifest file to validate",
     )
     val_parser.set_defaults(func=cmd_validate)
+
+    # export-sql subcommand
+    sql_parser = subparsers.add_parser(
+        "export-sql",
+        help="Export SQL files for compose bootstrap (01-schema.sql, 02-data.sql)",
+    )
+    sql_config_group = sql_parser.add_mutually_exclusive_group(required=True)
+    sql_config_group.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Path to the generation configuration file (YAML or JSON)",
+    )
+    sql_config_group.add_argument(
+        "--preset",
+        choices=[p.value for p in ScalePreset],
+        help="Use a built-in preset (small, mvp, or medium)",
+    )
+    sql_parser.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Output directory for SQL files",
+    )
+    sql_parser.add_argument(
+        "--schema",
+        default="public",
+        metavar="NAME",
+        help="Target schema in SQL statements (default: public)",
+    )
+    sql_parser.set_defaults(func=cmd_export_sql)
 
     return parser
 
