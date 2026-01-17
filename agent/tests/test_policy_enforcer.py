@@ -121,6 +121,7 @@ class TestPolicyEnforcerFunctionBlocking:
         assert PolicyEnforcer.validate_sql(sql) is True
 
 
+@pytest.mark.dataset_pagila
 class TestPolicyEnforcerPagilaRegression:
     """Regression tests ensuring Pagila tables still work when configured."""
 
