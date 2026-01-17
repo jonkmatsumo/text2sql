@@ -12,34 +12,34 @@ from mcp_server.services.cache.sql_constraint_validator import (
 class TestExtractRatingFromSql:
     """Tests for extract_rating_from_sql function."""
 
-    def test_extract_simple_eq(self):
+    def test_extract_simple_eq(self, schema_fixture):
         """Test extraction from simple equality."""
-        sql = "SELECT * FROM film WHERE rating = 'PG'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'PG'"
         assert extract_rating_from_sql(sql) == "PG"
 
-    def test_extract_with_alias(self):
+    def test_extract_with_alias(self, schema_fixture):
         """Test extraction with table alias."""
-        sql = "SELECT * FROM film f WHERE f.rating = 'G'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} f WHERE f.rating = 'G'"
         assert extract_rating_from_sql(sql) == "G"
 
-    def test_extract_pg13(self):
+    def test_extract_pg13(self, schema_fixture):
         """Test extraction of PG-13."""
-        sql = "SELECT * FROM film WHERE rating = 'PG-13'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'PG-13'"
         assert extract_rating_from_sql(sql) == "PG-13"
 
-    def test_extract_nc17(self):
+    def test_extract_nc17(self, schema_fixture):
         """Test extraction of NC-17."""
-        sql = "SELECT * FROM film WHERE rating = 'NC-17'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'NC-17'"
         assert extract_rating_from_sql(sql) == "NC-17"
 
-    def test_extract_r_rating(self):
+    def test_extract_r_rating(self, schema_fixture):
         """Test extraction of R rating."""
-        sql = "SELECT * FROM film WHERE rating = 'R'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'R'"
         assert extract_rating_from_sql(sql) == "R"
 
-    def test_no_rating_predicate(self):
+    def test_no_rating_predicate(self, schema_fixture):
         """Test when no rating predicate exists."""
-        sql = "SELECT * FROM film WHERE title = 'Test'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE title = 'Test'"
         assert extract_rating_from_sql(sql) is None
 
     def test_complex_query_with_rating(self):
@@ -60,28 +60,28 @@ class TestExtractRatingFromSql:
 class TestExtractLimitFromSql:
     """Tests for extract_limit_from_sql function."""
 
-    def test_extract_limit_10(self):
+    def test_extract_limit_10(self, schema_fixture):
         """Test extraction of LIMIT 10."""
-        sql = "SELECT * FROM film LIMIT 10"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} LIMIT 10"
         assert extract_limit_from_sql(sql) == 10
 
-    def test_extract_limit_5(self):
+    def test_extract_limit_5(self, schema_fixture):
         """Test extraction of LIMIT 5."""
-        sql = "SELECT * FROM film ORDER BY title LIMIT 5"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} ORDER BY title LIMIT 5"
         assert extract_limit_from_sql(sql) == 5
 
-    def test_no_limit(self):
+    def test_no_limit(self, schema_fixture):
         """Test when no LIMIT exists."""
-        sql = "SELECT * FROM film"
+        sql = f"SELECT * FROM {schema_fixture.valid_table}"
         assert extract_limit_from_sql(sql) is None
 
 
 class TestValidateSqlConstraints:
     """Tests for validate_sql_constraints function."""
 
-    def test_valid_rating_match(self):
+    def test_valid_rating_match(self, schema_fixture):
         """Test validation passes when rating matches."""
-        sql = "SELECT * FROM film WHERE rating = 'PG'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'PG'"
         constraints = QueryConstraints(rating="PG")
 
         result = validate_sql_constraints(sql, constraints)
@@ -89,9 +89,9 @@ class TestValidateSqlConstraints:
         assert result.is_valid is True
         assert len(result.mismatches) == 0
 
-    def test_invalid_rating_mismatch(self):
+    def test_invalid_rating_mismatch(self, schema_fixture):
         """Test validation fails when rating doesn't match."""
-        sql = "SELECT * FROM film WHERE rating = 'G'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'G'"
         constraints = QueryConstraints(rating="PG")
 
         result = validate_sql_constraints(sql, constraints)
@@ -102,9 +102,9 @@ class TestValidateSqlConstraints:
         assert result.mismatches[0].expected == "PG"
         assert result.mismatches[0].found == "G"
 
-    def test_invalid_missing_rating(self):
+    def test_invalid_missing_rating(self, schema_fixture):
         """Test validation fails when rating is missing from SQL."""
-        sql = "SELECT * FROM film WHERE title = 'Test'"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE title = 'Test'"
         constraints = QueryConstraints(rating="PG")
 
         result = validate_sql_constraints(sql, constraints)
@@ -113,27 +113,27 @@ class TestValidateSqlConstraints:
         assert len(result.mismatches) == 1
         assert result.mismatches[0].found is None
 
-    def test_valid_no_constraints(self):
+    def test_valid_no_constraints(self, schema_fixture):
         """Test validation passes when no constraints specified."""
-        sql = "SELECT * FROM film"
+        sql = f"SELECT * FROM {schema_fixture.valid_table}"
         constraints = QueryConstraints()
 
         result = validate_sql_constraints(sql, constraints)
 
         assert result.is_valid is True
 
-    def test_valid_limit_match(self):
+    def test_valid_limit_match(self, schema_fixture):
         """Test validation passes when limit matches."""
-        sql = "SELECT * FROM film LIMIT 10"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} LIMIT 10"
         constraints = QueryConstraints(limit=10)
 
         result = validate_sql_constraints(sql, constraints)
 
         assert result.is_valid is True
 
-    def test_invalid_limit_mismatch(self):
+    def test_invalid_limit_mismatch(self, schema_fixture):
         """Test validation fails when limit doesn't match."""
-        sql = "SELECT * FROM film LIMIT 5"
+        sql = f"SELECT * FROM {schema_fixture.valid_table} LIMIT 5"
         constraints = QueryConstraints(limit=10, include_ties=False)
 
         result = validate_sql_constraints(sql, constraints)
@@ -141,9 +141,9 @@ class TestValidateSqlConstraints:
         assert result.is_valid is False
         assert result.mismatches[0].constraint_type == "limit"
 
-    def test_limit_mismatch_allowed_with_ties(self):
+    def test_limit_mismatch_allowed_with_ties(self, schema_fixture):
         """Test limit mismatch is allowed when include_ties is True."""
-        sql = "SELECT * FROM film LIMIT 15"  # More than 10 due to ties
+        sql = f"SELECT * FROM {schema_fixture.valid_table} LIMIT 15"  # More than 10 due to ties
         constraints = QueryConstraints(limit=10, include_ties=True)
 
         result = validate_sql_constraints(sql, constraints)
@@ -202,16 +202,24 @@ class TestRatingVariants:
             ("SELECT * FROM film WHERE rating = 'NC-17'", "NC-17"),
         ],
     )
-    def test_sql_rating_extraction_parametrized(self, sql, expected_rating):
+    def test_sql_rating_extraction_parametrized(self, sql, expected_rating, schema_fixture):
         """Parametrized test for rating extraction from SQL."""
+        # Inject table name if literal "film" is present in template
+        if "film" in sql:
+            sql = sql.replace("film", schema_fixture.valid_table)
         assert extract_rating_from_sql(sql) == expected_rating
 
-    def test_pg_query_rejects_g_sql(self):
+    def test_pg_query_rejects_g_sql(self, schema_fixture):
         """Critical test: PG query should reject G-rated SQL."""
         from mcp_server.services.cache.constraint_extractor import extract_constraints
 
-        constraints = extract_constraints("Top 10 actors in PG films")
-        sql = "SELECT * FROM film WHERE rating = 'G'"
+        # Use valid table name (pluralized logic is simpler here, usually +s)
+        # Note: extract_constraints relies on spaCy model which knows "films".
+        # For parity, we use valid_table. If model fails for "dim_customers",
+        # this test might fail on synthetic.
+        entity_plural = f"{schema_fixture.valid_table}s"
+        constraints = extract_constraints(f"Top 10 actors in PG {entity_plural}")
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'G'"
 
         result = validate_sql_constraints(sql, constraints)
 
@@ -219,12 +227,13 @@ class TestRatingVariants:
         assert result.mismatches[0].expected == "PG"
         assert result.mismatches[0].found == "G"
 
-    def test_g_query_rejects_r_sql(self):
+    def test_g_query_rejects_r_sql(self, schema_fixture):
         """Critical test: G query should reject R-rated SQL."""
         from mcp_server.services.cache.constraint_extractor import extract_constraints
 
-        constraints = extract_constraints("Top 10 actors in G films")
-        sql = "SELECT * FROM film WHERE rating = 'R'"
+        entity_plural = f"{schema_fixture.valid_table}s"
+        constraints = extract_constraints(f"Top 10 actors in G {entity_plural}")
+        sql = f"SELECT * FROM {schema_fixture.valid_table} WHERE rating = 'R'"
 
         result = validate_sql_constraints(sql, constraints)
 

@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from agent.tests.schema_fixtures import PAGILA_FIXTURE
 from dal.database import Database
 
 
@@ -26,3 +27,9 @@ async def init_database(request):
     await Database.init()
     yield
     await Database.close()
+
+
+@pytest.fixture(params=[PAGILA_FIXTURE], ids=lambda f: f.name)
+def schema_fixture(request):
+    """Fixture providing dataset-specific schema details."""
+    return request.param
