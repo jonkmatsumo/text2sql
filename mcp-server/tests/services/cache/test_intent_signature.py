@@ -173,3 +173,52 @@ class TestBuildSignatureFromConstraints:
 
         keys = {sig_pg.compute_key(), sig_g.compute_key(), sig_r.compute_key()}
         assert len(keys) == 3  # All must be distinct
+
+    def test_intent_inference_case_insensitive(self):
+        """Test that intent inference is robust to case variations."""
+        sig = build_signature_from_constraints(
+            query="Top 10 ACTORS in pg MOVIES",
+            rating="PG",
+            limit=10,
+            entity="actor",
+        )
+        assert sig.intent == "top_actors_by_film_count"
+
+    def test_intent_inference_punctuation_variants(self):
+        """Test intent inference with minor wording/punctuation differences."""
+        variants = [
+            "Top 10 actors for PG films",
+            "Top 10 actors in films rated PG",
+            "Top 10 actors - PG movies",
+        ]
+        for query in variants:
+            sig = build_signature_from_constraints(
+                query=query, rating="PG", limit=10, entity="actor"
+            )
+            assert sig.intent == "top_actors_by_film_count", f"Failed for query: {query}"
+
+    def test_intent_inference_negative_cases(self):
+        """Test cases where intent should NOT be top_actors_by_film_count."""
+        # Case 1: Just top actors (no film mention)
+        sig = build_signature_from_constraints(
+            query="Top 10 actors",
+            limit=10,
+            entity="actor",
+        )
+        assert sig.intent == "top_actors"
+
+        # Case 2: Top films (different entity)
+        sig_film = build_signature_from_constraints(
+            query="Top 10 films",
+            limit=10,
+            entity="film",
+        )
+        assert sig_film.intent == "top_films"
+
+        # Case 3: Synthetic entity
+        sig_merchant = build_signature_from_constraints(
+            query="Top 10 merchants",
+            limit=10,
+            entity="merchant",
+        )
+        assert sig_merchant.intent == "top_merchants"
