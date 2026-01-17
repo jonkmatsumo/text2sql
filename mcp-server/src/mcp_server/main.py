@@ -56,6 +56,26 @@ async def lifespan(app):
     # Startup: Initialize database connection pool
     await Database.init()
 
+    # P0: Fail-fast validation — ensure query-target schema exists
+    # This MUST run before any other startup logic that depends on schema
+    try:
+        from mcp_server.services.seeding.validation import (
+            run_mcp_startup_validation,
+            warn_if_quality_files_missing,
+        )
+
+        async with Database.get_connection() as conn:
+            await run_mcp_startup_validation(conn)
+
+        # P2: Warn about optional quality files (non-fatal)
+        warn_if_quality_files_missing()
+
+    except SystemExit:
+        raise  # Re-raise for hard failure (validation failed)
+    except Exception as e:
+        logger.error(f"Startup validation failed unexpectedly: {e}")
+        raise RuntimeError("Query-target schema validation failed") from e
+
     # Initialize NLP patterns from DB
     try:
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
