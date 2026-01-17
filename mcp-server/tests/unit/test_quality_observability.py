@@ -1,0 +1,142 @@
+"""Tests for quality observability features."""
+
+import subprocess
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+
+class TestDependencyPatternsWarning:
+    """Tests for NLP dependency patterns domain mismatch warning."""
+
+    def test_warning_when_no_custom_patterns(self, caplog, tmp_path):
+        """Test warning is logged when no custom patterns are loaded."""
+        import logging
+
+        from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
+
+        # Create an empty patterns directory (no .jsonl files)
+        empty_patterns_dir = tmp_path / "patterns"
+        empty_patterns_dir.mkdir()
+
+        # Patch to use our empty patterns directory
+        with patch(
+            "mcp_server.services.canonicalization.spacy_pipeline.get_env_str",
+            return_value=str(empty_patterns_dir),
+        ), patch("spacy.load") as mock_spacy_load, patch(
+            "spacy.matcher.DependencyMatcher"
+        ) as mock_matcher_cls:
+            # Setup mock NLP
+            mock_nlp = MagicMock()
+            mock_nlp.pipe_names = []
+            mock_ruler = MagicMock()
+            mock_nlp.add_pipe.return_value = mock_ruler
+            mock_nlp.vocab = MagicMock()
+            mock_spacy_load.return_value = mock_nlp
+
+            mock_matcher = MagicMock()
+            mock_matcher_cls.return_value = mock_matcher
+
+            CanonicalizationService.reset_instance()
+
+            # Capture logs from the specific module
+            with caplog.at_level(
+                logging.WARNING, logger="mcp_server.services.canonicalization.spacy_pipeline"
+            ):
+                service = CanonicalizationService()
+                service._state = None  # Reset state
+                # Build pipeline with no custom patterns
+                service._build_pipeline("en_core_web_sm", extra_patterns=None)
+
+            assert "nlp_dependency_patterns_default_only" in caplog.text
+            assert "domain_assumption=film_schema" in caplog.text
+
+    def test_no_warning_when_custom_patterns_loaded(self, caplog):
+        """Test no warning when custom patterns are provided."""
+        from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
+
+        with patch("spacy.load") as mock_spacy_load, patch(
+            "spacy.matcher.DependencyMatcher"
+        ) as mock_matcher_cls:
+            mock_nlp = MagicMock()
+            mock_nlp.pipe_names = []
+            mock_nlp.add_pipe.return_value = MagicMock()
+            mock_nlp.vocab = MagicMock()
+            mock_spacy_load.return_value = mock_nlp
+
+            mock_matcher = MagicMock()
+            mock_matcher_cls.return_value = mock_matcher
+
+            CanonicalizationService.reset_instance()
+
+            with caplog.at_level("WARNING"):
+                service = CanonicalizationService()
+                # Build pipeline WITH custom patterns
+                service._build_pipeline(
+                    "en_core_web_sm",
+                    extra_patterns=[{"label": "CUSTOM", "pattern": "test"}],
+                )
+
+            assert "nlp_dependency_patterns_default_only" not in caplog.text
+
+
+class TestGoldenDatasetIsolation:
+    """Test that runtime modules don't import golden_dataset references."""
+
+    def test_no_golden_dataset_in_runtime_imports(self):
+        """Ensure runtime modules don't reference golden_dataset."""
+        # List of runtime modules that should NOT reference golden_dataset
+        runtime_modules = [
+            "mcp_server.main",
+            "mcp_server.services.registry.service",
+            "mcp_server.services.seeding.cli",
+        ]
+
+        # Check via grep (static analysis)
+        for module_path in runtime_modules:
+            # Convert module path to file path
+            file_path = module_path.replace(".", "/") + ".py"
+            full_path = f"/Users/jonathan/git/text2sql/mcp-server/src/{file_path}"
+
+            result = subprocess.run(
+                ["grep", "-l", "golden_dataset", full_path],
+                capture_output=True,
+                text=True,
+            )
+
+            # grep returns 0 if found, 1 if not found
+            assert result.returncode == 1, (
+                f"Runtime module {module_path} references golden_dataset! "
+                "golden_dataset should only be used in evaluation scripts."
+            )
+
+
+class TestRegistryStatusLogging:
+    """Tests for few-shot registry status logging."""
+
+    @pytest.mark.asyncio
+    async def test_registry_status_logged(self, caplog):
+        """Test registry status is logged with correct count."""
+        from mcp_server.services.registry import RegistryService
+
+        # Mock list_examples to return some examples
+        mock_examples = [MagicMock(), MagicMock(), MagicMock()]
+
+        with patch.object(RegistryService, "list_examples", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = mock_examples
+
+            examples = await RegistryService.list_examples(tenant_id=1, limit=1000)
+
+            assert len(examples) == 3
+
+    @pytest.mark.asyncio
+    async def test_registry_empty_returns_empty_list(self, caplog):
+        """Test registry returns empty list when no examples."""
+        from mcp_server.services.registry import RegistryService
+
+        with patch.object(RegistryService, "list_examples", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = []
+
+            examples = await RegistryService.list_examples(tenant_id=1, limit=1000)
+
+            assert len(examples) == 0

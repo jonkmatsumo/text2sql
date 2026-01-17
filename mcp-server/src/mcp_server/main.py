@@ -76,6 +76,24 @@ async def lifespan(app):
         logger.error(f"Startup validation failed unexpectedly: {e}")
         raise RuntimeError("Query-target schema validation failed") from e
 
+    # P3: Emit few-shot registry status (quality observability)
+    try:
+        from mcp_server.services.registry import RegistryService
+
+        examples = await RegistryService.list_examples(tenant_id=1, limit=1000)
+        examples_count = len(examples)
+        logger.info(
+            f"event=fewshot_registry_status examples_count={examples_count} "
+            f"examples_source=query_pairs loaded={examples_count > 0}"
+        )
+        if examples_count == 0:
+            logger.warning(
+                "event=fewshot_registry_empty "
+                "impact='Generation quality may be degraded without few-shot examples'"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to check registry status: {e}")
+
     # Initialize NLP patterns from DB
     try:
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
