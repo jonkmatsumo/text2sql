@@ -1,0 +1,174 @@
+{
+    "version": "1.0",
+    "dataset_mode": "synthetic",
+    "test_cases": [
+        {
+            "id": "basic-customer-count",
+            "nlq": "How many customers do we have?",
+            "expected_sql": "SELECT COUNT(*) AS customer_count FROM dim_customer",
+            "expected_columns": [
+                "customer_count"
+            ],
+            "category": "basic",
+            "difficulty": "easy",
+            "intent": "count_entities"
+        },
+        {
+            "id": "basic-merchant-list",
+            "nlq": "Show me all merchants",
+            "expected_sql": "SELECT * FROM dim_merchant",
+            "category": "basic",
+            "difficulty": "easy",
+            "intent": "list_entities"
+        },
+        {
+            "id": "top-n-customers-by-transactions",
+            "nlq": "Who are the top 10 customers by number of transactions?",
+            "expected_sql": "SELECT c.customer_id, c.first_name, c.last_name, COUNT(t.transaction_id) AS transaction_count FROM dim_customer c JOIN dim_account a ON c.customer_id = a.customer_id JOIN fact_transaction t ON a.account_id = t.account_id GROUP BY c.customer_id, c.first_name, c.last_name ORDER BY transaction_count DESC LIMIT 10",
+            "expected_columns": [
+                "customer_id",
+                "first_name",
+                "last_name",
+                "transaction_count"
+            ],
+            "expected_row_count_max": 10,
+            "category": "aggregation",
+            "difficulty": "medium",
+            "intent": "top_n_ranking"
+        },
+        {
+            "id": "agg-total-transaction-amount",
+            "nlq": "What is the total transaction amount across all transactions?",
+            "expected_sql": "SELECT SUM(amount) AS total_amount FROM fact_transaction",
+            "expected_columns": [
+                "total_amount"
+            ],
+            "expected_row_count": 1,
+            "category": "aggregation",
+            "difficulty": "easy",
+            "intent": "aggregate_sum"
+        },
+        {
+            "id": "agg-avg-transaction-by-merchant",
+            "nlq": "What is the average transaction amount per merchant?",
+            "expected_sql": "SELECT m.merchant_id, m.merchant_name, AVG(t.amount) AS avg_amount FROM dim_merchant m JOIN fact_transaction t ON m.merchant_id = t.merchant_id GROUP BY m.merchant_id, m.merchant_name ORDER BY avg_amount DESC",
+            "expected_columns": [
+                "merchant_id",
+                "merchant_name",
+                "avg_amount"
+            ],
+            "category": "aggregation",
+            "difficulty": "medium",
+            "intent": "aggregate_average"
+        },
+        {
+            "id": "join-customer-accounts",
+            "nlq": "List all customers with their account numbers",
+            "expected_sql": "SELECT c.customer_id, c.first_name, c.last_name, a.account_number FROM dim_customer c JOIN dim_account a ON c.customer_id = a.customer_id",
+            "expected_columns": [
+                "customer_id",
+                "first_name",
+                "last_name",
+                "account_number"
+            ],
+            "category": "join",
+            "difficulty": "easy",
+            "intent": "join_entities"
+        },
+        {
+            "id": "join-transaction-details",
+            "nlq": "Show transaction details with customer and merchant names",
+            "expected_sql": "SELECT t.transaction_id, t.amount, t.transaction_date, c.first_name, c.last_name, m.merchant_name FROM fact_transaction t JOIN dim_account a ON t.account_id = a.account_id JOIN dim_customer c ON a.customer_id = c.customer_id JOIN dim_merchant m ON t.merchant_id = m.merchant_id",
+            "expected_columns": [
+                "transaction_id",
+                "amount",
+                "transaction_date",
+                "first_name",
+                "last_name",
+                "merchant_name"
+            ],
+            "category": "join",
+            "difficulty": "hard",
+            "intent": "join_multiple"
+        },
+        {
+            "id": "filter-high-value-transactions",
+            "nlq": "Find all transactions over $1000",
+            "expected_sql": "SELECT * FROM fact_transaction WHERE amount > 1000",
+            "category": "filter",
+            "difficulty": "easy",
+            "intent": "filter_by_value"
+        },
+        {
+            "id": "filter-transaction-status",
+            "nlq": "Show me all completed transactions",
+            "expected_sql": "SELECT * FROM fact_transaction WHERE status = 'completed'",
+            "category": "filter",
+            "difficulty": "easy",
+            "intent": "filter_by_status"
+        },
+        {
+            "id": "filter-amount-range",
+            "nlq": "Find transactions between $100 and $500",
+            "expected_sql": "SELECT * FROM fact_transaction WHERE amount BETWEEN 100 AND 500",
+            "category": "filter",
+            "difficulty": "easy",
+            "intent": "filter_by_range"
+        },
+        {
+            "id": "time-daily-transaction-count",
+            "nlq": "How many transactions happened each day last month?",
+            "expected_sql": "SELECT DATE(transaction_date) AS day, COUNT(*) AS transaction_count FROM fact_transaction WHERE transaction_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND transaction_date < DATE_TRUNC('month', CURRENT_DATE) GROUP BY DATE(transaction_date) ORDER BY day",
+            "expected_columns": [
+                "day",
+                "transaction_count"
+            ],
+            "category": "time-series",
+            "difficulty": "medium",
+            "intent": "time_aggregation"
+        },
+        {
+            "id": "time-monthly-revenue",
+            "nlq": "What was our monthly revenue for the past 6 months?",
+            "expected_sql": "SELECT DATE_TRUNC('month', transaction_date) AS month, SUM(amount) AS revenue FROM fact_transaction WHERE transaction_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '6 months') GROUP BY DATE_TRUNC('month', transaction_date) ORDER BY month",
+            "expected_columns": [
+                "month",
+                "revenue"
+            ],
+            "expected_row_count_max": 6,
+            "category": "time-series",
+            "difficulty": "medium",
+            "intent": "time_aggregation"
+        },
+        {
+            "id": "edge-no-results",
+            "nlq": "Find customers with negative account balance",
+            "expected_sql": "SELECT * FROM dim_account WHERE balance < 0",
+            "category": "edge-case",
+            "difficulty": "easy",
+            "intent": "filter_edge",
+            "notes": "May return empty result if no negative balances exist"
+        },
+        {
+            "id": "edge-null-handling",
+            "nlq": "Find transactions with no merchant",
+            "expected_sql": "SELECT * FROM fact_transaction WHERE merchant_id IS NULL",
+            "category": "edge-case",
+            "difficulty": "easy",
+            "intent": "null_check",
+            "notes": "Tests NULL handling"
+        },
+        {
+            "id": "agg-dispute-summary",
+            "nlq": "How many disputes do we have by status?",
+            "expected_sql": "SELECT status, COUNT(*) AS dispute_count FROM fact_dispute GROUP BY status ORDER BY dispute_count DESC",
+            "expected_columns": [
+                "status",
+                "dispute_count"
+            ],
+            "category": "aggregation",
+            "difficulty": "easy",
+            "intent": "group_by_count"
+        }
+    ]
+}

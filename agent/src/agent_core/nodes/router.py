@@ -177,6 +177,11 @@ async def router_node(state: AgentState) -> dict:
                     "ambiguity_type": ambiguity_type,
                 }
             )
+            # Log full ambiguity context for debugging
+            span.set_attribute("ambiguity_data", json.dumps(res_data))
+            span.set_attribute(
+                "resolved_bindings", json.dumps(res_data.get("resolved_bindings", {}))
+            )
 
             return {
                 "ambiguity_type": ambiguity_type,

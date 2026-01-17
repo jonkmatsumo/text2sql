@@ -25,6 +25,17 @@ def get_dataset_mode() -> DatasetMode:
     mode = os.getenv("DATASET_MODE", "synthetic").lower()
     if mode not in ("synthetic", "pagila"):
         raise ValueError(f"Invalid DATASET_MODE: {mode}. Must be 'synthetic' or 'pagila'")
+
+    if mode == "pagila":
+        import warnings
+
+        warnings.warn(
+            "Pagila dataset is deprecated and will be removed in a future release. "
+            "Please migrate to 'synthetic' mode.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     return mode  # type: ignore[return-value]
 
 

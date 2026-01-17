@@ -209,6 +209,9 @@ Environment variables are grouped by category (not exhaustive):
 *   **LLM provider selection**: Provider + model settings and provider API key.
 *   **DAL provider selectors**: Optional overrides to choose storage backends.
 
+> [!WARNING]
+> **Deprecation Notice**: The Pagila dataset is deprecated and maintained only for legacy verification. The system defaults to `DATASET_MODE=synthetic`. See [docs/deprecations/pagila.md](docs/deprecations/pagila.md) for details.
+
 ## Local Development
 
 ### 1. Initial Setup
