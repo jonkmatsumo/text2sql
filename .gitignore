@@ -1,5 +1,6 @@
 # Local documentation (hidden from git)
 docs/
+!docs/deprecations/
 
 # Python
 __pycache__/
