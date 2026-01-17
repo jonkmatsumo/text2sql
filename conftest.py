@@ -1,5 +1,8 @@
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 # ==============================================================================
 # CRITICAL INFRASTRUCTURE FILE - DO NOT DELETE
@@ -57,3 +60,17 @@ if inserted_paths:
     assert not any(
         "/tests" in path for path in inserted_paths
     ), "conftest.py: tests paths must not be added to sys.path"
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip pagila-marked tests unless RUN_PAGILA_TESTS=1."""
+    if os.getenv("RUN_PAGILA_TESTS", "0") == "1":
+        # Run all tests including pagila tests
+        return
+
+    skip_pagila = pytest.mark.skip(
+        reason="Skipping pagila dataset test (set RUN_PAGILA_TESTS=1 to run)"
+    )
+    for item in items:
+        if "dataset_pagila" in item.keywords:
+            item.add_marker(skip_pagila)

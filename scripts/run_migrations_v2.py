@@ -23,7 +23,9 @@ async def main():
     """Apply Phase 5 database schema updates to the project databases."""
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
-    db_name = os.getenv("DB_NAME", "pagila")
+    from common.config.dataset import get_default_db_name
+
+    db_name = os.getenv("DB_NAME", get_default_db_name())
     db_user = "postgres"
     db_pass = "root_password"
 

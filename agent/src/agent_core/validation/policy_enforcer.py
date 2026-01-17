@@ -19,7 +19,9 @@ def _get_db_url() -> str:
 
     host = get_env_str("DB_HOST", "localhost")
     port = get_env_str("DB_PORT", "5432")
-    db_name = get_env_str("DB_NAME", "pagila")
+    from common.config.dataset import get_default_db_name
+
+    db_name = get_env_str("DB_NAME", get_default_db_name())
     user = get_env_str("DB_USER", "text2sql_ro")
     password = get_env_str("DB_PASS", "secure_agent_pass")
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"

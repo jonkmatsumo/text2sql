@@ -3,13 +3,17 @@
 These patterns use SpaCy's DependencyMatcher to identify constraints
 based on grammatical relationships, not string adjacency.
 
-NOTE: These default patterns are tuned for a FILM/MOVIE domain schema
-(e.g., Pagila dataset). They match terms like "movie", "film", "actor",
-and film rating codes (G, PG, PG-13, R, NC-17).
+Pattern sets are dataset-mode aware:
+- LIMIT_PATTERNS: Domain-agnostic (work for all datasets)
+- RATING_PATTERNS: Film-specific (only active when DATASET_MODE=pagila)
+- ENTITY_PATTERNS: Combined film + financial patterns
 
-For other domains, provide custom patterns via PATTERNS_DIR env var
+For custom domains, provide patterns via PATTERNS_DIR env var
 pointing to a directory containing domain-specific .jsonl pattern files.
 """
+
+import os
+from typing import List
 
 # Pattern 1a: Adjectival modification - Entity based
 RATING_AMOD_PATTERN_ENT = [
@@ -146,3 +150,50 @@ ENTITY_PATTERN_FINANCIAL = [
 ]
 
 ENTITY_PATTERNS = [ENTITY_PATTERN_FILM, ENTITY_PATTERN_ACTOR, ENTITY_PATTERN_FINANCIAL]
+
+
+# ============================================================================
+# Dataset-Mode Aware Pattern Getters
+# ============================================================================
+
+
+def _get_dataset_mode() -> str:
+    """Get current dataset mode from environment."""
+    return os.getenv("DATASET_MODE", "synthetic").lower()
+
+
+def get_rating_patterns() -> List:
+    """Get rating patterns based on dataset mode.
+
+    Returns:
+        Film rating patterns (G, PG, R, etc.) only if DATASET_MODE=pagila.
+        Empty list for synthetic mode (financial domain has no film ratings).
+    """
+    if _get_dataset_mode() == "pagila":
+        return RATING_PATTERNS
+    return []
+
+
+def get_entity_patterns() -> List:
+    """Get entity patterns appropriate for current dataset mode.
+
+    Returns:
+        All entity patterns for pagila mode, financial-only for synthetic mode.
+    """
+    if _get_dataset_mode() == "pagila":
+        return [ENTITY_PATTERN_FILM, ENTITY_PATTERN_ACTOR, ENTITY_PATTERN_FINANCIAL]
+    # Synthetic mode: only financial entities
+    return [ENTITY_PATTERN_FINANCIAL]
+
+
+def get_all_patterns() -> dict:
+    """Get all patterns appropriate for current dataset mode.
+
+    Returns:
+        Dict with 'rating', 'limit', 'entity' pattern lists.
+    """
+    return {
+        "rating": get_rating_patterns(),
+        "limit": LIMIT_PATTERNS,  # Domain-agnostic
+        "entity": get_entity_patterns(),
+    }

@@ -22,7 +22,9 @@ async def fetch_test_cases(tenant_id: int = 1, category: str = None):
     """Fetch active test cases from Golden Dataset."""
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
-    db_name = os.getenv("DB_NAME", "pagila")
+    from common.config.dataset import get_default_db_name
+
+    db_name = os.getenv("DB_NAME", get_default_db_name())
     db_user = os.getenv("DB_USER", "text2sql_ro")
     db_pass = os.getenv("DB_PASS", "secure_agent_pass")
 
@@ -59,7 +61,9 @@ async def execute_ground_truth_sql(sql: str, tenant_id: int):
     """Execute ground truth SQL to get expected result."""
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
-    db_name = os.getenv("DB_NAME", "pagila")
+    from common.config.dataset import get_default_db_name
+
+    db_name = os.getenv("DB_NAME", get_default_db_name())
     db_user = os.getenv("DB_USER", "text2sql_ro")
     db_pass = os.getenv("DB_PASS", "secure_agent_pass")
 
@@ -207,7 +211,9 @@ async def store_evaluation_result(
     """Store evaluation result in database."""
     db_host = os.getenv("DB_HOST", "localhost")
     db_port = int(os.getenv("DB_PORT", "5432"))
-    db_name = os.getenv("DB_NAME", "pagila")
+    from common.config.dataset import get_default_db_name
+
+    db_name = os.getenv("DB_NAME", get_default_db_name())
     db_user = os.getenv("DB_USER", "text2sql_ro")
     db_pass = os.getenv("DB_PASS", "secure_agent_pass")
 
