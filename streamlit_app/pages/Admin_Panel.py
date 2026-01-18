@@ -4,6 +4,7 @@ import json
 import nest_asyncio
 import pandas as pd
 
+# isort: split
 import streamlit as st
 
 # isort: split
