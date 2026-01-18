@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   grafana:
-    image: grafana/grafana:10.0.0
+    build: observability/grafana
     container_name: text2sql_grafana
     ports:
       - "3001:3000"
@@ -11,12 +11,14 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
     networks:
       - text2sql_net
     depends_on:
       - agent-control-db
+
+volumes:
+  grafana_data:
 
 networks:
   text2sql_net:
