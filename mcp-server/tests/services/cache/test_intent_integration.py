@@ -1,4 +1,3 @@
-
 """Integration tests for constraint extraction -> intent signature pipeline."""
 
 import pytest
@@ -30,8 +29,11 @@ def test_synthetic_signature_safe():
     )
 
     # Verify signature
-    assert signature.intent == "top_merchants"
-    assert signature.entity == "merchant"
+    # Since synthetic entity patterns are temporarily removed (Sub-Phase 2),
+    # intent matching logic won't trigger "top_merchants".
+    # It should be safe/generic.
+    assert signature.intent is None  # or generic fallback if implemented
+    assert signature.entity is None
     # Ensure no film filtering or rating leakage
     assert "rating" not in signature.filters
     assert signature.item != "film"
@@ -39,7 +41,7 @@ def test_synthetic_signature_safe():
 
 @pytest.mark.usefixtures("mode_synthetic")
 def test_synthetic_pg13_leakage_prevention(mode_synthetic):
-    """Verify that even with film tokens in synthetic mode, signature is clean."""
+    """Verify that PG-13 rating is not extracted in synthetic mode."""
     query = "Show top 10 PG-13 movies"
     constraints = extract_constraints(query)
 

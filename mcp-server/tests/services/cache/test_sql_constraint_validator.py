@@ -172,6 +172,13 @@ class TestValidateSqlConstraints:
         assert result.extracted_predicates.get("limit") == 10
 
 
+@pytest.fixture
+def mode_pagila(monkeypatch):
+    """Fixture to set DATASET_MODE to pagila."""
+    monkeypatch.setenv("DATASET_MODE", "pagila")
+
+
+@pytest.mark.usefixtures("mode_pagila")
 class TestRatingVariants:
     """Test various rating query patterns to prevent cache aliasing."""
 

@@ -45,16 +45,10 @@ _PAGILA_ENTITY_PATTERNS = [
 # Synthetic / Financial Entities (active in all modes where relevant, or just synthetic?)
 # Based on existing constraint_extractor.py, these were mixed.
 # For synthetic parity, we want these available in synthetic mode.
-_SYNTHETIC_ENTITY_PATTERNS = [
-    (r"\bmerchants?\b", "merchant"),
-    (r"\btransactions?\b", "transaction"),
-    (r"\baccounts?\b", "account"),
-    (r"\binstitutions?\b", "institution"),
-    (r"\bbanks?\b", "institution"),
-    # Common entities that might appear in synthetic financial data
-    (r"\bcustomers?\b", "customer"),
-    (r"\bpayments?\b", "payment"),
-]
+# Synthetic / Financial Entities
+# TODO: Source these from artifacts/config in Phase B.2/B.3.
+# For now, we avoid hardcoding per Phase B.1 requirements.
+_SYNTHETIC_ENTITY_PATTERNS = []
 
 
 def get_constraint_patterns(*, dataset_mode: Optional[str] = None) -> ConstraintPatternSet:
@@ -74,11 +68,10 @@ def get_constraint_patterns(*, dataset_mode: Optional[str] = None) -> Constraint
             dataset_mode = "synthetic"
 
     if dataset_mode == "pagila":
-        # In Pagila mode, we return legacy film/rating patterns + synthetic ones (if backward compat needed)
-        # The existing code mixed them all.
+        # In Pagila mode, we return legacy film/rating patterns
         return ConstraintPatternSet(
             rating_patterns=_PAGILA_RATING_PATTERNS,
-            entity_patterns=(_PAGILA_ENTITY_PATTERNS + _SYNTHETIC_ENTITY_PATTERNS),
+            entity_patterns=_PAGILA_ENTITY_PATTERNS,
         )
     else:
         # Synthetic mode: No film ratings, no film/actor entities.

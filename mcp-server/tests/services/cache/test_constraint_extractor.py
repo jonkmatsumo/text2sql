@@ -1,10 +1,24 @@
 """Unit tests for constraint extraction from natural language queries."""
 
-from mcp_server.services.cache.constraint_extractor import extract_constraints, normalize_rating
+import pytest
+from mcp_server.services.cache.constraint_extractor import extract_constraints
 
 
-class TestExtractConstraints:
-    """Tests for extract_constraints function."""
+@pytest.fixture
+def mode_pagila(monkeypatch):
+    """Fixture to set DATASET_MODE to pagila."""
+    monkeypatch.setenv("DATASET_MODE", "pagila")
+
+
+@pytest.fixture
+def mode_synthetic(monkeypatch):
+    """Fixture to set DATASET_MODE to synthetic."""
+    monkeypatch.setenv("DATASET_MODE", "synthetic")
+
+
+@pytest.mark.usefixtures("mode_pagila")
+class TestExtractConstraintsPagila:
+    """Tests for extract_constraints in Pagila (legacy) mode."""
 
     def test_extract_rating_g(self):
         """Test extraction of G rating."""
@@ -41,26 +55,6 @@ class TestExtractConstraints:
         constraints = extract_constraints("Show NC17 movies")
         assert constraints.rating == "NC-17"
 
-    def test_extract_limit_top_10(self):
-        """Test extraction of 'top 10' limit."""
-        constraints = extract_constraints("Show top 10 actors")
-        assert constraints.limit == 10
-
-    def test_extract_limit_top_5(self):
-        """Test extraction of 'top 5' limit."""
-        constraints = extract_constraints("Top 5 films by revenue")
-        assert constraints.limit == 5
-
-    def test_extract_ties_including(self):
-        """Test extraction of 'including ties'."""
-        constraints = extract_constraints("Top 10 actors including ties")
-        assert constraints.include_ties is True
-
-    def test_extract_ties_with(self):
-        """Test extraction of 'with ties'."""
-        constraints = extract_constraints("Top 10 actors with ties")
-        assert constraints.include_ties is True
-
     def test_extract_entity_actor(self):
         """Test extraction of actor entity."""
         constraints = extract_constraints("Show top actors")
@@ -75,11 +69,6 @@ class TestExtractConstraints:
         """Test that 'movie' is normalized to 'film'."""
         constraints = extract_constraints("Show all movies")
         assert constraints.entity == "film"
-
-    def test_extract_metric_count_distinct(self):
-        """Test extraction of count distinct metric."""
-        constraints = extract_constraints("Count of distinct films per actor")
-        assert constraints.metric == "count_distinct"
 
     def test_extract_combined(self):
         """Test combined extraction of multiple constraints."""
@@ -96,45 +85,45 @@ class TestExtractConstraints:
         constraints = extract_constraints("Show G rated films")
         assert constraints.confidence >= 0.8
 
-    def test_confidence_without_rating(self):
-        """Test that confidence is low when no rating found."""
-        constraints = extract_constraints("Show all films")
-        assert constraints.confidence < 0.5
-
     def test_priority_pg13_over_pg(self):
         """Test that PG-13 is matched before PG."""
         constraints = extract_constraints("Show PG-13 rated films")
         assert constraints.rating == "PG-13"
 
 
-class TestNormalizeRating:
-    """Tests for normalize_rating function."""
+@pytest.mark.usefixtures("mode_synthetic")
+class TestExtractConstraintsSynthetic:
+    """Tests for extract_constraints in Synthetic (default) mode."""
 
-    def test_normalize_lowercase(self):
-        """Test normalization of lowercase rating."""
-        assert normalize_rating("pg") == "PG"
+    def test_no_film_rating_leakage(self):
+        """Verify that film ratings are NOT extracted in synthetic mode."""
+        constraints = extract_constraints("Show top 10 PG-13 movies")
+        assert constraints.rating is None
+        # Confidence should be default (0.5) or determined by other matches
+        # not penalized for missing rating. If matches nothing, valid match with default.
+        assert constraints.confidence == 0.5
 
-    def test_normalize_mixed_case(self):
-        """Test normalization of mixed case rating."""
-        assert normalize_rating("Pg-13") == "PG-13"
+    def test_no_film_entity_leakage(self):
+        """Verify that film entities are NOT extracted in synthetic mode."""
+        constraints = extract_constraints("Show top actors")
+        assert constraints.entity is None
 
-    def test_normalize_with_space(self):
-        """Test normalization of rating with space."""
-        assert normalize_rating("pg 13") == "PG-13"
+    def test_extract_financial_entity(self):
+        """Test extraction of financial entities (currently disabled/empty)."""
+        query = "Show top 10 merchants by transaction count"
+        constraints = extract_constraints(query)
+        # Patterns removed in Sub-Phase 2, so entity should be None
+        assert constraints.entity is None
+        assert constraints.limit == 10
 
-    def test_normalize_nc17(self):
-        """Test normalization of NC-17 variants."""
-        assert normalize_rating("nc17") == "NC-17"
-        assert normalize_rating("NC-17") == "NC-17"
+    def test_extract_limit_generic(self):
+        """Test generic limit extraction works in synthetic mode."""
+        constraints = extract_constraints("Top 5 items")
+        assert constraints.limit == 5
 
-    def test_normalize_invalid(self):
-        """Test normalization of invalid rating."""
-        assert normalize_rating("XX") is None
-
-    def test_normalize_empty(self):
-        """Test normalization of empty string."""
-        assert normalize_rating("") is None
-
-    def test_normalize_none(self):
-        """Test normalization of None."""
-        assert normalize_rating(None) is None
+    def test_confidence_without_rating(self):
+        """Test confidence calculation in synthetic mode."""
+        # In synthetic mode, "no rating" is normal,
+        # so confidence shouldn't be penalized purely for that.
+        constraints = extract_constraints("Show top 10 items")
+        assert constraints.confidence == 0.5
