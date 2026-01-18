@@ -73,13 +73,7 @@ class TestNoClarificationForSynonymQuery:
             metadata={},  # No ent_id
         )
 
-        # Mock the RagEngine to avoid embedding calls
-        mock_rag = MagicMock()
-        mock_rag.embed_text = MagicMock(return_value=[0.0] * 384)
-
-        with patch.object(resolver.extractor, "extract", return_value=[mock_mention]), patch.object(
-            resolver.binder, "rag", mock_rag
-        ):
+        with patch.object(resolver.extractor, "extract", return_value=[mock_mention]):
             # Schema context without "customer" or "users" table
             schema_context = [
                 {
