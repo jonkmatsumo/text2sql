@@ -173,6 +173,37 @@ mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 register_all(mcp)
 
 
+# Add health endpoint for readiness checks
+# FastMCP exposes underlying Starlette app via mcp._app or mcp.http_app
+try:
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def health_handler(request):
+        """Health/readiness endpoint reflecting initialization status.
+
+        Returns:
+            200 with ready=true if all required checks passed
+            503 with ready=false and failure details if any required check failed
+        """
+        from mcp_server.health import init_state
+
+        status = init_state.as_dict()
+        http_status = 200 if init_state.is_ready else 503
+        return JSONResponse(status, status_code=http_status)
+
+    # Access the underlying Starlette app and add route
+    if hasattr(mcp, "_app") and mcp._app is not None:
+        mcp._app.routes.append(Route("/health", health_handler, methods=["GET"]))
+        logger.info("Registered /health endpoint on _app")
+    elif hasattr(mcp, "http_app"):
+        # http_app is a factory - we can't add routes to it directly here
+        # Route will be added when the app is created
+        logger.info("Health endpoint will be registered when HTTP app is created")
+except ImportError:
+    logger.warning("Could not import starlette - /health endpoint not available")
+
+
 # GLOBAL PATCH: Apply OTEL Instrumentation via Factory Wrapper
 # This must be at module level because FastMCP likely imports 'mcp'
 # instead of running __main__.
