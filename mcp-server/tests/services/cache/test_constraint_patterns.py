@@ -11,9 +11,10 @@ def test_get_constraint_patterns_synthetic(monkeypatch):
     # Should have no rating patterns
     assert len(patterns.rating_patterns) == 0
 
-    # Should have no film/actor entities, and currently NO synthetic entities (hardcoding removed)
+    # Should have no film/actor entities,
+    # but minimal synthetic entities (merchant, account, transaction, institution)
     entities = [p[1] for p in patterns.entity_patterns]
-    assert len(entities) == 0
+    assert len(entities) == 4
     assert "actor" not in entities
     assert "rental" not in entities
 
@@ -53,4 +54,4 @@ def test_get_constraint_patterns_default(monkeypatch):
     # common.config.dataset.get_dataset_mode defaults to "synthetic"
     patterns = get_constraint_patterns()
     assert len(patterns.rating_patterns) == 0
-    assert len(patterns.entity_patterns) == 0
+    assert len(patterns.entity_patterns) == 4

@@ -111,7 +111,7 @@ def _wrap_tool(tool):
         return input_dict
 
     def _record_results(span, inputs, result=None, error=None):
-        """Helper to record inputs, outputs and errors on a span."""
+        """Record inputs, outputs and errors on a span."""
         inputs_json, truncated, size, sha256 = truncate_json(inputs)
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.TOOL_CALL)
         span.set_attribute(TelemetryKeys.EVENT_NAME, tool.name)

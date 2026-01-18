@@ -137,8 +137,8 @@ class TestExtractConstraintsSynthetic:
         """Test extraction of financial entities (currently disabled/empty)."""
         query = "Show top 10 merchants by transaction count"
         constraints = extract_constraints(query)
-        # Patterns removed in Sub-Phase 2, so entity should be None
-        assert constraints.entity is None
+        # Patterns restored in Phase 2 fix, so entity should be merchant
+        assert constraints.entity == "merchant"
         assert constraints.limit == 10
 
     def test_extract_limit_generic(self):

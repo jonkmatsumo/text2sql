@@ -29,11 +29,10 @@ def test_synthetic_signature_safe():
     )
 
     # Verify signature
-    # Since synthetic entity patterns are temporarily removed (Sub-Phase 2),
-    # intent matching logic won't trigger "top_merchants".
-    # It should be safe/generic.
-    assert signature.intent is None  # or generic fallback if implemented
-    assert signature.entity is None
+    # Since synthetic entity patterns are restored,
+    # intent matching logic triggers "top_merchants".
+    assert signature.intent == "top_merchants"
+    assert signature.entity == "merchant"
     # Ensure no film filtering or rating leakage
     assert "rating" not in signature.filters
     assert signature.item != "film"

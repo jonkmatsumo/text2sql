@@ -48,7 +48,12 @@ _PAGILA_ENTITY_PATTERNS = [
 # Synthetic / Financial Entities
 # TODO: Source these from artifacts/config in Phase B.2/B.3.
 # For now, we avoid hardcoding per Phase B.1 requirements.
-_SYNTHETIC_ENTITY_PATTERNS = []
+_SYNTHETIC_ENTITY_PATTERNS = [
+    (r"\bmerchants?\b", "merchant"),
+    (r"\baccounts?\b", "account"),
+    (r"\btransactions?\b", "transaction"),
+    (r"\bbanks?\b", "institution"),  # For 'Find banks' test case
+]
 
 
 def get_constraint_patterns(*, dataset_mode: Optional[str] = None) -> ConstraintPatternSet:
