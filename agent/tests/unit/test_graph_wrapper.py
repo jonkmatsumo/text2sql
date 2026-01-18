@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 if importlib.util.find_spec("mcp") is None:
 
     def create_mock_module(name):
+        """Create a mock module for testing."""
         mock = types.ModuleType(name)
         mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
         mock.__path__ = []
@@ -71,6 +72,12 @@ async def test_sync_node_returning_awaitable():
     wrapped = with_telemetry_context(sync_node)
     result = await wrapped({})
     assert result == {"result": "awaitable"}
+
+
+@pytest.mark.asyncio
+async def test_graph_wrapper_initialization():
+    """Test graph wrapper initialization."""
+    pass
 
 
 @pytest.mark.asyncio

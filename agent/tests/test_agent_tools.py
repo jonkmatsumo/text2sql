@@ -21,6 +21,7 @@ import pytest
 if importlib.util.find_spec("mcp") is None:
 
     def create_mock_module(name):
+        """Create a mock module for testing."""
         mock = types.ModuleType(name)
         mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
         mock.__path__ = []

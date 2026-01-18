@@ -194,9 +194,9 @@ class CanonicalizationService:
             has_custom_patterns: Whether custom entity patterns were loaded
         """
         from mcp_server.services.canonicalization.dependency_patterns import (
-            ENTITY_PATTERNS,
             LIMIT_PATTERNS,
-            RATING_PATTERNS,
+            get_entity_patterns,
+            get_rating_patterns,
         )
         from spacy.matcher import DependencyMatcher
 
@@ -211,9 +211,9 @@ class CanonicalizationService:
             )
 
         matcher = DependencyMatcher(nlp.vocab)
-        matcher.add("RATING_CONSTRAINT", RATING_PATTERNS)
+        matcher.add("RATING_CONSTRAINT", get_rating_patterns())
         matcher.add("LIMIT_CONSTRAINT", LIMIT_PATTERNS)
-        matcher.add("ENTITY_CONSTRAINT", ENTITY_PATTERNS)
+        matcher.add("ENTITY_CONSTRAINT", get_entity_patterns())
         return matcher
 
     async def reload_patterns(self) -> int:

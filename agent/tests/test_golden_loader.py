@@ -271,6 +271,11 @@ class TestLoader:
 
     def test_load_missing_file_raises_error(self):
         """Test loading non-existent file raises clear error."""
+        from golden.loader import GOLDEN_DATASET_FILES
+
+        if GOLDEN_DATASET_FILES["pagila"].exists():
+            pytest.skip("Pagila golden dataset exists, cannot test missing file error")
+
         with pytest.raises(GoldenDatasetNotFoundError) as exc_info:
             load_golden_dataset("pagila")  # pagila doesn't have a golden dataset yet
         assert "not found" in str(exc_info.value).lower()

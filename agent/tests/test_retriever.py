@@ -112,9 +112,11 @@ class TestGetVectorStore:
         # Don't set any environment variables
         get_vector_store()
 
-        # Verify defaults were used (DB_NAME defaults to get_default_db_name() = synthetic)
+        # Verify defaults were used (DB_NAME defaults to get_default_db_name() = query_target)
         call_kwargs = mock_pgvector.call_args[1]
-        expected_connection = "postgresql://text2sql_ro:secure_agent_pass@localhost:5432/synthetic"
+        expected_connection = (
+            "postgresql://text2sql_ro:secure_agent_pass@localhost:5432/query_target"
+        )
         assert call_kwargs["connection"] == expected_connection
 
     @patch("agent_core.retriever.PGVector")

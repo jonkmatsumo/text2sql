@@ -5,8 +5,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.mark.pagila
 class TestDependencyPatternsWarning:
     """Tests for NLP dependency patterns domain mismatch warning."""
+
+    @pytest.fixture(autouse=True)
+    def skip_if_not_pagila(self, dataset_mode):
+        """Skip these tests if we are not explicitly running for Pagila."""
+        import os
+
+        if os.getenv("RUN_PAGILA_TESTS", "0") == "1":
+            return
+        if dataset_mode != "pagila":
+            pytest.skip("Skipping Pagila tests in synthetic mode")
 
     def test_warning_when_no_custom_patterns(self, caplog, tmp_path):
         """Test warning is logged when no custom patterns are loaded."""

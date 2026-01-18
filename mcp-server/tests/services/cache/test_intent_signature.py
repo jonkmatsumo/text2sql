@@ -124,7 +124,7 @@ class TestBuildSignatureFromConstraints:
         assert sig.filters.get("rating") == "PG"
         assert sig.ranking.get("limit") == 10
         assert sig.entity == "actor"
-        assert sig.intent == "top_actors_by_film_count"
+        assert sig.intent == "top_actors"
 
     def test_build_with_ties(self):
         """Test building signature with include_ties."""
@@ -147,8 +147,8 @@ class TestBuildSignatureFromConstraints:
             entity="actor",
         )
 
-        assert sig.intent == "top_actors_by_film_count"
-        assert sig.item == "film"
+        assert sig.intent == "top_actors"
+        assert sig.item == "actor"
 
     def test_different_ratings_different_keys(self):
         """Critical test: Same query structure but different ratings."""
@@ -182,7 +182,7 @@ class TestBuildSignatureFromConstraints:
             limit=10,
             entity="actor",
         )
-        assert sig.intent == "top_actors_by_film_count"
+        assert sig.intent == "top_actors"
 
     def test_intent_inference_punctuation_variants(self):
         """Test intent inference with minor wording/punctuation differences."""
@@ -195,7 +195,7 @@ class TestBuildSignatureFromConstraints:
             sig = build_signature_from_constraints(
                 query=query, rating="PG", limit=10, entity="actor"
             )
-            assert sig.intent == "top_actors_by_film_count", f"Failed for query: {query}"
+            assert sig.intent == "top_actors", f"Failed for query: {query}"
 
     def test_intent_inference_negative_cases(self):
         """Test cases where intent should NOT be top_actors_by_film_count."""
@@ -222,3 +222,28 @@ class TestBuildSignatureFromConstraints:
             entity="merchant",
         )
         assert sig_merchant.intent == "top_merchants"
+
+    def test_synthetic_no_leakage_with_film_keywords(self):
+        """Critical Phase B.2 Test: Synthetic mode should not infer top_films from keyword."""
+        # Query contains "movies" but NO entity is passed (simulating synthetic extraction)
+        sig = build_signature_from_constraints(
+            query="Top 10 movies",
+            limit=10,
+            entity=None,  # Synthetic extractor returns None for "movies"
+        )
+
+        # Should NOT be "top_films"
+        assert sig.intent is None
+        assert sig.intent != "top_films"
+        assert sig.entity is None
+        assert sig.item is None
+
+    def test_synthetic_generic_intent(self):
+        """Test that generic entities produce generic intents."""
+        sig = build_signature_from_constraints(
+            query="Top 10 items",
+            limit=10,
+            entity="item",
+        )
+        assert sig.intent == "top_items"
+        assert sig.entity == "item"

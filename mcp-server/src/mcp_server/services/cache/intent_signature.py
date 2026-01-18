@@ -88,15 +88,19 @@ def build_signature_from_constraints(
     """Build an IntentSignature from extracted constraints."""
     intent = None
     query_lower = query.lower()
+    intent = None
+    query_lower = query.lower()
+
+    # Domain-agnostic intent derivation
     if "top" in query_lower:
         if entity:
-            # Special case: Actors by film count (legacy contract)
-            if entity == "actor" and ("film" in query_lower or "movie" in query_lower):
-                intent = "top_actors_by_film_count"
-            else:
-                intent = f"top_{entity}s"
-        elif "film" in query_lower or "movie" in query_lower:
-            intent = "top_films"
+            # Generic top-k pattern: top_{entity}s
+            # We pluralize simply by adding 's' for the signature;
+            # robustness comes from 'entity' being normalized by extractor.
+            intent = f"top_{entity}s".lower()
+
+        # If no entity is extracted, we do NOT infer domain specific intent (e.g. top_films)
+        # from raw query strings to avoid leakage.
 
     filters = {}
     if rating:
@@ -113,11 +117,7 @@ def build_signature_from_constraints(
     return IntentSignature(
         intent=intent,
         entity=entity,
-        item=(
-            "film"
-            if "film" in query_lower or "movie" in query_lower
-            else (entity if entity else None)
-        ),
+        item=entity if entity else None,
         metric=metric,
         filters=filters,
         ranking=ranking,

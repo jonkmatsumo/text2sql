@@ -42,18 +42,6 @@ class QueryConstraints:
         return json.dumps(self.to_dict(), separators=(",", ":"))
 
 
-# Rating patterns ordered by specificity (longer/more specific first)
-RATING_PATTERNS = [
-    (r"\bNC[-\s]?17\b", "NC-17"),
-    (r"\bPG[-\s]?13\b", "PG-13"),
-    (r"\bPG\b", "PG"),
-    (r"\bG[- ]?rated\b", "G"),
-    (r"\brated[- ]?G\b", "G"),
-    (r"\brating\s*[=:]\s*['\"]?G['\"]?\b", "G"),
-    (r"\bG\b(?!\s*films?\s+rated)", "G"),
-    (r"\bR\b", "R"),
-]
-
 # Spelled-out number mappings
 SPELLED_NUMBERS = {
     "one": 1,
@@ -117,22 +105,6 @@ TIES_PATTERNS = [
     r"\binclude\s+ties\b",
 ]
 
-ENTITY_PATTERNS = [
-    (r"\bactors?\b", "actor"),
-    (r"\bfilms?\b", "film"),
-    (r"\bmovies?\b", "film"),
-    (r"\bcustomers?\b", "customer"),
-    (r"\bstores?\b", "store"),
-    (r"\bpayments?\b", "payment"),
-    (r"\brentals?\b", "rental"),
-    # Synthetic / Financial Entities
-    (r"\bmerchants?\b", "merchant"),
-    (r"\btransactions?\b", "transaction"),
-    (r"\baccounts?\b", "account"),
-    (r"\binstitutions?\b", "institution"),
-    (r"\bbanks?\b", "institution"),
-]
-
 METRIC_PATTERNS = [
     (r"\bcount\s+(?:of\s+)?distinct\b", "count_distinct"),
     (r"\bdistinct\s+count\b", "count_distinct"),
@@ -148,17 +120,25 @@ METRIC_PATTERNS = [
 
 def extract_constraints(query: str) -> QueryConstraints:
     """Extract hard constraints from a natural language query."""
+    from mcp_server.services.cache.constraint_patterns import get_constraint_patterns
+
     constraints = QueryConstraints()
     confidence_factors = []
 
-    for pattern, rating in RATING_PATTERNS:
+    # Get dataset-aware patterns
+    patterns = get_constraint_patterns()
+
+    for pattern, rating in patterns.rating_patterns:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.rating = rating
             constraints._matched_patterns.append(f"rating:{pattern}")
             confidence_factors.append(1.0)
             break
 
-    if not constraints.rating:
+    # If no rating is found, but rating patterns exist (legacy mode), reduce confidence
+    # for explicit rating queries. In synthetic mode (no rating patterns), absence
+    # should not penalize.
+    if patterns.rating_patterns and not constraints.rating:
         confidence_factors.append(0.3)
 
     for pattern, extractor in LIMIT_PATTERNS:
@@ -181,7 +161,7 @@ def extract_constraints(query: str) -> QueryConstraints:
             constraints._matched_patterns.append(f"ties:{pattern}")
             break
 
-    for pattern, entity in ENTITY_PATTERNS:
+    for pattern, entity in patterns.entity_patterns:
         if re.search(pattern, query, re.IGNORECASE):
             constraints.entity = entity
             constraints._matched_patterns.append(f"entity:{pattern}")
@@ -199,21 +179,3 @@ def extract_constraints(query: str) -> QueryConstraints:
         constraints.confidence = 0.5
 
     return constraints
-
-
-def normalize_rating(rating_str: str) -> Optional[str]:
-    """Normalize rating string to canonical form."""
-    if not rating_str:
-        return None
-
-    normalized = rating_str.upper().strip()
-    normalized = re.sub(r"[-\s]+", "-", normalized)
-    rating_map = {
-        "G": "G",
-        "PG": "PG",
-        "PG-13": "PG-13",
-        "R": "R",
-        "NC-17": "NC-17",
-        "NC17": "NC-17",
-    }
-    return rating_map.get(normalized)

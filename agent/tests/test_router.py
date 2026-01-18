@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 if importlib.util.find_spec("mcp") is None:
 
     def create_mock_module(name):
+        """Create a mock module for testing."""
         mock = types.ModuleType(name)
         mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
         mock.__path__ = []
@@ -315,8 +316,8 @@ class TestHardRefusalLogic:
         assert "cannot filter" in result.get("clarification_question", "")
 
     @pytest.mark.asyncio
-    async def test_silent_resolution_single_column(self, base_state, mock_tools):
-        """Test that single column match proceeds without clarification."""
+    async def test_route_question_simple(self, base_state, mock_tools):
+        """Test simple question routing."""
         base_state["messages"] = [HumanMessage(content="What is the average runtime?")]
         base_state[
             "schema_context"

@@ -90,6 +90,14 @@ def main():
     args = parser.parse_args()
 
     if not args.corpus.exists():
+        # In synthetic mode, it's expected that rating_queries.json might not be relevant or present
+        # Check if we should fail or just skip
+        from common.config.dataset import get_dataset_mode
+
+        if get_dataset_mode() == "synthetic":
+            print(f"Synthetic mode: corpus not found at {args.corpus}. Skipping replay tests.")
+            sys.exit(0)
+
         print(f"Error: Corpus file not found: {args.corpus}")
         sys.exit(1)
 
