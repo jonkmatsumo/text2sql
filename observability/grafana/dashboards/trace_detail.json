@@ -286,19 +286,24 @@
     "templating": {
         "list": [
             {
-                "current": {
-                    "selected": false,
-                    "text": "",
-                    "value": ""
+                "datasource": {
+                    "type": "postgres",
+                    "uid": "Postgres"
                 },
+                "definition": "SELECT trace_id FROM otel.traces ORDER BY start_time DESC LIMIT 100",
                 "description": "Trace ID to inspect",
                 "hide": 0,
+                "includeAll": false,
                 "label": "Trace ID",
+                "multi": false,
                 "name": "trace_id",
                 "options": [],
-                "query": "",
+                "query": "SELECT trace_id FROM otel.traces ORDER BY start_time DESC LIMIT 100",
+                "refresh": 1,
+                "regex": "",
                 "skipUrlSync": false,
-                "type": "textbox"
+                "sort": 0,
+                "type": "query"
             }
         ]
     },
@@ -310,6 +315,6 @@
     "timezone": "",
     "title": "Text2SQL Trace Detail",
     "uid": "text2sql-trace-detail",
-    "version": 1,
+    "version": 2,
     "weekStart": ""
 }
