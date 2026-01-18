@@ -47,6 +47,7 @@ services:
       DB_HOST: postgres-db
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-synthetic}
+      DATASET_MODE: ${DATASET_MODE:-synthetic}
       DB_USER: text2sql_ro
       DB_PASS: secure_agent_pass
       CONTROL_DB_HOST: agent-control-db
