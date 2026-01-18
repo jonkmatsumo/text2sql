@@ -113,8 +113,8 @@ def save_traces_batch(trace_units: list[dict]):
                     error_count = EXCLUDED.error_count,
                     span_count = EXCLUDED.span_count,
                     raw_blob_url = EXCLUDED.raw_blob_url,
-                    trace_attributes = {traces_table}.trace_attributes
-                        || EXCLUDED.trace_attributes;
+                    trace_attributes = ({traces_table}.trace_attributes::jsonb
+                        || EXCLUDED.trace_attributes::jsonb)::json;
             """
                 ),
                 {

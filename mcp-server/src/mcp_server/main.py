@@ -5,6 +5,7 @@ via the central registry.
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -20,7 +21,12 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from common.config.env import get_env_int, get_env_str
 from dal.database import Database
 
+# Configure logging at the start
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 # OTEL Setup
 OTEL_EXPORTER_OTLP_ENDPOINT = get_env_str(
@@ -41,9 +47,6 @@ def setup_telemetry():
 
 
 setup_telemetry()
-
-# Load environment variables
-load_dotenv()
 
 
 @asynccontextmanager
@@ -139,6 +142,30 @@ mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 register_all(mcp)
 
 
+# GLOBAL PATCH: Apply OTEL Instrumentation via Factory Wrapper
+# This must be at module level because FastMCP likely imports 'mcp'
+# instead of running __main__.
+try:
+    if hasattr(mcp, "http_app"):
+        original_factory = mcp.http_app
+
+        def patched_factory(*args, **kwargs):
+            """Instrument the app instance created by the factory."""
+            app = original_factory(*args, **kwargs)
+            try:
+                StarletteInstrumentor().instrument_app(app)
+                # App instrumented successfully
+            except Exception as instr_e:
+                logging.error(f"Failed to instrument app: {instr_e}")
+            return app
+
+        mcp.http_app = patched_factory
+    else:
+        logging.warning("Could not find mcp.http_app factory to patch")
+except Exception as e:
+    logging.error(f"Error: Could not apply instrumentation wrapper: {e}")
+
+
 if __name__ == "__main__":
 
     # Respect transport and host/port from environment for containerized use
@@ -147,19 +174,11 @@ if __name__ == "__main__":
     port = get_env_int("MCP_PORT", 8000)
 
     if transport in ("sse", "http", "streamable-http"):
-        # We standardize on sse transport to be compatible with langchain-mcp-adapters
-        # which does not yet support the session requirements of streamable-http.
-        print(f"🚀 Starting MCP server in sse mode on {host}:{port}/messages")
-
-        # Access the underlying starlette app to instrument with OTEL
-        # FastMCP usually stores the app in mcp._app when using SSE
-        try:
-            starlette_app = mcp.get_app()
-            StarletteInstrumentor().instrument_app(starlette_app)
-            print("✅ Starlette app instrumented for OTEL")
-        except Exception as e:
-            print(f"Warning: Could not instrument Starlette app: {e}")
-
+        print(
+            f"🚀 Starting MCP server in sse mode on {host}:{port}/messages",
+            file=sys.stderr,
+            flush=True,
+        )
         mcp.run(transport="sse", host=host, port=port, path="/messages")
     else:
         mcp.run(transport="stdio")
