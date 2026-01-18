@@ -120,3 +120,7 @@ services:
     networks:
       - text2sql_net
     restart: unless-stopped
+
+networks:
+  text2sql_net:
+    external: true
