@@ -64,7 +64,7 @@ def test_synthetic_pg13_leakage_prevention(mode_synthetic):
     # So if I pass entity=None, but query has "movies", intent_signature WILL return 'top_films'.
     # This confirms the finding in Issue #286 that intent_signature is NOT fully safe yet.
     # However, Phase 4 task says verify tolerance.
-    
+
     # Asserting what IS expected given CURRENT state of intent_signature.
     assert constraints.rating is None
     assert "rating" not in signature.filters
