@@ -5,10 +5,10 @@ datasources:
     type: postgres
     access: proxy
     url: agent-control-db:5432
-    user: ${CONTROL_DB_USER:-postgres}
+    user: postgres
     database: agent_control
     jsonData:
       sslmode: "disable"
       postgresVersion: 1300
     secureJsonData:
-      password: ${CONTROL_DB_PASSWORD:-control_password}
+      password: control_password
