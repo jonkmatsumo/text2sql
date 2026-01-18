@@ -47,7 +47,11 @@ class Candidate:
         if self.scores.get("ontology_match") == 1.0:
             return 1.0
 
-        weights = {"lexical": 0.5, "semantic": 0.3, "relational": 0.2}
+        # NOTE: Semantic scoring was removed because the binder was using
+        # FastEmbed (384-dim) while schema nodes use OpenAI (1536-dim),
+        # causing incomparable similarity scores. Ontology match and lexical
+        # scoring provide more reliable grounding signals.
+        weights = {"lexical": 0.7, "relational": 0.3}
         return sum(self.scores.get(k, 0.0) * weights.get(k, 0.0) for k in weights)
 
 
@@ -148,10 +152,12 @@ class CandidateBinder:
     """Binds mentions to schema elements within a context."""
 
     def __init__(self):
-        """Initialize binder."""
-        from mcp_server.services.rag import RagEngine
+        """Initialize binder.
 
-        self.rag = RagEngine
+        NOTE: RagEngine was removed - semantic scoring is no longer performed
+        due to embedding model mismatch. See final_score() for details.
+        """
+        pass
 
     def get_candidates(self, mention: Mention, schema_context: List[Any]) -> List[Candidate]:
         """Enumerate and score candidates for a mention.
@@ -286,17 +292,8 @@ class CandidateBinder:
         for cand in candidates:
             if cand.kind == "table":
                 cand.scores["relational"] = 1.0
-        if candidates:
-            # We only embed if we have candidates to rank
-            mention_vec = self.rag.embed_text(mention.text)
-            for cand in candidates:
-                cand_text = f"{cand.id}: {cand.label}"
-                cand_vec = self.rag.embed_text(cand_text)
 
-                import numpy as np
-
-                semantic_score = float(np.dot(mention_vec, cand_vec))
-                cand.scores["semantic"] = semantic_score
+        # NOTE: Semantic scoring was removed - see final_score comment for rationale
 
         return sorted(candidates, key=lambda x: x.final_score, reverse=True)
 

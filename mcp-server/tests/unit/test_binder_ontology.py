@@ -28,23 +28,19 @@ class TestCandidateOntologyMatch:
             kind="table",
             id="users",
             label="Users table",
-            scores={"lexical": 0.8, "semantic": 0.6, "relational": 1.0},
+            scores={"lexical": 0.8, "relational": 1.0},
             metadata={},
         )
-        # Expected: 0.8*0.5 + 0.6*0.3 + 1.0*0.2 = 0.4 + 0.18 + 0.2 = 0.78
-        assert abs(candidate.final_score - 0.78) < 0.01
+        # Expected: 0.8*0.7 + 1.0*0.3 = 0.56 + 0.3 = 0.86 (semantic removed)
+        assert abs(candidate.final_score - 0.86) < 0.01
 
 
 class TestCandidateBinderOntologyPrecedence:
     """Tests for CandidateBinder.get_candidates with ontology ent_id."""
 
     @pytest.fixture
-    def binder(self, mocker):
-        """Create a binder with mocked RagEngine to avoid embedding calls."""
-        mocker.patch(
-            "mcp_server.services.ambiguity.binder.CandidateBinder.__init__",
-            lambda self: setattr(self, "rag", None),
-        )
+    def binder(self):
+        """Create a binder instance (no RagEngine mocking needed - semantic scoring removed)."""
         return CandidateBinder()
 
     @pytest.fixture
@@ -110,14 +106,8 @@ class TestCandidateBinderOntologyPrecedence:
         assert candidates[0].scores.get("ontology_match") == 1.0
         assert candidates[0].final_score == 1.0
 
-    def test_ent_id_no_match_falls_through_to_lexical_scoring(
-        self, binder, sample_schema_context, mocker
-    ):
+    def test_ent_id_no_match_falls_through_to_lexical_scoring(self, binder, sample_schema_context):
         """When ent_id is present but doesn't match, fall through to normal scoring."""
-        # Mock embed_text to avoid actual embedding calls
-        mock_embed = mocker.patch.object(binder, "rag", autospec=True)
-        mock_embed.embed_text.return_value = [0.0] * 384  # Dummy embedding
-
         mention = Mention(
             text="products",
             type="entity",
@@ -134,12 +124,8 @@ class TestCandidateBinderOntologyPrecedence:
         for c in candidates:
             assert c.scores.get("ontology_match") != 1.0
 
-    def test_no_ent_id_uses_normal_scoring(self, binder, sample_schema_context, mocker):
-        """When no ent_id, use standard lexical/semantic scoring."""
-        # Mock embed_text to avoid actual embedding calls
-        mock_embed = mocker.patch.object(binder, "rag", autospec=True)
-        mock_embed.embed_text.return_value = [0.0] * 384
-
+    def test_no_ent_id_uses_normal_scoring(self, binder, sample_schema_context):
+        """When no ent_id, use standard lexical scoring."""
         mention = Mention(
             text="orders",
             type="noun_phrase",

@@ -36,11 +36,16 @@ async def retrieve_context_node(state: AgentState) -> dict:
         # === Pre-retrieval grounding ===
         # Apply canonicalization to ground synonyms (e.g., "customers" → "users")
         # This enriches the query with schema hints before semantic search
-        from agent_core.utils.grounding import ground_query_for_retrieval
+        from agent_core.utils.grounding import extract_schema_hints
 
-        grounded_query = ground_query_for_retrieval(active_query)
-        if grounded_query != active_query:
-            span.set_attribute("grounded_query", grounded_query)
+        grounded_query, mappings = extract_schema_hints(active_query)
+        canonicalization_applied = len(mappings) > 0
+
+        # === Grounding Telemetry (Phase C) ===
+        span.set_attribute("grounding.canonicalization_applied", canonicalization_applied)
+        span.set_attribute("grounding.schema_hints_count", len(mappings))
+        if canonicalization_applied:
+            span.set_attribute("grounding.grounded_query", grounded_query)
 
         context_str = ""
         table_names = []

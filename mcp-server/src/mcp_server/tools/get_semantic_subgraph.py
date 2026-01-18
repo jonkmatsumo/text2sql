@@ -62,7 +62,7 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         nodes_map = {}
         rels_list = []
 
-        def add_node(node_id, label, properties, node_type, score=None):
+        def add_node(node_id, label, properties, node_type, score=None, canonical_aliases=None):
             if node_id not in nodes_map:
                 props = dict(properties)
                 props["id"] = node_id
@@ -70,11 +70,22 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 props["type"] = node_type
                 if score is not None:
                     props["score"] = score
+                # Add canonical_aliases if provided (Phase B enrichment)
+                if canonical_aliases:
+                    props["canonical_aliases"] = canonical_aliases
                 nodes_map[node_id] = props
             return node_id
 
         # Step 1: Fetch Seed Tables and their Columns via Introspector
         fk_table_names = set()
+
+        # Pre-load canonical aliases for enrichment
+        from mcp_server.services.canonicalization.alias_service import CanonicalAliasService
+
+        try:
+            await CanonicalAliasService.load_aliases()
+        except Exception as e:
+            logger.debug(f"Alias enrichment not available: {e}")
 
         # We can fetch table definitions in parallel
         tasks = [introspector.get_table_def(t_name) for t_name in seed_table_names]
@@ -85,6 +96,12 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 logger.warning(f"Failed to fetch table def for {t_name}: {table_def}")
                 continue
 
+            # Get canonical aliases for this table (optional enrichment)
+            try:
+                table_aliases = await CanonicalAliasService.get_aliases_for_table(t_name)
+            except Exception:
+                table_aliases = []
+
             # Add Table Node
             t_id = add_node(
                 node_id=t_name,
@@ -92,6 +109,7 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 properties={"name": t_name, "description": table_def.description},
                 node_type="Table",
                 score=seed_scores.get(t_name),
+                canonical_aliases=table_aliases,
             )
 
             # Add Columns and Relationships
