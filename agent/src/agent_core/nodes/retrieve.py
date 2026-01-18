@@ -33,6 +33,15 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         span.set_inputs({"user_query": active_query})
 
+        # === Pre-retrieval grounding ===
+        # Apply canonicalization to ground synonyms (e.g., "customers" → "users")
+        # This enriches the query with schema hints before semantic search
+        from agent_core.utils.grounding import ground_query_for_retrieval
+
+        grounded_query = ground_query_for_retrieval(active_query)
+        if grounded_query != active_query:
+            span.set_attribute("grounded_query", grounded_query)
+
         context_str = ""
         table_names = []
         graph_data = {}
@@ -42,8 +51,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
             subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
 
             if subgraph_tool:
-                # Execute subgraph retrieval
-                payload = {"query": active_query}
+                # Execute subgraph retrieval with grounded query
+                payload = {"query": grounded_query}
                 tenant_id = state.get("tenant_id")
                 if tenant_id is not None:
                     payload["tenant_id"] = tenant_id
