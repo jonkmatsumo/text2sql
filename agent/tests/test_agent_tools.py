@@ -13,19 +13,31 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import importlib.util
+import importlib.machinery
+import types
 
-# Mock the mcp SDK before importing agent_core modules that depend on it
-if "mcp" not in sys.modules:
-    mcp_mock = MagicMock()
-    mcp_mock.__path__ = []  # Make it look like a package
+# Mock the mcp SDK only if not installed, to allow import of agent_core modules
+if importlib.util.find_spec("mcp") is None:
+    def create_mock_module(name):
+        mock = types.ModuleType(name)
+        mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+        mock.__path__ = []
+        sys.modules[name] = mock
+        return mock
+
+    mcp_mock = create_mock_module("mcp")
     mcp_mock.ClientSession = MagicMock()
-    mcp_mock.types = MagicMock()
-    mcp_mock.types.TextContent = MagicMock()
-    sys.modules["mcp"] = mcp_mock
-    sys.modules["mcp.types"] = mcp_mock.types
-    sys.modules["mcp.client"] = MagicMock()
-    sys.modules["mcp.client.sse"] = MagicMock()
-    sys.modules["mcp.client.streamable_http"] = MagicMock()
+    
+    mcp_types = create_mock_module("mcp.types")
+    mcp_types.TextContent = MagicMock()
+    mcp_mock.types = mcp_types
+    
+    create_mock_module("mcp.client")
+    create_mock_module("mcp.client.sse")
+    create_mock_module("mcp.client.streamable_http")
+
+
 
 from agent_core.mcp_client.sdk_client import ToolInfo  # noqa: E402
 from agent_core.tools import get_mcp_tools  # noqa: E402
