@@ -1,15 +1,116 @@
+"""MCP Tool Output Parsing Utilities (Phase 2 - Issue #165).
+
+This module provides robust parsing for MCP tool outputs, supporting both:
+1. Official MCP SDK payloads (single JSON encoding in TextContent.text)
+2. Legacy langchain-mcp-adapters payloads (double-encoded JSON strings)
+
+Payload Shape Reference:
+- SDK: result.content = [TextContent(text='{"key": "value"}')]  # single-encoded
+- SDK: result.structuredContent = {"key": "value"}  # already parsed (if available)
+- Adapter: response = [{"type": "text", "text": '"{...}"'}]  # double-encoded
+"""
+
 import json
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def parse_tool_output(tool_output):
+def detect_adapter_double_encoding(payload: Any) -> bool:
+    """Detect if payload has adapter-style double JSON encoding.
+
+    Adapter payloads often have the JSON stringified twice, so parsing once
+    yields another JSON string instead of the final data structure.
+
+    Args:
+        payload: The raw payload to check (typically a string).
+
+    Returns:
+        True if the payload appears to be double-encoded.
     """
-    Robustly parsing utility for MCP tool outputs.
+    if not isinstance(payload, str):
+        return False
+
+    try:
+        first_parse = json.loads(payload)
+        # If first parse yields a string that is also valid JSON, it's double-encoded
+        if isinstance(first_parse, str):
+            try:
+                json.loads(first_parse)
+                return True
+            except (json.JSONDecodeError, TypeError):
+                return False
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+    return False
+
+
+def normalize_payload(payload: Any) -> Any:
+    """Normalize SDK or adapter payloads to Python objects.
+
+    Handles:
+    - Already-parsed dicts/lists (pass through)
+    - Single-encoded JSON strings (SDK style)
+    - Double-encoded JSON strings (adapter style)
+
+    Args:
+        payload: The raw payload (string, dict, list, or MCP content object).
+
+    Returns:
+        Normalized Python object (dict, list, or primitive).
+
+    Raises:
+        ValueError: If payload cannot be parsed as valid JSON.
+    """
+    # Already parsed - pass through
+    if isinstance(payload, (dict, list)):
+        return payload
+
+    # Handle MCP TextContent objects
+    if hasattr(payload, "text"):
+        payload = payload.text
+
+    # Not a string - return as-is
+    if not isinstance(payload, str):
+        return payload
+
+    # Empty string - return as-is
+    if not payload.strip():
+        return payload
+
+    # Try to parse JSON
+    try:
+        parsed = json.loads(payload)
+
+        # Check for double-encoding (adapter style)
+        if isinstance(parsed, str):
+            try:
+                return json.loads(parsed)
+            except (json.JSONDecodeError, TypeError):
+                # Not double-encoded, just a JSON string value
+                return parsed
+
+        return parsed
+
+    except (json.JSONDecodeError, TypeError) as e:
+        # Not valid JSON - could be plain text error message
+        logger.debug(f"Payload is not JSON, treating as raw text: {str(e)[:50]}")
+        return payload
+
+
+def parse_tool_output(tool_output):
+    """Robustly parse MCP tool outputs.
 
     Handles tool outputs that may be wrapped in LangChain Message lists,
-    stringified, or double-encoded.
+    stringified, or double-encoded. Supports both SDK and adapter payloads.
+
+    Args:
+        tool_output: Raw output from MCP tool invocation.
+
+    Returns:
+        List of parsed result objects.
     """
     aggregated_results = []
 
@@ -53,33 +154,17 @@ def parse_tool_output(tool_output):
         if not raw_payload:
             continue
 
-        # 2. Parse the JSON string
+        # 2. Use normalize_payload for consistent handling
         try:
-            parsed_chunk = json.loads(raw_payload)
+            normalized = normalize_payload(raw_payload)
 
-            # 3. Handle Double-Encoding (common in MCP/LangChain bridges)
-            if isinstance(parsed_chunk, str):
-                try:
-                    parsed_chunk = json.loads(parsed_chunk)
-                except json.JSONDecodeError:
-                    # If second parse fails, it might just be a string result (e.g. error message)
-                    # But usually we expect structured data.
-                    # If we want to capture simple strings, we could append parsed_chunk here.
-                    # For now, let's allow strings if they are not json.
-                    pass
-
-            # 4. Aggregate Results
-            if isinstance(parsed_chunk, list):
-                aggregated_results.extend(parsed_chunk)
-            elif isinstance(parsed_chunk, dict):
-                aggregated_results.append(parsed_chunk)
-            elif isinstance(parsed_chunk, str):
-                # If the payload was a json string "foo", parsed_chunk is "foo".
-                aggregated_results.append(parsed_chunk)
+            # 3. Aggregate Results
+            if isinstance(normalized, list):
+                aggregated_results.extend(normalized)
             else:
-                aggregated_results.append(parsed_chunk)
+                aggregated_results.append(normalized)
 
-        except (json.JSONDecodeError, TypeError) as e:
+        except Exception as e:
             logger.warning(
                 f"Failed to parse tool output chunk: {str(e)[:100]}... "
                 f"Raw Payload Start: {str(raw_payload)[:100]}"
