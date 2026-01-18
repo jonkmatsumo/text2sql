@@ -1,15 +1,33 @@
 """Unit tests for the graph telemetry context wrapper."""
 
 import asyncio
+import importlib.machinery
+import importlib.util
 import inspect
 import sys
+import types
 from unittest.mock import MagicMock
 
-# Mock langchain_mcp_adapters to allow import of agent_core.tools during collection
-if "langchain_mcp_adapters" not in sys.modules:
-    mcp_mock = MagicMock()
-    sys.modules["langchain_mcp_adapters"] = mcp_mock
-    sys.modules["langchain_mcp_adapters.client"] = mcp_mock
+# Mock the mcp SDK only if not installed
+if importlib.util.find_spec("mcp") is None:
+
+    def create_mock_module(name):
+        mock = types.ModuleType(name)
+        mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+        mock.__path__ = []
+        sys.modules[name] = mock
+        return mock
+
+    mcp_mock = create_mock_module("mcp")
+    mcp_mock.ClientSession = MagicMock()
+
+    mcp_types = create_mock_module("mcp.types")
+    mcp_mock.types = mcp_types
+
+    create_mock_module("mcp.client")
+    create_mock_module("mcp.client.sse")
+    create_mock_module("mcp.client.streamable_http")
+
 
 import pytest
 from agent_core.graph import with_telemetry_context

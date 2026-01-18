@@ -17,12 +17,26 @@ def test_otel_isolation(backend, expect_import):
 import sys
 import os
 
-# Mock langchain_mcp_adapters to allow import of agent_core.tools without the package installed
+# Mock MCP SDK only if not installed
+import importlib.util
+import importlib.machinery
+import types
 from unittest.mock import MagicMock
-if "langchain_mcp_adapters" not in sys.modules:
-    mcp_mock = MagicMock()
-    sys.modules["langchain_mcp_adapters"] = mcp_mock
-    sys.modules["langchain_mcp_adapters.client"] = mcp_mock
+if importlib.util.find_spec("mcp") is None:
+    def create_mock_module(name):
+        mock = types.ModuleType(name)
+        mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+        mock.__path__ = []
+        sys.modules[name] = mock
+        return mock
+
+    mcp_mock = create_mock_module("mcp")
+    mcp_types = create_mock_module("mcp.types")
+    mcp_mock.types = mcp_types
+    create_mock_module("mcp.client")
+    create_mock_module("mcp.client.sse")
+    create_mock_module("mcp.client.streamable_http")
+
 
 # Set backend
 os.environ["TELEMETRY_BACKEND"] = "{backend}"
