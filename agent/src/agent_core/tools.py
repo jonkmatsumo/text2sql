@@ -9,8 +9,16 @@ from common.config.env import get_env_str
 
 load_dotenv()
 
-# Default URL for sse transport (endpoint is /messages)
+# ==============================================================================
+# MCP Transport Configuration (Phase 0 Audit Findings - Issue #163)
+# ==============================================================================
+# Server: mcp-server/src/mcp_server/main.py uses FastMCP v0.9.0+ (pyproject.toml)
+# Transport: SSE verified working; runs mcp.run(transport="sse", path="/messages")
+# Endpoint: /messages is the SSE endpoint; /mcp is NOT valid
+# Default: MCP_TRANSPORT should be "sse" unless streamable-http is explicitly tested
+# ==============================================================================
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
+DEFAULT_MCP_TRANSPORT = "sse"
 
 
 async def get_mcp_tools():
