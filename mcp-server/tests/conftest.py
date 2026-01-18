@@ -29,6 +29,14 @@ async def init_database(request):
     await Database.close()
 
 
+@pytest.fixture(scope="session")
+def dataset_mode():
+    """Return the current dataset mode from env (default: synthetic)."""
+    from common.config.dataset import get_dataset_mode
+
+    return get_dataset_mode()
+
+
 @pytest.fixture(params=[PAGILA_FIXTURE], ids=lambda f: f.name)
 def schema_fixture(request):
     """Fixture providing dataset-specific schema details."""
