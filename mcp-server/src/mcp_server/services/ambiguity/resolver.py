@@ -42,14 +42,35 @@ class AmbiguityResolver:
         """
         mentions = self.extractor.extract(query)
         if not mentions:
-            return {"status": "CLEAR", "resolved_bindings": {}, "ambiguities": []}
+            return {
+                "status": "CLEAR",
+                "resolved_bindings": {},
+                "ambiguities": [],
+                "grounding_metadata": {
+                    "ent_id_present": False,
+                    "ontology_match_used": False,
+                    "schema_candidates_count": 0,
+                },
+            }
 
         resolved_bindings = {}
         ambiguities = []
         missing = []
 
+        # === Grounding Metadata (Phase C telemetry) ===
+        grounding_metadata = {
+            "ent_id_present": False,
+            "ontology_match_used": False,
+            "schema_candidates_count": 0,
+        }
+
         for m in mentions:
+            # Track ent_id presence
+            if m.metadata.get("ent_id"):
+                grounding_metadata["ent_id_present"] = True
+
             candidates = self.binder.get_candidates(m, schema_context)
+            grounding_metadata["schema_candidates_count"] += len(candidates)
 
             if not candidates:
                 missing.append(m.text)
@@ -57,12 +78,17 @@ class AmbiguityResolver:
 
             best = candidates[0]
 
+            # Track ontology_match usage
+            if best.scores.get("ontology_match") == 1.0:
+                grounding_metadata["ontology_match_used"] = True
+
             # 1. Check minimum fitness
             if best.final_score < MIN_BINDING_SCORE:
                 missing.append(m.text)
                 continue
 
             # 2. Check margin for ambiguity
+
             if len(candidates) > 1:
                 second = candidates[1]
                 margin = best.final_score - second.final_score
@@ -103,6 +129,7 @@ class AmbiguityResolver:
                 "status": "AMBIGUOUS",
                 "resolved_bindings": resolved_bindings,
                 "ambiguities": ambiguities,
+                "grounding_metadata": grounding_metadata,
             }
 
         if missing:
@@ -110,9 +137,15 @@ class AmbiguityResolver:
                 "status": "MISSING",
                 "resolved_bindings": resolved_bindings,
                 "missing_mentions": missing,
+                "grounding_metadata": grounding_metadata,
             }
 
-        return {"status": "CLEAR", "resolved_bindings": resolved_bindings, "ambiguities": []}
+        return {
+            "status": "CLEAR",
+            "resolved_bindings": resolved_bindings,
+            "ambiguities": [],
+            "grounding_metadata": grounding_metadata,
+        }
 
     def _is_structural_cousin(self, c1: Any, c2: Any) -> bool:
         """Check if candidates are structural cousins (Table vs its PK/ID)."""
