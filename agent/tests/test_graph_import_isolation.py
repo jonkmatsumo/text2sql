@@ -11,11 +11,13 @@ import sys
 import os
 from unittest.mock import MagicMock
 
-# Mock langchain_mcp_adapters to allow import of agent_core.tools
-# as we might not have all dependencies in the test environment
-mcp_mock = MagicMock()
-sys.modules["langchain_mcp_adapters"] = mcp_mock
-sys.modules["langchain_mcp_adapters.client"] = mcp_mock
+# Mock MCP SDK to allow import of agent_core.tools
+if "mcp" not in sys.modules:
+    mcp_mock = MagicMock()
+    sys.modules["mcp"] = mcp_mock
+    sys.modules["mcp.client"] = mcp_mock
+    sys.modules["mcp.client.sse"] = mcp_mock
+    sys.modules["mcp.client.streamable_http"] = mcp_mock
 
 # Import the module under test
 os.environ["TELEMETRY_BACKEND"] = "otel"

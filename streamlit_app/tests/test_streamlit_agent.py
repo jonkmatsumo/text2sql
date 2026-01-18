@@ -14,8 +14,10 @@ import pytest
 def mock_agent_dependencies():
     """Mock agent dependencies for each test to avoid state leakage."""
     mocks = {
-        "langchain_mcp_adapters": MagicMock(),
-        "langchain_mcp_adapters.client": MagicMock(),
+        "mcp": MagicMock(),
+        "mcp.client": MagicMock(),
+        "mcp.client.sse": MagicMock(),
+        "mcp.client.streamable_http": MagicMock(),
         "mlflow": MagicMock(),
         "agent_core": MagicMock(),
         "agent_core.graph": MagicMock(),

@@ -4,11 +4,15 @@ import json
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Mock missing dependency before imports
-mock_client_mod = MagicMock()
-mock_client_mod.MultiServerMCPClient.return_value.get_tools = AsyncMock(return_value=[])
-sys.modules["langchain_mcp_adapters"] = MagicMock()
-sys.modules["langchain_mcp_adapters.client"] = mock_client_mod
+# Mock MCP SDK before importing agent_core modules
+if "mcp" not in sys.modules:
+    mcp_mock = MagicMock()
+    mcp_mock.ClientSession = MagicMock()
+    mcp_mock.types = MagicMock()
+    sys.modules["mcp"] = mcp_mock
+    sys.modules["mcp.client"] = MagicMock()
+    sys.modules["mcp.client.sse"] = MagicMock()
+    sys.modules["mcp.client.streamable_http"] = MagicMock()
 
 import pytest  # noqa: E402
 from agent_core.nodes.router import router_node  # noqa: E402
