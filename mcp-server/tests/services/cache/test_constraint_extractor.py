@@ -16,9 +16,34 @@ def mode_synthetic(monkeypatch):
     monkeypatch.setenv("DATASET_MODE", "synthetic")
 
 
+@pytest.mark.pagila
 @pytest.mark.usefixtures("mode_pagila")
 class TestExtractConstraintsPagila:
     """Tests for extract_constraints in Pagila (legacy) mode."""
+
+    @pytest.fixture(autouse=True)
+    def skip_if_not_pagila(self, dataset_mode):
+        """Skip these tests if we are not explicitly running for Pagila."""
+        # Even with mode_pagila fixture forcing the env var for the TEST,
+        # we want to skip this whole class if the GLOBAL suite run is synthetic-default
+        # and user didn't request pagila tests.
+        import os
+
+        # If RUN_PAGILA_TESTS is set, we run.
+        if os.getenv("RUN_PAGILA_TESTS", "0") == "1":
+            return
+
+        # If the *original* environment (before monkeypatch) was pagila, we run.
+        # But here checking the current env might match monkeypatch.
+        # So we really rely on the marker skipping we implemented in conftest.
+        # But since mcp-server conftest might lack the hook, we do an explicit check.
+        # We check if the INTENT was to run pagila.
+        # If we are just running 'pytest', dataset_mode fixture (session) says 'synthetic'.
+        if dataset_mode != "pagila":
+            pytest.skip(
+                "Skipping Pagila tests in synthetic mode "
+                "(set DATASET_MODE=pagila or RUN_PAGILA_TESTS=1)"
+            )
 
     def test_extract_rating_g(self):
         """Test extraction of G rating."""
