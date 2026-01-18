@@ -1,18 +1,18 @@
-"""Unit tests for MCP tool output parsing (Phase 2 - Issue #165).
+"""Unit tests for MCP tool output parsing.
 
 Tests for:
-- detect_adapter_double_encoding()
+- detect_double_json_encoding()
 - normalize_payload()
 - parse_tool_output()
 
-Covers both SDK payloads (single encoding) and adapter payloads (double encoding).
+Covers both SDK payloads (single encoding) and wrapped payloads (double encoding).
 """
 
 import json
 
 import pytest
 from agent_core.utils.parsing import (
-    detect_adapter_double_encoding,
+    detect_double_json_encoding,
     normalize_payload,
     parse_tool_output,
 )
@@ -35,51 +35,53 @@ def sdk_error_payload():
 
 
 @pytest.fixture
-def adapter_double_encoded_success():
-    """Adapter-style payload: double-encoded JSON string."""
+def double_encoded_success():
+    """Return a double-encoded JSON success string."""
     inner = json.dumps({"tables": ["film", "actor", "customer"]})
     return json.dumps(inner)  # Double-encoded
 
 
 @pytest.fixture
-def adapter_double_encoded_error():
-    """Adapter-style error payload: double-encoded error message."""
+def double_encoded_error():
+    """Return a double-encoded JSON error message."""
     inner = json.dumps({"error": "Connection failed"})
     return json.dumps(inner)
 
 
 # ==============================================================================
-# Tests: detect_adapter_double_encoding
+# Tests: detect_double_json_encoding
 # ==============================================================================
 
 
-class TestDetectAdapterDoubleEncoding:
-    """Tests for detect_adapter_double_encoding()."""
+class TestDetectDoubleJsonEncoding:
+    """Tests for detect_double_json_encoding()."""
 
-    def test_single_encoded_dict_returns_false(self, sdk_success_payload):
+    def test_single_encoded_dict_returns_false(self):
         """Single-encoded dict JSON should return False."""
-        assert detect_adapter_double_encoding(sdk_success_payload) is False
+        payload = '{"status": "success", "data": [1, 2, 3]}'
+        assert detect_double_json_encoding(payload) is False
 
-    def test_double_encoded_returns_true(self, adapter_double_encoded_success):
+    def test_double_encoded_returns_true(self):
         """Double-encoded JSON should return True."""
-        assert detect_adapter_double_encoding(adapter_double_encoded_success) is True
+        inner = '{"status": "success", "data": [1, 2, 3]}'
+        payload = json.dumps(inner)
+        assert detect_double_json_encoding(payload) is True
 
     def test_non_string_returns_false(self):
         """Non-string input should return False."""
-        assert detect_adapter_double_encoding({"key": "value"}) is False
-        assert detect_adapter_double_encoding([1, 2, 3]) is False
-        assert detect_adapter_double_encoding(None) is False
+        assert detect_double_json_encoding({"key": "value"}) is False
+        assert detect_double_json_encoding([1, 2, 3]) is False
+        assert detect_double_json_encoding(None) is False
 
     def test_plain_text_returns_false(self):
         """Plain text (not JSON) should return False."""
-        assert detect_adapter_double_encoding("Hello World") is False
+        assert detect_double_json_encoding("Hello World") is False
 
     def test_json_string_value_returns_true(self):
         """A JSON string that contains another JSON string."""
-        # Real double encoding: inner is '{"x": 1}', outer is json.dumps of that string
         inner = json.dumps({"x": 1})
         outer = json.dumps(inner)
-        assert detect_adapter_double_encoding(outer) is True
+        assert detect_double_json_encoding(outer) is True
 
 
 # ==============================================================================
@@ -105,9 +107,9 @@ class TestNormalizePayload:
         result = normalize_payload(sdk_success_payload)
         assert result == {"tables": ["film", "actor", "customer"]}
 
-    def test_double_encoded_json(self, adapter_double_encoded_success):
+    def test_double_encoded_json(self, double_encoded_success):
         """Double-encoded JSON should be parsed twice."""
-        result = normalize_payload(adapter_double_encoded_success)
+        result = normalize_payload(double_encoded_success)
         assert result == {"tables": ["film", "actor", "customer"]}
 
     def test_plain_text_returns_as_is(self):
@@ -150,9 +152,9 @@ class TestParseToolOutput:
         assert len(result) == 1
         assert result[0] == {"tables": ["film", "actor", "customer"]}
 
-    def test_adapter_double_encoded(self, adapter_double_encoded_success):
-        """Parse adapter-style double-encoded format."""
-        tool_output = [{"type": "text", "text": adapter_double_encoded_success}]
+    def test_double_encoded_result(self, double_encoded_success):
+        """Parse double-encoded format."""
+        tool_output = [{"type": "text", "text": double_encoded_success}]
         result = parse_tool_output(tool_output)
         assert len(result) == 1
         assert result[0] == {"tables": ["film", "actor", "customer"]}
@@ -185,8 +187,6 @@ class TestParseToolOutput:
         """Dict without 'type' key should be preserved."""
         data = {"tables": ["film"], "count": 1}
         result = parse_tool_output([data])
-        # When dict doesn't have 'type': 'text', and no text/content keys,
-        # it's appended directly
         assert data in result
 
     def test_object_with_text_attribute(self):

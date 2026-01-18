@@ -2,7 +2,7 @@
 
 Provides robust parsing for MCP tool outputs, supporting:
 - Official MCP SDK payloads (single JSON encoding in TextContent.text)
-- Double-encoded JSON strings (for backward compatibility)
+- Double-encoded JSON strings (e.g. stringified JSON within a JSON field)
 
 Payload Shape Reference:
 - SDK: result.content = [TextContent(text='{"key": "value"}')]
@@ -16,10 +16,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def detect_adapter_double_encoding(payload: Any) -> bool:
-    """Detect if payload has adapter-style double JSON encoding.
+def detect_double_json_encoding(payload: Any) -> bool:
+    """Detect if payload has double JSON encoding.
 
-    Adapter payloads often have the JSON stringified twice, so parsing once
+    In some cases, JSON results are stringified twice, so parsing once
     yields another JSON string instead of the final data structure.
 
     Args:
@@ -47,12 +47,12 @@ def detect_adapter_double_encoding(payload: Any) -> bool:
 
 
 def normalize_payload(payload: Any) -> Any:
-    """Normalize SDK or adapter payloads to Python objects.
+    """Normalize SDK or wrapped payloads to Python objects.
 
     Handles:
     - Already-parsed dicts/lists (pass through)
-    - Single-encoded JSON strings (SDK style)
-    - Double-encoded JSON strings (adapter style)
+    - Single-encoded JSON strings
+    - Double-encoded JSON strings
 
     Args:
         payload: The raw payload (string, dict, list, or MCP content object).
@@ -83,7 +83,7 @@ def normalize_payload(payload: Any) -> Any:
     try:
         parsed = json.loads(payload)
 
-        # Check for double-encoding (adapter style)
+        # Check for double-encoding
         if isinstance(parsed, str):
             try:
                 return json.loads(parsed)
@@ -103,7 +103,7 @@ def parse_tool_output(tool_output):
     """Robustly parse MCP tool outputs.
 
     Handles tool outputs that may be wrapped in LangChain Message lists,
-    stringified, or double-encoded. Supports both SDK and adapter payloads.
+    stringified, or double-encoded.
 
     Args:
         tool_output: Raw output from MCP tool invocation.

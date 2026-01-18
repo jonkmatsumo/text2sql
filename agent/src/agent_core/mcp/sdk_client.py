@@ -52,7 +52,14 @@ class MCPClient:
         # Validate transport
         if self.transport not in ("sse", "streamable-http"):
             raise ValueError(
-                f"Unsupported MCP_TRANSPORT: {self.transport}. " "Supported: sse, streamable-http"
+                f"Unsupported MCP_TRANSPORT: {self.transport}. "
+                "Supported by client: sse, streamable-http"
+            )
+
+        if self.transport == "streamable-http":
+            raise ValueError(
+                "MCP_TRANSPORT=streamable-http is not currently supported by the "
+                "mcp-server configuration. Please use 'sse' for production realism."
             )
 
     @asynccontextmanager

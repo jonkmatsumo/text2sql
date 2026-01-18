@@ -39,30 +39,20 @@ async def run_spike():
     print(f"Transport: {transport}")
     print()
 
-    # Import SDK based on transport
-    from mcp import ClientSession
+    # Use MCPClient for unified transport handling and validation
+    from agent_core.mcp import MCPClient
 
-    if transport == "sse":
-        from mcp.client.sse import sse_client
-
-        print("Using SSE transport...")
-        async with sse_client(server_url) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                await _test_session(session)
-
-    elif transport == "streamable-http":
-        from mcp.client.streamable_http import streamable_http_client
-
-        print("Using streamable-http transport...")
-        async with streamable_http_client(server_url) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                await _test_session(session)
-
-    else:
-        print(f"ERROR: Unsupported transport: {transport}")
-        print("Supported: sse, streamable-http")
+    try:
+        client = MCPClient(server_url=server_url, transport=transport)
+        async with client.connect() as mcp:
+            print(f"Connected using {transport}...")
+            # Fetch the raw session from the wrapper to reuse existing test logic
+            await _test_session(mcp._session)
+    except ValueError as ve:
+        print(f"FAIL-FAST ERROR: {ve}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
 
 
@@ -92,10 +82,10 @@ async def _test_session(session):
     print()
 
     # 3. Call execute_sql_query
-    print("--- call_tool('execute_sql_query', {'query': 'SELECT 1 AS test'}) ---")
+    print("--- call_tool('execute_sql_query', {'sql_query': 'SELECT 1 AS test'}) ---")
     try:
         result = await session.call_tool(
-            "execute_sql_query", arguments={"query": "SELECT 1 AS test"}
+            "execute_sql_query", arguments={"sql_query": "SELECT 1 AS test"}
         )
         _print_result(result)
     except Exception as e:
@@ -103,12 +93,15 @@ async def _test_session(session):
     print()
 
     # 4. Test error handling with invalid query
-    print("--- call_tool('execute_sql_query', {'query': 'INVALID SQL'}) ---")
+    print("--- call_tool('execute_sql_query', {'sql_query': 'INVALID SQL'}) ---")
     try:
-        result = await session.call_tool("execute_sql_query", arguments={"query": "INVALID SQL"})
+        result = await session.call_tool(
+            "execute_sql_query", arguments={"sql_query": "INVALID SQL"}
+        )
         _print_result(result)
     except Exception as e:
         print(f"ERROR (expected): {e}")
+
     print()
 
     print("=== Spike Complete ===")

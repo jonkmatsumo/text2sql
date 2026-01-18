@@ -25,7 +25,7 @@ DEFAULT_MCP_TRANSPORT = "sse"
 async def get_mcp_tools():
     """Connect to MCP server and return LangGraph-compatible tool wrappers.
 
-    Uses official MCP SDK (not langchain-mcp-adapters) for tool discovery.
+    Uses official MCP SDK for tool discovery.
 
     The MCP server provides secure, read-only database access through:
     - list_tables: Discover available tables
@@ -168,7 +168,7 @@ async def mcp_tools_context():
 def unpack_mcp_result(result: Any) -> Any:
     """Unpack MCP content into raw value.
 
-    Handles both SDK and legacy adapter response formats.
+    Handles both standard and nested JSON string response formats.
 
     Args:
         result: Raw MCP tool result.
@@ -178,9 +178,7 @@ def unpack_mcp_result(result: Any) -> Any:
     """
     from agent_core.utils.parsing import normalize_payload
 
-    # SDK responses are already normalized by MCPClient.call_tool()
-    # This function handles any remaining edge cases
-    # Handle adapter-style list of content dicts
+    # Handle results wrapped in content list (e.g. from some proxies or older nodes)
     if isinstance(result, list) and result and isinstance(result[0], dict) and "type" in result[0]:
         text_content = ""
         for item in result:
