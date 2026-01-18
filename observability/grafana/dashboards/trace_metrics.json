@@ -315,6 +315,6 @@
   "timezone": "",
   "title": "Text2SQL Trace Metrics",
   "uid": "text2sql-traces",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

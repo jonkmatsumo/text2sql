@@ -14,6 +14,8 @@ services:
       - CONTROL_DB_PASSWORD=${CONTROL_DB_PASSWORD:-control_password}
     volumes:
       - grafana_data:/var/lib/grafana
+      - ${PWD}/observability/grafana/provisioning:/etc/grafana/provisioning
+      - ${PWD}/observability/grafana/dashboards:/etc/grafana/dashboards
     networks:
       - text2sql_net
     depends_on:
