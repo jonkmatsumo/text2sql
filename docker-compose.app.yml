@@ -58,7 +58,7 @@ services:
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-1}
       MEMGRAPH_URI: bolt://memgraph:7687
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      MCP_TRANSPORT: "streamable-http"
+      MCP_TRANSPORT: "sse" # SSE transport verified working (Phase 0 audit)
       SPACY_ENABLED: "true"
     ports:
       - "8000:8000"
@@ -89,6 +89,7 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
       MCP_SERVER_URL: http://mcp-server:8000/messages
+      MCP_TRANSPORT: sse # Must match mcp-server transport setting
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
       DB_HOST: postgres-db
       DB_PORT: 5432
