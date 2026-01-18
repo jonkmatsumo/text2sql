@@ -23,7 +23,6 @@ exporters:
     verbosity: detailed
   otlphttp/worker:
     endpoint: http://otel-worker:4320/v1/traces
-    encoding: json
 
 service:
   pipelines:
