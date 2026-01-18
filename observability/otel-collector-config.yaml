@@ -21,12 +21,15 @@ processors:
 exporters:
   logging:
     verbosity: detailed
-  otlphttp/worker:
-    endpoint: http://otel-worker:4320/v1/traces
+  otlp/worker:
+    endpoint: http://otel-worker:4320
+    tls:
+      insecure: true
+    protocol: http/json
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, attributes]
-      exporters: [logging, otlphttp/worker]
+      exporters: [logging, otlp/worker]
