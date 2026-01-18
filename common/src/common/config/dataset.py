@@ -46,4 +46,4 @@ def get_default_db_name() -> str:
         "synthetic" for synthetic mode, "pagila" for pagila mode.
     """
     mode = get_dataset_mode()
-    return "synthetic" if mode == "synthetic" else "pagila"
+    return "query_target" if mode == "synthetic" else "pagila"

@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-root_password}
-      POSTGRES_DB: ${DB_NAME:-synthetic}
+      POSTGRES_DB: ${DB_NAME:-query_target}
     volumes:
       # Mount initialization scripts (Schema -> Data -> Permissions)
       # They execute in alphanumeric order of filenames
@@ -18,7 +18,7 @@ services:
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-synthetic}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${DB_NAME:-query_target}"]
       interval: 5s
       timeout: 5s
       retries: 10

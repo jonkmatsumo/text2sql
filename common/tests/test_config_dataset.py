@@ -50,11 +50,11 @@ class TestGetDefaultDbName:
     """Tests for get_default_db_name function."""
 
     def test_synthetic_mode_returns_synthetic(self, monkeypatch):
-        """Synthetic mode should return 'synthetic' as db name."""
+        """Synthetic mode should return 'query_target' as db name."""
         monkeypatch.setenv("DATASET_MODE", "synthetic")
         from common.config.dataset import get_default_db_name
 
-        assert get_default_db_name() == "synthetic"
+        assert get_default_db_name() == "query_target"
 
     def test_pagila_mode_returns_pagila(self, monkeypatch):
         """Pagila mode should return 'pagila' as db name."""
@@ -64,8 +64,8 @@ class TestGetDefaultDbName:
         assert get_default_db_name() == "pagila"
 
     def test_default_returns_synthetic(self, monkeypatch):
-        """Default (no DATASET_MODE) should return 'synthetic'."""
+        """Default (no DATASET_MODE) should return 'query_target'."""
         monkeypatch.delenv("DATASET_MODE", raising=False)
         from common.config.dataset import get_default_db_name
 
-        assert get_default_db_name() == "synthetic"
+        assert get_default_db_name() == "query_target"
