@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import gzip
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -257,7 +258,17 @@ async def receive_traces(request: Request):
     # Normalize content-type
     base_content_type = content_type.split(";")[0].strip().lower()
 
+    content_encoded = request.headers.get("content-encoding", "").lower()
+
     body = await request.body()
+    if content_encoded == "gzip":
+        try:
+            body = gzip.decompress(body)
+        except Exception as e:
+            logger.error(f"Failed to decompress gzip body: {e}")
+            return Response(
+                content=f"Decompression error: {e}", status_code=status.HTTP_400_BAD_REQUEST
+            )
     try:
         # Validate content-type
         if base_content_type not in ("application/x-protobuf", "application/json"):

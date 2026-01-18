@@ -22,8 +22,10 @@ exporters:
   logging:
     verbosity: detailed
   otlphttp/worker:
-    endpoint: http://otel-worker:4320/v1/traces
-    encoding: json
+    endpoint: http://otel-worker:4320
+    compression: none
+    tls:
+      insecure: true
 
 service:
   pipelines:
