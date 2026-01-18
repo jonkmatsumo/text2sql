@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP SDK Client Spike Script (Phase 1 - Issue #164).
+r"""MCP SDK Client Spike Script.
 
 Non-production script to validate official MCP Python SDK connectivity.
 
@@ -11,9 +11,9 @@ Requirements:
     - pip install "mcp[cli]"
     - MCP server running on specified URL
 
-Payload Shape Observations (captured for Phase 2):
-    - SDK returns CallToolResult with .content (list of TextContent/etc) and .structuredContent
-    - TextContent.text contains single-encoded JSON (not double-encoded like adapter)
+Payload Observations:
+    - SDK returns CallToolResult with .content (list of TextContent) and .structuredContent
+    - TextContent.text contains single-encoded JSON
     - Error responses: result.isError=True, error message in TextContent
     - Tool schemas available via tool.inputSchema (dict)
 """

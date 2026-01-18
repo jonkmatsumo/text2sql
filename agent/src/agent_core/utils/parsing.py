@@ -1,13 +1,12 @@
-"""MCP Tool Output Parsing Utilities (Phase 2 - Issue #165).
+"""MCP Tool Output Parsing Utilities.
 
-This module provides robust parsing for MCP tool outputs, supporting both:
-1. Official MCP SDK payloads (single JSON encoding in TextContent.text)
-2. Legacy langchain-mcp-adapters payloads (double-encoded JSON strings)
+Provides robust parsing for MCP tool outputs, supporting:
+- Official MCP SDK payloads (single JSON encoding in TextContent.text)
+- Double-encoded JSON strings (for backward compatibility)
 
 Payload Shape Reference:
-- SDK: result.content = [TextContent(text='{"key": "value"}')]  # single-encoded
-- SDK: result.structuredContent = {"key": "value"}  # already parsed (if available)
-- Adapter: response = [{"type": "text", "text": '"{...}"'}]  # double-encoded
+- SDK: result.content = [TextContent(text='{"key": "value"}')]
+- SDK: result.structuredContent = {"key": "value"} (if available)
 """
 
 import json

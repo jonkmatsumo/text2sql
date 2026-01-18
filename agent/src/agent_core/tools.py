@@ -1,13 +1,9 @@
-"""MCP server tool integration for LangGraph (Phase 4 - Issue #167).
+"""MCP server tool integration for LangGraph.
 
-This module provides the bridge between MCP tools and LangGraph nodes:
+This module bridges MCP tools with LangGraph nodes:
 - get_mcp_tools(): Discovers tools from MCP server and wraps them
 - _wrap_tool(): Adds telemetry to tool invocations
 - mcp_tools_context(): Context manager for tool lifecycle
-
-Migration Note (Issue #53):
-Previously used langchain-mcp-adapters MultiServerMCPClient.
-Now uses official MCP SDK via agent_core.mcp.MCPClient.
 """
 
 from contextlib import asynccontextmanager
@@ -21,14 +17,7 @@ from common.config.env import get_env_str
 
 load_dotenv()
 
-# ==============================================================================
-# MCP Transport Configuration (Phase 0 Audit Findings - Issue #163)
-# ==============================================================================
-# Server: mcp-server/src/mcp_server/main.py uses FastMCP v0.9.0+ (pyproject.toml)
-# Transport: SSE verified working; runs mcp.run(transport="sse", path="/messages")
-# Endpoint: /messages is the SSE endpoint; /mcp is NOT valid
-# Default: MCP_TRANSPORT should be "sse" unless streamable-http is explicitly tested
-# ==============================================================================
+# Default transport: SSE on /messages endpoint
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
 DEFAULT_MCP_TRANSPORT = "sse"
 

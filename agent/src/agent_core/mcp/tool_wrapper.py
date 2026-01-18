@@ -1,16 +1,10 @@
-"""LangGraph-Compatible Tool Wrapper (Phase 3 - Issue #166).
+"""LangGraph-Compatible Tool Wrapper.
 
 Wraps MCP tools in a LangGraph-compatible interface with:
 - name: str
 - description: str
 - metadata: dict (schema info)
-- ainvoke(input, config): async invocation with telemetry
-
-Design Decisions (from adapter migration):
-- Preserves tool.name and tool.description from MCP
-- input_schema stored in metadata for downstream consumers
-- ainvoke() signature matches LangGraph/LangChain tool expectations
-- Telemetry wrapping delegated to tools.py _wrap_tool() (Phase 4)
+- ainvoke(input, config): async invocation
 """
 
 import logging

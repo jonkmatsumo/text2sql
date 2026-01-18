@@ -1,15 +1,9 @@
-"""MCP SDK Client Wrapper (Phase 3 - Issue #166).
+"""MCP SDK Client Wrapper.
 
 Thin wrapper around the official MCP Python SDK ClientSession that:
 - Handles SSE and streamable-http transports
 - Provides async context manager for session lifecycle
 - Exposes list_tools() and call_tool() with normalized payloads
-
-Design Decisions (from adapter migration):
-- Uses official mcp.ClientSession instead of langchain_mcp_adapters
-- Payloads are normalized via agent_core.utils.parsing.normalize_payload
-- Transport is explicitly configured via MCP_TRANSPORT env var
-- SSE verified working; streamable-http requires server support
 """
 
 import logging
