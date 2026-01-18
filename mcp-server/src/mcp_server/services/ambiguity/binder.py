@@ -38,7 +38,15 @@ class Candidate:
 
     @property
     def final_score(self) -> float:
-        """Compute weighted final score."""
+        """Compute weighted final score.
+
+        If ontology_match is present and == 1.0, return 1.0 immediately (short-circuit).
+        Otherwise use standard weighted scoring.
+        """
+        # Ontology match is a short-circuit: if present and 1.0, it's a definitive match
+        if self.scores.get("ontology_match") == 1.0:
+            return 1.0
+
         weights = {"lexical": 0.5, "semantic": 0.3, "relational": 0.2}
         return sum(self.scores.get(k, 0.0) * weights.get(k, 0.0) for k in weights)
 
@@ -146,7 +154,50 @@ class CandidateBinder:
         self.rag = RagEngine
 
     def get_candidates(self, mention: Mention, schema_context: List[Any]) -> List[Candidate]:
-        """Enumerate and score candidates for a mention."""
+        """Enumerate and score candidates for a mention.
+
+        If mention.metadata contains an 'ent_id' (canonical ID from ontology),
+        we prioritize exact matches on that ID over lexical/semantic scoring.
+        """
+        # === Phase 1: Ontology-based short-circuit ===
+        # If SpaCy EntityRuler provided a canonical ent_id, check for exact match first
+        ent_id = mention.metadata.get("ent_id")
+        if ent_id:
+            # Search for exact match on table name or column ID
+            for table in schema_context:
+                # Check table ID match
+                if table["name"].lower() == ent_id.lower():
+                    return [
+                        Candidate(
+                            kind="table",
+                            id=table["name"],
+                            label=table.get("description", table["name"]),
+                            scores={"ontology_match": 1.0, "lexical": 1.0, "relational": 1.0},
+                            metadata={"table": table["name"], "matched_via": "ontology"},
+                        )
+                    ]
+                # Check column ID match (format: table.column)
+                for col in table.get("columns", []):
+                    col_id = f"{table['name']}.{col['name']}"
+                    if col_id.lower() == ent_id.lower():
+                        return [
+                            Candidate(
+                                kind="column",
+                                id=col_id,
+                                label=col.get("description", col["name"]),
+                                scores={"ontology_match": 1.0, "lexical": 1.0, "relational": 1.0},
+                                metadata={
+                                    "table": table["name"],
+                                    "column": col["name"],
+                                    "matched_via": "ontology",
+                                },
+                            )
+                        ]
+            # ent_id was provided but no match found in schema_context
+            # Fall through to normal scoring, but mark that ontology lookup failed
+            logger.debug(f"Ontology ent_id '{ent_id}' not found in schema_context, using fallback")
+
+        # === Phase 2: Standard lexical/semantic scoring ===
         candidates = []
         mention_text = mention.text.lower()
 
