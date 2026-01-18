@@ -1,6 +1,8 @@
 import asyncio
 
 import streamlit as st
+
+# isort: split
 from streamlit_app.service.admin import AdminService
 
 st.set_page_config(page_title="Pinned Recommendations", layout="wide")

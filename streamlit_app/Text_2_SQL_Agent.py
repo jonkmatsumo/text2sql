@@ -12,6 +12,7 @@ from pathlib import Path
 import nest_asyncio
 from dotenv import load_dotenv
 
+# isort: split
 import streamlit as st
 
 # Apply nest_asyncio to allow nested event loops (required for MCP SSE client)
