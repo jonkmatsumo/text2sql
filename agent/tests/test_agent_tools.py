@@ -8,17 +8,18 @@ name collisions with mcp-server/tests/test_tools.py when running tests
 from the repo root.
 """
 
+import importlib.machinery
+import importlib.util
 import os
 import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import importlib.util
-import importlib.machinery
-import types
 
 # Mock the mcp SDK only if not installed, to allow import of agent_core modules
 if importlib.util.find_spec("mcp") is None:
+
     def create_mock_module(name):
         mock = types.ModuleType(name)
         mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
@@ -28,15 +29,14 @@ if importlib.util.find_spec("mcp") is None:
 
     mcp_mock = create_mock_module("mcp")
     mcp_mock.ClientSession = MagicMock()
-    
+
     mcp_types = create_mock_module("mcp.types")
     mcp_types.TextContent = MagicMock()
     mcp_mock.types = mcp_types
-    
+
     create_mock_module("mcp.client")
     create_mock_module("mcp.client.sse")
     create_mock_module("mcp.client.streamable_http")
-
 
 
 from agent_core.mcp_client.sdk_client import ToolInfo  # noqa: E402

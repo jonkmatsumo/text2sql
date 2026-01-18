@@ -1,14 +1,15 @@
 """Unit tests for router node and ambiguity detection."""
 
+import importlib.machinery
+import importlib.util
 import json
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
-import importlib.util
-import importlib.machinery
 import types
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Mock MCP SDK only if not installed
 if importlib.util.find_spec("mcp") is None:
+
     def create_mock_module(name):
         mock = types.ModuleType(name)
         mock.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
@@ -18,14 +19,13 @@ if importlib.util.find_spec("mcp") is None:
 
     mcp_mock = create_mock_module("mcp")
     mcp_mock.ClientSession = MagicMock()
-    
+
     mcp_types = create_mock_module("mcp.types")
     mcp_mock.types = mcp_types
-    
+
     create_mock_module("mcp.client")
     create_mock_module("mcp.client.sse")
     create_mock_module("mcp.client.streamable_http")
-
 
 
 import pytest  # noqa: E402
