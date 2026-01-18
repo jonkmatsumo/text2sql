@@ -2,10 +2,26 @@ name: Golden Dataset Evaluation
 
 on:
   workflow_dispatch:
+    inputs:
+      dataset_mode:
+        description: "Dataset mode"
+        required: true
+        default: "synthetic"
+        type: choice
+        options:
+          - synthetic
+          - pagila
+      db_name:
+        description: "Database name"
+        required: false
+        default: "query_target"
+        type: string
 
 env:
   # Test database credentials (ephemeral CI database, not production)
   TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'ci_test_password_placeholder' }}
+  DB_NAME: ${{ github.event.inputs.db_name || 'query_target' }}
+  DATASET_MODE: ${{ github.event.inputs.dataset_mode || 'synthetic' }}
 
 jobs:
   evaluate:
@@ -18,7 +34,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ${{ env.TEST_DB_PASSWORD }}
-          POSTGRES_DB: pagila
+          POSTGRES_DB: ${{ env.DB_NAME || 'query_target' }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -53,20 +69,20 @@ jobs:
           PGPASSWORD: ${{ env.TEST_DB_PASSWORD }}
         run: |
           # Run database initialization scripts
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/01-schema.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/02-data.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/03-permissions.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/04-vector-setup.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/05-multi-tenancy.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/06-few-shot.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/07-caching.sql || true
-          psql -h localhost -U postgres -d pagila -f database/init-scripts/09-golden-dataset.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/01-schema.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/02-data.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/03-permissions.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/04-vector-setup.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/05-multi-tenancy.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/06-few-shot.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/07-caching.sql || true
+          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/09-golden-dataset.sql || true
 
       - name: Seed Golden Dataset
         env:
           DB_HOST: localhost
           DB_PORT: 5432
-          DB_NAME: pagila
+          DB_NAME: ${{ env.DB_NAME }}
           DB_USER: postgres
           DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
@@ -78,7 +94,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           DB_HOST: localhost
           DB_PORT: 5432
-          DB_NAME: pagila
+          DB_NAME: ${{ env.DB_NAME }}
           DB_USER: postgres
           DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
@@ -89,7 +105,7 @@ jobs:
         env:
           DB_HOST: localhost
           DB_PORT: 5432
-          DB_NAME: pagila
+          DB_NAME: ${{ env.DB_NAME }}
           DB_USER: postgres
           DB_PASS: ${{ env.TEST_DB_PASSWORD }}
         run: |
