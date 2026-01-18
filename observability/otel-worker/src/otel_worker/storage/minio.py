@@ -51,7 +51,7 @@ def upload_trace_blob(trace_id: str, service_name: str, payload_dict: dict) -> s
         io.BytesIO(data_bytes),
         length=len(data_bytes),
         content_type="application/json",
-        content_encoding="gzip",
+        metadata={"Content-Encoding": "gzip"},
     )
 
     logger.info(f"Uploaded trace blob to MinIO: {object_name}")
