@@ -1,4 +1,4 @@
-"""Unit tests for MCP server tool integration (Phase 4 - Issue #167).
+"""Unit tests for MCP server tool integration.
 
 Tests for get_mcp_tools() using MCPClient (official MCP SDK).
 
@@ -229,3 +229,44 @@ class TestGetMcpTools:
             assert hasattr(tool, "name")
             assert hasattr(tool, "ainvoke")
             assert tool.name == "test_tool"
+
+    @pytest.mark.asyncio
+    async def test_tool_ainvoke_with_config_parameter(self):
+        """Test that tool.ainvoke works with config parameter (LangGraph compat).
+
+        LangGraph passes config dict to tools for tracing/callbacks. The wrapper
+        must accept config=None or config=dict without raising.
+        """
+        mock_tool_infos = [create_mock_tool_info("test_tool")]
+
+        # Patch telemetry at the import location (inside _wrap_tool)
+        with patch("agent_core.telemetry.telemetry") as mock_telemetry:
+            mock_span = MagicMock()
+            mock_span.__enter__ = MagicMock(return_value=mock_span)
+            mock_span.__exit__ = MagicMock(return_value=None)
+            mock_telemetry.start_span.return_value = mock_span
+
+            with patch("agent_core.tools.MCPClient") as mock_client_class:
+                # Setup discovery mock
+                mock_client = MagicMock()
+                mock_connect_cm = AsyncMock()
+                mock_connect_cm.__aenter__.return_value = mock_client
+                mock_connect_cm.__aexit__.return_value = None
+                mock_client_class.return_value.connect.return_value = mock_connect_cm
+                mock_client.list_tools = AsyncMock(return_value=mock_tool_infos)
+
+                # Setup invocation mock
+                mock_client.call_tool = AsyncMock(return_value={"tables": ["film"]})
+
+                tools = await get_mcp_tools()
+                tool = tools[0]
+
+                # Test with config=None (default)
+                result1 = await tool.ainvoke({"query": "test"})
+                assert result1 == {"tables": ["film"]}
+
+                # Test with config=dict (LangGraph style)
+                result2 = await tool.ainvoke(
+                    {"query": "test2"}, config={"tags": ["test"], "callbacks": []}
+                )
+                assert result2 == {"tables": ["film"]}
