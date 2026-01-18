@@ -9,7 +9,8 @@ dependencies = [
     "langchain-openai>=0.2.0",
     "langchain-postgres>=0.0.16",  # For pgvector
     "psycopg2-binary>=2.9.0",     # DB Driver
-    "langchain-mcp-adapters>=0.1.0",  # For connecting to Phase 1 Server
+    "langchain-mcp-adapters>=0.1.0",  # For connecting to Phase 1 Server (DEPRECATED: removal in Phase 6)
+    "mcp>=1.0.0",  # Official MCP SDK - Phase 1 spike, production use in Phase 4
     "pydantic>=2.5.0",
     "python-dotenv>=1.0.0",
     "mlflow==3.8.1",
