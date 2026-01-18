@@ -40,7 +40,7 @@ async def run_spike():
     print()
 
     # Use MCPClient for unified transport handling and validation
-    from agent_core.mcp import MCPClient
+    from agent_core.mcp_client import MCPClient
 
     try:
         client = MCPClient(server_url=server_url, transport=transport)

@@ -8,7 +8,7 @@ Exports:
 - MCPToolWrapper: LangGraph-compatible tool with ainvoke()
 """
 
-from agent_core.mcp.sdk_client import MCPClient
-from agent_core.mcp.tool_wrapper import MCPToolWrapper
+from agent_core.mcp_client.sdk_client import MCPClient
+from agent_core.mcp_client.tool_wrapper import MCPToolWrapper
 
 __all__ = ["MCPClient", "MCPToolWrapper"]

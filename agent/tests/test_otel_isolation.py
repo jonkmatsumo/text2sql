@@ -21,10 +21,12 @@ import os
 from unittest.mock import MagicMock
 if "mcp" not in sys.modules:
     mcp_mock = MagicMock()
+    mcp_mock.__path__ = []
     sys.modules["mcp"] = mcp_mock
-    sys.modules["mcp.client"] = mcp_mock
-    sys.modules["mcp.client.sse"] = mcp_mock
-    sys.modules["mcp.client.streamable_http"] = mcp_mock
+    sys.modules["mcp.types"] = MagicMock()
+    sys.modules["mcp.client"] = MagicMock()
+    sys.modules["mcp.client.sse"] = MagicMock()
+    sys.modules["mcp.client.streamable_http"] = MagicMock()
 
 # Set backend
 os.environ["TELEMETRY_BACKEND"] = "{backend}"

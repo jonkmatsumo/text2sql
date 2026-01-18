@@ -17,15 +17,17 @@ import pytest
 # Mock the mcp SDK before importing agent_core modules that depend on it
 if "mcp" not in sys.modules:
     mcp_mock = MagicMock()
+    mcp_mock.__path__ = []  # Make it look like a package
     mcp_mock.ClientSession = MagicMock()
     mcp_mock.types = MagicMock()
     mcp_mock.types.TextContent = MagicMock()
     sys.modules["mcp"] = mcp_mock
+    sys.modules["mcp.types"] = mcp_mock.types
     sys.modules["mcp.client"] = MagicMock()
     sys.modules["mcp.client.sse"] = MagicMock()
     sys.modules["mcp.client.streamable_http"] = MagicMock()
 
-from agent_core.mcp.sdk_client import ToolInfo  # noqa: E402
+from agent_core.mcp_client.sdk_client import ToolInfo  # noqa: E402
 from agent_core.tools import get_mcp_tools  # noqa: E402
 
 

@@ -72,3 +72,4 @@ database/query-target/corpus/*
 !database/query-target/README.md
 local-data/
 mlruns/
+o/

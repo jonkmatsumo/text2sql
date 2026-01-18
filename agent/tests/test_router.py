@@ -7,9 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # Mock MCP SDK before importing agent_core modules
 if "mcp" not in sys.modules:
     mcp_mock = MagicMock()
+    mcp_mock.__path__ = []  # Make it look like a package
     mcp_mock.ClientSession = MagicMock()
     mcp_mock.types = MagicMock()
     sys.modules["mcp"] = mcp_mock
+    sys.modules["mcp.types"] = mcp_mock.types
     sys.modules["mcp.client"] = MagicMock()
     sys.modules["mcp.client.sse"] = MagicMock()
     sys.modules["mcp.client.streamable_http"] = MagicMock()

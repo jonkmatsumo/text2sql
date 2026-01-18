@@ -13,8 +13,11 @@ import pytest
 @pytest.fixture(autouse=True)
 def mock_agent_dependencies():
     """Mock agent dependencies for each test to avoid state leakage."""
+    mcp_mock = MagicMock()
+    mcp_mock.__path__ = []
     mocks = {
-        "mcp": MagicMock(),
+        "mcp": mcp_mock,
+        "mcp.types": MagicMock(),
         "mcp.client": MagicMock(),
         "mcp.client.sse": MagicMock(),
         "mcp.client.streamable_http": MagicMock(),

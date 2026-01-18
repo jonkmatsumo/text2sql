@@ -5,13 +5,17 @@ import inspect
 import sys
 from unittest.mock import MagicMock
 
-# Mock MCP SDK to allow import of agent_core.tools during collection
+# Mock the mcp SDK before importing agent_core.graph
 if "mcp" not in sys.modules:
     mcp_mock = MagicMock()
+    mcp_mock.__path__ = []  # Make it look like a package
+    mcp_mock.ClientSession = MagicMock()
+    mcp_mock.types = MagicMock()
     sys.modules["mcp"] = mcp_mock
-    sys.modules["mcp.client"] = mcp_mock
-    sys.modules["mcp.client.sse"] = mcp_mock
-    sys.modules["mcp.client.streamable_http"] = mcp_mock
+    sys.modules["mcp.types"] = mcp_mock.types
+    sys.modules["mcp.client"] = MagicMock()
+    sys.modules["mcp.client.sse"] = MagicMock()
+    sys.modules["mcp.client.streamable_http"] = MagicMock()
 
 import pytest
 from agent_core.graph import with_telemetry_context
