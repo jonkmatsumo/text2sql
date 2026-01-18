@@ -3,8 +3,11 @@ import json
 
 import nest_asyncio
 import pandas as pd
+
+# isort: split
 import streamlit as st
 
+# isort: split
 from streamlit_app.service.admin import AdminService  # noqa: E402
 
 # Allow nested asyncio loops for MCP

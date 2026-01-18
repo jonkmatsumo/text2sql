@@ -55,9 +55,21 @@ async def lifespan(app):
 
     This ensures the database pool is created in the same event loop
     as the server, avoiding "Event loop is closed" errors.
+
+    Tracks initialization status via InitializationState for health endpoint.
     """
-    # Startup: Initialize database connection pool
-    await Database.init()
+    from mcp_server.health import init_state
+
+    init_state.start()
+
+    # Startup: Initialize database connection pool (required)
+    try:
+        await Database.init()
+        init_state.record_success("database", required=True)
+    except Exception as e:
+        logger.exception("Database initialization failed")
+        init_state.record_failure("database", e, required=True)
+        # Database is critical - we can still start but mark not ready
 
     # P0: Fail-fast validation — ensure query-target schema exists
     # This MUST run before any other startup logic that depends on schema
@@ -72,11 +84,13 @@ async def lifespan(app):
 
         # P2: Warn about optional quality files (non-fatal)
         warn_if_quality_files_missing()
+        init_state.record_success("schema_validation", required=True)
 
     except SystemExit:
         raise  # Re-raise for hard failure (validation failed)
     except Exception as e:
-        logger.error(f"Startup validation failed unexpectedly: {e}")
+        logger.exception("Startup validation failed unexpectedly")
+        init_state.record_failure("schema_validation", e, required=True)
         raise RuntimeError("Query-target schema validation failed") from e
 
     # P3: Emit few-shot registry status (quality observability)
@@ -86,48 +100,65 @@ async def lifespan(app):
         examples = await RegistryService.list_examples(tenant_id=1, limit=1000)
         examples_count = len(examples)
         logger.info(
-            f"event=fewshot_registry_status examples_count={examples_count} "
-            f"examples_source=query_pairs loaded={examples_count > 0}"
+            "event=fewshot_registry_status examples_count=%d "
+            "examples_source=query_pairs loaded=%s",
+            examples_count,
+            examples_count > 0,
         )
         if examples_count == 0:
             logger.warning(
                 "event=fewshot_registry_empty "
                 "impact='Generation quality may be degraded without few-shot examples'"
             )
+        init_state.record_success("registry_status", required=False)
     except Exception as e:
-        logger.warning(f"Failed to check registry status: {e}")
+        logger.warning("Failed to check registry status: %s", e)
+        init_state.record_failure("registry_status", e, required=False)
 
-    # Initialize NLP patterns from DB
+    # Initialize NLP patterns from DB (optional - fallback behavior exists)
     try:
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
         service = CanonicalizationService.get_instance()
         await service.reload_patterns()
+        init_state.record_success("nlp_patterns", required=False)
     except Exception as e:
-        print(f"Warning: Failed to load NLP patterns: {e}")
+        logger.exception("NLP patterns initialization failed")
+        init_state.record_failure("nlp_patterns", e, required=False)
 
-    # Maintenance: Prune legacy cache entries
+    # Maintenance: Prune legacy cache entries (optional)
     try:
         from mcp_server.services.cache.service import prune_legacy_entries
 
         count = await prune_legacy_entries()
         if count > 0:
-            print(f"🧹 Pruned {count} legacy cache entries on startup")
+            logger.info("Pruned %d legacy cache entries on startup", count)
+        init_state.record_success("cache_pruning", required=False)
     except Exception as e:
-        print(f"Warning: Cache pruning failed: {e}")
+        logger.exception("Cache pruning failed")
+        init_state.record_failure("cache_pruning", e, required=False)
 
-    # Check if schema_embeddings table is empty and try to index
-    # This is optional - server should still work without it
+    # Check if schema_embeddings table is empty and try to index (optional)
     try:
         from mcp_server.services.rag import index_all_tables
 
         async with Database.get_connection() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM public.schema_embeddings")
             if count == 0:
-                print("Schema embeddings table is empty. Starting indexing...")
+                logger.info("Schema embeddings table is empty. Starting indexing...")
                 await index_all_tables()
+        init_state.record_success("schema_embeddings", required=False)
     except Exception as e:
-        print(f"Warning: Index check or indexing failed: {e}")
+        logger.exception("Schema embeddings indexing failed")
+        init_state.record_failure("schema_embeddings", e, required=False)
+
+    init_state.complete()
+
+    if init_state.is_ready:
+        logger.info("MCP server initialization complete - ready")
+    else:
+        failed = [c.name for c in init_state.failed_checks]
+        logger.warning("MCP server initialization complete with failures: %s", failed)
 
     yield
 
@@ -140,6 +171,37 @@ mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 
 # Register all tools via the central registry
 register_all(mcp)
+
+
+# Add health endpoint for readiness checks
+# FastMCP exposes underlying Starlette app via mcp._app or mcp.http_app
+try:
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def health_handler(request):
+        """Health/readiness endpoint reflecting initialization status.
+
+        Returns:
+            200 with ready=true if all required checks passed
+            503 with ready=false and failure details if any required check failed
+        """
+        from mcp_server.health import init_state
+
+        status = init_state.as_dict()
+        http_status = 200 if init_state.is_ready else 503
+        return JSONResponse(status, status_code=http_status)
+
+    # Access the underlying Starlette app and add route
+    if hasattr(mcp, "_app") and mcp._app is not None:
+        mcp._app.routes.append(Route("/health", health_handler, methods=["GET"]))
+        logger.info("Registered /health endpoint on _app")
+    elif hasattr(mcp, "http_app"):
+        # http_app is a factory - we can't add routes to it directly here
+        # Route will be added when the app is created
+        logger.info("Health endpoint will be registered when HTTP app is created")
+except ImportError:
+    logger.warning("Could not import starlette - /health endpoint not available")
 
 
 # GLOBAL PATCH: Apply OTEL Instrumentation via Factory Wrapper

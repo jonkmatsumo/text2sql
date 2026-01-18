@@ -62,7 +62,20 @@ class AdminService:
 
     @staticmethod
     async def _call_tool(tool_name: str, args: dict) -> Any:
-        """Invoke an MCP admin tool safely."""
+        """Invoke an MCP admin tool safely.
+
+        Handles ExceptionGroups from asyncio TaskGroups by unwrapping single-exception
+        groups to surface meaningful error messages. Logs full traceback for debugging.
+        """
+        import logging
+
+        from streamlit_app.utils.exceptions import (
+            is_single_exception_group,
+            unwrap_single_exception_group,
+        )
+
+        logger = logging.getLogger(__name__)
+
         try:
             from agent_core.tools import mcp_tools_context, unpack_mcp_result
 
@@ -76,7 +89,19 @@ class AdminService:
             # Use central unpacking utility
             return unpack_mcp_result(result)
         except Exception as e:
-            return {"error": str(e)}
+            # Handle ExceptionGroups from asyncio TaskGroups
+            if is_single_exception_group(e):
+                # Log the full traceback of the original exception group
+                logger.exception(
+                    "Tool '%s' raised ExceptionGroup with single root cause",
+                    tool_name,
+                )
+                # Unwrap to get meaningful error message
+                unwrapped = unwrap_single_exception_group(e)
+                return {"error": str(unwrapped)}
+            else:
+                # Multi-exception groups or regular exceptions: preserve original behavior
+                return {"error": str(e)}
 
     @classmethod
     async def list_interactions(
