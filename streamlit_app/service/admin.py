@@ -87,7 +87,18 @@ class AdminService:
                 result = await tool.ainvoke(args, config={})
 
             # Use central unpacking utility
-            return unpack_mcp_result(result)
+            unpacked = unpack_mcp_result(result)
+
+            # Robustness: Handle FastMCP/SDK wrappers like {"result": [...]}
+            if (
+                isinstance(unpacked, dict)
+                and "result" in unpacked
+                and len(unpacked) == 1
+                and not tool_name == "lookup_cache"  # Preserve for specific tools if needed
+            ):
+                return unpacked["result"]
+
+            return unpacked
         except Exception as e:
             # Handle ExceptionGroups from asyncio TaskGroups
             if is_single_exception_group(e):
