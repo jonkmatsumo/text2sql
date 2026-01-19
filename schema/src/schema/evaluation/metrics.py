@@ -12,16 +12,17 @@ class MetricSuiteV1:
     SQL Evaluation Metrics Suite V1.
 
     Provides deterministic structural and exact-match scores for SQL comparison.
+    Follows the locked Metrics V1 Spec.
     """
 
-    # Hardcoded weights (must sum to 1.0)
+    # Locked Weights (Must sum to 1.0)
     WEIGHTS = {
-        "table_overlap": 0.2,
-        "join_similarity": 0.2,
+        "table_overlap": 0.35,
+        "join_similarity": 0.15,
         "aggregation_match": 0.15,
-        "groupby_match": 0.15,
-        "predicate_similarity": 0.2,
-        "limit_match": 0.1,
+        "groupby_match": 0.10,
+        "predicate_similarity": 0.15,
+        "limit_match": 0.10,
     }
 
     @classmethod
@@ -41,59 +42,77 @@ class MetricSuiteV1:
         if not generated_sql:
             return cls._empty_metrics(expected_sql, ["Missing generated SQL"])
 
-        # 1. Exact Match via Canonicalization
-        exact_match = cls.check_exact_match(generated_sql, expected_sql)
+        # 1. Exact Match via Canonicalization and Parse Failure Handling
+        exact_match, gen_ast, exp_ast, parse_errors = cls._compute_exact_match_and_asts(
+            generated_sql, expected_sql
+        )
 
         # 2. Structural Subscores
-        try:
-            gen_ast = sqlglot.parse_one(generated_sql, read="postgres")
-            exp_ast = sqlglot.parse_one(expected_sql, read="postgres")
-
+        # if either parse fails: structural_score = 1.0 if exact_match True else 0.0
+        if gen_ast is None or exp_ast is None:
+            structural_score = 1.0 if exact_match else 0.0
+            subscores = {k: 1.0 if exact_match else 0.0 for k in cls.WEIGHTS}
+        else:
             subscores = cls.compute_subscores(gen_ast, exp_ast)
-
             # Weighted aggregation
             structural_score = sum(subscores[k] * cls.WEIGHTS[k] for k in cls.WEIGHTS)
 
-            return {
-                "exact_match": exact_match,
-                "structural_score": round(structural_score, 4),
-                "subscores": {k: round(v, 4) for k, v in subscores.items()},
-                "generated_tables": cls._get_tables(gen_ast),
-                "expected_tables": cls._get_tables(exp_ast),
-                "parse_errors": [],
-            }
+        return {
+            "exact_match": exact_match,
+            "structural_score": round(structural_score, 4),
+            "subscores": {k: round(v, 4) for k, v in subscores.items()},
+            "generated_tables": cls._get_tables(gen_ast) if gen_ast else [],
+            "expected_tables": cls._get_tables(exp_ast) if exp_ast else [],
+            "parse_errors": parse_errors,
+        }
 
+    @classmethod
+    def _compute_exact_match_and_asts(
+        cls, sql1: str, sql2: str
+    ) -> tuple[bool, Optional[exp.Expression], Optional[exp.Expression], List[str]]:
+        """
+        Compute exact match and return ASTs if they parse.
+
+        Follows the spec for parse failure behavior.
+        """
+        gen_ast = None
+        exp_ast = None
+        parse_errors = []
+
+        try:
+            gen_ast = sqlglot.parse_one(sql1, read="postgres")
         except Exception as e:
-            parse_errors = [str(e)]
-            # If expected_sql fails to parse (shouldn't happen in golden),
-            # we still return a failure result
-            try:
-                exp_ast = sqlglot.parse_one(expected_sql, read="postgres")
-                expected_tables = cls._get_tables(exp_ast)
-            except Exception:
-                expected_tables = []
-                parse_errors.append(f"Expected SQL parse error: {e}")
+            parse_errors.append(f"Generated SQL parse error: {str(e)}")
 
-            return {
-                "exact_match": False,
-                "structural_score": 0.0,
-                "subscores": {k: 0.0 for k in cls.WEIGHTS},
-                "generated_tables": [],
-                "expected_tables": expected_tables,
-                "parse_errors": parse_errors,
-            }
+        try:
+            exp_ast = sqlglot.parse_one(sql2, read="postgres")
+        except Exception as e:
+            parse_errors.append(f"Expected SQL parse error: {str(e)}")
+
+        # Case 1: Both parse
+        if gen_ast is not None and exp_ast is not None:
+            can1 = gen_ast.sql(dialect="postgres").lower()
+            can2 = exp_ast.sql(dialect="postgres").lower()
+            return (can1 == can2), gen_ast, exp_ast, parse_errors
+
+        # Case 2: Both fail to parse
+        if gen_ast is None and exp_ast is None:
+            norm1 = " ".join(sql1.lower().split())
+            norm2 = " ".join(sql2.lower().split())
+            return (norm1 == norm2), None, None, parse_errors
+
+        # Case 3: One fails to parse
+        return False, gen_ast, exp_ast, parse_errors
 
     @staticmethod
     def check_exact_match(sql1: str, sql2: str) -> bool:
-        """Check if two SQL queries are exactly the same after canonicalization."""
+        """Lightweight wrapper for check_exact_match."""
         try:
-            # Canonicalize using sqlglot
-            # Lowercase canonicalized SQL to handle case-insensitive identifiers
             can1 = sqlglot.parse_one(sql1, read="postgres").sql(dialect="postgres").lower()
             can2 = sqlglot.parse_one(sql2, read="postgres").sql(dialect="postgres").lower()
             return can1 == can2
         except Exception:
-            # Fallback to whitespace normalization if parsing fails
+            # Fallback for simple calls without full compute_all logic
             norm1 = " ".join(sql1.lower().split())
             norm2 = " ".join(sql2.lower().split())
             return norm1 == norm2
@@ -137,84 +156,110 @@ class MetricSuiteV1:
 
     @classmethod
     def _score_table_overlap(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
+        """Compute table overlap similarity."""
         gen_tables = set(cls._get_tables(gen))
         exp_tables = set(cls._get_tables(exp_ast))
         return cls._jaccard(gen_tables, exp_tables)
 
     @classmethod
     def _score_join_similarity(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
-        gen_joins = {j.sql().lower() for j in gen.find_all(exp.Join)}
-        exp_joins = {j.sql().lower() for j in exp_ast.find_all(exp.Join)}
-        return cls._jaccard(gen_joins, exp_joins)
+        """Compute normalized join count difference."""
+        gen_count = len(list(gen.find_all(exp.Join)))
+        exp_count = len(list(exp_ast.find_all(exp.Join)))
+
+        if gen_count == exp_count:
+            return 1.0
+
+        diff = abs(gen_count - exp_count)
+        max_count = max(gen_count, exp_count, 1)
+        return max(0.0, 1.0 - diff / max_count)
 
     @classmethod
     def _score_aggregation_match(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
-        agg_types = (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max)
+        """Compute boolean aggregation presence match."""
+        agg_types = (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max, exp.AggFunc)
 
-        def get_aggs(ast):
-            # Map of agg_type_name -> count
-            counts = {}
-            for node in ast.find_all(agg_types):
-                name = type(node).__name__
-                counts[name] = counts.get(name, 0) + 1
-            return counts
+        gen_has_agg = gen.find(agg_types) is not None
+        exp_has_agg = exp_ast.find(agg_types) is not None
 
-        gen_aggs = get_aggs(gen)
-        exp_aggs = get_aggs(exp_ast)
-
-        if not gen_aggs and not exp_aggs:
-            return 1.0
-
-        all_keys = set(gen_aggs.keys()) | set(exp_aggs.keys())
-        matches = 0
-        for k in all_keys:
-            matches += min(gen_aggs.get(k, 0), exp_aggs.get(k, 0))
-
-        total = sum(max(gen_aggs.get(k, 0), exp_aggs.get(k, 0)) for k in all_keys)
-        return matches / total if total > 0 else 1.0
+        return 1.0 if gen_has_agg == exp_has_agg else 0.0
 
     @classmethod
     def _score_groupby_match(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
-        def get_group_cols(ast):
-            group = ast.find(exp.Group)
-            if not group:
-                return set()
-            return {col.sql().lower() for col in group.find_all(exp.Column)}
+        """Compute boolean GROUP BY presence match."""
+        gen_has_gb = gen.find(exp.Group) is not None
+        exp_has_gb = exp_ast.find(exp.Group) is not None
 
-        gen_cols = get_group_cols(gen)
-        exp_cols = get_group_cols(exp_ast)
-        return cls._jaccard(gen_cols, exp_cols)
+        return 1.0 if gen_has_gb == exp_has_gb else 0.0
 
     @classmethod
     def _score_predicate_similarity(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
-        def get_predicates(ast):
+        """Compute predicate TYPE set Jaccard similarity."""
+
+        def get_predicate_types(ast: exp.Expression) -> Set[str]:
+            types = set()
             where = ast.find(exp.Where)
             if not where:
-                return set()
-            # This is a bit naive, but we'll extract individual binary expressions
-            predicates = set()
-            for pred in where.find_all((exp.Binary, exp.In, exp.Between)):
-                predicates.add(pred.sql().lower())
-            return predicates
+                return types
 
-        gen_preds = get_predicates(gen)
-        exp_preds = get_predicates(exp_ast)
-        return cls._jaccard(gen_preds, exp_preds)
+            # equality: EQ
+            if where.find(exp.EQ):
+                types.add("equality")
+
+            # range: GT, GTE, LT, LTE, Between
+            if where.find((exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Between)):
+                types.add("range")
+
+            # in: In
+            if where.find(exp.In):
+                types.add("in")
+
+            # like: Like, ILike
+            if where.find((exp.Like, exp.ILike)):
+                types.add("like")
+
+            # null_check: Is (IS NULL / IS NOT NULL)
+            if where.find(exp.Is):
+                types.add("null_check")
+
+            return types
+
+        gen_types = get_predicate_types(gen)
+        exp_types = get_predicate_types(exp_ast)
+        return cls._jaccard(gen_types, exp_types)
 
     @classmethod
     def _score_limit_match(cls, gen: exp.Expression, exp_ast: exp.Expression) -> float:
-        def get_limit(ast):
+        """Compute LIMIT match score per spec."""
+
+        def get_limit_val(ast: exp.Expression) -> Optional[int]:
             limit = ast.find(exp.Limit)
             if not limit:
                 return None
-            return limit.expression.sql().lower()
+            try:
+                return int(limit.expression.name)
+            except (ValueError, TypeError, AttributeError):
+                return -1  # Sentinel if it's an expression like '10 + 5'
 
-        gen_limit = get_limit(gen)
-        exp_limit = get_limit(exp_ast)
+        gen_limit = get_limit_val(gen)
+        exp_limit = get_limit_val(exp_ast)
+
+        if gen_limit is None and exp_limit is None:
+            return 1.0
+        if gen_limit is None or exp_limit is None:
+            return 0.0
 
         if gen_limit == exp_limit:
             return 1.0
-        return 0.0
+
+        # Formula: max(0.0, 1.0 - |gen - exp| / max(gen, exp))
+        # Handle sentinel values
+        if gen_limit < 0 or exp_limit < 0:
+            return 0.0
+
+        diff = abs(gen_limit - exp_limit)
+        max_limit = max(gen_limit, exp_limit, 1)
+        return max(0.0, 1.0 - diff / max_limit)
 
     @classmethod
     def _empty_metrics(cls, expected_sql: str, errors: List[str]) -> Dict[str, Any]:

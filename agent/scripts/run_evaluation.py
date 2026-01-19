@@ -28,6 +28,8 @@ from golden import (  # noqa: E402
     load_test_cases,
 )
 
+from schema.evaluation.metrics import MetricSuiteV1  # noqa: E402
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -178,7 +180,6 @@ async def evaluate_test_case(
     test_id = test_case["test_id"]
     question = test_case["question"]
     ground_truth_sql = test_case.get("ground_truth_sql")
-    expected_row_count = test_case.get("expected_row_count")
 
     print(f"\n[Test {test_id}] {question}")
 
@@ -207,47 +208,25 @@ async def evaluate_test_case(
         actual_result = result.get("query_result")
         error = result.get("error")
 
-        # Determine correctness
-        is_correct = False
+        # Determine Metrics V1
+        metrics = MetricSuiteV1.compute_all(generated_sql, ground_truth_sql or "")
+        is_correct = metrics["exact_match"]
         error_message = None
 
         if error:
             error_message = str(error)
-        elif generated_sql and actual_result is not None:
-            # Validate result shape
+        elif not generated_sql:
+            error_message = "No SQL generated"
+        elif actual_result is not None:
+            # Validate result shape (legacy check)
             shape_valid, shape_error = validate_result_shape(actual_result, test_case)
             if not shape_valid:
                 error_message = shape_error
-            else:
-                # Execute ground truth SQL to compare (if available)
-                if ground_truth_sql:
-                    try:
-                        expected_result = await execute_ground_truth_sql(
-                            ground_truth_sql, tenant_id
-                        )
-                        actual_row_count = len(actual_result)
-                        expected_row_count_actual = len(expected_result)
-
-                        if expected_row_count is not None:
-                            is_correct = actual_row_count == expected_row_count
-                        else:
-                            # Compare first row if available
-                            if actual_result and expected_result:
-                                is_correct = (
-                                    actual_row_count == expected_row_count_actual
-                                    and actual_result[0] == expected_result[0]
-                                )
-                            else:
-                                is_correct = actual_row_count == expected_row_count_actual
-                    except Exception as e:
-                        error_message = f"Ground truth execution failed: {e}"
-                else:
-                    # No ground truth SQL, just check shape
-                    is_correct = True
 
         status = "✓ PASS" if is_correct else "✗ FAIL"
         print(
-            f"  {status} - Rows: {len(actual_result) if actual_result else 0}, "
+            f"  {status} - EM: {is_correct}, Structural: {metrics['structural_score']}, "
+            f"Rows: {len(actual_result) if actual_result else 0}, "
             f"Time: {execution_time_ms}ms"
         )
         if error_message:
@@ -256,6 +235,12 @@ async def evaluate_test_case(
         return {
             "test_id": test_id,
             "is_correct": is_correct,
+            "exact_match": metrics["exact_match"],
+            "structural_score": metrics["structural_score"],
+            "subscores": metrics["subscores"],
+            "generated_tables": metrics["generated_tables"],
+            "expected_tables": metrics["expected_tables"],
+            "parse_errors": metrics["parse_errors"],
             "execution_time_ms": execution_time_ms,
             "error_message": error_message,
         }
@@ -450,21 +435,50 @@ async def run_evaluation_suite(
         print("No tests executed (all skipped or dry run).")
         return {"total": 0, "passed": 0, "failed": 0, "accuracy": 0}
 
-    passed = sum(1 for r in evaluated if r["is_correct"])
+    passed = sum(1 for r in evaluated if r["is_correct"])  # is_correct is exact_match
     failed = total - passed
     avg_time = sum(r["execution_time_ms"] for r in evaluated) / total
 
+    exact_match_rate = passed / total if total > 0 else 0
+    structural_scores = [r["structural_score"] for r in evaluated]
+    avg_structural_score = sum(structural_scores) / total if total > 0 else 0
+    min_structural_score = min(structural_scores) if structural_scores else 0
+
     print(f"Total Tests: {total}")
-    print(f"Passed: {passed} ({passed / total * 100:.1f}%)")
-    print(f"Failed: {failed} ({failed / total * 100:.1f}%)")
+    print(f"Exact Match Rate: {exact_match_rate * 100:.1f}% ({passed}/{total})")
+    print(f"Avg Structural Score: {avg_structural_score:.3f}")
+    print(f"Min Structural Score: {min_structural_score:.3f}")
     print(f"Average Execution Time: {avg_time:.0f}ms")
 
-    return {
+    summary = {
         "total": total,
-        "passed": passed,
+        "passed": passed,  # mapped to exact_match_count
         "failed": failed,
-        "accuracy": passed / total if total > 0 else 0,
+        "accuracy": exact_match_rate,  # mapped to exact_match_rate
+        "exact_match_rate": exact_match_rate,
+        "avg_structural_score": avg_structural_score,
+        "min_structural_score": min_structural_score,
+        "avg_time_ms": avg_time,
     }
+
+    if golden_only:
+        # Emit artifacts
+        output_dir = Path("evaluation_artifacts")
+        output_dir.mkdir(exist_ok=True)
+
+        with open(output_dir / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+
+        with open(output_dir / "results.json", "w") as f:
+            json.dump(results, f, indent=2)
+
+        with open(output_dir / "cases.jsonl", "w") as f:
+            for r in results:
+                f.write(json.dumps(r) + "\n")
+
+        print(f"\nArtifacts emitted to {output_dir}/")
+
+    return summary
 
 
 def main():
