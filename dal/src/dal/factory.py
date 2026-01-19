@@ -40,20 +40,6 @@ from common.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
-from dal.memgraph import MemgraphStore
-from dal.postgres import (
-    PgSemanticCache,
-    PostgresConversationStore,
-    PostgresEvaluationStore,
-    PostgresExampleStore,
-    PostgresFeedbackStore,
-    PostgresInteractionStore,
-    PostgresMetadataStore,
-    PostgresPatternRunStore,
-    PostgresRegistryStore,
-    PostgresSchemaIntrospector,
-    PostgresSchemaStore,
-)
 from dal.util.env import get_provider_env
 
 logger = logging.getLogger(__name__)
@@ -61,50 +47,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Provider Registries
 # =============================================================================
-
-GRAPH_STORE_PROVIDERS: dict[str, type[GraphStore]] = {
-    "memgraph": MemgraphStore,
-}
-
-CACHE_STORE_PROVIDERS: dict[str, type[CacheStore]] = {
-    "postgres": PgSemanticCache,
-}
-
-EXAMPLE_STORE_PROVIDERS: dict[str, type[ExampleStore]] = {
-    "postgres": PostgresExampleStore,
-}
-
-SCHEMA_STORE_PROVIDERS: dict[str, type[SchemaStore]] = {
-    "postgres": PostgresSchemaStore,
-}
-
-SCHEMA_INTROSPECTOR_PROVIDERS: dict[str, type[SchemaIntrospector]] = {
-    "postgres": PostgresSchemaIntrospector,
-}
-
-METADATA_STORE_PROVIDERS: dict[str, type[MetadataStore]] = {
-    "postgres": PostgresMetadataStore,
-}
-
-PATTERN_RUN_STORE_PROVIDERS: dict[str, type[PatternRunStore]] = {
-    "postgres": PostgresPatternRunStore,
-}
-
-REGISTRY_STORE_PROVIDERS: dict[str, type[RegistryStore]] = {
-    "postgres": PostgresRegistryStore,
-}
-
-CONVERSATION_STORE_PROVIDERS: dict[str, type[ConversationStore]] = {
-    "postgres": PostgresConversationStore,
-}
-
-FEEDBACK_STORE_PROVIDERS: dict[str, type[FeedbackStore]] = {
-    "postgres": PostgresFeedbackStore,
-}
-
-INTERACTION_STORE_PROVIDERS: dict[str, type[InteractionStore]] = {
-    "postgres": PostgresInteractionStore,
-}
 
 
 # =============================================================================
@@ -149,6 +91,13 @@ def get_graph_store() -> GraphStore:
     """
     global _graph_store
     if _graph_store is None:
+        # Import implementations lazily to avoid import loops and expensive init
+        from dal.memgraph import MemgraphStore
+
+        GRAPH_STORE_PROVIDERS = {
+            "memgraph": MemgraphStore,
+        }
+
         provider = get_provider_env(
             "GRAPH_STORE_PROVIDER",
             default="memgraph",
@@ -183,6 +132,12 @@ def get_cache_store() -> CacheStore:
     """
     global _cache_store
     if _cache_store is None:
+        from dal.postgres import PgSemanticCache
+
+        CACHE_STORE_PROVIDERS = {
+            "postgres": PgSemanticCache,
+        }
+
         provider = get_provider_env(
             "CACHE_STORE_PROVIDER",
             default="postgres",
@@ -210,6 +165,12 @@ def get_example_store() -> ExampleStore:
     """
     global _example_store
     if _example_store is None:
+        from dal.postgres import PostgresExampleStore
+
+        EXAMPLE_STORE_PROVIDERS = {
+            "postgres": PostgresExampleStore,
+        }
+
         provider = get_provider_env(
             "EXAMPLE_STORE_PROVIDER",
             default="postgres",
@@ -234,6 +195,12 @@ def get_registry_store() -> RegistryStore:
     """
     global _registry_store
     if _registry_store is None:
+        from dal.postgres import PostgresRegistryStore
+
+        REGISTRY_STORE_PROVIDERS = {
+            "postgres": PostgresRegistryStore,
+        }
+
         provider = get_provider_env(
             "REGISTRY_STORE_PROVIDER",
             default="postgres",
@@ -261,6 +228,12 @@ def get_schema_store() -> SchemaStore:
     """
     global _schema_store
     if _schema_store is None:
+        from dal.postgres import PostgresSchemaStore
+
+        SCHEMA_STORE_PROVIDERS = {
+            "postgres": PostgresSchemaStore,
+        }
+
         provider = get_provider_env(
             "SCHEMA_STORE_PROVIDER",
             default="postgres",
@@ -288,6 +261,12 @@ def get_schema_introspector() -> SchemaIntrospector:
     """
     global _schema_introspector
     if _schema_introspector is None:
+        from dal.postgres import PostgresSchemaIntrospector
+
+        SCHEMA_INTROSPECTOR_PROVIDERS = {
+            "postgres": PostgresSchemaIntrospector,
+        }
+
         provider = get_provider_env(
             "SCHEMA_INTROSPECTOR_PROVIDER",
             default="postgres",
@@ -315,6 +294,12 @@ def get_metadata_store() -> MetadataStore:
     """
     global _metadata_store
     if _metadata_store is None:
+        from dal.postgres import PostgresMetadataStore
+
+        METADATA_STORE_PROVIDERS = {
+            "postgres": PostgresMetadataStore,
+        }
+
         provider = get_provider_env(
             "METADATA_STORE_PROVIDER",
             default="postgres",
@@ -339,6 +324,12 @@ def get_pattern_run_store() -> PatternRunStore:
     """
     global _pattern_run_store
     if _pattern_run_store is None:
+        from dal.postgres import PostgresPatternRunStore
+
+        PATTERN_RUN_STORE_PROVIDERS = {
+            "postgres": PostgresPatternRunStore,
+        }
+
         provider = get_provider_env(
             "PATTERN_RUN_STORE_PROVIDER",
             default="postgres",
@@ -387,6 +378,12 @@ def get_conversation_store() -> ConversationStore:
     """Get or create the singleton ConversationStore instance."""
     global _conversation_store
     if _conversation_store is None:
+        from dal.postgres import PostgresConversationStore
+
+        CONVERSATION_STORE_PROVIDERS = {
+            "postgres": PostgresConversationStore,
+        }
+
         provider = get_provider_env(
             "CONVERSATION_STORE_PROVIDER",
             default="postgres",
@@ -402,6 +399,12 @@ def get_feedback_store() -> FeedbackStore:
     """Get or create the singleton FeedbackStore instance."""
     global _feedback_store
     if _feedback_store is None:
+        from dal.postgres import PostgresFeedbackStore
+
+        FEEDBACK_STORE_PROVIDERS = {
+            "postgres": PostgresFeedbackStore,
+        }
+
         provider = get_provider_env(
             "FEEDBACK_STORE_PROVIDER",
             default="postgres",
@@ -417,6 +420,12 @@ def get_interaction_store() -> InteractionStore:
     """Get or create the singleton InteractionStore instance."""
     global _interaction_store
     if _interaction_store is None:
+        from dal.postgres import PostgresInteractionStore
+
+        INTERACTION_STORE_PROVIDERS = {
+            "postgres": PostgresInteractionStore,
+        }
+
         provider = get_provider_env(
             "INTERACTION_STORE_PROVIDER",
             default="postgres",
@@ -432,9 +441,6 @@ def get_interaction_store() -> InteractionStore:
 # Evaluation Store
 # =============================================================================
 
-EVALUATION_STORE_PROVIDERS: dict[str, type[EvaluationStore]] = {
-    "postgres": PostgresEvaluationStore,
-}
 
 _evaluation_store: Optional[EvaluationStore] = None
 
@@ -450,6 +456,12 @@ def get_evaluation_store() -> EvaluationStore:
     """
     global _evaluation_store
     if _evaluation_store is None:
+        from dal.postgres import PostgresEvaluationStore
+
+        EVALUATION_STORE_PROVIDERS = {
+            "postgres": PostgresEvaluationStore,
+        }
+
         provider = get_provider_env(
             "EVALUATION_STORE_PROVIDER",
             default="postgres",
