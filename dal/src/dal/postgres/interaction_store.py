@@ -118,6 +118,8 @@ class PostgresInteractionStore(InteractionStore):
                 i.user_nlq_text,
                 i.execution_status,
                 i.created_at,
+                i.trace_id,
+                LEFT(i.generated_sql, 200) as generated_sql_preview,
                 f.thumb
             FROM query_interactions i
             LEFT JOIN (
