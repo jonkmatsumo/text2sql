@@ -61,13 +61,38 @@ def verify_persistence():
         cur.execute(query)
         count = cur.fetchone()[0]
 
-        print(f"Spans found in last 15 minutes: {count}")
-
         if count > 0:
-            print("SUCCESS: Traces are persisting to Postgres.")
+            print(f"SUCCESS: {count} traces persisted to Postgres in last 15 minutes.")
             return True
         else:
-            print("FAILURE: No recent traces found in Postgres.")
+            print("\nFAILURE: No spans found in Postgres in last 15 minutes.")
+            print("Diagnosis:")
+            if total_count > 0:
+                print(f"- Historical persistence confirmed ({total_count} total spans).")
+            else:
+                print("- No historical persistence (DB is empty).")
+
+            # Check queue state for hint
+            try:
+                cur.execute("SELECT count(*) FROM otel.ingestion_queue WHERE status = 'failed'")
+                failed = cur.fetchone()[0]
+                cur.execute("SELECT count(*) FROM otel.ingestion_queue WHERE status = 'pending'")
+                pending = cur.fetchone()[0]
+
+                if failed > 0:
+                    print(
+                        f"- CRITICAL: {failed} items failed in ingestion queue. "
+                        "Check otel-worker logs."
+                    )
+                if pending > 0:
+                    print(
+                        f"- WARNING: {pending} items pending in queue. "
+                        "Ingestion might be lagging."
+                    )
+            except Exception:
+                pass
+
+            print("- Suggestion: Verify 'otel-worker' is running and connected to DB.")
             return False
 
     except Exception as e:
