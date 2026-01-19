@@ -281,7 +281,7 @@ async def store_evaluation_results_batch(
         eval_results.append(
             EvaluationCaseResultCreate(
                 run_id=run_id,
-                test_id=r["test_id"],
+                test_id=str(r["test_id"]),
                 question=r.get("question", ""),
                 generated_sql=r.get("current_sql") or r.get("generated_sql"),
                 # Note: evaluate_test_case returns a dict.
