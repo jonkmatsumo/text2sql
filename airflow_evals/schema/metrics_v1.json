@@ -12,17 +12,35 @@
         "config": {
             "type": "object"
         },
+        "exact_match_count": {
+            "type": "integer"
+        },
+        "exact_match_rate": {
+            "type": "number"
+        },
+        "avg_structural_score": {
+            "type": "number"
+        },
+        "min_structural_score": {
+            "type": "number"
+        },
+        "dataset_source": {
+            "type": "string"
+        },
         "total_cases": {
             "type": "integer"
         },
         "successful_cases": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Deprecated: use exact_match_count"
         },
         "failed_cases": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Deprecated"
         },
         "accuracy": {
-            "type": "number"
+            "type": "number",
+            "description": "Deprecated: use exact_match_rate"
         },
         "avg_latency_ms": {
             "type": "number"
@@ -35,8 +53,8 @@
         "run_id",
         "timestamp",
         "total_cases",
-        "successful_cases",
-        "failed_cases",
-        "accuracy"
+        "exact_match_count",
+        "exact_match_rate",
+        "avg_structural_score"
     ]
 }

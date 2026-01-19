@@ -1,0 +1,9 @@
+{
+    "total": 0,
+    "passed": 0,
+    "accuracy": 0.0,
+    "exact_match_rate": 0.0,
+    "avg_structural_score": 0.0,
+    "min_structural_score": 0.0,
+    "baseline_established": false
+}

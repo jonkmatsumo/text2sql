@@ -11,37 +11,14 @@ on:
         options:
           - synthetic
           - pagila
-      db_name:
-        description: "Database name"
-        required: false
-        default: "query_target"
-        type: string
 
 env:
-  # Test database credentials (ephemeral CI database, not production)
-  TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'ci_test_password_placeholder' }}
-  DB_NAME: ${{ github.event.inputs.db_name || 'query_target' }}
   DATASET_MODE: ${{ github.event.inputs.dataset_mode || 'synthetic' }}
 
 jobs:
   evaluate:
     name: Run Golden Dataset Evaluation
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ env.TEST_DB_PASSWORD }}
-          POSTGRES_DB: ${{ env.DB_NAME || 'query_target' }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
       - uses: actions/checkout@v6
@@ -54,72 +31,80 @@ jobs:
 
       - name: Install dependencies
         run: |
+          pip install -e "./schema"
           pip install -e "./agent[test]"
           pip install -e "./mcp-server[test]"
 
-      - name: Wait for PostgreSQL
-        run: |
-          until pg_isready -h localhost -U postgres; do
-            echo "Waiting for PostgreSQL..."
-            sleep 2
-          done
-
-      - name: Initialize database
-        env:
-          PGPASSWORD: ${{ env.TEST_DB_PASSWORD }}
-        run: |
-          # Run database initialization scripts
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/01-schema.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/02-data.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/03-permissions.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/04-vector-setup.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/05-multi-tenancy.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/06-few-shot.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/07-caching.sql || true
-          psql -h localhost -U postgres -d ${{ env.DB_NAME }} -f database/init-scripts/09-golden-dataset.sql || true
-
-      - name: Seed Golden Dataset
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: ${{ env.DB_NAME }}
-          DB_USER: postgres
-          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
-        run: |
-          cd mcp-server
-          python3 scripts/seed_golden_dataset.py
-
-      - name: Run evaluation suite
+      - name: Run evaluation suite (Golden Only)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: ${{ env.DB_NAME }}
-          DB_USER: postgres
-          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
+          DATASET_MODE: ${{ env.DATASET_MODE }}
         run: |
           cd agent
-          python3 scripts/run_evaluation.py --tenant-id 1
+          python3 scripts/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
 
-      - name: Generate evaluation report
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: ${{ env.DB_NAME }}
-          DB_USER: postgres
-          DB_PASS: ${{ env.TEST_DB_PASSWORD }}
-        run: |
-          cd agent
-          python3 scripts/evaluation_metrics.py --days 1 > evaluation_report.txt
-
-      - name: Upload evaluation report
+      - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: evaluation-report
-          path: agent/evaluation_report.txt
+          name: evaluation-results
+          path: agent/evaluation_artifacts/
 
-      - name: Check accuracy threshold
+      - name: Metrics Gating & Baseline Check
+        id: gating
         run: |
-          # Parse report and fail if accuracy below threshold
-          # (Implementation would parse evaluation_report.txt)
-          echo "Accuracy check would go here"
+          SUMMARY_PATH="agent/evaluation_artifacts/ci-run/summary.json"
+          BASELINE_PATH="evaluation/baselines/${{ env.DATASET_MODE }}_baseline.json"
+
+          if [ ! -f "$SUMMARY_PATH" ]; then
+            echo "::error::Evaluation summary not found at $SUMMARY_PATH"
+            exit 1
+          fi
+
+          EM_RATE=$(jq -r '.exact_match_rate' $SUMMARY_PATH)
+          AVG_STRUCT=$(jq -r '.avg_structural_score' $SUMMARY_PATH)
+
+          echo "Exact Match Rate: $EM_RATE"
+          echo "Avg Structural Score: $AVG_STRUCT"
+
+          # 1. Hard Gating (Static Thresholds)
+          if (( $(echo "$EM_RATE < 0.50" | bc -l) )); then
+            echo "::error::Exact Match Rate below 50% ($EM_RATE)"
+            exit 1
+          fi
+
+          if (( $(echo "$EM_RATE < 0.70" | bc -l) )); then
+            echo "::warning::Exact Match Rate below 70% ($EM_RATE)"
+          fi
+
+          if (( $(echo "$AVG_STRUCT < 0.60" | bc -l) )); then
+            echo "::warning::Avg Structural Score below 60% ($AVG_STRUCT)"
+          fi
+
+          # 2. Baseline Guard & Regression Check
+          if [ -f "$BASELINE_PATH" ]; then
+            ESTABLISHED=$(jq -r '.baseline_established // false' $BASELINE_PATH)
+            if [ "$ESTABLISHED" = "true" ]; then
+              BASE_EM=$(jq -r '.exact_match_rate' $BASELINE_PATH)
+              BASE_STRUCT=$(jq -r '.avg_structural_score' $BASELINE_PATH)
+
+              echo "Baseline EM: $BASE_EM"
+              echo "Baseline Avg Structural: $BASE_STRUCT"
+
+              # FAIL if exact_match_rate drop > 0.05
+              EM_DROP=$(echo "$BASE_EM - $EM_RATE" | bc -l)
+              if (( $(echo "$EM_DROP > 0.05" | bc -l) )); then
+                echo "::error::Regression detected: EM Rate dropped by $EM_DROP (> 0.05)"
+                exit 1
+              fi
+
+              # WARN if avg_structural_score drop > 0.10
+              STRUCT_DROP=$(echo "$BASE_STRUCT - $AVG_STRUCT" | bc -l)
+              if (( $(echo "$STRUCT_DROP > 0.10" | bc -l) )); then
+                echo "::warning::Regression detected: Avg Structural Scan dropped by $STRUCT_DROP (> 0.10)"
+              fi
+            else
+              echo "Baseline not established for ${{ env.DATASET_MODE }}, skipping regression check."
+            fi
+          else
+            echo "Baseline file missing at $BASELINE_PATH, skipping regression check."
+          fi

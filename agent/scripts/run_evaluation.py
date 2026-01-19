@@ -367,6 +367,8 @@ async def run_evaluation_suite(
     dataset_mode: Optional[str] = None,
     golden_only: bool = False,
     dry_run: bool = False,
+    output_dir: str = "evaluation_artifacts",
+    run_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Run full evaluation suite against Golden Dataset.
 
@@ -429,11 +431,42 @@ async def run_evaluation_suite(
     print("=" * 60)
 
     evaluated = [r for r in results if not r.get("skipped")]
-    total = len(evaluated)
 
+    summary = summarize_evaluation_results(
+        evaluated=evaluated,
+        results=results,
+        golden_only=golden_only,
+        output_dir_parent=output_dir,
+        run_id=run_id,
+    )
+
+    return summary
+
+
+def summarize_evaluation_results(
+    evaluated: List[Dict[str, Any]],
+    results: List[Dict[str, Any]],
+    golden_only: bool = False,
+    output_dir_parent: str = "evaluation_artifacts",
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Summarize evaluation results and emit artifacts.
+
+    Args:
+        evaluated: List of results from evaluate_test_case.
+        results: Full list of results for artifact emission.
+        golden_only: If True, emit results to files.
+        output_dir_parent: Parent directory for artifacts.
+        run_id: Unique ID for this run.
+    """
+    total = len(evaluated)
     if total == 0:
         print("No tests executed (all skipped or dry run).")
         return {"total": 0, "passed": 0, "failed": 0, "accuracy": 0}
+
+    # Generate run_id if missing
+    if not run_id:
+        run_id = f"run_{int(time.time())}"
 
     passed = sum(1 for r in evaluated if r["is_correct"])  # is_correct is exact_match
     failed = total - passed
@@ -451,6 +484,7 @@ async def run_evaluation_suite(
     print(f"Average Execution Time: {avg_time:.0f}ms")
 
     summary = {
+        "run_id": run_id,
         "total": total,
         "passed": passed,  # mapped to exact_match_count
         "failed": failed,
@@ -462,21 +496,21 @@ async def run_evaluation_suite(
     }
 
     if golden_only:
-        # Emit artifacts
-        output_dir = Path("evaluation_artifacts")
-        output_dir.mkdir(exist_ok=True)
+        # Emit artifacts to {output_dir}/{run_id}/
+        artifacts_dir = Path(output_dir_parent) / run_id
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(output_dir / "summary.json", "w") as f:
+        with open(artifacts_dir / "summary.json", "w") as f:
             json.dump(summary, f, indent=2)
 
-        with open(output_dir / "results.json", "w") as f:
+        with open(artifacts_dir / "results.json", "w") as f:
             json.dump(results, f, indent=2)
 
-        with open(output_dir / "cases.jsonl", "w") as f:
+        with open(artifacts_dir / "cases.jsonl", "w") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
 
-        print(f"\nArtifacts emitted to {output_dir}/")
+        print(f"\nArtifacts emitted to {artifacts_dir}/")
 
     return summary
 
@@ -527,6 +561,13 @@ Examples:
         action="store_true",
         help="Load test cases but skip agent execution",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="evaluation_artifacts",
+        help="Root directory for artifacts",
+    )
+    parser.add_argument("--run-id", type=str, help="Run ID for this evaluation")
 
     args = parser.parse_args()
 
@@ -555,6 +596,8 @@ Examples:
             dataset_mode=dataset_mode,
             golden_only=args.golden_only,
             dry_run=args.dry_run,
+            output_dir=args.output_dir,
+            run_id=args.run_id,
         )
     )
 
