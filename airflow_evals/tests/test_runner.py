@@ -50,7 +50,13 @@ async def test_runner_execution_flow(eval_env):
 
         # Verify Summary
         assert summary.total_cases == 2
-        assert summary.successful_cases == 1  # Only first one matched
+        assert summary.exact_match_count == 1
+        assert summary.exact_match_rate == 0.5
+        assert summary.avg_structural_score > 0
+        assert summary.dataset_source == "dataset.jsonl"
+
+        # Deprecated fields mapping
+        assert summary.successful_cases == 1
         assert summary.accuracy == 0.5
 
         # Verify Artifacts Created

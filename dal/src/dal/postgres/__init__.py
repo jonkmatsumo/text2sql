@@ -4,6 +4,7 @@ This package contains the concrete implementations of DAL interfaces for Postgre
 """
 
 from .conversation_store import PostgresConversationStore
+from .evaluation_store import PostgresEvaluationStore
 from .example_store import PostgresExampleStore
 from .feedback_store import PostgresFeedbackStore
 from .interaction_store import PostgresInteractionStore
@@ -17,6 +18,7 @@ from .semantic_cache import PgSemanticCache
 
 __all__ = [
     "PostgresConversationStore",
+    "PostgresEvaluationStore",
     "PostgresExampleStore",
     "PostgresFeedbackStore",
     "PostgresInteractionStore",

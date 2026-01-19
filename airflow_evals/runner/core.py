@@ -11,6 +11,7 @@ from agent_core.graph import run_agent_with_tracing
 
 from airflow_evals.runner.config import EvaluationCaseResult, EvaluationConfig, EvaluationSummary
 from airflow_evals.runner.regression import RegressionDetector, RegressionReport
+from schema.evaluation.metrics import MetricSuiteV1
 
 # Optional MLflow import
 try:
@@ -85,19 +86,21 @@ class EvaluationRunner:
             elif result.get("ambiguity_type"):
                 execution_status = "CLARIFICATION_REQUIRED"
 
-            # Basic correctness check (Exact Match for MVP)
-            # In Phase 5 we can improve this to be execution-based
-            is_correct = False
-            if generated_sql and expected_sql:
-                # Normalize whitespace for basic comparison
-                is_correct = " ".join(generated_sql.split()) == " ".join(expected_sql.split())
+            # Metrics V1 Computation
+            metrics = MetricSuiteV1.compute_all(generated_sql, expected_sql)
 
             return EvaluationCaseResult(
                 case_id=case_id,
                 question=question,
                 expected_sql=expected_sql,
                 generated_sql=generated_sql,
-                is_correct=is_correct,
+                is_correct=metrics["exact_match"],  # Backward compatibility
+                exact_match=metrics["exact_match"],
+                structural_score=metrics["structural_score"],
+                subscores=metrics["subscores"],
+                generated_tables=metrics["generated_tables"],
+                expected_tables=metrics["expected_tables"],
+                parse_errors=metrics["parse_errors"],
                 execution_status=execution_status,
                 error=error,
                 latency_ms=latency_ms,
@@ -107,12 +110,22 @@ class EvaluationRunner:
         except Exception as e:
             logger.exception(f"Error running case {case_id}")
             end_time = time.time()
+
+            # Empty metrics for failure
+            metrics = MetricSuiteV1.compute_all(None, expected_sql)
+
             return EvaluationCaseResult(
                 case_id=case_id,
                 question=question,
                 expected_sql=expected_sql,
                 generated_sql=None,
                 is_correct=False,
+                exact_match=False,
+                structural_score=0.0,
+                subscores={k: 0.0 for k in MetricSuiteV1.WEIGHTS},
+                generated_tables=[],
+                expected_tables=metrics["expected_tables"],
+                parse_errors=[str(e)],
                 execution_status="SYSTEM_ERROR",
                 error=str(e),
                 latency_ms=(end_time - start_time) * 1000,
@@ -140,12 +153,13 @@ class EvaluationRunner:
 
         # Compute metrics
         total_cases = len(results)
-        # Note: successful_runs != correct answers. separate concept.
 
-        correct_cases = len([r for r in results if r.is_correct])
-        failed_cases = total_cases - correct_cases  # Definition of failure for accuracy purposes
+        exact_match_count = len([r for r in results if r.exact_match])
+        exact_match_rate = (exact_match_count / total_cases) if total_cases > 0 else 0.0
 
-        accuracy = (correct_cases / total_cases) if total_cases > 0 else 0.0
+        structural_scores = [r.structural_score for r in results]
+        avg_structural_score = sum(structural_scores) / total_cases if total_cases > 0 else 0.0
+        min_structural_score = min(structural_scores) if structural_scores else 0.0
 
         latencies = [r.latency_ms for r in results]
         avg_latency = statistics.mean(latencies) if latencies else 0.0
@@ -157,9 +171,14 @@ class EvaluationRunner:
             run_id=self.run_id,
             config=self.config,
             total_cases=total_cases,
-            successful_cases=correct_cases,  # Map successful to correctness for summary
-            failed_cases=failed_cases,
-            accuracy=accuracy,
+            exact_match_count=exact_match_count,
+            exact_match_rate=exact_match_rate,
+            avg_structural_score=avg_structural_score,
+            min_structural_score=min_structural_score,
+            dataset_source=Path(self.config.dataset_path).name,
+            successful_cases=exact_match_count,  # Backward compatibility
+            failed_cases=total_cases - exact_match_count,
+            accuracy=exact_match_rate,
             avg_latency_ms=avg_latency,
             p95_latency_ms=p95_latency,
         )
@@ -213,7 +232,7 @@ class EvaluationRunner:
     def log_to_mlflow(self, summary: EvaluationSummary, results: List[EvaluationCaseResult]):
         """Log metrics and artifacts to MLflow."""
         if not MLFLOW_AVAILABLE:
-            logger.warning("MLflow not available, skipping logging")
+            logger.info("MLflow not available, skipping logging")
             return
 
         try:
@@ -241,12 +260,16 @@ class EvaluationRunner:
                 # Log Metrics
                 mlflow.log_metrics(
                     {
-                        "accuracy": summary.accuracy,
+                        "exact_match_rate": summary.exact_match_rate,
+                        "avg_structural_score": summary.avg_structural_score,
+                        "min_structural_score": summary.min_structural_score,
+                        "accuracy": summary.accuracy,  # Deprecated
                         "avg_latency_ms": summary.avg_latency_ms,
                         "p95_latency_ms": summary.p95_latency_ms,
                         "total_cases": summary.total_cases,
-                        "successful_cases": summary.successful_cases,
-                        "failed_cases": summary.failed_cases,
+                        "exact_match_count": summary.exact_match_count,
+                        "successful_cases": summary.successful_cases,  # Deprecated
+                        "failed_cases": summary.failed_cases,  # Deprecated
                     }
                 )
 
