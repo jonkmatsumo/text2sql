@@ -11,6 +11,7 @@ from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
 from otel_worker.logging import log_event
+from otel_worker.metrics.coordinator import aggregation_coordinator
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
     parse_otlp_json_traces,
@@ -95,7 +96,9 @@ async def lifespan(app: FastAPI):
 
     await monitor.start()
     await coordinator.start()
+    await aggregation_coordinator.start()
     yield
+    await aggregation_coordinator.stop()
     await coordinator.stop()
     await monitor.stop()
 

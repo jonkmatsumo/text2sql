@@ -15,7 +15,7 @@ class TestMetricsAggregation:
         assert get_stage_from_span_name("unknown_node") is None
 
     def test_compute_trace_metrics(self):
-        """Verify trace metrics computation."""
+        """Verify trace metrics computation (without spans)."""
         trace_row = {
             "trace_id": "t1",
             "service_name": "agent",
@@ -29,12 +29,49 @@ class TestMetricsAggregation:
         assert metrics["trace_id"] == "t1"
         assert metrics["has_error"] is False
         assert metrics["duration_ms"] == 1000
+        # Verify default token values
+        assert metrics["total_tokens"] == 0
+        assert metrics["prompt_tokens"] == 0
+        assert metrics["completion_tokens"] == 0
 
         # Test error case
         trace_row_err = trace_row.copy()
         trace_row_err["status"] = "ERROR"
         metrics_err = compute_trace_metrics(trace_row_err)
         assert metrics_err["has_error"] is True
+
+    def test_compute_trace_metrics_with_tokens(self):
+        """Verify trace metrics computation with token usage from spans."""
+        trace_row = {
+            "trace_id": "t1",
+            "service_name": "agent",
+            "status": "OK",
+        }
+        spans = [
+            {
+                "span_id": "s1",
+                "name": "node1",
+                "span_attributes": {
+                    "llm.token_usage.input_tokens": 10,
+                    "llm.token_usage.output_tokens": 20,
+                    "llm.token_usage.total_tokens": 30,
+                },
+            },
+            {
+                "span_id": "s2",
+                "name": "node2",
+                "span_attributes": {
+                    "llm.token_usage.input_tokens": 5,
+                    "llm.token_usage.output_tokens": 5,
+                    # total calculated manually
+                },
+            },
+        ]
+
+        metrics = compute_trace_metrics(trace_row, spans)
+        assert metrics["prompt_tokens"] == 15  # 10 + 5
+        assert metrics["completion_tokens"] == 25  # 20 + 5
+        assert metrics["total_tokens"] == 40  # 30 + (5+5)
 
     def test_compute_stage_metrics(self):
         """Verify stage metrics computation."""
