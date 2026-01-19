@@ -4,9 +4,12 @@ This service handles agent integration, state management, and result processing.
 It encapsulates business logic previously in app_logic.py.
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Add agent to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
@@ -113,11 +116,19 @@ class AgentService:
         try:
             tools = await get_mcp_tools()
             feedback_tool = next((t for t in tools if t.name == "submit_feedback"), None)
-            if feedback_tool:
-                await feedback_tool.ainvoke(
-                    {"interaction_id": interaction_id, "thumb": thumb, "comment": comment}
+            if not feedback_tool:
+                logger.error(
+                    "submit_feedback tool not found in MCP tools list",
+                    extra={
+                        "available_tools": [t.name for t in tools],
+                    },
                 )
-                return True
+                return False
+
+            await feedback_tool.ainvoke(
+                {"interaction_id": interaction_id, "thumb": thumb, "comment": comment}
+            )
+            return True
         except Exception as e:
             print(f"Error submitting feedback: {e}")
 
