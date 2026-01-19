@@ -22,7 +22,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "ms",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -59,7 +59,7 @@
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 10000
               }
             ]
           }
@@ -68,7 +68,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 0
       },
@@ -112,7 +112,7 @@
             ],
             "limit": 50
           },
-          "rawSql": "SELECT\n  $__timeGroupAlias(start_time, $__interval),\n  avg(duration_ms) AS \"avg_latency\",\n  percentile_cont(0.50) within group (order by duration_ms) as \"p50\",\n  percentile_cont(0.90) within group (order by duration_ms) as \"p90\"\nFROM otel.traces\nWHERE $__timeFilter(start_time)\nGROUP BY 1\nORDER BY 1"
+          "rawSql": "SELECT\n  $__timeGroupAlias(start_time, $__interval),\n  avg(duration_ms) AS \"avg_latency\",\n  percentile_cont(0.50) within group (order by duration_ms) as \"p50\",\n  percentile_cont(0.90) within group (order by duration_ms) as \"p90\"\nFROM otel.trace_metrics\nWHERE $__timeFilter(start_time)\nGROUP BY 1\nORDER BY 1"
         }
       ],
       "title": "Latency (End-to-End)",
@@ -131,7 +131,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "%",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -168,7 +168,7 @@
               },
               {
                 "color": "red",
-                "value": 80
+                "value": 0.05
               }
             ]
           }
@@ -177,8 +177,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 0
       },
       "id": 2,
@@ -204,10 +204,98 @@
           "format": "time_series",
           "rawQuery": true,
           "refId": "A",
-          "rawSql": "SELECT\n  $__timeGroupAlias(start_time, $__interval),\n  count(*) FILTER (WHERE status = 'ERROR') / count(*)::float as error_rate\nFROM otel.traces\nWHERE $__timeFilter(start_time)\nGROUP BY 1\nORDER BY 1"
+          "rawSql": "SELECT\n  $__timeGroupAlias(start_time, $__interval),\n  count(*) FILTER (WHERE has_error) / NULLIF(count(*), 0)::float as error_rate\nFROM otel.trace_metrics\nWHERE $__timeFilter(start_time)\nGROUP BY 1\nORDER BY 1"
         }
       ],
       "title": "Error Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "Postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Tokens",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "Postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "refId": "A",
+          "rawSql": "SELECT\n  $__timeGroupAlias(start_time, $__interval),\n  sum(total_tokens) AS \"Total\",\n  sum(prompt_tokens) AS \"Prompt\",\n  sum(completion_tokens) AS \"Completion\"\nFROM otel.trace_metrics\nWHERE $__timeFilter(start_time)\nGROUP BY 1\nORDER BY 1"
+        }
+      ],
+      "title": "Token Usage",
       "type": "timeseries"
     },
     {
@@ -292,7 +380,7 @@
           "format": "table",
           "rawQuery": true,
           "refId": "A",
-          "rawSql": "SELECT start_time as created_at, trace_id, duration_ms, (status = 'ERROR') as has_error\nFROM otel.traces\nORDER BY start_time DESC\nLIMIT 100"
+          "rawSql": "SELECT start_time as created_at, trace_id, duration_ms, has_error, total_tokens\nFROM otel.trace_metrics\nORDER BY start_time DESC\nLIMIT 100"
         }
       ],
       "title": "Recent Traces",
@@ -315,6 +403,6 @@
   "timezone": "",
   "title": "Text2SQL Trace Metrics",
   "uid": "text2sql-traces",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

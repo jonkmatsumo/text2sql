@@ -24,19 +24,46 @@ def get_stage_from_span_name(span_name: str) -> Optional[str]:
     return None
 
 
-def compute_trace_metrics(trace_row: Dict[str, Any]) -> Dict[str, Any]:
+def compute_trace_metrics(
+    trace_row: Dict[str, Any], spans: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     """Compute derived metrics for a single trace."""
     # Trace row from otel.traces already has duration_ms and status
     # We essentially project it to the metrics table format
     has_error = trace_row.get("status") == "ERROR" or trace_row.get("error_count", 0) > 0
-    return {
+
+    metrics = {
         "trace_id": trace_row["trace_id"],
         "service_name": trace_row.get("service_name"),
         "start_time": trace_row.get("start_time"),
         "end_time": trace_row.get("end_time"),
         "duration_ms": trace_row.get("duration_ms"),
         "has_error": has_error,
+        "total_tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
     }
+
+    if spans:
+        for span in spans:
+            attrs = span.get("span_attributes") or {}
+            # Allow for both flat attributes and nested dicts if JSON storage varies
+            # Common patterns: "llm.token_usage.total_tokens" or "gen_ai.usage.total_tokens"
+            # We check specific keys based on our testing conventions
+
+            p_tokens = attrs.get("llm.token_usage.input_tokens", 0) or 0
+            c_tokens = attrs.get("llm.token_usage.output_tokens", 0) or 0
+            t_tokens = attrs.get("llm.token_usage.total_tokens", 0) or 0
+
+            # If total is missing but parts exist, sum them
+            if t_tokens == 0 and (p_tokens > 0 or c_tokens > 0):
+                t_tokens = p_tokens + c_tokens
+
+            metrics["prompt_tokens"] += int(p_tokens)
+            metrics["completion_tokens"] += int(c_tokens)
+            metrics["total_tokens"] += int(t_tokens)
+
+    return metrics
 
 
 def compute_stage_metrics(spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -109,32 +136,37 @@ def run_aggregation(
         for trace in traces:
             trace_id = trace["trace_id"]
 
-            # 1. Compute and Upsert Trace Metrics
-            t_metrics = compute_trace_metrics(trace)
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO otel.trace_metrics (
-                        trace_id, service_name, start_time, end_time, duration_ms, has_error
-                    ) VALUES (
-                        :trace_id, :service_name, :start_time, :end_time, :duration_ms, :has_error
-                    )
-                    ON CONFLICT (trace_id) DO UPDATE SET
-                        end_time = EXCLUDED.end_time,
-                        duration_ms = EXCLUDED.duration_ms,
-                        has_error = EXCLUDED.has_error;
-                """
-                ),
-                t_metrics,
-            )
-            stats["traces_processed"] += 1
-
-            # 2. Fetch Spans for Stage Metrics
+            # 1. Fetch Spans FIRST (needed for both trace token metrics and stage metrics)
             spans_result = conn.execute(
                 text("SELECT * FROM otel.spans WHERE trace_id = :tid"),
                 {"tid": trace_id},
             )
             spans = [dict(row._mapping) for row in spans_result]
+
+            # 2. Compute and Upsert Trace Metrics (now with tokens)
+            t_metrics = compute_trace_metrics(trace, spans)
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO otel.trace_metrics (
+                        trace_id, service_name, start_time, end_time, duration_ms, has_error,
+                        total_tokens, prompt_tokens, completion_tokens
+                    ) VALUES (
+                        :trace_id, :service_name, :start_time, :end_time, :duration_ms, :has_error,
+                        :total_tokens, :prompt_tokens, :completion_tokens
+                    )
+                    ON CONFLICT (trace_id) DO UPDATE SET
+                        end_time = EXCLUDED.end_time,
+                        duration_ms = EXCLUDED.duration_ms,
+                        has_error = EXCLUDED.has_error,
+                        total_tokens = EXCLUDED.total_tokens,
+                        prompt_tokens = EXCLUDED.prompt_tokens,
+                        completion_tokens = EXCLUDED.completion_tokens;
+                """
+                ),
+                t_metrics,
+            )
+            stats["traces_processed"] += 1
 
             # 3. Compute Stage Metrics
             s_metrics = compute_stage_metrics(spans)
