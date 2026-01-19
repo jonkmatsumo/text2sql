@@ -79,7 +79,7 @@ class TestFeedback:
         """Test successful feedback submission."""
         mocks = mock_agent_dependencies
         mock_tool = AsyncMock()
-        mock_tool.name = "submit_feedback_tool"
+        mock_tool.name = "submit_feedback"
 
         # Use the mock from the fixture
         mock_tools_module = mocks["agent_core.tools"]
@@ -93,6 +93,26 @@ class TestFeedback:
         args = mock_tool.ainvoke.call_args[0][0]
         assert args["interaction_id"] == "int-123"
         assert args["thumb"] == "UP"
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_tool_missing(self, mock_agent_dependencies):
+        """Test feedback submission when tool is missing."""
+        mocks = mock_agent_dependencies
+
+        # Mock tools list WITHOUT submit_feedback
+        mock_other_tool = MagicMock()
+        mock_other_tool.name = "other_tool"
+
+        mock_tools_module = mocks["agent_core.tools"]
+        mock_get_tools = AsyncMock(return_value=[mock_other_tool])
+        mock_tools_module.get_mcp_tools = mock_get_tools
+
+        with patch("streamlit_app.service.agent.logger") as mock_logger:
+            success = await AgentService.submit_feedback("int-123", "UP", "Great")
+
+            assert success is False
+            mock_logger.error.assert_called_once()
+            assert "not found in MCP tools list" in mock_logger.error.call_args[0][0]
 
 
 class TestFormatConversationEntry:
