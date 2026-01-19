@@ -51,31 +51,37 @@ class TestProviderRegistries:
 
     def test_graph_store_providers_contains_memgraph(self):
         """Verify Memgraph is registered for graph stores."""
+        get_graph_store()
         assert "memgraph" in GRAPH_STORE_PROVIDERS
         assert GRAPH_STORE_PROVIDERS["memgraph"] is MemgraphStore
 
     def test_cache_store_providers_contains_postgres(self):
         """Verify Postgres is registered for cache stores."""
+        get_cache_store()
         assert "postgres" in CACHE_STORE_PROVIDERS
         assert CACHE_STORE_PROVIDERS["postgres"] is PgSemanticCache
 
     def test_example_store_providers_contains_postgres(self):
         """Verify Postgres is registered for example stores."""
+        get_example_store()
         assert "postgres" in EXAMPLE_STORE_PROVIDERS
         assert EXAMPLE_STORE_PROVIDERS["postgres"] is PostgresExampleStore
 
     def test_schema_store_providers_contains_postgres(self):
         """Verify Postgres is registered for schema stores."""
+        get_schema_store()
         assert "postgres" in SCHEMA_STORE_PROVIDERS
         assert SCHEMA_STORE_PROVIDERS["postgres"] is PostgresSchemaStore
 
     def test_schema_introspector_providers_contains_postgres(self):
         """Verify Postgres is registered for schema introspectors."""
+        get_schema_introspector()
         assert "postgres" in SCHEMA_INTROSPECTOR_PROVIDERS
         assert SCHEMA_INTROSPECTOR_PROVIDERS["postgres"] is PostgresSchemaIntrospector
 
     def test_metadata_store_providers_contains_postgres(self):
         """Verify Postgres is registered for metadata stores."""
+        get_metadata_store()
         assert "postgres" in METADATA_STORE_PROVIDERS
         assert METADATA_STORE_PROVIDERS["postgres"] is PostgresMetadataStore
 

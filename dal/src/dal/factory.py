@@ -48,6 +48,19 @@ logger = logging.getLogger(__name__)
 # Provider Registries
 # =============================================================================
 
+GRAPH_STORE_PROVIDERS: "dict[str, type[GraphStore]]" = {}
+CACHE_STORE_PROVIDERS: "dict[str, type[CacheStore]]" = {}
+EXAMPLE_STORE_PROVIDERS: "dict[str, type[ExampleStore]]" = {}
+SCHEMA_STORE_PROVIDERS: "dict[str, type[SchemaStore]]" = {}
+SCHEMA_INTROSPECTOR_PROVIDERS: "dict[str, type[SchemaIntrospector]]" = {}
+METADATA_STORE_PROVIDERS: "dict[str, type[MetadataStore]]" = {}
+PATTERN_RUN_STORE_PROVIDERS: "dict[str, type[PatternRunStore]]" = {}
+REGISTRY_STORE_PROVIDERS: "dict[str, type[RegistryStore]]" = {}
+CONVERSATION_STORE_PROVIDERS: "dict[str, type[ConversationStore]]" = {}
+FEEDBACK_STORE_PROVIDERS: "dict[str, type[FeedbackStore]]" = {}
+INTERACTION_STORE_PROVIDERS: "dict[str, type[InteractionStore]]" = {}
+EVALUATION_STORE_PROVIDERS: "dict[str, type[EvaluationStore]]" = {}
+
 
 # =============================================================================
 # Singleton Instances
@@ -90,13 +103,13 @@ def get_graph_store() -> GraphStore:
         ValueError: If GRAPH_STORE_PROVIDER is set to an invalid value.
     """
     global _graph_store
+    global _graph_store, GRAPH_STORE_PROVIDERS
     if _graph_store is None:
         # Import implementations lazily to avoid import loops and expensive init
-        from dal.memgraph import MemgraphStore
+        if "memgraph" not in GRAPH_STORE_PROVIDERS:
+            from dal.memgraph import MemgraphStore
 
-        GRAPH_STORE_PROVIDERS = {
-            "memgraph": MemgraphStore,
-        }
+            GRAPH_STORE_PROVIDERS["memgraph"] = MemgraphStore
 
         provider = get_provider_env(
             "GRAPH_STORE_PROVIDER",
@@ -130,13 +143,12 @@ def get_cache_store() -> CacheStore:
     Raises:
         ValueError: If CACHE_STORE_PROVIDER is set to an invalid value.
     """
-    global _cache_store
+    global _cache_store, CACHE_STORE_PROVIDERS
     if _cache_store is None:
-        from dal.postgres import PgSemanticCache
+        if "postgres" not in CACHE_STORE_PROVIDERS:
+            from dal.postgres import PgSemanticCache
 
-        CACHE_STORE_PROVIDERS = {
-            "postgres": PgSemanticCache,
-        }
+            CACHE_STORE_PROVIDERS["postgres"] = PgSemanticCache
 
         provider = get_provider_env(
             "CACHE_STORE_PROVIDER",
@@ -163,13 +175,12 @@ def get_example_store() -> ExampleStore:
     Raises:
         ValueError: If EXAMPLE_STORE_PROVIDER is set to an invalid value.
     """
-    global _example_store
+    global _example_store, EXAMPLE_STORE_PROVIDERS
     if _example_store is None:
-        from dal.postgres import PostgresExampleStore
+        if "postgres" not in EXAMPLE_STORE_PROVIDERS:
+            from dal.postgres import PostgresExampleStore
 
-        EXAMPLE_STORE_PROVIDERS = {
-            "postgres": PostgresExampleStore,
-        }
+            EXAMPLE_STORE_PROVIDERS["postgres"] = PostgresExampleStore
 
         provider = get_provider_env(
             "EXAMPLE_STORE_PROVIDER",
@@ -193,13 +204,12 @@ def get_registry_store() -> RegistryStore:
     Returns:
         The singleton RegistryStore instance.
     """
-    global _registry_store
+    global _registry_store, REGISTRY_STORE_PROVIDERS
     if _registry_store is None:
-        from dal.postgres import PostgresRegistryStore
+        if "postgres" not in REGISTRY_STORE_PROVIDERS:
+            from dal.postgres import PostgresRegistryStore
 
-        REGISTRY_STORE_PROVIDERS = {
-            "postgres": PostgresRegistryStore,
-        }
+            REGISTRY_STORE_PROVIDERS["postgres"] = PostgresRegistryStore
 
         provider = get_provider_env(
             "REGISTRY_STORE_PROVIDER",
@@ -226,13 +236,12 @@ def get_schema_store() -> SchemaStore:
     Raises:
         ValueError: If SCHEMA_STORE_PROVIDER is set to an invalid value.
     """
-    global _schema_store
+    global _schema_store, SCHEMA_STORE_PROVIDERS
     if _schema_store is None:
-        from dal.postgres import PostgresSchemaStore
+        if "postgres" not in SCHEMA_STORE_PROVIDERS:
+            from dal.postgres import PostgresSchemaStore
 
-        SCHEMA_STORE_PROVIDERS = {
-            "postgres": PostgresSchemaStore,
-        }
+            SCHEMA_STORE_PROVIDERS["postgres"] = PostgresSchemaStore
 
         provider = get_provider_env(
             "SCHEMA_STORE_PROVIDER",
@@ -259,13 +268,12 @@ def get_schema_introspector() -> SchemaIntrospector:
     Raises:
         ValueError: If SCHEMA_INTROSPECTOR_PROVIDER is set to an invalid value.
     """
-    global _schema_introspector
+    global _schema_introspector, SCHEMA_INTROSPECTOR_PROVIDERS
     if _schema_introspector is None:
-        from dal.postgres import PostgresSchemaIntrospector
+        if "postgres" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.postgres import PostgresSchemaIntrospector
 
-        SCHEMA_INTROSPECTOR_PROVIDERS = {
-            "postgres": PostgresSchemaIntrospector,
-        }
+            SCHEMA_INTROSPECTOR_PROVIDERS["postgres"] = PostgresSchemaIntrospector
 
         provider = get_provider_env(
             "SCHEMA_INTROSPECTOR_PROVIDER",
@@ -292,13 +300,12 @@ def get_metadata_store() -> MetadataStore:
     Raises:
         ValueError: If METADATA_STORE_PROVIDER is set to an invalid value.
     """
-    global _metadata_store
+    global _metadata_store, METADATA_STORE_PROVIDERS
     if _metadata_store is None:
-        from dal.postgres import PostgresMetadataStore
+        if "postgres" not in METADATA_STORE_PROVIDERS:
+            from dal.postgres import PostgresMetadataStore
 
-        METADATA_STORE_PROVIDERS = {
-            "postgres": PostgresMetadataStore,
-        }
+            METADATA_STORE_PROVIDERS["postgres"] = PostgresMetadataStore
 
         provider = get_provider_env(
             "METADATA_STORE_PROVIDER",
@@ -322,13 +329,12 @@ def get_pattern_run_store() -> PatternRunStore:
     Returns:
         The singleton PatternRunStore instance.
     """
-    global _pattern_run_store
+    global _pattern_run_store, PATTERN_RUN_STORE_PROVIDERS
     if _pattern_run_store is None:
-        from dal.postgres import PostgresPatternRunStore
+        if "postgres" not in PATTERN_RUN_STORE_PROVIDERS:
+            from dal.postgres import PostgresPatternRunStore
 
-        PATTERN_RUN_STORE_PROVIDERS = {
-            "postgres": PostgresPatternRunStore,
-        }
+            PATTERN_RUN_STORE_PROVIDERS["postgres"] = PostgresPatternRunStore
 
         provider = get_provider_env(
             "PATTERN_RUN_STORE_PROVIDER",
@@ -376,13 +382,12 @@ def reset_singletons() -> None:
 
 def get_conversation_store() -> ConversationStore:
     """Get or create the singleton ConversationStore instance."""
-    global _conversation_store
+    global _conversation_store, CONVERSATION_STORE_PROVIDERS
     if _conversation_store is None:
-        from dal.postgres import PostgresConversationStore
+        if "postgres" not in CONVERSATION_STORE_PROVIDERS:
+            from dal.postgres import PostgresConversationStore
 
-        CONVERSATION_STORE_PROVIDERS = {
-            "postgres": PostgresConversationStore,
-        }
+            CONVERSATION_STORE_PROVIDERS["postgres"] = PostgresConversationStore
 
         provider = get_provider_env(
             "CONVERSATION_STORE_PROVIDER",
@@ -397,13 +402,12 @@ def get_conversation_store() -> ConversationStore:
 
 def get_feedback_store() -> FeedbackStore:
     """Get or create the singleton FeedbackStore instance."""
-    global _feedback_store
+    global _feedback_store, FEEDBACK_STORE_PROVIDERS
     if _feedback_store is None:
-        from dal.postgres import PostgresFeedbackStore
+        if "postgres" not in FEEDBACK_STORE_PROVIDERS:
+            from dal.postgres import PostgresFeedbackStore
 
-        FEEDBACK_STORE_PROVIDERS = {
-            "postgres": PostgresFeedbackStore,
-        }
+            FEEDBACK_STORE_PROVIDERS["postgres"] = PostgresFeedbackStore
 
         provider = get_provider_env(
             "FEEDBACK_STORE_PROVIDER",
@@ -418,13 +422,12 @@ def get_feedback_store() -> FeedbackStore:
 
 def get_interaction_store() -> InteractionStore:
     """Get or create the singleton InteractionStore instance."""
-    global _interaction_store
+    global _interaction_store, INTERACTION_STORE_PROVIDERS
     if _interaction_store is None:
-        from dal.postgres import PostgresInteractionStore
+        if "postgres" not in INTERACTION_STORE_PROVIDERS:
+            from dal.postgres import PostgresInteractionStore
 
-        INTERACTION_STORE_PROVIDERS = {
-            "postgres": PostgresInteractionStore,
-        }
+            INTERACTION_STORE_PROVIDERS["postgres"] = PostgresInteractionStore
 
         provider = get_provider_env(
             "INTERACTION_STORE_PROVIDER",
@@ -454,13 +457,12 @@ def get_evaluation_store() -> EvaluationStore:
     Returns:
         The singleton EvaluationStore instance.
     """
-    global _evaluation_store
+    global _evaluation_store, EVALUATION_STORE_PROVIDERS
     if _evaluation_store is None:
-        from dal.postgres import PostgresEvaluationStore
+        if "postgres" not in EVALUATION_STORE_PROVIDERS:
+            from dal.postgres import PostgresEvaluationStore
 
-        EVALUATION_STORE_PROVIDERS = {
-            "postgres": PostgresEvaluationStore,
-        }
+            EVALUATION_STORE_PROVIDERS["postgres"] = PostgresEvaluationStore
 
         provider = get_provider_env(
             "EVALUATION_STORE_PROVIDER",
