@@ -26,10 +26,14 @@ exporters:
     compression: none
     tls:
       insecure: true
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, attributes]
-      exporters: [logging, otlphttp/worker]
+      exporters: [logging, otlphttp/worker, otlp/tempo]

@@ -1,0 +1,53 @@
+{
+    "annotations": {
+        "list": []
+    },
+    "editable": false,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+        {
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "options": {
+                "code": {
+                    "language": "markdown",
+                    "showLineNumbers": false,
+                    "showMiniMap": false
+                },
+                "content": "# Trace Explorer\n\nUse this dashboard to jump into the Tempo Trace Waterfall view.\n\n### [Open Tempo Explore View](/explore?orgId=1&left=%7B%22datasource%22:%22Tempo%22%2C%22queries%22:%5B%7B%22refId%22:%22A%22%2C%22datasource%22:%7B%22type%22:%22tempo%22%2C%22uid%22:%22tempo%22%7D%2C%22queryType%22:%22traceId%22%7D%5D%2C%22range%22:%7B%22from%22:%22now-1h%22%2C%22to%22:%22now%22%7D%7D)\n\n### Instructions\n1. **Click the link above** to open Grafana Explore with Tempo selected.\n2. Go to the **Search** tab (next to Query).\n3. Find your trace (e.g., by time or service name).\n4. Click a Trace ID to view the waterfall.\n\n### ⚠️ Important Notes\n- **Ephemeral Data**: Tempo runs with local storage. **Restarting the container clears all traces.**\n- **System of Record**: For long-term history and analytics, check Postgres/MLflow dashboards.\n- **Missing Traces?**: If traces appear here but not in Postgres, check the `otel-worker` queue.",
+                "mode": "markdown"
+            },
+            "pluginVersion": "10.0.0",
+            "title": "Welcome",
+            "type": "text"
+        }
+    ],
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+        "observability",
+        "traces"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Trace Explorer",
+    "uid": "trace-explorer",
+    "version": 1,
+    "weekStart": ""
+}
