@@ -112,7 +112,7 @@ class AgentService:
 
         try:
             tools = await get_mcp_tools()
-            feedback_tool = next((t for t in tools if t.name == "submit_feedback_tool"), None)
+            feedback_tool = next((t for t in tools if t.name == "submit_feedback"), None)
             if feedback_tool:
                 await feedback_tool.ainvoke(
                     {"interaction_id": interaction_id, "thumb": thumb, "comment": comment}
