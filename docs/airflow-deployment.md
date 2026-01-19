@@ -7,10 +7,10 @@ This guide describes how to deploy the on-demand Airflow stack for Golden Datase
 The stack consists of:
 - **Airflow Webserver**: UI for managing DAGs.
 - **Airflow Scheduler**: Orchestrates tasks.
-- **Airflow Worker**: Executes evaluation tasks (using Celery).
+- **Airflow Worker**: Executes evaluation tasks.
 - **Redis**: Message broker for Celery.
 - **PostgreSQL**: Metadata database for Airflow.
-- **MinIO**: S3-compatible storage for evaluation artifacts.
+- **MinIO**: S3-compatible storage (Reserved for future use).
 
 ## Prerequisites
 
@@ -39,7 +39,28 @@ The stack consists of:
 ## Accessing Services
 
 - **Airflow UI**: [http://localhost:8080](http://localhost:8080) (Default: admin/admin)
-- **MinIO Console**: [http://localhost:9001](http://localhost:9001) (Default: minioadmin/minioadmin)
+- **MinIO Console**: [http://localhost:9001](http://localhost:9001) (Reserved)
+
+## Artifact Persistence
+
+Evaluation artifacts are stored on the host at:
+`./airflow_evals/airflow/logs/eval_artifacts/{run_id}/`
+
+This directory is persisted across container restarts via a bind mount to `/opt/airflow/logs` in the containers.
+
+## Smoke Run Procedure
+
+1. Log in to Airflow UI.
+2. Unpause the `text2sql_evaluation` DAG.
+3. Trigger the DAG manually with a JSON configuration:
+   ```json
+   {
+     "limit": 5,
+     "seed": 123
+   }
+   ```
+4. Monitor the `run_evaluation` task logs.
+5. Verify artifacts appear in the host filesystem.
 
 ## Troubleshooting
 
@@ -58,5 +79,5 @@ docker compose -f docker-compose.evals.yml down -v
 ## Security Recommendations
 
 1. **Change all default passwords** in `.env.airflow`.
-2. Do not expose 8080 or 9001 to the public internet without a reverse proxy and proper auth.
-3. Use the `airflow-internal` network for sensitive internal communications.
+2. Do not expose 8080 or 9001 to the public internet without a reverse proxy.
+3. The `airflow-internal` network isolates DB/Redis from external access.
