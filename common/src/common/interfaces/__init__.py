@@ -2,6 +2,7 @@
 
 from .cache_store import CacheStore
 from .conversation_store import ConversationStore
+from .evaluation_store import EvaluationStore
 from .example_store import ExampleStore
 from .extended_vector_index import ExtendedVectorIndex
 from .feedback_store import FeedbackStore
@@ -17,6 +18,7 @@ from .vector_index import SearchResult, VectorIndex
 __all__ = [
     "CacheStore",
     "ConversationStore",
+    "EvaluationStore",
     "ExampleStore",
     "ExtendedVectorIndex",
     "FeedbackStore",
