@@ -29,6 +29,7 @@ from typing import Optional
 from common.interfaces import (
     CacheStore,
     ConversationStore,
+    EvaluationStore,
     ExampleStore,
     FeedbackStore,
     GraphStore,
@@ -43,6 +44,7 @@ from dal.memgraph import MemgraphStore
 from dal.postgres import (
     PgSemanticCache,
     PostgresConversationStore,
+    PostgresEvaluationStore,
     PostgresExampleStore,
     PostgresFeedbackStore,
     PostgresInteractionStore,
@@ -364,6 +366,7 @@ def reset_singletons() -> None:
     global _graph_store, _cache_store, _example_store, _registry_store
     global _schema_store, _schema_introspector, _metadata_store
     global _conversation_store, _feedback_store, _interaction_store, _pattern_run_store
+    global _evaluation_store
 
     _graph_store = None
     _cache_store = None
@@ -375,7 +378,9 @@ def reset_singletons() -> None:
     _conversation_store = None
     _feedback_store = None
     _interaction_store = None
+    _interaction_store = None
     _pattern_run_store = None
+    _evaluation_store = None
 
 
 def get_conversation_store() -> ConversationStore:
@@ -421,3 +426,36 @@ def get_interaction_store() -> InteractionStore:
         store_cls = INTERACTION_STORE_PROVIDERS[provider]
         _interaction_store = store_cls()
     return _interaction_store
+
+
+# =============================================================================
+# Evaluation Store
+# =============================================================================
+
+EVALUATION_STORE_PROVIDERS: dict[str, type[EvaluationStore]] = {
+    "postgres": PostgresEvaluationStore,
+}
+
+_evaluation_store: Optional[EvaluationStore] = None
+
+
+def get_evaluation_store() -> EvaluationStore:
+    """Get or create the singleton EvaluationStore instance.
+
+    Provider is selected via EVALUATION_STORE_PROVIDER env var.
+    Default: "postgres" (PostgresEvaluationStore)
+
+    Returns:
+        The singleton EvaluationStore instance.
+    """
+    global _evaluation_store
+    if _evaluation_store is None:
+        provider = get_provider_env(
+            "EVALUATION_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(EVALUATION_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing EvaluationStore with provider: {provider}")
+        store_cls = EVALUATION_STORE_PROVIDERS[provider]
+        _evaluation_store = store_cls()
+    return _evaluation_store

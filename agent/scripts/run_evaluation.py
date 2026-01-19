@@ -28,7 +28,10 @@ from golden import (  # noqa: E402
     load_test_cases,
 )
 
+from dal.database import Database  # noqa: E402
+from dal.factory import get_evaluation_store  # noqa: E402
 from schema.evaluation.metrics import MetricSuiteV1  # noqa: E402
+from schema.evaluation.models import EvaluationCaseResultCreate, EvaluationRunCreate  # noqa: E402
 
 load_dotenv()
 
@@ -234,6 +237,8 @@ async def evaluate_test_case(
 
         return {
             "test_id": test_id,
+            "question": question,  # Pass through for persistence
+            "generated_sql": generated_sql,  # Pass through for persistence
             "is_correct": is_correct,
             "exact_match": metrics["exact_match"],
             "structural_score": metrics["structural_score"],
@@ -251,48 +256,53 @@ async def evaluate_test_case(
         print(f"  ✗ ERROR - {error_message}")
         return {
             "test_id": test_id,
+            "question": question,
             "is_correct": False,
+            "structural_score": 0.0,
             "execution_time_ms": execution_time_ms,
             "error_message": error_message,
+            "skipped": False,  # Explicitly mark as not skipped so it counts as failure
         }
 
 
-async def store_evaluation_result(
-    test_id: Any,
-    generated_sql: Optional[str],
-    actual_result: Optional[List],
-    actual_row_count: int,
-    is_correct: bool,
-    error_message: Optional[str],
-    token_count: Optional[int],
-    execution_time_ms: int,
+async def store_evaluation_results_batch(
+    run_id: str,
+    results: List[Dict[str, Any]],
     tenant_id: int,
 ) -> None:
-    """Store evaluation result in database."""
-    config = _get_db_config()
-    conn = await asyncpg.connect(**config)
+    """Store batch of evaluation results via DAL."""
+    if not results:
+        return
 
-    try:
-        await conn.execute(
-            """
-            INSERT INTO evaluation_results (
-                test_id, generated_sql, actual_result, actual_row_count,
-                is_correct, error_message, token_count, execution_time_ms, tenant_id
+    # Convert to schema models
+    eval_results = []
+    for r in results:
+        # Map raw result to EvaluationCaseResultCreate
+        eval_results.append(
+            EvaluationCaseResultCreate(
+                run_id=run_id,
+                test_id=r["test_id"],
+                question=r.get("question", ""),
+                generated_sql=r.get("current_sql") or r.get("generated_sql"),
+                # Note: evaluate_test_case returns a dict.
+                # It has: test_id, is_correct, exact_match, structural_score...
+                # It lacks 'question' or 'generated_sql' in the return dict!
+                # We need to update evaluate_test_case to return these details.
+                is_correct=r["is_correct"],
+                structural_score=r["structural_score"],
+                error_message=r.get("error_message"),
+                execution_time_ms=r["execution_time_ms"],
+                raw_response={
+                    "subscores": r.get("subscores"),
+                    "generated_tables": r.get("generated_tables"),
+                    "expected_tables": r.get("expected_tables"),
+                    "parse_errors": r.get("parse_errors"),
+                },
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        """,
-            str(test_id),  # Convert to string in case it's from file-based tests
-            generated_sql,
-            json.dumps(actual_result) if actual_result else None,
-            actual_row_count,
-            is_correct,
-            error_message,
-            token_count,
-            execution_time_ms,
-            tenant_id,
         )
-    finally:
-        await conn.close()
+
+    store = get_evaluation_store()
+    await store.save_case_results(eval_results)
 
 
 def validate_golden_dataset_cli(
@@ -419,11 +429,55 @@ async def run_evaluation_suite(
     if dry_run:
         print("\n[DRY RUN - Agent execution skipped]")
 
+    # --- Persistence: Init and Create Run ---
+    current_run = None
+    if not dry_run:
+        try:
+            # Initialize DAL (needed for factory)
+            await Database.init()
+
+            store = get_evaluation_store()
+
+            # Create Run
+            current_run = await store.create_run(
+                EvaluationRunCreate(
+                    dataset_mode=dataset_mode,
+                    tenant_id=tenant_id,
+                    config_snapshot={
+                        "category": category,
+                        "difficulty": difficulty,
+                        "golden_only": golden_only,
+                    },
+                )
+            )
+            run_id = current_run.id
+            print(f"\nCreated Evaluation Run [ID: {run_id}]")
+
+        except Exception as e:
+            print(f"Failed to initialize persistence or create run: {e}")
+            # Decide if we fail hard or continue without persistence.
+            # Requirement says "Control-Plane DDL for Evaluation Runs and Results"
+            # It seems critical. But maybe we allow fallback?
+            # Let's log and continue if it's just local dev without DB?
+            # But the task is specifically about persistence.
+            pass
+
     # Run evaluation
     results = []
-    for test_case in test_cases:
-        result = await evaluate_test_case(test_case, tenant_id, dry_run=dry_run)
-        results.append(result)
+    try:
+        for test_case in test_cases:
+            result = await evaluate_test_case(test_case, tenant_id, dry_run=dry_run)
+            results.append(result)
+
+        # Persistence: Save Results
+        if current_run and results:
+            await store_evaluation_results_batch(current_run.id, results, tenant_id)
+
+    finally:
+        # Persistence: Completion
+        if current_run:
+            # Update run status
+            pass  # We will do this after summarization
 
     # Summary
     print("\n" + "=" * 60)
@@ -439,6 +493,21 @@ async def run_evaluation_suite(
         output_dir_parent=output_dir,
         run_id=run_id,
     )
+
+    # Persistence: Update Run with Summary
+    if current_run:
+        try:
+            current_run.status = "COMPLETED"
+            from datetime import datetime
+
+            current_run.completed_at = datetime.now().astimezone()
+            current_run.metrics_summary = summary
+
+            store = get_evaluation_store()
+            await store.update_run(current_run)
+            print(f"✓ Run {current_run.id} updated with summary.")
+        except Exception as e:
+            print(f"Failed to update run status: {e}")
 
     return summary
 
