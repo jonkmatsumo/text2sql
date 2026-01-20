@@ -265,7 +265,7 @@ class MemgraphStore(GraphStore):
         #     query = ... (HNSW)
         # else:
         #     query = ... (Cosine fallback)
-        
+
         # CURRENT FIX: Client-side cosine similarity (Memgraph vector modules missing)
         # 1. Fetch all candidate nodes
         query = f"""
@@ -273,43 +273,43 @@ class MemgraphStore(GraphStore):
         WHERE n.{embedding_property} IS NOT NULL
         RETURN n AS node
         """
-        
+
         with self.driver.session() as session:
             result = session.run(query)
             candidates = []
-            
+
             for record in result:
                 neo_node = record["node"]
                 props = dict(neo_node)
-                
+
                 # Extract embedding
                 node_embedding = props.get(embedding_property)
                 if not node_embedding or not isinstance(node_embedding, list):
                     continue
-                    
+
                 # Calculate Cosine Similarity in Python
                 # Dot product
                 dot_product = sum(a * b for a, b in zip(embedding, node_embedding))
                 # Magnitudes
                 mag_a = sum(a * a for a in embedding) ** 0.5
                 mag_b = sum(b * b for b in node_embedding) ** 0.5
-                
+
                 score = 0.0
                 if mag_a * mag_b > 0:
                     score = dot_product / (mag_a * mag_b)
-                
+
                 # Remove embedding from props to save memory/bandwidth in return
                 props.pop(embedding_property, None)
-                
+
                 # Ensure ID
                 if "id" not in props:
                     try:
                         props["id"] = str(neo_node.element_id)
                     except AttributeError:
                         pass
-                        
+
                 candidates.append({"node": props, "score": score})
-            
+
             # 2. Sort by score DESC and take top K
             candidates.sort(key=lambda x: x["score"], reverse=True)
             return candidates[:k]
