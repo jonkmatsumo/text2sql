@@ -31,7 +31,12 @@ class InteractionStore(Protocol):
         ...
 
     async def get_recent_interactions(self, limit: int = 50, offset: int = 0) -> List[dict]:
-        """Fetch list of user interactions with feedback summary."""
+        """Fetch list of user interactions with feedback summary.
+
+        Returns:
+            List of dicts containing: id, conversation_id, user_nlq_text,
+            execution_status, created_at, trace_id, generated_sql_preview, thumb.
+        """
         ...
 
     async def get_interaction_detail(self, interaction_id: str) -> Optional[dict]:

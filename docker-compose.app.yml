@@ -61,6 +61,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MCP_TRANSPORT: "sse" # SSE transport verified working (Phase 0 audit)
       SPACY_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: text2sql-mcp-server
     ports:
       - "8000:8000"
     networks:
@@ -68,6 +71,8 @@ services:
     volumes:
       - ./mcp-server/src:/app/mcp-server/src
       - ./common/src:/app/common/src
+      - ./schema/src:/app/schema/src
+      - ./dal/src:/app/dal/src
       - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 

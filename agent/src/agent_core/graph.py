@@ -318,6 +318,11 @@ async def run_agent_with_tracing(
                 try:
 
                     async def _create_interaction():
+                        # Use canonical OTEL trace_id if available, fallback to thread_id
+                        # This ensures the ID stored in DB matches the trace in Tempo/Grafana
+                        otel_trace_id = telemetry.get_current_trace_id()
+                        final_trace_id = otel_trace_id if otel_trace_id else thread_id
+
                         return await create_tool.ainvoke(
                             {
                                 "conversation_id": session_id or thread_id,
@@ -325,7 +330,7 @@ async def run_agent_with_tracing(
                                 "user_nlq_text": question,
                                 "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                                 "prompt_version": "v1.0",
-                                "trace_id": thread_id,
+                                "trace_id": final_trace_id,
                             },
                             config=config,
                         )
@@ -470,9 +475,15 @@ async def run_agent_with_tracing(
                             },
                             exc_info=True,
                         )
+                        # Diagnostic print for immediate visibility
+                        print(f"CRITICAL: Update failed for {interaction_id}: {e}")
+
                         # Mark result as having persistence failure (observable)
                         result["persistence_failed"] = True
                         result["persistence_error"] = str(e)
+                else:
+                    logger.error("update_interaction tool not found in available tools")
+                    print("CRITICAL: update_interaction tool missing!")
 
         # Metadata is already handled early and made sticky via telemetry_context
 

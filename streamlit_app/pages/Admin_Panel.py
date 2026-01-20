@@ -9,6 +9,7 @@ import streamlit as st
 
 # isort: split
 from streamlit_app.service.admin import AdminService  # noqa: E402
+from streamlit_app.service.observability_links import grafana_trace_detail_url
 
 # Allow nested asyncio loops for MCP
 nest_asyncio.apply()
@@ -61,27 +62,48 @@ def main():
                 df = pd.DataFrame(interactions)
 
                 # Show list
-                cols = st.columns([2, 1, 1, 1, 1])
+                cols = st.columns([2, 2, 0.5, 1, 0.5, 1, 1])
                 cols[0].write("**NLQ Text**")
-                cols[1].write("**Status**")
-                cols[2].write("**Thumb**")
-                cols[3].write("**Created At**")
-                cols[4].write("**Action**")
+                cols[1].write("**SQL Preview**")
+                cols[2].write("**Trace**")
+                cols[3].write("**Status**")
+                cols[4].write("**Thumb**")
+                cols[5].write("**Created At**")
+                cols[6].write("**Action**")
 
                 for _, row in df.iterrows():
-                    cols = st.columns([2, 1, 1, 1, 1])
+                    cols = st.columns([2, 2, 0.5, 1, 0.5, 1, 1])
                     cols[0].write(row.get("user_nlq_text", "Unknown Query"))
-                    cols[1].write(row.get("execution_status", "UNKNOWN"))
+
+                    # SQL Preview
+                    sql_prev = row.get("generated_sql_preview")
+                    if sql_prev:
+                        cols[1].code(sql_prev, language="sql")
+                    else:
+                        cols[1].write("-")
+
+                    # Trace
+                    trace_id = row.get("trace_id")
+                    if trace_id:
+                        cols[2].link_button(
+                            "📊",
+                            grafana_trace_detail_url(trace_id),
+                            help=f"Trace: {trace_id}",
+                        )
+                    else:
+                        cols[2].write("-")
+
+                    cols[3].write(row.get("execution_status", "UNKNOWN"))
                     thumb = row.get("thumb")
                     thumb = thumb if thumb else "-"
-                    cols[2].write(thumb)
+                    cols[4].write(thumb)
                     # Handle potential non-datetime timestamp if raw string
                     created_at = row.get("created_at", "")
                     # Simple display, or convert if needed.
                     # The Service does sort by string, which is fine for ISO.
-                    cols[3].write(created_at[:16].replace("T", " "))
+                    cols[5].write(created_at[:16].replace("T", " "))
 
-                    if cols[4].button("Review", key=row["id"]):
+                    if cols[6].button("Review", key=row["id"]):
                         st.session_state.review_id = row["id"]
                         st.rerun()
 

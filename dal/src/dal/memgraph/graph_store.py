@@ -260,63 +260,59 @@ class MemgraphStore(GraphStore):
             Where 'node' is a flat dictionary of node properties.
         """
         # Strategy selection based on label (could be config-driven in future)
-        if label == "Table":
-            query = """
-            CALL vector_search.search($index, $label, $prop, $vector, $k)
-            YIELD node, score
-            RETURN node, score
-            """
-            params = {
-                "index": index_name,
-                "label": label,
-                "prop": embedding_property,
-                "vector": embedding,
-                "k": k,
-            }
-        else:
-            # Fallback Scan
-            query = f"""
-            MATCH (n:`{label}`)
-            WHERE n.{embedding_property} IS NOT NULL
-            WITH n, vector.similarity.cosine(n.{embedding_property}, $vector) AS score
-            ORDER BY score DESC
-            LIMIT $k
-            RETURN n AS node, score
-            """
-            params = {
-                "vector": embedding,
-                "k": k,
-            }
+        # FIXME: Re-enable HNSW search when vector_search module is available
+        # if label == "Table":
+        #     query = ... (HNSW)
+        # else:
+        #     query = ... (Cosine fallback)
+
+        # CURRENT FIX: Client-side cosine similarity (Memgraph vector modules missing)
+        # 1. Fetch all candidate nodes
+        query = f"""
+        MATCH (n:`{label}`)
+        WHERE n.{embedding_property} IS NOT NULL
+        RETURN n AS node
+        """
 
         with self.driver.session() as session:
-            result = session.run(query, params)
-            hits = []
+            result = session.run(query)
+            candidates = []
+
             for record in result:
                 neo_node = record["node"]
-                score = record["score"]
-
-                # Normalize score
-                if not isinstance(score, float):
-                    try:
-                        score = float(score)
-                    except (ValueError, TypeError):
-                        score = 0.0
-
-                # Map to property dict
                 props = dict(neo_node)
-                # Remove embedding from returned properties to save bandwidth
+
+                # Extract embedding
+                node_embedding = props.get(embedding_property)
+                if not node_embedding or not isinstance(node_embedding, list):
+                    continue
+
+                # Calculate Cosine Similarity in Python
+                # Dot product
+                dot_product = sum(a * b for a, b in zip(embedding, node_embedding))
+                # Magnitudes
+                mag_a = sum(a * a for a in embedding) ** 0.5
+                mag_b = sum(b * b for b in node_embedding) ** 0.5
+
+                score = 0.0
+                if mag_a * mag_b > 0:
+                    score = dot_product / (mag_a * mag_b)
+
+                # Remove embedding from props to save memory/bandwidth in return
                 props.pop(embedding_property, None)
 
-                # Ensure ID is present in the dict if it's available via element_id
+                # Ensure ID
                 if "id" not in props:
                     try:
                         props["id"] = str(neo_node.element_id)
                     except AttributeError:
                         pass
 
-                hits.append({"node": props, "score": score})
+                candidates.append({"node": props, "score": score})
 
-            return hits
+            # 2. Sort by score DESC and take top K
+            candidates.sort(key=lambda x: x["score"], reverse=True)
+            return candidates[:k]
 
     def run_query(
         self, query: str, parameters: Optional[Dict[str, Any]] = None
