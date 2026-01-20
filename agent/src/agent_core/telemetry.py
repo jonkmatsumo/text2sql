@@ -163,6 +163,11 @@ class TelemetryBackend(abc.ABC):
         """Get the current active span if one exists."""
         pass
 
+    @abc.abstractmethod
+    def get_current_trace_id(self) -> Optional[str]:
+        """Get the current trace ID as a 32-char hex string."""
+        pass
+
 
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
@@ -287,6 +292,17 @@ class OTELTelemetryBackend(TelemetryBackend):
             return None
         return OTELTelemetrySpan(otel_span)
 
+    def get_current_trace_id(self) -> Optional[str]:
+        """Get current trace ID from OTEL context."""
+        span = trace.get_current_span()
+        if span == trace.INVALID_SPAN:
+            return None
+        ctx = span.get_span_context()
+        if ctx.is_valid:
+            # Format as 32-char hex string
+            return format(ctx.trace_id, "032x")
+        return None
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -376,6 +392,14 @@ class InMemoryTelemetryBackend(TelemetryBackend):
             return self.spans[-1]
         return None
 
+    def get_current_trace_id(self) -> Optional[str]:
+        """Get current trace ID from in-memory spans."""
+        # Return ID of last unfinished span if available
+        if self.spans and not self.spans[-1].is_finished:
+            # Mock ID for testing
+            return "0" * 32
+        return None
+
 
 class NoOpTelemetrySpan(TelemetrySpan):
     """No-op implementation of TelemetrySpan."""
@@ -435,6 +459,10 @@ class NoOpTelemetryBackend(TelemetryBackend):
     def get_current_span(self) -> Optional[TelemetrySpan]:
         """Get no-op span."""
         return NoOpTelemetrySpan()
+
+    def get_current_trace_id(self) -> Optional[str]:
+        """Get no-op trace ID."""
+        return None
 
 
 class TelemetryService:
@@ -648,6 +676,10 @@ class TelemetryService:
     def get_current_span(self) -> Optional[TelemetrySpan]:
         """Get the current active span from the backend."""
         return self._backend.get_current_span()
+
+    def get_current_trace_id(self) -> Optional[str]:
+        """Get the current trace ID from the backend."""
+        return self._backend.get_current_trace_id()
 
 
 # Global instance for easy access
