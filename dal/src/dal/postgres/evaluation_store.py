@@ -136,6 +136,7 @@ class PostgresEvaluationStore(EvaluationStore):
                 r.error_message,
                 r.execution_time_ms,
                 json.dumps(r.raw_response),
+                r.trace_id,
             )
             for r in results
         ]
@@ -145,9 +146,9 @@ class PostgresEvaluationStore(EvaluationStore):
                 """
                 INSERT INTO evaluation_results (
                     run_id, test_id, question, generated_sql, is_correct,
-                    structural_score, error_message, execution_time_ms, raw_response
+                    structural_score, error_message, execution_time_ms, raw_response, trace_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
                 """,
                 data,
             )
