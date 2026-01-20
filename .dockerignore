@@ -1,39 +1,68 @@
-# Version control
-.git/
-.github/
+# Git
+.git
+.gitignore
 
-# Python caches
-**/__pycache__/
-**/*.pyc
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual environments
-.venv/
+# Virtual Environments
+.env
+.venv
+env/
 venv/
+ENV/
+env.bak/
+venv.bak/
+*/.venv/
+mcp-server/.venv/
+streamlit_app/.venv/
 
-# OS / editor artifacts
-.DS_Store
+# Testing/Linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.tox/
+
+# Local Data
+local-data/
+*.sqlite
+*.db
+
+# IDEs
 .idea/
 .vscode/
 
+# Node (if applicable)
+node_modules/
+
+# Mac
+.DS_Store
+
 # Generated or large data
-local-data/
 mlruns/
 artifacts/
 logs/
 tmp/
 coverage/
-
-# Node dependencies
-node_modules/
-
-# Build outputs
-build/
-dist/
-*.egg-info/
-
-# Docker
 docker-compose.override.yml
-.env
