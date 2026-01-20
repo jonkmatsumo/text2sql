@@ -245,4 +245,8 @@ def unpack_mcp_result(result: Any) -> Any:
         if text_content:
             return normalize_payload(text_content)
 
+    # Handle results wrapped in a "result" dict key (default FastMCP/SDK behavior)
+    if isinstance(result, dict) and "result" in result and len(result) == 1:
+        return result["result"]
+
     return result

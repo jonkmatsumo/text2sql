@@ -63,6 +63,10 @@ def _introspect_allowed_tables() -> Set[str]:
             conn.close()
     except Exception as e:
         logger.warning(f"Failed to introspect tables: {e}. Using empty allowlist.")
+        print(f"CRITICAL: PolicyEnforcer introspection failed: {e}")
+        import traceback
+
+        traceback.print_exc()
         return set()
 
 
