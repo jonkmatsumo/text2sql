@@ -476,9 +476,7 @@ async def run_agent_with_tracing(
                             exc_info=True,
                         )
                         # Diagnostic print for immediate visibility
-                        print(
-                            f"CRITICAL: Update failed for {interaction_id}: {e}"
-                        )
+                        print(f"CRITICAL: Update failed for {interaction_id}: {e}")
 
                         # Mark result as having persistence failure (observable)
                         result["persistence_failed"] = True

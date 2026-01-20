@@ -129,9 +129,7 @@ def main():
                             st.markdown("**Response:**")
                             try:
                                 payload = json.loads(detail["response_payload"])
-                                st.write(
-                                    payload.get("text", detail["response_payload"])
-                                )
+                                st.write(payload.get("text", detail["response_payload"]))
                             except (ValueError, TypeError, json.JSONDecodeError):
                                 st.write(detail["response_payload"])
 
@@ -259,14 +257,10 @@ def main():
 
     elif view == "Approved Examples":
         st.header("✅ Approved Few-Shot Examples")
-        st.write(
-            "These examples are currently verified and indexable in the Few-Shot Registry."
-        )
+        st.write("These examples are currently verified and indexable in the Few-Shot Registry.")
 
         # Search/Filter UI
-        search = st.text_input(
-            "Search examples", placeholder="Filter by question or SQL..."
-        )
+        search = st.text_input("Search examples", placeholder="Filter by question or SQL...")
 
         with st.spinner("Loading examples..."):
             examples = asyncio.run(
@@ -307,9 +301,7 @@ def main():
             st.info("Generate new entity patterns from DB values + LLM synonyms.")
             if st.button("Generate Patterns"):
                 asyncio.run(
-                    run_operation(
-                        "Pattern Generation", OpsService.run_pattern_generation()
-                    )
+                    run_operation("Pattern Generation", OpsService.run_pattern_generation())
                 )
 
             st.divider()
@@ -334,19 +326,13 @@ def main():
             st.subheader("Schema Hydration")
             st.info("Sync Postgres schema to Memgraph.")
             if st.button("Hydrate Schema", disabled=True, help="Coming soon"):
-                asyncio.run(
-                    run_operation("Schema Hydration", OpsService.run_schema_hydration())
-                )
+                asyncio.run(run_operation("Schema Hydration", OpsService.run_schema_hydration()))
 
         with col3:
             st.subheader("Semantic Cache")
             st.info("Re-index embeddings for cache/retrieval.")
             if st.button("Re-index Cache", disabled=True, help="Coming soon"):
-                asyncio.run(
-                    run_operation(
-                        "Cache Re-indexing", OpsService.run_cache_reindexing()
-                    )
-                )
+                asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
 
     elif view == "Observability":
         st.header("📊 Observability")
