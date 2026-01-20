@@ -9,6 +9,7 @@ import streamlit as st
 
 # isort: split
 from streamlit_app.service.admin import AdminService  # noqa: E402
+from streamlit_app.service.observability_links import grafana_trace_detail_url
 
 # Allow nested asyncio loops for MCP
 nest_asyncio.apply()
@@ -61,27 +62,48 @@ def main():
                 df = pd.DataFrame(interactions)
 
                 # Show list
-                cols = st.columns([2, 1, 1, 1, 1])
+                cols = st.columns([2, 2, 0.5, 1, 0.5, 1, 1])
                 cols[0].write("**NLQ Text**")
-                cols[1].write("**Status**")
-                cols[2].write("**Thumb**")
-                cols[3].write("**Created At**")
-                cols[4].write("**Action**")
+                cols[1].write("**SQL Preview**")
+                cols[2].write("**Trace**")
+                cols[3].write("**Status**")
+                cols[4].write("**Thumb**")
+                cols[5].write("**Created At**")
+                cols[6].write("**Action**")
 
                 for _, row in df.iterrows():
-                    cols = st.columns([2, 1, 1, 1, 1])
+                    cols = st.columns([2, 2, 0.5, 1, 0.5, 1, 1])
                     cols[0].write(row.get("user_nlq_text", "Unknown Query"))
-                    cols[1].write(row.get("execution_status", "UNKNOWN"))
+
+                    # SQL Preview
+                    sql_prev = row.get("generated_sql_preview")
+                    if sql_prev:
+                        cols[1].code(sql_prev, language="sql")
+                    else:
+                        cols[1].write("-")
+
+                    # Trace
+                    trace_id = row.get("trace_id")
+                    if trace_id:
+                        cols[2].link_button(
+                            "📊",
+                            grafana_trace_detail_url(trace_id),
+                            help=f"Trace: {trace_id}",
+                        )
+                    else:
+                        cols[2].write("-")
+
+                    cols[3].write(row.get("execution_status", "UNKNOWN"))
                     thumb = row.get("thumb")
                     thumb = thumb if thumb else "-"
-                    cols[2].write(thumb)
+                    cols[4].write(thumb)
                     # Handle potential non-datetime timestamp if raw string
                     created_at = row.get("created_at", "")
                     # Simple display, or convert if needed.
                     # The Service does sort by string, which is fine for ISO.
-                    cols[3].write(created_at[:16].replace("T", " "))
+                    cols[5].write(created_at[:16].replace("T", " "))
 
-                    if cols[4].button("Review", key=row["id"]):
+                    if cols[6].button("Review", key=row["id"]):
                         st.session_state.review_id = row["id"]
                         st.rerun()
 
@@ -107,7 +129,9 @@ def main():
                             st.markdown("**Response:**")
                             try:
                                 payload = json.loads(detail["response_payload"])
-                                st.write(payload.get("text", detail["response_payload"]))
+                                st.write(
+                                    payload.get("text", detail["response_payload"])
+                                )
                             except (ValueError, TypeError, json.JSONDecodeError):
                                 st.write(detail["response_payload"])
 
@@ -235,10 +259,14 @@ def main():
 
     elif view == "Approved Examples":
         st.header("✅ Approved Few-Shot Examples")
-        st.write("These examples are currently verified and indexable in the Few-Shot Registry.")
+        st.write(
+            "These examples are currently verified and indexable in the Few-Shot Registry."
+        )
 
         # Search/Filter UI
-        search = st.text_input("Search examples", placeholder="Filter by question or SQL...")
+        search = st.text_input(
+            "Search examples", placeholder="Filter by question or SQL..."
+        )
 
         with st.spinner("Loading examples..."):
             examples = asyncio.run(
@@ -279,7 +307,9 @@ def main():
             st.info("Generate new entity patterns from DB values + LLM synonyms.")
             if st.button("Generate Patterns"):
                 asyncio.run(
-                    run_operation("Pattern Generation", OpsService.run_pattern_generation())
+                    run_operation(
+                        "Pattern Generation", OpsService.run_pattern_generation()
+                    )
                 )
 
             st.divider()
@@ -304,13 +334,19 @@ def main():
             st.subheader("Schema Hydration")
             st.info("Sync Postgres schema to Memgraph.")
             if st.button("Hydrate Schema", disabled=True, help="Coming soon"):
-                asyncio.run(run_operation("Schema Hydration", OpsService.run_schema_hydration()))
+                asyncio.run(
+                    run_operation("Schema Hydration", OpsService.run_schema_hydration())
+                )
 
         with col3:
             st.subheader("Semantic Cache")
             st.info("Re-index embeddings for cache/retrieval.")
             if st.button("Re-index Cache", disabled=True, help="Coming soon"):
-                asyncio.run(run_operation("Cache Re-indexing", OpsService.run_cache_reindexing()))
+                asyncio.run(
+                    run_operation(
+                        "Cache Re-indexing", OpsService.run_cache_reindexing()
+                    )
+                )
 
     elif view == "Observability":
         st.header("📊 Observability")

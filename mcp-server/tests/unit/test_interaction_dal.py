@@ -93,7 +93,10 @@ async def test_get_recent_interactions(dal, mock_db):
     assert len(results) == 1
     assert results[0]["id"] == "int-1"
     mock_db.fetch.assert_called_once()
-    assert "LIMIT $1 OFFSET $2" in mock_db.fetch.call_args[0][0]
+    sql = mock_db.fetch.call_args[0][0]
+    assert "LIMIT $1 OFFSET $2" in sql
+    assert "i.trace_id" in sql
+    assert "generated_sql_preview" in sql
 
 
 @pytest.mark.asyncio
