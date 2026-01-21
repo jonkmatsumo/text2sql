@@ -17,7 +17,7 @@ This package provides tooling to generate reproducible synthetic datasets for te
 ## Installation
 
 ```bash
-cd synthetic-data
+cd synthetic_data
 pip install -e .
 ```
 
@@ -52,7 +52,7 @@ Loads generated data from a manifest into a PostgreSQL database.
 ## Package Structure
 
 ```
-synthetic-data/
+synthetic_data/
 ├── pyproject.toml
 ├── README.md
 └── src/
@@ -73,7 +73,7 @@ synthetic-data/
 
 ## Development
 
-This package uses a src-layout. Run tests from the `synthetic-data/` directory:
+This package uses a src-layout. Run tests from the `synthetic_data/` directory:
 
 ```bash
 pytest
