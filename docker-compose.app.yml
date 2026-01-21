@@ -71,8 +71,7 @@ services:
     volumes:
       - ./mcp-server/src:/app/mcp-server/src
       - ./src:/app/src
-      - ./schema/src:/app/schema/src
-      - ./dal/src:/app/dal/src
+
       - ./database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 

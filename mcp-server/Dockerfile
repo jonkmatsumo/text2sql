@@ -17,9 +17,9 @@ COPY mcp-server/pyproject.toml ./mcp-server/
 
 # Create dummy source to allow pip install to work for dependencies
 RUN mkdir -p src/common && touch src/common/__init__.py
-RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
-RUN mkdir -p dal/src/dal && touch dal/src/dal/__init__.py
-RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
+RUN mkdir -p src/schema && touch src/schema/__init__.py
+RUN mkdir -p src/dal && touch src/dal/__init__.py
+RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
 
 # Install packages with cache mount (so repeat builds are fast)
@@ -28,9 +28,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Copy source code (this changes frequently)
 COPY src/common ./src/common
-COPY schema/src/ ./schema/src/
-COPY dal/src/ ./dal/src/
-COPY ingestion/src/ ./ingestion/src/
+COPY src/schema ./src/schema
+COPY src/dal ./src/dal
+COPY src/ingestion ./src/ingestion
 COPY mcp-server/src/ ./mcp-server/src/
 
 # Re-install in editable mode

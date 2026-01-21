@@ -32,11 +32,11 @@ COPY dal/pyproject.toml ./dal/
 # Create dummy source files for local dependencies enable caching
 # Common expects src/common
 RUN mkdir -p src/common && touch src/common/__init__.py
-RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
-RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
+RUN mkdir -p src/schema && touch src/schema/__init__.py
+RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
-RUN mkdir -p dal/src/dal && touch dal/src/dal/__init__.py
+RUN mkdir -p src/dal && touch src/dal/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -50,10 +50,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY src/common ./src/common
 
 # Schema source
-COPY schema/src/ ./schema/src/
+COPY src/schema ./src/schema
 
 # Ingestion source
-COPY ingestion/src/ ./ingestion/src/
+COPY src/ingestion ./src/ingestion
 
 # Streamlit source (includes tests now)
 COPY streamlit-app/ ./streamlit-app/
@@ -65,7 +65,7 @@ COPY agent/src/ ./agent/src/
 COPY mcp-server/src/ ./mcp-server/src/
 
 # DAL source
-COPY dal/src/ ./dal/src/
+COPY src/dal ./src/dal
 
 # --- EDITABLE INSTALL LAYER ---
 # Re-install in editable mode so that imports resolve correctly to the /app/x/src locations
