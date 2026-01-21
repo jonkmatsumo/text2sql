@@ -70,7 +70,7 @@ services:
       - text2sql_net
     volumes:
       - ./mcp-server/src:/app/mcp-server/src
-      - ./common/src:/app/common/src
+      - ./src:/app/src
       - ./schema/src:/app/schema/src
       - ./dal/src:/app/dal/src
       - ./database/query-target/patterns:/app/patterns:ro
@@ -122,7 +122,7 @@ services:
       - ./streamlit-app:/app/streamlit-app
       - ./agent:/app/agent
       - ./mcp-server:/app/mcp-server
-      - ./common/src:/app/common/src
+      - ./src:/app/src
       - ./common/tests:/app/common/tests
     networks:
       - text2sql_net

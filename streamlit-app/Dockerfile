@@ -31,7 +31,7 @@ COPY dal/pyproject.toml ./dal/
 
 # Create dummy source files for local dependencies enable caching
 # Common expects src/common
-RUN mkdir -p common/src/common && touch common/src/common/__init__.py
+RUN mkdir -p src/common && touch src/common/__init__.py
 RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
 RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
@@ -47,7 +47,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # invalidate layers below this point.
 
 # Common source
-COPY common/src/ ./common/src/
+COPY src/common ./src/common
 
 # Schema source
 COPY schema/src/ ./schema/src/

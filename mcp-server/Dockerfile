@@ -16,7 +16,7 @@ COPY ingestion/pyproject.toml ./ingestion/
 COPY mcp-server/pyproject.toml ./mcp-server/
 
 # Create dummy source to allow pip install to work for dependencies
-RUN mkdir -p common/src/common && touch common/src/common/__init__.py
+RUN mkdir -p src/common && touch src/common/__init__.py
 RUN mkdir -p schema/src/schema && touch schema/src/schema/__init__.py
 RUN mkdir -p dal/src/dal && touch dal/src/dal/__init__.py
 RUN mkdir -p ingestion/src/ingestion && touch ingestion/src/ingestion/__init__.py
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install ./common ./schema ./dal ./ingestion ./mcp-server
 
 # Copy source code (this changes frequently)
-COPY common/src/ ./common/src/
+COPY src/common ./src/common
 COPY schema/src/ ./schema/src/
 COPY dal/src/ ./dal/src/
 COPY ingestion/src/ ./ingestion/src/
