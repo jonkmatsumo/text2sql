@@ -8,13 +8,14 @@ This module implements the entry point that:
 
 import json
 
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from agent_core.state import AgentState
 from agent_core.telemetry import telemetry
 from agent_core.telemetry_schema import SpanKind, TelemetryKeys
 from agent_core.tools import get_mcp_tools
 from agent_core.utils.parsing import parse_tool_output
-from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 load_dotenv()
 

@@ -9,11 +9,12 @@ This module implements the "Plan-Then-Generate" pattern:
 
 import json
 
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+
 from agent_core.state import AgentState
 from agent_core.telemetry import telemetry
 from agent_core.telemetry_schema import SpanKind, TelemetryKeys
-from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 

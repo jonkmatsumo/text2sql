@@ -11,8 +11,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from agent_core.utils.parsing import normalize_payload
 from mcp import ClientSession
+
+from agent_core.utils.parsing import normalize_payload
 
 logger = logging.getLogger(__name__)
 

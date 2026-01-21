@@ -7,8 +7,9 @@ import logging
 from typing import Dict
 
 import sqlglot
-from agent_core.validation.policy_loader import PolicyDefinition, PolicyLoader
 from sqlglot import exp
+
+from agent_core.validation.policy_loader import PolicyDefinition, PolicyLoader
 
 logger = logging.getLogger(__name__)
 

@@ -34,7 +34,7 @@ COPY dal/pyproject.toml ./dal/
 RUN mkdir -p src/common && touch src/common/__init__.py
 RUN mkdir -p src/schema && touch src/schema/__init__.py
 RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
-RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
+RUN mkdir -p src/agent_core && touch src/agent_core/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
 RUN mkdir -p streamlit-app/src/streamlit_app && touch streamlit-app/src/streamlit_app/__init__.py
 RUN mkdir -p src/dal && touch src/dal/__init__.py
@@ -60,7 +60,7 @@ COPY src/ingestion ./src/ingestion
 COPY streamlit-app/ ./streamlit-app/
 
 # Agent source
-COPY agent/src/ ./agent/src/
+COPY src/agent_core ./src/agent_core
 
 # MCP Server source
 COPY mcp-server/src/ ./mcp-server/src/

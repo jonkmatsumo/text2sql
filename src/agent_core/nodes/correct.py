@@ -3,12 +3,13 @@
 Enhanced with error taxonomy for targeted correction strategies.
 """
 
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+
 from agent_core.state import AgentState
 from agent_core.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent_core.telemetry import telemetry
 from agent_core.telemetry_schema import SpanKind, TelemetryKeys
-from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
