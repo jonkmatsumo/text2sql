@@ -30,7 +30,7 @@ def test_direct_import_check():
 
     This is an audit test to identify files that need refactoring.
     """
-    ingestion_path = Path("mcp-server/src/ingestion")
+    ingestion_path = Path("src/ingestion")
 
     files_with_direct_imports = []
     for py_file in ingestion_path.glob("**/*.py"):
