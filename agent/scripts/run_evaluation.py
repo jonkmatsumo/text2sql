@@ -196,13 +196,15 @@ async def evaluate_test_case(
         }
 
     start_time = time.time()
+    # Generate a unique trace ID for this execution
+    trace_id = f"eval-{test_id}-{int(start_time)}"
 
     try:
         # Run agent
         result = await run_agent_with_tracing(
             question=question,
             tenant_id=tenant_id,
-            session_id=f"eval-{test_id}",
+            session_id=trace_id,
         )
 
         execution_time_ms = int((time.time() - start_time) * 1000)
@@ -248,6 +250,7 @@ async def evaluate_test_case(
             "parse_errors": metrics["parse_errors"],
             "execution_time_ms": execution_time_ms,
             "error_message": error_message,
+            "trace_id": trace_id,
         }
 
     except Exception as e:
@@ -262,6 +265,7 @@ async def evaluate_test_case(
             "execution_time_ms": execution_time_ms,
             "error_message": error_message,
             "skipped": False,  # Explicitly mark as not skipped so it counts as failure
+            "trace_id": trace_id,
         }
 
 
@@ -298,6 +302,7 @@ async def store_evaluation_results_batch(
                     "expected_tables": r.get("expected_tables"),
                     "parse_errors": r.get("parse_errors"),
                 },
+                trace_id=r.get("trace_id"),
             )
         )
 

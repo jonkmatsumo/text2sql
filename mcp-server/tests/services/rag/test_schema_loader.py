@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
+
 from mcp_server.services.rag.schema_loader import SchemaLoader
 
 

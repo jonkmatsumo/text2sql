@@ -10,11 +10,10 @@ import asyncio
 import json
 import logging
 
-from mcp_server.services.rag import RagEngine
-
 from dal.database import Database
 from dal.memgraph import MemgraphStore
 from ingestion.vector_indexer import VectorIndexer
+from mcp_server.services.rag import RagEngine
 
 TOOL_NAME = "get_semantic_subgraph"
 

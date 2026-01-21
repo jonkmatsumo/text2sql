@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.models import QueryPair
 from mcp_server.services.registry import RegistryService
 

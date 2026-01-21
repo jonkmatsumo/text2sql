@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.models import QueryPair
 from mcp_server.services.recommendation.config import RecommendationConfig
 from mcp_server.services.recommendation.service import RecommendationService

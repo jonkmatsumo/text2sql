@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from dotenv import load_dotenv  # noqa: E402
+
 from mcp_server.db import Database  # noqa: E402
 
 load_dotenv()

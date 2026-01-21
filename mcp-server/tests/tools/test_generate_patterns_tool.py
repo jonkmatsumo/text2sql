@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
 from mcp_server.tools.admin.generate_patterns import handler
 
 

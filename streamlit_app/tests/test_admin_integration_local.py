@@ -19,9 +19,8 @@ async def test_admin_service_e2e_flow():
 
     from unittest.mock import patch
 
-    from mcp_server.tools.manage_pin_rules import handler as pin_handler
-
     from dal.database import Database
+    from mcp_server.tools.manage_pin_rules import handler as pin_handler
 
     async def mock_call_tool(tool_name, args):
         if tool_name == "manage_pin_rules":

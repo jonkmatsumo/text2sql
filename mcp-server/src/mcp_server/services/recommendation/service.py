@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
+from common.sanitization import sanitize_text
 from mcp_server.models import QueryPair
 from mcp_server.services.recommendation.config import RECO_CONFIG
 from mcp_server.services.recommendation.explanation import (
@@ -12,8 +13,6 @@ from mcp_server.services.recommendation.explanation import (
 )
 from mcp_server.services.recommendation.interface import RecommendationResult, RecommendedExample
 from mcp_server.services.registry import RegistryService
-
-from common.sanitization import sanitize_text
 
 logger = logging.getLogger(__name__)
 

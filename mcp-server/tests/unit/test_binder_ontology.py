@@ -5,6 +5,7 @@ EntityRuler should short-circuit candidate scoring.
 """
 
 import pytest
+
 from mcp_server.services.ambiguity.binder import Candidate, CandidateBinder, Mention
 
 

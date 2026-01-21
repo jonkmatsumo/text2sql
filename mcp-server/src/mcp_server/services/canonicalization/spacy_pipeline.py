@@ -193,12 +193,13 @@ class CanonicalizationService:
             nlp: SpaCy NLP object
             has_custom_patterns: Whether custom entity patterns were loaded
         """
+        from spacy.matcher import DependencyMatcher
+
         from mcp_server.services.canonicalization.dependency_patterns import (
             LIMIT_PATTERNS,
             get_entity_patterns,
             get_rating_patterns,
         )
-        from spacy.matcher import DependencyMatcher
 
         # P2: Warn if using default patterns only (domain mismatch risk)
         if not has_custom_patterns:

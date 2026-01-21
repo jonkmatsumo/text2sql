@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.services.cache import (
     SIMILARITY_THRESHOLD,
     get_cache_stats,

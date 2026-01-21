@@ -6,11 +6,11 @@ These tests verify the tools use the expected DAL/store implementations.
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import mcp_server.tools.get_table_schema as get_table_schema_mod
 import mcp_server.tools.list_tables as list_tables_mod
 import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
-import pytest
-
 from schema import ColumnDef, TableDef
 
 get_table_schema = get_table_schema_mod.handler

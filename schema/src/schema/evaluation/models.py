@@ -40,6 +40,7 @@ class EvaluationCaseResultCreate(BaseModel):
     error_message: Optional[str] = None
     execution_time_ms: int
     raw_response: Dict[str, Any] = Field(default_factory=dict)
+    trace_id: Optional[str] = None
 
 
 class EvaluationCaseResult(EvaluationCaseResultCreate):

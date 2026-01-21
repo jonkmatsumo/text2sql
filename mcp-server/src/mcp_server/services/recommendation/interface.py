@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from mcp_server.services.recommendation.explanation import RecommendationExplanation
 from pydantic import BaseModel, Field
+
+from mcp_server.services.recommendation.explanation import RecommendationExplanation
 
 
 class RecommendedExample(BaseModel):

@@ -1,6 +1,7 @@
 """Integration tests for cache correctness and isolation."""
 
 import pytest
+
 from mcp_server.config.database import Database
 from mcp_server.services.cache import lookup_cache, update_cache
 from mcp_server.services.registry import RegistryService

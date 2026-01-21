@@ -1,11 +1,10 @@
 import logging
 from typing import List, Optional
 
+from dal.factory import get_registry_store
 from mcp_server.models import QueryPair
 from mcp_server.services.canonicalization import CanonicalizationService
 from mcp_server.services.rag import RagEngine
-
-from dal.factory import get_registry_store
 
 logger = logging.getLogger(__name__)
 

@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from mcp_server.services.rag.retrieval import get_relevant_examples
 
 

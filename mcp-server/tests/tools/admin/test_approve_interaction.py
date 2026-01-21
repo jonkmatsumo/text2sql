@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from mcp_server.tools.admin.approve_interaction import TOOL_NAME, handler
 
 

@@ -25,7 +25,19 @@ mock_st.info = MagicMock()
 mock_st.error = MagicMock()
 mock_st.success = MagicMock()
 mock_st.warning = MagicMock()
-mock_st.columns = MagicMock(return_value=[MagicMock(), MagicMock(), MagicMock()])
+
+
+def columns_side_effect(spec, **kwargs):
+    """Mock side effect to return the requested number of columns."""
+    if isinstance(spec, int):
+        count = spec
+    else:
+        count = len(spec)
+    return [MagicMock() for _ in range(count)]
+
+
+mock_st.columns = MagicMock(side_effect=columns_side_effect)
+mock_st.tabs = MagicMock(return_value=[MagicMock(), MagicMock(), MagicMock(), MagicMock()])
 mock_st.text_input = MagicMock()
 mock_st.text_area = MagicMock()
 mock_st.dataframe = MagicMock()
@@ -36,6 +48,7 @@ mock_st.session_state = MagicMock()
 mock_st.status = MagicMock()
 mock_st.metric = MagicMock()
 mock_st.caption = MagicMock()
+mock_st.link_button = MagicMock()
 
 mock_nest = types.ModuleType("nest_asyncio")
 mock_nest.apply = MagicMock()
@@ -61,7 +74,7 @@ async def test_admin_panel_reload_button_logic():
 
         # Setup st.button side effects to simulate user clicking "Reload NLP Patterns"
         def button_side_effect(label, **kwargs):
-            if label == "Reload NLP Patterns":
+            if label == "Reload":
                 return True
             return False
 
@@ -74,21 +87,23 @@ async def test_admin_panel_reload_button_logic():
 
             # We import the module source to run it "as if" Streamlit ran it
             spec = importlib.util.spec_from_file_location(
-                "Admin_Panel", "streamlit_app/pages/Admin_Panel.py"
+                "System_Operations", "streamlit_app/pages/3_System_Operations.py"
             )
             val_mod = importlib.util.module_from_spec(spec)
-            sys.modules["Admin_Panel"] = val_mod
+            sys.modules["System_Operations"] = val_mod
             spec.loader.exec_module(val_mod)
 
-            # Now run main
-            val_mod.main()
+            # Now run main (streamlit pages don't have main function, execution IS the module body)
+            # The previous test seemed to expect a main() function, OR maybe it just ran the module.
+            # Standard streamlit pages are scripts. `exec_module` runs the script.
+            # So we don't need `val_mod.main()`.
 
             # Verify identity
-            assert val_mod.st is mock_st, "Admin_Panel.st is not the mocked object!"
+            assert val_mod.st is mock_st, "System_Operations.st is not the mocked object!"
 
             # Verify button was queried
             calls = [c[0][0] for c in mock_st.button.call_args_list if c[0]]
-            assert "Reload NLP Patterns" in calls, f"Button not clicked. Calls: {calls}"
+            assert "Reload" in calls, f"Button not clicked. Calls: {calls}"
 
             # Verify service was called
             mock_service_reload.assert_called_once()

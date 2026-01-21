@@ -9,7 +9,6 @@ def test_schema_import_identity():
     # 3. They resolve to the same underlying class object
 
     from mcp_server.models.database import ColumnDef as DBColumnDef
-
     from schema import ColumnDef
 
     assert ColumnDef is DBColumnDef

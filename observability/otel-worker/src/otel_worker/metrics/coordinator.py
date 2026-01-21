@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from otel_worker.metrics.aggregate import run_aggregation
+from otel_worker.metrics.regression import compute_regressions
 from otel_worker.storage.postgres import engine
 
 logger = logging.getLogger(__name__)
@@ -62,5 +63,59 @@ class AggregationCoordinator:
                 break
 
 
-# Global coordinator instance
+class RegressionCoordinator:
+    """Manages background regression checks."""
+
+    def __init__(self, interval_seconds: int = 3600):  # Run every hour by default
+        """Initialize the coordinator."""
+        self.interval_seconds = interval_seconds
+        self._task: asyncio.Task = None
+        self._stopping = False
+
+    async def start(self):
+        """Start the background regression loop."""
+        if self._task:
+            return
+        self._stopping = False
+        self._task = asyncio.create_task(self._run_loop())
+        logger.info(f"Started RegressionCoordinator (Interval: {self.interval_seconds}s)")
+
+    async def stop(self):
+        """Stop the background loop."""
+        self._stopping = True
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("Stopped RegressionCoordinator")
+
+    async def _run_loop(self):
+        """Run the regression job periodically."""
+        while not self._stopping:
+            try:
+                # Run synchronous regression check in a thread
+                await asyncio.to_thread(
+                    compute_regressions,
+                    engine,
+                    candidate_minutes=30,
+                    baseline_minutes=30,
+                    offset_minutes=30,  # Currently hardcoded, could be config
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in regression loop: {e}")
+
+            # Sleep for the interval
+            try:
+                await asyncio.sleep(self.interval_seconds)
+            except asyncio.CancelledError:
+                break
+
+
+# Global coordinator instances
 aggregation_coordinator = AggregationCoordinator()
+regression_coordinator = RegressionCoordinator()

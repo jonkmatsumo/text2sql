@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp_server.models import Node
 
 from dal.memgraph import MemgraphStore
+from mcp_server.models import Node
 
 
 class TestMemgraphStore:

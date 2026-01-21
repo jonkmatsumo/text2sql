@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.tools.get_sample_data import TOOL_NAME as get_sample_data_tool_name
 from mcp_server.tools.get_sample_data import handler as get_sample_data
 

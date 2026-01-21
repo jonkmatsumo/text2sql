@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 import spacy
+
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
 logger = logging.getLogger(__name__)

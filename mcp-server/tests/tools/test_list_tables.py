@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.tools.list_tables import TOOL_NAME, handler
 
 

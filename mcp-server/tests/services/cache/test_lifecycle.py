@@ -2,10 +2,10 @@ import json
 import time
 
 import pytest
-from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
 
 from dal.database import Database
 from dal.factory import get_cache_store
+from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
 
 TEST_QUERY = "Integration Test: Show me the hierarchy of the payment system"
 TENANT_ID = 1
