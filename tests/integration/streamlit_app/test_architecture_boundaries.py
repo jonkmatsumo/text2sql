@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Path to streamlit_app package
-STREAMLIT_APP_DIR = Path(__file__).parent.parent.parent / "streamlit_app"
+STREAMLIT_APP_DIR = Path(__file__).parent.parent.parent.parent / "streamlit_app"
 
 
 def test_no_dal_imports_in_streamlit_app():
