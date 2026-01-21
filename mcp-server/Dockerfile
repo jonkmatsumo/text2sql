@@ -24,7 +24,7 @@ RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init
 
 # Install packages with cache mount (so repeat builds are fast)
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./common ./schema ./dal ./ingestion ./mcp-server
+    pip install -e ./common -e ./schema -e ./dal -e ./ingestion -e ./mcp-server
 
 # Copy source code (this changes frequently)
 COPY src/common ./src/common

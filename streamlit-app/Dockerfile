@@ -36,11 +36,12 @@ RUN mkdir -p src/schema && touch src/schema/__init__.py
 RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
 RUN mkdir -p agent/src/agent_core && touch agent/src/agent_core/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
+RUN mkdir -p streamlit-app/src/streamlit_app && touch streamlit-app/src/streamlit_app/__init__.py
 RUN mkdir -p src/dal && touch src/dal/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./common ./schema ./ingestion ./streamlit-app ./agent ./mcp-server ./dal
+    pip install -e ./common -e ./schema -e ./ingestion -e ./agent -e ./mcp-server -e ./dal -e ./streamlit-app
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
