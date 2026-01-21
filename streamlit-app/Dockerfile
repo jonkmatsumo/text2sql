@@ -21,7 +21,7 @@ COPY schema/pyproject.toml ./schema/
 # 3. Ingestion deps
 COPY ingestion/pyproject.toml ./ingestion/
 # 4. Streamlit app deps
-COPY streamlit_app/pyproject.toml ./streamlit_app/
+COPY streamlit-app/pyproject.toml ./streamlit-app/
 # 5. Agent deps
 COPY agent/pyproject.toml ./agent/
 # 6. MCP Server deps
@@ -40,7 +40,7 @@ RUN mkdir -p dal/src/dal && touch dal/src/dal/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install ./common ./schema ./ingestion ./streamlit_app ./agent ./mcp-server ./dal
+    pip install ./common ./schema ./ingestion ./streamlit-app ./agent ./mcp-server ./dal
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
@@ -56,7 +56,7 @@ COPY schema/src/ ./schema/src/
 COPY ingestion/src/ ./ingestion/src/
 
 # Streamlit source (includes tests now)
-COPY streamlit_app/ ./streamlit_app/
+COPY streamlit-app/ ./streamlit-app/
 
 # Agent source
 COPY agent/src/ ./agent/src/
@@ -76,7 +76,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e ./common \
     && pip install -e ./schema \
     && pip install -e ./ingestion \
-    && pip install -e ./streamlit_app \
+    && pip install -e ./streamlit-app \
     && pip install -e ./mcp-server \
     && pip install -e ./agent \
     && pip install -e ./dal
@@ -88,4 +88,4 @@ EXPOSE 8501
 WORKDIR /app
 
 # Run Streamlit from streamlit_app entrypoint
-CMD ["streamlit", "run", "streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "streamlit-app/src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]

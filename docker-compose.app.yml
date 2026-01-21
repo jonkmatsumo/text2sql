@@ -79,7 +79,7 @@ services:
   streamlit:
     build:
       context: .
-      dockerfile: streamlit_app/Dockerfile
+      dockerfile: streamlit-app/Dockerfile
     container_name: text2sql_streamlit
     depends_on:
       mcp-server:
@@ -119,7 +119,7 @@ services:
       - "8501:8501"
     volumes:
       # Mount for development (hot reload)
-      - ./streamlit:/app/streamlit
+      - ./streamlit-app:/app/streamlit-app
       - ./agent:/app/agent
       - ./mcp-server:/app/mcp-server
       - ./common/src:/app/common/src

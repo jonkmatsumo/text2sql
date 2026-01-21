@@ -181,7 +181,7 @@ text2sql/
 │   ├── query-target/           # Target DB schema, data, and patterns
 │   └── control-plane/          # App metadata, RLS, and cache schema
 ├── streamlit/                  # Streamlit packaging + Docker assets
-├── streamlit_app/              # Streamlit UI entrypoint (Text_2_SQL_Agent.py)
+├── streamlit-app/              # Streamlit UI entrypoint (Text_2_SQL_Agent.py)
 ├── observability/              # Optional OTEL stack
 ├── docker-compose.infra.yml    # Infrastructure services (Postgres, MinIO, etc.)
 ├── docker-compose.app.yml      # Application services (Python apps)

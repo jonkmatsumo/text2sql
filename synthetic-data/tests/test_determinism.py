@@ -50,7 +50,7 @@ def compute_mvp_digest():
 
 def test_mvp_determinism_regression():
     """Assert that the MVP dataset digest matches the stored golden value."""
-    # This path is relative to the synthetic_data directory where pytest is run
+    # This path is relative to the synthetic-data directory where pytest is run
     golden_file = Path(__file__).parent.parent / "golden/mvp_digest.txt"
 
     actual_digest = compute_mvp_digest()

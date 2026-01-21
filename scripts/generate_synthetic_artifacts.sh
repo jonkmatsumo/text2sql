@@ -12,8 +12,8 @@ echo "Target: ${TARGET_DIR}"
 # Ensure directories exist
 mkdir -p "${QUERIES_DIR}"
 
-# Set PYTHONPATH to include synthetic_data source
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/synthetic_data/src"
+# Set PYTHONPATH to include synthetic-data source
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/synthetic-data/src"
 
 # 1. Generate SQL Schema and Data
 echo "Generating SQL schema and data..."

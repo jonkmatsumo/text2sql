@@ -22,7 +22,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["streamlit_app"]
-package-dir = {"" = ".."}
+package-dir = {"" = "src"}
 
 [tool.coverage.run]
 source = ["streamlit_app"]
