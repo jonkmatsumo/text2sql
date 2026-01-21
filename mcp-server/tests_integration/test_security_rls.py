@@ -7,6 +7,7 @@ They will be skipped if the database is not available.
 import os
 
 import pytest
+
 from mcp_server.db import Database
 
 

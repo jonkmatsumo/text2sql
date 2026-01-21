@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
+
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
 
 

@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import sqlglot
-from mcp_server.services.cache.constraint_extractor import QueryConstraints
 from sqlglot import exp
+
+from mcp_server.services.cache.constraint_extractor import QueryConstraints
 
 
 @dataclass

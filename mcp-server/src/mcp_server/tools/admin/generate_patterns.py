@@ -1,8 +1,7 @@
 from typing import Any, Dict
 
-from mcp_server.services.ops.maintenance import MaintenanceService
-
 from dal.factory import get_pattern_run_store
+from mcp_server.services.ops.maintenance import MaintenanceService
 
 
 async def handler(dry_run: bool = False) -> Dict[str, Any]:

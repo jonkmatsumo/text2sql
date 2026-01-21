@@ -2,6 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.services.canonicalization.pattern_reload_service import PatternReloadService
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 

@@ -1,9 +1,8 @@
 """Schema indexing service for RAG."""
 
 import mcp_server.services.rag
-from mcp_server.models import SchemaEmbedding
-
 from dal.database import Database
+from mcp_server.models import SchemaEmbedding
 
 from .engine import RagEngine, generate_schema_document
 

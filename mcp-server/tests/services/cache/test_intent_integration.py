@@ -1,6 +1,7 @@
 """Integration tests for constraint extraction -> intent signature pipeline."""
 
 import pytest
+
 from mcp_server.services.cache.constraint_extractor import extract_constraints
 from mcp_server.services.cache.intent_signature import build_signature_from_constraints
 

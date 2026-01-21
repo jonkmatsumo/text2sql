@@ -12,11 +12,11 @@ Tests import from the new per-tool modules.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
+import pytest
+
 import mcp_server.tools.execute_sql_query as execute_sql_query_mod
 import mcp_server.tools.get_semantic_definitions as get_semantic_definitions_mod
 import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
-import pytest
-
 from schema import ColumnDef
 
 execute_sql_query = execute_sql_query_mod.handler

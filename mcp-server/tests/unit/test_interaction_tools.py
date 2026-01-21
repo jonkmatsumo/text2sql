@@ -6,6 +6,7 @@ These tests verify the interaction tools work correctly with the DAL layer.
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.tools.interaction.create_interaction import handler as create_interaction
 from mcp_server.tools.interaction.update_interaction import handler as update_interaction
 

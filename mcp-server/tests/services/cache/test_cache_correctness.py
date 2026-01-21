@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.services.cache.constraint_extractor import extract_constraints
 from mcp_server.services.cache.intent_signature import build_signature_from_constraints
 from mcp_server.services.cache.service import lookup_cache

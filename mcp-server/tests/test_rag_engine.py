@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+
 from mcp_server.services.rag import RagEngine, search_similar_tables
 from mcp_server.services.rag.engine import format_vector_for_postgres, generate_schema_document
 

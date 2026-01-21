@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
 

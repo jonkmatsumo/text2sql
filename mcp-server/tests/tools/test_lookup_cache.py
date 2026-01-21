@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.tools.lookup_cache import TOOL_NAME, handler
 
 

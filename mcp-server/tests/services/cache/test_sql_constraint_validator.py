@@ -1,6 +1,7 @@
 """Unit tests for SQL constraint validation."""
 
 import pytest
+
 from mcp_server.services.cache.constraint_extractor import QueryConstraints
 from mcp_server.services.cache.sql_constraint_validator import (
     extract_limit_from_sql,

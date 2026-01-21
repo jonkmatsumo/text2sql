@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from mcp_server.tools.admin.get_interaction_details import TOOL_NAME, handler
 
 

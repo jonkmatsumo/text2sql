@@ -1,6 +1,7 @@
 """Unit tests for constraint extraction from natural language queries."""
 
 import pytest
+
 from mcp_server.services.cache.constraint_extractor import extract_constraints
 
 

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
 
 

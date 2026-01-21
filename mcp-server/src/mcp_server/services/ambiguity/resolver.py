@@ -7,9 +7,8 @@ policy to decide whether to silently resolve or ask for clarification.
 import logging
 from typing import Any, Dict, List
 
-from mcp_server.services.ambiguity.binder import CandidateBinder, MentionExtractor
-
 from common.config.env import get_env_float
+from mcp_server.services.ambiguity.binder import CandidateBinder, MentionExtractor
 
 logger = logging.getLogger(__name__)
 

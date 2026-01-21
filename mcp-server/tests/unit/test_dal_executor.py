@@ -3,12 +3,12 @@
 import asyncio
 
 import pytest
+
+from dal.context import get_current_tenant, set_current_tenant
 from mcp_server.utils.context_aware_executor import (
     ContextAwareExecutor,
     run_in_executor_with_context,
 )
-
-from dal.context import get_current_tenant, set_current_tenant
 
 
 class TestContextAwareExecutor:

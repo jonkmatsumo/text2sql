@@ -15,6 +15,7 @@ pytest.importorskip("hypothesis")
 
 from hypothesis import given, settings  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
+
 from mcp_server.services.cache.constraint_extractor import (  # noqa: E402
     SPELLED_NUMBERS,
     extract_constraints,

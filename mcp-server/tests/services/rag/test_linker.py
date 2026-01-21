@@ -2,6 +2,7 @@ import copy
 from unittest.mock import patch
 
 import pytest
+
 from mcp_server.services.rag import SchemaLinker
 
 # Mock Data Template

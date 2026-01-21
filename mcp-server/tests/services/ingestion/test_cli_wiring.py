@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from mcp_server.services.seeding.cli import _ingest_graph_schema
 
 
