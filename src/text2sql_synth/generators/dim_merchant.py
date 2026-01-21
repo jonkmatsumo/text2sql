@@ -7,6 +7,7 @@ long-tail popularity distributions.
 from __future__ import annotations
 
 import pandas as pd
+
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 

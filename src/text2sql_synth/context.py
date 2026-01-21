@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from numpy.random import PCG64, Generator
 from pydantic import BaseModel
+
 from text2sql_synth import __version__
 from text2sql_synth.util.hashing import seed_from_str, stable_hash_str, stable_row_hash
 

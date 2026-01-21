@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pandas as pd
+
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 
