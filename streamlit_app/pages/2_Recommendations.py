@@ -1,6 +1,7 @@
 import asyncio
 
 import streamlit as st
+
 from streamlit_app.service.admin import AdminService
 
 st.set_page_config(page_title="Recommendations", page_icon="✨", layout="wide")
