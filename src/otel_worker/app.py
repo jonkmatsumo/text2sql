@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel
+
 from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
@@ -25,7 +27,6 @@ from otel_worker.storage.postgres import (
     list_spans_for_trace,
     list_traces,
 )
-from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

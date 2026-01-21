@@ -4,6 +4,7 @@ import os
 import tempfile
 
 import mlflow
+
 from otel_worker.config import settings
 
 logger = logging.getLogger(__name__)

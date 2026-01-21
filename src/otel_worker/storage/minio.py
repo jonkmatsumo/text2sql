@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from minio import Minio
+
 from otel_worker.config import settings
 
 logger = logging.getLogger(__name__)

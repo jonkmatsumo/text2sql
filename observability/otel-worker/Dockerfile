@@ -16,7 +16,7 @@ RUN mkdir -p src/otel_worker && touch src/otel_worker/__init__.py
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e .
 
-COPY src/ ./src/
+COPY src/otel_worker ./src/otel_worker
 COPY alembic.ini .
 COPY migrations/ ./migrations/
 

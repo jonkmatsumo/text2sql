@@ -3,8 +3,9 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from otel_worker.config import settings
 from sqlalchemy import create_engine, text
+
+from otel_worker.config import settings
 
 logger = logging.getLogger(__name__)
 
