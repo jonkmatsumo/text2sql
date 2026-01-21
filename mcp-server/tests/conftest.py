@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from agent.tests.schema_fixtures import PAGILA_FIXTURE
 from dal.database import Database
+from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE
 
 
 def pytest_configure(config):

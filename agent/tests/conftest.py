@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent.tests.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
+from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
 
 # Mock mcp if not available (for CI/local envs without mcp installed)
 try:

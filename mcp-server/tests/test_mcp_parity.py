@@ -1,7 +1,7 @@
 import pytest
 
-from agent.tests.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
 from mcp_server.services.cache.sql_constraint_validator import extract_limit_from_sql
+from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
 
 
 @pytest.mark.parametrize("schema_fixture", [PAGILA_FIXTURE, SYNTHETIC_FIXTURE], indirect=True)

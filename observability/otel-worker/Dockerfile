@@ -17,8 +17,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e .
 
 COPY src/otel_worker ./src/otel_worker
-COPY alembic.ini .
-COPY migrations/ ./migrations/
+COPY observability/otel-worker/alembic.ini .
+COPY observability/otel-worker/migrations/ ./migrations/
 
 EXPOSE 4320
 
