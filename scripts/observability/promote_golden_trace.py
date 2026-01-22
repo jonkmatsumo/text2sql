@@ -10,8 +10,9 @@ import sys
 # Add src to path
 sys.path.append(os.path.join(os.getcwd(), "observability/otel-worker/src"))
 
-from otel_worker.storage.postgres import engine  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+
+from otel_worker.storage.postgres import engine  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("promote_golden_trace")

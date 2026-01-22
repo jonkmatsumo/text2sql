@@ -84,13 +84,14 @@ async def test_recommendation_flow_e2e_happy_path():
     mock_pin_rule.registry_example_ids = ["sig_P1"]
 
     # Patching
-    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config), patch(
-        "mcp_server.services.registry.RegistryService.lookup_semantic"
-    ) as mock_lookup, patch(
-        "mcp_server.services.registry.RegistryService.fetch_by_signatures"
-    ) as mock_fetch, patch(
-        "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
-    ) as mock_list_rules:
+    with (
+        patch("mcp_server.services.recommendation.service.RECO_CONFIG", config),
+        patch("mcp_server.services.registry.RegistryService.lookup_semantic") as mock_lookup,
+        patch("mcp_server.services.registry.RegistryService.fetch_by_signatures") as mock_fetch,
+        patch(
+            "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
+        ) as mock_list_rules,
+    ):
 
         # Setup Mocks
         # 1: approved, 2: seeded, 3: history
@@ -157,11 +158,13 @@ async def test_recommendation_flow_fallback_disabled():
     # Only 1 candidate available total
     v1 = make_qp("Only one", "V1", "verified")
 
-    with patch("mcp_server.services.recommendation.service.RECO_CONFIG", config), patch(
-        "mcp_server.services.registry.RegistryService.lookup_semantic"
-    ) as mock_lookup, patch(
-        "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
-    ) as mock_list_rules:
+    with (
+        patch("mcp_server.services.recommendation.service.RECO_CONFIG", config),
+        patch("mcp_server.services.registry.RegistryService.lookup_semantic") as mock_lookup,
+        patch(
+            "dal.postgres.pinned_recommendations." "PostgresPinnedRecommendationStore.list_rules"
+        ) as mock_list_rules,
+    ):
 
         mock_lookup.side_effect = [
             [v1],  # approved

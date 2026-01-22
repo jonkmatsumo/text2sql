@@ -35,11 +35,12 @@ async def test_get_interaction_details():
     mock_interaction = {"id": "int-1", "user_nlq_text": "query"}
     mock_feedback = [{"id": "fb-1", "thumb": "UP"}]
 
-    with patch(
-        "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
-    ) as mock_i_store, patch(
-        "mcp_server.tools.admin.get_interaction_details.get_feedback_store"
-    ) as mock_f_store:
+    with (
+        patch(
+            "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
+        ) as mock_i_store,
+        patch("mcp_server.tools.admin.get_interaction_details.get_feedback_store") as mock_f_store,
+    ):
 
         mock_i = AsyncMock()
         mock_i.get_interaction_detail = AsyncMock(return_value=mock_interaction)

@@ -14,10 +14,11 @@ async def test_create_interaction_receives_config():
         return await func()
 
     # Mock dependencies
-    with patch("agent_core.tools.mcp_tools_context") as mock_mcp_ctx, patch(
-        "agent_core.telemetry.telemetry"
-    ) as mock_telemetry, patch("agent_core.graph.app") as mock_app, patch(
-        "agent_core.utils.retry.retry_with_backoff", side_effect=mock_retry
+    with (
+        patch("agent_core.tools.mcp_tools_context") as mock_mcp_ctx,
+        patch("agent_core.telemetry.telemetry") as mock_telemetry,
+        patch("agent_core.graph.app") as mock_app,
+        patch("agent_core.utils.retry.retry_with_backoff", side_effect=mock_retry),
     ):
 
         # Setup mock tools
@@ -66,10 +67,11 @@ async def test_update_interaction_receives_config():
     async def mock_retry(func, *args, **kwargs):
         return await func()
 
-    with patch("agent_core.tools.mcp_tools_context") as mock_mcp_ctx, patch(
-        "agent_core.telemetry.telemetry"
-    ) as mock_telemetry, patch("agent_core.graph.app") as mock_app, patch(
-        "agent_core.utils.retry.retry_with_backoff", side_effect=mock_retry
+    with (
+        patch("agent_core.tools.mcp_tools_context") as mock_mcp_ctx,
+        patch("agent_core.telemetry.telemetry") as mock_telemetry,
+        patch("agent_core.graph.app") as mock_app,
+        patch("agent_core.utils.retry.retry_with_backoff", side_effect=mock_retry),
     ):
 
         mock_create_tool = MagicMock()

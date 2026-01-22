@@ -65,17 +65,22 @@ class TestSemanticTraversalGuardrail:
         mock_session = MagicMock()
         mock_store.driver.session.return_value = mock_session
 
-        with patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
-            return_value=mock_store,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
-            return_value=mock_introspector,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
-        ), patch(
-            "mcp_server.services.rag.linker.SchemaLinker.rank_and_filter_columns",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=mock_introspector,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+            ),
+            patch(
+                "mcp_server.services.rag.linker.SchemaLinker.rank_and_filter_columns",
+                new_callable=AsyncMock,
+            ),
         ):
 
             result_json = await get_semantic_subgraph("query is irrelevant with fixed seeds")
@@ -116,17 +121,22 @@ class TestSemanticTraversalGuardrail:
 
         mock_store = MagicMock()
 
-        with patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
-            return_value=mock_store,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
-            return_value=mock_introspector,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
-        ), patch(
-            "mcp_server.services.rag.linker.SchemaLinker.rank_and_filter_columns",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=mock_introspector,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+            ),
+            patch(
+                "mcp_server.services.rag.linker.SchemaLinker.rank_and_filter_columns",
+                new_callable=AsyncMock,
+            ),
         ):
 
             result_json = await get_semantic_subgraph("find orders")

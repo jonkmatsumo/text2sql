@@ -49,10 +49,14 @@ async def test_high_cardinality_exclusion_regression():
 
     mock_conn.fetch.side_effect = side_effect_fetch
 
-    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
-        "dal.database.Database.get_schema_introspector",
-        return_value=mock_introspector,
-    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
+    with (
+        patch("dal.database.Database.get_connection", return_value=mock_db_ctx),
+        patch(
+            "dal.database.Database.get_schema_introspector",
+            return_value=mock_introspector,
+        ),
+        patch("ingestion.patterns.generator.get_openai_client", return_value=None),
+    ):
         patterns = await generate_entity_patterns()
 
         # Check STATUS patterns (should exist)

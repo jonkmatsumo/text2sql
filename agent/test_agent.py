@@ -2,8 +2,9 @@
 
 import asyncio
 
-from agent_core.graph import app
 from langchain_core.messages import HumanMessage
+
+from agent_core.graph import app
 
 
 async def test_agent():

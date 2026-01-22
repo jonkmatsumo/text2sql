@@ -70,10 +70,14 @@ async def test_generate_entity_patterns():
     ]
     mock_client.chat.completions.create.return_value = mock_llm_resp
 
-    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
-        "dal.database.Database.get_schema_introspector",
-        return_value=mock_introspector,
-    ), patch("ingestion.patterns.generator.get_openai_client", return_value=mock_client):
+    with (
+        patch("dal.database.Database.get_connection", return_value=mock_db_ctx),
+        patch(
+            "dal.database.Database.get_schema_introspector",
+            return_value=mock_introspector,
+        ),
+        patch("ingestion.patterns.generator.get_openai_client", return_value=mock_client),
+    ):
 
         patterns = await generate_entity_patterns()
 

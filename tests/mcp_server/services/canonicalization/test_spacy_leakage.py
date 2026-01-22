@@ -36,11 +36,13 @@ class TestCanonicalizationServiceLeakage:
         monkeypatch.setenv("DATASET_MODE", "synthetic")
         CanonicalizationService.reset_instance()
 
-        with patch(
-            "mcp_server.services.canonicalization.dependency_patterns.get_rating_patterns"
-        ) as mock_get_rating, patch("spacy.matcher.DependencyMatcher") as MockMatcher, patch(
-            "spacy.load"
-        ) as mock_load:
+        with (
+            patch(
+                "mcp_server.services.canonicalization.dependency_patterns.get_rating_patterns"
+            ) as mock_get_rating,
+            patch("spacy.matcher.DependencyMatcher") as MockMatcher,
+            patch("spacy.load") as mock_load,
+        ):
 
             mock_get_rating.return_value = []
 

@@ -97,11 +97,12 @@ async def test_generate_node_telemetry():
     # We need to patch where it's used
     from unittest.mock import patch
 
-    with patch("agent_core.nodes.generate.telemetry", mock_telemetry), patch(
-        "agent_core.llm_client.get_llm", return_value=lambda **k: mock_chain
-    ), patch("agent_core.nodes.generate.get_few_shot_examples") as mock_fs, patch(
-        "agent_core.nodes.generate.ChatPromptTemplate.from_messages"
-    ) as mock_from_messages:
+    with (
+        patch("agent_core.nodes.generate.telemetry", mock_telemetry),
+        patch("agent_core.llm_client.get_llm", return_value=lambda **k: mock_chain),
+        patch("agent_core.nodes.generate.get_few_shot_examples") as mock_fs,
+        patch("agent_core.nodes.generate.ChatPromptTemplate.from_messages") as mock_from_messages,
+    ):
 
         mock_fs.return_value = ""
 

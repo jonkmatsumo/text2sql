@@ -61,9 +61,12 @@ async def test_admin_panel_reload_button_logic():
 
     # Use MagicMock so it returns the dict immediately (since we bypass asyncio.run)
     # Correct import path from root where we run pytest
-    with patch.dict("sys.modules", {"streamlit": mock_st, "nest_asyncio": mock_nest}), patch(
-        "streamlit_app.service.ops_service.OpsService.reload_patterns", new_callable=MagicMock
-    ) as mock_service_reload:
+    with (
+        patch.dict("sys.modules", {"streamlit": mock_st, "nest_asyncio": mock_nest}),
+        patch(
+            "streamlit_app.service.ops_service.OpsService.reload_patterns", new_callable=MagicMock
+        ) as mock_service_reload,
+    ):
         mock_service_reload.return_value = {
             "success": True,
             "message": "Reloaded",

@@ -114,9 +114,10 @@ async def test_pattern_resolution_end_to_end(reset_canonicalization_service, moc
     # 2. Reload with Mocked DependencyMatcher
     # We mock _setup_dependency_matcher because blank("en") doesn't support
     # dependency parsing required by the matcher. We only test EntityRuler here.
-    with patch.object(
-        CanonicalizationService, "_setup_dependency_matcher", return_value=None
-    ), patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True):
+    with (
+        patch.object(CanonicalizationService, "_setup_dependency_matcher", return_value=None),
+        patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True),
+    ):
         await service.reload_patterns()
 
         # 3. Run Query

@@ -11,11 +11,11 @@ from mcp_server.services.seeding.cli import _ingest_graph_schema
 async def test_ingest_graph_schema_wires_vector_index():
     """Verify that _ingest_graph_schema calls ensure_table_embedding_hnsw_index."""
     # Mock all the dependencies
-    with patch("mcp_server.services.seeding.cli.get_schema_introspector"), patch(
-        "mcp_server.services.seeding.cli.GraphHydrator"
-    ) as MockHydrator, patch(
-        "ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
-    ) as mock_ensure:
+    with (
+        patch("mcp_server.services.seeding.cli.get_schema_introspector"),
+        patch("mcp_server.services.seeding.cli.GraphHydrator") as MockHydrator,
+        patch("ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index") as mock_ensure,
+    ):
 
         # Setup mock hydrator
         mock_hydrator_instance = MockHydrator.return_value
@@ -36,11 +36,11 @@ async def test_ingest_graph_schema_wires_vector_index():
 @pytest.mark.asyncio
 async def test_ingest_graph_schema_handles_ensure_error():
     """Verify that vector index failure does not crash ingestion."""
-    with patch("mcp_server.services.seeding.cli.get_schema_introspector"), patch(
-        "mcp_server.services.seeding.cli.GraphHydrator"
-    ) as MockHydrator, patch(
-        "ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index"
-    ) as mock_ensure:
+    with (
+        patch("mcp_server.services.seeding.cli.get_schema_introspector"),
+        patch("mcp_server.services.seeding.cli.GraphHydrator") as MockHydrator,
+        patch("ingestion.vector_index_ddl.ensure_table_embedding_hnsw_index") as mock_ensure,
+    ):
 
         mock_hydrator_instance = MockHydrator.return_value
         mock_hydrator_instance.hydrate_schema = AsyncMock()

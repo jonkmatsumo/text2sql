@@ -103,9 +103,10 @@ class TestRetryWithBackoff:
                 raise ConnectionError("Connection refused")
             return "success"
 
-        with patch("agent_core.utils.retry.asyncio.sleep", new=AsyncMock()), patch(
-            "agent_core.utils.retry.logger"
-        ) as mock_logger:
+        with (
+            patch("agent_core.utils.retry.asyncio.sleep", new=AsyncMock()),
+            patch("agent_core.utils.retry.logger") as mock_logger,
+        ):
             await retry_with_backoff(flaky_op, "test_op")
 
         # Should have logged warning for retry
@@ -119,9 +120,10 @@ class TestRetryWithBackoff:
         """Final failure after all attempts should log error."""
         mock_op = AsyncMock(side_effect=ConnectionError("Connection refused"))
 
-        with patch("agent_core.utils.retry.asyncio.sleep", new=AsyncMock()), patch(
-            "agent_core.utils.retry.logger"
-        ) as mock_logger:
+        with (
+            patch("agent_core.utils.retry.asyncio.sleep", new=AsyncMock()),
+            patch("agent_core.utils.retry.logger") as mock_logger,
+        ):
             with pytest.raises(ConnectionError):
                 await retry_with_backoff(mock_op, "test_op", max_attempts=2)
 

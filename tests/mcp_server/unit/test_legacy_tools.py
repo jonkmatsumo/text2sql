@@ -86,16 +86,18 @@ class TestLegacyTools:
         async def _fake_search_similar_tables(_query_embedding, limit=5, tenant_id=None):
             return mock_search
 
-        with patch.object(
-            search_relevant_tables_mod.RagEngine, "embed_text", new=_fake_embed_text
-        ), patch.object(
-            search_relevant_tables_mod,
-            "search_similar_tables",
-            new=_fake_search_similar_tables,
-        ), patch.object(
-            search_relevant_tables_mod.Database,
-            "get_schema_introspector",
-            return_value=mock_introspector,
+        with (
+            patch.object(search_relevant_tables_mod.RagEngine, "embed_text", new=_fake_embed_text),
+            patch.object(
+                search_relevant_tables_mod,
+                "search_similar_tables",
+                new=_fake_search_similar_tables,
+            ),
+            patch.object(
+                search_relevant_tables_mod.Database,
+                "get_schema_introspector",
+                return_value=mock_introspector,
+            ),
         ):
 
             result = await search_relevant_tables("query")

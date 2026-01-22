@@ -27,9 +27,10 @@ async def test_ingress_sanitization_applied():
     raw_input = "  What is the TOTAL revenue?  "
     expected_sanitized = "what is the total revenue?"
 
-    with patch("common.sanitization.sanitize_text") as mock_sanitize, patch(
-        "langgraph.graph.StateGraph.compile"
-    ) as mock_compile:
+    with (
+        patch("common.sanitization.sanitize_text") as mock_sanitize,
+        patch("langgraph.graph.StateGraph.compile") as mock_compile,
+    ):
 
         # Mock sanitize_text to track calls
         from common.sanitization import SanitizationResult
@@ -45,8 +46,9 @@ async def test_ingress_sanitization_applied():
 
         # We need to re-import or use the app from graph
 
-        with patch("agent_core.graph.app", mock_app), patch(
-            "agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context
+        with (
+            patch("agent_core.graph.app", mock_app),
+            patch("agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context),
         ):
             await run_agent_with_tracing(raw_input)
 
@@ -75,8 +77,9 @@ async def test_normal_input_behavior():
         mock_app.ainvoke.return_value = {"messages": []}
         mock_compile.return_value = mock_app
 
-        with patch("agent_core.graph.app", mock_app), patch(
-            "agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context
+        with (
+            patch("agent_core.graph.app", mock_app),
+            patch("agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context),
         ):
             await run_agent_with_tracing(normal_input)
 

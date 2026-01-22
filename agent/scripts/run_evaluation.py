@@ -21,13 +21,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 # Add database/query-target to path for golden dataset imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "database" / "query-target"))
 
-from agent_core.graph import run_agent_with_tracing  # noqa: E402
 from golden import (  # noqa: E402
     GoldenDatasetNotFoundError,
     GoldenDatasetValidationError,
     load_test_cases,
 )
 
+from agent_core.graph import run_agent_with_tracing  # noqa: E402
 from dal.database import Database  # noqa: E402
 from dal.factory import get_evaluation_store  # noqa: E402
 from schema.evaluation.metrics import MetricSuiteV1  # noqa: E402

@@ -41,10 +41,11 @@ async def test_run_agent_persists_on_crash():
     mock_app.ainvoke.side_effect = RuntimeError("Simulated Crash")
 
     # Patch dependencies
-    with patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)), patch(
-        "agent_core.graph.app", mock_app
-    ), patch("agent_core.graph.telemetry.update_current_trace"), patch(
-        "agent_core.graph.telemetry"
+    with (
+        patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
+        patch("agent_core.graph.app", mock_app),
+        patch("agent_core.graph.telemetry.update_current_trace"),
+        patch("agent_core.graph.telemetry"),
     ):
 
         # Run the agent
@@ -106,10 +107,11 @@ async def test_run_agent_persists_on_success():
     }
 
     # Patch dependencies
-    with patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)), patch(
-        "agent_core.graph.app", mock_app
-    ), patch("agent_core.graph.telemetry.update_current_trace"), patch(
-        "agent_core.graph.telemetry"
+    with (
+        patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
+        patch("agent_core.graph.app", mock_app),
+        patch("agent_core.graph.telemetry.update_current_trace"),
+        patch("agent_core.graph.telemetry"),
     ):
 
         # Run the agent

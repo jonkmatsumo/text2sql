@@ -38,18 +38,23 @@ class TestIndexer:
         mock_store = AsyncMock()
 
         # Mock Database
-        with patch(
-            "mcp_server.services.rag.indexer.Database.get_schema_introspector",
-            return_value=mock_introspector,
-        ), patch(
-            "mcp_server.services.rag.indexer.Database.get_schema_store", return_value=mock_store
-        ), patch(
-            "mcp_server.services.rag.engine.RagEngine.embed_text",
-            new_callable=AsyncMock,
-            return_value=[0.1, 0.2],
-        ), patch(
-            "mcp_server.services.rag.reload_schema_index", new_callable=AsyncMock
-        ) as mock_reload:
+        with (
+            patch(
+                "mcp_server.services.rag.indexer.Database.get_schema_introspector",
+                return_value=mock_introspector,
+            ),
+            patch(
+                "mcp_server.services.rag.indexer.Database.get_schema_store", return_value=mock_store
+            ),
+            patch(
+                "mcp_server.services.rag.engine.RagEngine.embed_text",
+                new_callable=AsyncMock,
+                return_value=[0.1, 0.2],
+            ),
+            patch(
+                "mcp_server.services.rag.reload_schema_index", new_callable=AsyncMock
+            ) as mock_reload,
+        ):
 
             await index_all_tables()
 

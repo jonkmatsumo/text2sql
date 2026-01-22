@@ -30,8 +30,9 @@ async def test_call_tool_unwraps_result():
     mock_tool.name = "some_tool"
     mock_tool.ainvoke.return_value = mock_raw_result
 
-    with patch("agent_core.tools.mcp_tools_context") as mock_ctx, patch(
-        "agent_core.tools.unpack_mcp_result", side_effect=lambda x: x
+    with (
+        patch("agent_core.tools.mcp_tools_context") as mock_ctx,
+        patch("agent_core.tools.unpack_mcp_result", side_effect=lambda x: x),
     ):
 
         # Async context manager mock
@@ -58,8 +59,9 @@ async def test_list_interactions_integration_with_fix():
     mock_tool.name = "list_interactions"
     mock_tool.ainvoke.return_value = mock_raw_result
 
-    with patch("agent_core.tools.mcp_tools_context") as mock_ctx, patch(
-        "agent_core.tools.unpack_mcp_result", side_effect=lambda x: x
+    with (
+        patch("agent_core.tools.mcp_tools_context") as mock_ctx,
+        patch("agent_core.tools.unpack_mcp_result", side_effect=lambda x: x),
     ):
 
         cm = MagicMock()
@@ -87,8 +89,9 @@ async def test_list_approved_examples_integration_with_fix():
     mock_tool.name = "list_approved_examples"
     mock_tool.ainvoke.return_value = mock_raw_result
 
-    with patch("agent_core.tools.mcp_tools_context") as mock_ctx, patch(
-        "agent_core.tools.unpack_mcp_result", side_effect=lambda x: x
+    with (
+        patch("agent_core.tools.mcp_tools_context") as mock_ctx,
+        patch("agent_core.tools.unpack_mcp_result", side_effect=lambda x: x),
     ):
 
         cm = MagicMock()

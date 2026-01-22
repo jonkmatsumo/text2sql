@@ -14,9 +14,10 @@ async def test_llm_input_sanitization():
 
     _LLM_CACHE.clear()
 
-    with patch("agent_core.llm_client.get_llm_client") as mock_get_client, patch(
-        "common.sanitization.sanitize_text"
-    ) as mock_sanitize:
+    with (
+        patch("agent_core.llm_client.get_llm_client") as mock_get_client,
+        patch("common.sanitization.sanitize_text") as mock_sanitize,
+    ):
 
         # Mock the underlying LLM client
         from langchain_openai import ChatOpenAI

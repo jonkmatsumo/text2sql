@@ -61,8 +61,9 @@ async def test_canonicalization_service_reload_returns_count():
     # This test verifies the refactor of spacy_pipeline.py logic, but we need to mock DB.
     # We can mock the database connection to return some rows.
 
-    with patch("dal.database.Database") as MockDB, patch(
-        "mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True
+    with (
+        patch("dal.database.Database") as MockDB,
+        patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True),
     ):
         # Setup DB mock
         mock_conn = AsyncMock()
@@ -92,9 +93,12 @@ async def test_canonicalization_service_reload_returns_count():
             CanonicalizationService.reset_instance()
 
             # Mock _setup_entity_ruler and _setup_dependency_matcher to avoid IO/Cython issues
-            with patch.object(
-                CanonicalizationService, "_setup_entity_ruler", return_value=2
-            ) as mock_setup, patch.object(CanonicalizationService, "_setup_dependency_matcher"):
+            with (
+                patch.object(
+                    CanonicalizationService, "_setup_entity_ruler", return_value=2
+                ) as mock_setup,
+                patch.object(CanonicalizationService, "_setup_dependency_matcher"),
+            ):
                 service = CanonicalizationService("en_core_web_sm")
 
                 # Check initial state
@@ -123,8 +127,9 @@ async def test_canonicalization_service_reload_returns_count():
 @pytest.mark.asyncio
 async def test_reload_concurrency():
     """Test reloading while extracting constraints concurrently."""
-    with patch("dal.database.Database") as MockDB, patch(
-        "mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True
+    with (
+        patch("dal.database.Database") as MockDB,
+        patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True),
     ):
 
         # Setup DB mock (return empty patterns to avoid complex setup)
@@ -145,9 +150,10 @@ async def test_reload_concurrency():
             # Init service
             CanonicalizationService.reset_instance()
 
-            with patch.object(
-                CanonicalizationService, "_setup_entity_ruler", return_value=0
-            ), patch.object(CanonicalizationService, "_setup_dependency_matcher"):
+            with (
+                patch.object(CanonicalizationService, "_setup_entity_ruler", return_value=0),
+                patch.object(CanonicalizationService, "_setup_dependency_matcher"),
+            ):
 
                 service = CanonicalizationService("en_core_web_sm")
 

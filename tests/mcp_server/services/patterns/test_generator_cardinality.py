@@ -41,10 +41,14 @@ async def test_cardinality_boundary():
     mock_conn.fetch.side_effect = side_effect_fetch
 
     # 3. Execution (Threshold=10 default)
-    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
-        "dal.database.Database.get_schema_introspector",
-        return_value=mock_introspector,
-    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
+    with (
+        patch("dal.database.Database.get_connection", return_value=mock_db_ctx),
+        patch(
+            "dal.database.Database.get_schema_introspector",
+            return_value=mock_introspector,
+        ),
+        patch("ingestion.patterns.generator.get_openai_client", return_value=None),
+    ):
 
         patterns = await generate_entity_patterns()
 
@@ -78,10 +82,14 @@ async def test_timeout_handling():
         foreign_keys=[],
     )
 
-    with patch("dal.database.Database.get_connection", return_value=mock_db_ctx), patch(
-        "dal.database.Database.get_schema_introspector",
-        return_value=mock_introspector,
-    ), patch("ingestion.patterns.generator.get_openai_client", return_value=None):
+    with (
+        patch("dal.database.Database.get_connection", return_value=mock_db_ctx),
+        patch(
+            "dal.database.Database.get_schema_introspector",
+            return_value=mock_introspector,
+        ),
+        patch("ingestion.patterns.generator.get_openai_client", return_value=None),
+    ):
 
         patterns = await generate_entity_patterns()
 

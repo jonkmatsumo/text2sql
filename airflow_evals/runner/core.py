@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent_core.graph import run_agent_with_tracing
-
 from airflow_evals.runner.config import EvaluationCaseResult, EvaluationConfig, EvaluationSummary
 from airflow_evals.runner.regression import RegressionDetector, RegressionReport
 from schema.evaluation.metrics import MetricSuiteV1

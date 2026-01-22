@@ -27,15 +27,19 @@ class TestSemanticWiringVerification:
         mock_introspector = MagicMock()
         mock_introspector.get_table_def = AsyncMock(return_value=mock_table_def)
 
-        with patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
-            return_value=mock_store,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
-            return_value=mock_introspector,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
-        ) as MockVectorIndexer:
+        with (
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=mock_introspector,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+            ) as MockVectorIndexer,
+        ):
 
             await get_semantic_subgraph("find customers")
 
@@ -71,14 +75,18 @@ class TestSemanticWiringVerification:
         mock_introspector = MagicMock()
         mock_introspector.get_table_def = AsyncMock(return_value=mock_table_def)
 
-        with patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
-            return_value=mock_store,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
-            return_value=mock_introspector,
-        ), patch(
-            "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+        with (
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=mock_introspector,
+            ),
+            patch(
+                "mcp_server.tools.get_semantic_subgraph.VectorIndexer", return_value=mock_indexer
+            ),
         ):
 
             await get_semantic_subgraph("find customers")

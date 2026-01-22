@@ -30,12 +30,14 @@ class TestDependencyPatternsWarning:
         empty_patterns_dir.mkdir()
 
         # Patch to use our empty patterns directory
-        with patch(
-            "mcp_server.services.canonicalization.spacy_pipeline.get_env_str",
-            return_value=str(empty_patterns_dir),
-        ), patch("spacy.load") as mock_spacy_load, patch(
-            "spacy.matcher.DependencyMatcher"
-        ) as mock_matcher_cls:
+        with (
+            patch(
+                "mcp_server.services.canonicalization.spacy_pipeline.get_env_str",
+                return_value=str(empty_patterns_dir),
+            ),
+            patch("spacy.load") as mock_spacy_load,
+            patch("spacy.matcher.DependencyMatcher") as mock_matcher_cls,
+        ):
             # Setup mock NLP
             mock_nlp = MagicMock()
             mock_nlp.pipe_names = []
@@ -65,9 +67,10 @@ class TestDependencyPatternsWarning:
         """Test no warning when custom patterns are provided."""
         from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
-        with patch("spacy.load") as mock_spacy_load, patch(
-            "spacy.matcher.DependencyMatcher"
-        ) as mock_matcher_cls:
+        with (
+            patch("spacy.load") as mock_spacy_load,
+            patch("spacy.matcher.DependencyMatcher") as mock_matcher_cls,
+        ):
             mock_nlp = MagicMock()
             mock_nlp.pipe_names = []
             mock_nlp.add_pipe.return_value = MagicMock()

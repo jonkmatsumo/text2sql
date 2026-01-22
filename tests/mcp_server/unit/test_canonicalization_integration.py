@@ -19,11 +19,13 @@ async def test_reload_patterns_integration():
     mock_db_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_db_ctx.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True), patch(
-        "dal.database.Database.get_connection", return_value=mock_db_ctx
-    ), patch("spacy.load") as mock_spacy_load, patch("spacy.blank") as mock_spacy_blank, patch(
-        "spacy.matcher.DependencyMatcher"
-    ) as mock_matcher_cls:
+    with (
+        patch("mcp_server.services.canonicalization.spacy_pipeline.SPACY_ENABLED", True),
+        patch("dal.database.Database.get_connection", return_value=mock_db_ctx),
+        patch("spacy.load") as mock_spacy_load,
+        patch("spacy.blank") as mock_spacy_blank,
+        patch("spacy.matcher.DependencyMatcher") as mock_matcher_cls,
+    ):
         mock_nlp = MagicMock()
         mock_nlp.pipe_names = []
         mock_nlp.add_pipe.return_value = MagicMock()

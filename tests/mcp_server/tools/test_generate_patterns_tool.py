@@ -20,10 +20,13 @@ async def test_generate_patterns_tool_success():
         yield f"Starting (Run ID: {run_id})..."
         yield "Success"
 
-    with patch(
-        "mcp_server.services.ops.maintenance.MaintenanceService.generate_patterns",
-        side_effect=mock_generator,
-    ), patch("mcp_server.tools.admin.generate_patterns.get_pattern_run_store") as mock_get_store:
+    with (
+        patch(
+            "mcp_server.services.ops.maintenance.MaintenanceService.generate_patterns",
+            side_effect=mock_generator,
+        ),
+        patch("mcp_server.tools.admin.generate_patterns.get_pattern_run_store") as mock_get_store,
+    ):
         mock_store = AsyncMock()
         mock_store.get_run.return_value = mock_run
         mock_get_store.return_value = mock_store
@@ -48,10 +51,13 @@ async def test_generate_patterns_tool_failure():
         yield f"Starting (Run ID: {run_id})..."
         raise Exception("LLM capacity exceeded")
 
-    with patch(
-        "mcp_server.services.ops.maintenance.MaintenanceService.generate_patterns",
-        side_effect=mock_generator_fail,
-    ), patch("mcp_server.tools.admin.generate_patterns.get_pattern_run_store") as mock_get_store:
+    with (
+        patch(
+            "mcp_server.services.ops.maintenance.MaintenanceService.generate_patterns",
+            side_effect=mock_generator_fail,
+        ),
+        patch("mcp_server.tools.admin.generate_patterns.get_pattern_run_store") as mock_get_store,
+    ):
         mock_store = AsyncMock()
         mock_store.get_run.return_value = mock_run
         mock_get_store.return_value = mock_store

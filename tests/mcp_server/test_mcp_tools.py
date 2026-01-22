@@ -229,11 +229,14 @@ class TestSearchRelevantTables:
         with patch.object(
             search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
         ):
-            with patch.object(
-                search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
-            ) as mock_search, patch.object(
-                search_relevant_tables_mod.Database, "get_schema_introspector"
-            ) as mock_intro:
+            with (
+                patch.object(
+                    search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
+                ) as mock_search,
+                patch.object(
+                    search_relevant_tables_mod.Database, "get_schema_introspector"
+                ) as mock_intro,
+            ):
                 mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
                 mock_table_def = MagicMock()
                 mock_table_def.columns = [mock_col]
@@ -258,10 +261,11 @@ class TestSearchRelevantTables:
         with patch.object(
             search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
         ):
-            with patch.object(
-                search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
-            ) as mock_search, patch.object(
-                search_relevant_tables_mod.Database, "get_schema_introspector"
+            with (
+                patch.object(
+                    search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
+                ) as mock_search,
+                patch.object(search_relevant_tables_mod.Database, "get_schema_introspector"),
             ):
                 mock_search.return_value = []
 

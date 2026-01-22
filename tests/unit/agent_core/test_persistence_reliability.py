@@ -37,9 +37,10 @@ class TestCreateInteractionFailure:
 
         # Ensure fail-open is NOT set
         with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "false"}, clear=False):
-            with patch(
-                "agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)
-            ), patch("agent_core.graph.telemetry"):
+            with (
+                patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
+                patch("agent_core.graph.telemetry"),
+            ):
 
                 # Should raise RuntimeError because default is fail-closed
                 with pytest.raises(RuntimeError) as exc_info:
@@ -82,9 +83,11 @@ class TestCreateInteractionFailure:
 
         # Set fail-open mode
         with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "true"}, clear=False):
-            with patch(
-                "agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)
-            ), patch("agent_core.graph.app", mock_app), patch("agent_core.graph.telemetry"):
+            with (
+                patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
+                patch("agent_core.graph.app", mock_app),
+                patch("agent_core.graph.telemetry"),
+            ):
 
                 # Should NOT raise - continues with interaction_id=None
                 result = await run_agent_with_tracing("My question")
@@ -116,12 +119,13 @@ class TestCreateInteractionFailure:
 
         # Enable fail-open so we can capture logging
         with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "true"}, clear=False):
-            with patch(
-                "agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)
-            ), patch("agent_core.graph.telemetry"), patch(
-                "agent_core.graph.logger"
-            ) as mock_logger, patch(
-                "agent_core.graph.app", AsyncMock(return_value={"messages": [], "error": None})
+            with (
+                patch("agent_core.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
+                patch("agent_core.graph.telemetry"),
+                patch("agent_core.graph.logger") as mock_logger,
+                patch(
+                    "agent_core.graph.app", AsyncMock(return_value={"messages": [], "error": None})
+                ),
             ):
 
                 await run_agent_with_tracing("My question")

@@ -64,14 +64,14 @@ async def test_size_based_flush(mock_item):
         [],
     ]
 
-    with patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll, patch(
-        "otel_worker.ingestion.processor.save_traces_batch"
-    ) as mock_save, patch(
-        "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
-    ), patch(
-        "otel_worker.ingestion.processor.update_ingestion_status"
-    ) as mock_update, patch(
-        "otel_worker.ingestion.processor.export_to_mlflow"
+    with (
+        patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll,
+        patch("otel_worker.ingestion.processor.save_traces_batch") as mock_save,
+        patch(
+            "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
+        ),
+        patch("otel_worker.ingestion.processor.update_ingestion_status") as mock_update,
+        patch("otel_worker.ingestion.processor.export_to_mlflow"),
     ):
         mock_poll.side_effect = items_stream + [[]] * 100
 
@@ -105,14 +105,14 @@ async def test_time_based_flush(mock_item):
     # 1 item initially, then nothing
     items_stream = [[mock_item]]
 
-    with patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll, patch(
-        "otel_worker.ingestion.processor.save_traces_batch"
-    ) as mock_save, patch(
-        "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
-    ), patch(
-        "otel_worker.ingestion.processor.update_ingestion_status"
-    ) as mock_update, patch(
-        "otel_worker.ingestion.processor.export_to_mlflow"
+    with (
+        patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll,
+        patch("otel_worker.ingestion.processor.save_traces_batch") as mock_save,
+        patch(
+            "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
+        ),
+        patch("otel_worker.ingestion.processor.update_ingestion_status") as mock_update,
+        patch("otel_worker.ingestion.processor.export_to_mlflow"),
     ):
         mock_poll.side_effect = items_stream + [[]] * 100
 
@@ -143,14 +143,14 @@ async def test_shutdown_flush(mock_item):
     # 1 item initially
     items_stream = [[mock_item]]
 
-    with patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll, patch(
-        "otel_worker.ingestion.processor.save_traces_batch"
-    ) as mock_save, patch(
-        "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
-    ), patch(
-        "otel_worker.ingestion.processor.update_ingestion_status"
-    ) as mock_update, patch(
-        "otel_worker.ingestion.processor.export_to_mlflow"
+    with (
+        patch("otel_worker.ingestion.processor.poll_ingestion_queue") as mock_poll,
+        patch("otel_worker.ingestion.processor.save_traces_batch") as mock_save,
+        patch(
+            "otel_worker.ingestion.processor.upload_trace_blob", return_value="http://minio/blob"
+        ),
+        patch("otel_worker.ingestion.processor.update_ingestion_status") as mock_update,
+        patch("otel_worker.ingestion.processor.export_to_mlflow"),
     ):
         mock_poll.side_effect = items_stream + [[]] * 100
 

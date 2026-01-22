@@ -21,11 +21,14 @@ class TestGetInteractionDetails:
         mock_interaction = {"id": "int-1", "user_nlq_text": "query"}
         mock_feedback = [{"id": "fb-1", "thumb": "UP"}]
 
-        with patch(
-            "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
-        ) as mock_get_i_store, patch(
-            "mcp_server.tools.admin.get_interaction_details.get_feedback_store"
-        ) as mock_get_f_store:
+        with (
+            patch(
+                "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
+            ) as mock_get_i_store,
+            patch(
+                "mcp_server.tools.admin.get_interaction_details.get_feedback_store"
+            ) as mock_get_f_store,
+        ):
 
             mock_i_store = AsyncMock()
             mock_i_store.get_interaction_detail = AsyncMock(return_value=mock_interaction)
@@ -45,10 +48,11 @@ class TestGetInteractionDetails:
     @pytest.mark.asyncio
     async def test_get_interaction_details_not_found(self):
         """Test get_interaction_details returns error when not found."""
-        with patch(
-            "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
-        ) as mock_get_i_store, patch(
-            "mcp_server.tools.admin.get_interaction_details.get_feedback_store"
+        with (
+            patch(
+                "mcp_server.tools.admin.get_interaction_details.get_interaction_store"
+            ) as mock_get_i_store,
+            patch("mcp_server.tools.admin.get_interaction_details.get_feedback_store"),
         ):
 
             mock_i_store = AsyncMock()

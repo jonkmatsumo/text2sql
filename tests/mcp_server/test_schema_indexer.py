@@ -69,9 +69,10 @@ async def test_index_all_tables_success():
         async def reload_schema_index_async():
             return None
 
-        with patch(
-            "mcp_server.services.rag.indexer.RagEngine.embed_text", new=embed_text_async
-        ), patch("mcp_server.services.rag.reload_schema_index", new=reload_schema_index_async):
+        with (
+            patch("mcp_server.services.rag.indexer.RagEngine.embed_text", new=embed_text_async),
+            patch("mcp_server.services.rag.reload_schema_index", new=reload_schema_index_async),
+        ):
             await index_all_tables()
 
             # Verify logic
@@ -160,9 +161,10 @@ async def test_index_all_tables_with_relationships():
         async def reload_schema_index_async():
             return None
 
-        with patch(
-            "mcp_server.services.rag.indexer.RagEngine.embed_text", new=embed_text_async
-        ), patch("mcp_server.services.rag.reload_schema_index", new=reload_schema_index_async):
+        with (
+            patch("mcp_server.services.rag.indexer.RagEngine.embed_text", new=embed_text_async),
+            patch("mcp_server.services.rag.reload_schema_index", new=reload_schema_index_async),
+        ):
             await index_all_tables()
 
             assert list_calls["count"] == 1

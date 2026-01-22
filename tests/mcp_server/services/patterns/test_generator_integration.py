@@ -40,12 +40,12 @@ async def test_generator_validation_integration():
     mock_conn = AsyncMock()
 
     # Patch dependencies
-    with patch("ingestion.patterns.generator.Database") as MockDB, patch(
-        "ingestion.patterns.generator.get_openai_client", return_value=mock_client
-    ), patch("ingestion.patterns.generator.EnumLikeColumnDetector") as MockDetectorCls, patch(
-        "ingestion.patterns.generator.sample_distinct_values", return_value=["ACTIVE"]
-    ), patch(
-        "ingestion.patterns.generator.get_native_enum_values", return_value=[]
+    with (
+        patch("ingestion.patterns.generator.Database") as MockDB,
+        patch("ingestion.patterns.generator.get_openai_client", return_value=mock_client),
+        patch("ingestion.patterns.generator.EnumLikeColumnDetector") as MockDetectorCls,
+        patch("ingestion.patterns.generator.sample_distinct_values", return_value=["ACTIVE"]),
+        patch("ingestion.patterns.generator.get_native_enum_values", return_value=[]),
     ):
 
         MockDB.get_schema_introspector.return_value = mock_introspector
