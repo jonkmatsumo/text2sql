@@ -15,11 +15,12 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from dotenv import load_dotenv
 
-# Add agent to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add repo root to path
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
 
 # Add database/query-target to path for golden dataset imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "database" / "query-target"))
+sys.path.insert(0, str(ROOT / "database" / "query-target"))
 
 from golden import (  # noqa: E402
     GoldenDatasetNotFoundError,

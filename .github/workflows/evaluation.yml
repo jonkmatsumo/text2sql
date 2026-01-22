@@ -44,7 +44,7 @@ jobs:
           DATASET_MODE: ${{ env.DATASET_MODE }}
         run: |
           cd agent
-          uv run python3 scripts/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
+          uv run python3 scripts/evals/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
 
       - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v6

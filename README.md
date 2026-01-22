@@ -219,7 +219,7 @@ Environment variables are grouped by category (not exhaustive):
 Before starting, bootstrap the local data directories:
 
 ```bash
-./scripts/bootstrap_local_data.sh
+./scripts/dev/bootstrap_local_data.sh
 ```
 
 ### 2. Services Bring-Up

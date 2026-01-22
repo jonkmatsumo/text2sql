@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Resolve repo root
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
 # Base directory for local data
 DATA_DIR="./local-data"
 

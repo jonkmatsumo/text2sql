@@ -68,4 +68,4 @@ docker-nuke:
 	docker compose $(COMPOSE_FILES) down -v --remove-orphans
 	@echo "Deleting local-data..."
 	rm -rf ./local-data/*
-	@echo "Environment nuked. Run ./scripts/bootstrap_local_data.sh to re-initialize."
+	@echo "Environment nuked. Run ./scripts/dev/bootstrap_local_data.sh to re-initialize."

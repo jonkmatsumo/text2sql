@@ -16,7 +16,7 @@ To run the system, you must populate this directory with:
 1.  **Schema & Data**:
     *   `01-schema.sql`: DDL for the target database.
     *   `02-data.sql`: DML/Data for the target database.
-    *   For synthetic data: Run `scripts/generate_synthetic_artifacts.sh` to generate schema and data.
+    *   For synthetic data: Run `scripts/data/generate_synthetic_artifacts.sh` to generate schema and data.
     *   For legacy Pagila (DEPRECATED): Run `./download_data.sh` to fetch the Pagila dataset (requires `DATASET_MODE=pagila`).
 
 > [!IMPORTANT]

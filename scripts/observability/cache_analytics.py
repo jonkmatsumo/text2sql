@@ -1,9 +1,16 @@
 """Script to analyze semantic cache performance."""
 
 import asyncio
+import sys
+from pathlib import Path
 
-from mcp_server.cache import get_cache_stats
-from mcp_server.db import Database
+# Add src to path
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+
+
+from mcp_server.dal.database import Database  # noqa: E402
+from mcp_server.services.cache import get_cache_stats  # noqa: E402
 
 
 async def analyze_cache():
