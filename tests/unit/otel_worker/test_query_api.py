@@ -12,9 +12,10 @@ os.environ["POSTGRES_URL"] = "sqlite:///otel_test.db"
 os.environ["OTEL_DB_SCHEMA"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+
 from otel_worker.app import app  # noqa: E402
 from otel_worker.storage.postgres import engine, save_trace_and_spans  # noqa: E402
-from sqlalchemy import text  # noqa: E402
 
 
 class TestQueryAPI(unittest.TestCase):

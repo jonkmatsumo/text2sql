@@ -11,7 +11,7 @@ echo -e "${GREEN}=== Starting End-to-End Trace Smoke Test ===${NC}"
 # 1. Generate Traces
 echo "Generating traces using verify_otel_setup.py..."
 # Export PYTHONPATH
-export PYTHONPATH=agent/src:common/src:schema/src
+export PYTHONPATH=src
 
 # Capture output to get Trace ID
 OUTPUT=$(python3 scripts/verify_otel_setup.py 2>&1)

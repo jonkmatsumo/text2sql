@@ -1,6 +1,7 @@
 """Tests for SQL export functionality."""
 
 import pandas as pd
+
 from text2sql_synth.sql_export import (
     _escape_sql_value,
     _infer_pg_type,

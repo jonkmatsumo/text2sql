@@ -7,8 +7,9 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
-from otel_worker.config import settings
 from sqlalchemy import text
+
+from otel_worker.config import settings
 
 # Load root .env if it exists
 dotenv_path = os.path.join(

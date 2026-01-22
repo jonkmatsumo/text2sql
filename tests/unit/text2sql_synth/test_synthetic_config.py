@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from text2sql_synth.config import (
     DistributionConfig,
     ScaleConfig,

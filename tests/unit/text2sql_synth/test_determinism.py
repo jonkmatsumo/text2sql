@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.orchestrator import generate_tables
 from text2sql_synth.util.hashing import stable_hash_str

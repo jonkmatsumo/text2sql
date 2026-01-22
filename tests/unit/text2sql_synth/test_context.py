@@ -4,6 +4,7 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+
 from text2sql_synth.context import GenerationContext, TimeWindowConfig
 
 

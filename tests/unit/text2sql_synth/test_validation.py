@@ -2,6 +2,7 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+
 from text2sql_synth.cli import build_parser
 from text2sql_synth.validate import _check_fk_integrity, validate_manifest
 

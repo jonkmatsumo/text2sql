@@ -63,7 +63,7 @@ services:
       - ./airflow_evals/airflow/dags:/opt/airflow/dags
       - ./airflow_evals/airflow/logs:/opt/airflow/logs
       - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./schema/src:/opt/airflow/plugins/schema_src
+      - ./src/schema:/opt/airflow/plugins/schema_src
       - ./agent/src:/opt/airflow/plugins/agent_src
       - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
     environment:
@@ -100,7 +100,7 @@ services:
       - ./airflow_evals/airflow/dags:/opt/airflow/dags
       - ./airflow_evals/airflow/logs:/opt/airflow/logs
       - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./schema/src:/opt/airflow/plugins/schema_src
+      - ./src/schema:/opt/airflow/plugins/schema_src
       - ./agent/src:/opt/airflow/plugins/agent_src
       - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
     environment:
@@ -130,7 +130,7 @@ services:
       - ./airflow_evals/airflow/dags:/opt/airflow/dags
       - ./airflow_evals/airflow/logs:/opt/airflow/logs
       - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./schema/src:/opt/airflow/plugins/schema_src
+      - ./src/schema:/opt/airflow/plugins/schema_src
       - ./agent/src:/opt/airflow/plugins/agent_src
       - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
     environment:

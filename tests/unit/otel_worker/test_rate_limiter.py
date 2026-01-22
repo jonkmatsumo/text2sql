@@ -2,6 +2,7 @@ import time
 from unittest.mock import patch
 
 import pytest
+
 from otel_worker.config import settings
 from otel_worker.ingestion.limiter import TokenBucketLimiter
 

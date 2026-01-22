@@ -23,8 +23,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install pre-commit
-        run: pip install pre-commit
+      - name: Install pre-commit and wrappers
+        run: |
+          pip install pre-commit
+          pip install -e pyproject/common -e pyproject/schema -e pyproject/dal -e pyproject/ingestion
 
       - name: Run pre-commit hooks
         run: |

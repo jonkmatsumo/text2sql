@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from otel_worker.config import settings
 from otel_worker.ingestion.processor import PersistenceCoordinator
 

@@ -1,12 +1,13 @@
 [project]
-name = "text2sql-common"
+name = "text2sql-ingestion"
 version = "0.1.0"
-description = "Shared utilities for Text 2 SQL"
-requires-python = ">=3.12"
+description = "Ingestion pipeline for Text 2 SQL"
+requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.0",
     "numpy",
-    "opentelemetry-api",
+    "openai>=1.0.0",
+    "hnswlib>=0.8.0",
 ]
 
 [build-system]
@@ -14,8 +15,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-package-dir = {"" = "../src"}
+package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
-where = ["../src"]
-include = ["common*"]
+where = ["../../src"]
+include = ["ingestion*"]

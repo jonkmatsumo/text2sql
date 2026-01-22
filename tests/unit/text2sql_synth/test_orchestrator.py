@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+
 from text2sql_synth import schema
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.orchestrator import generate_all, generate_tables

@@ -1,6 +1,7 @@
 import unittest
 
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
 from otel_worker.otlp.parser import extract_trace_summaries, parse_otlp_traces
 
 

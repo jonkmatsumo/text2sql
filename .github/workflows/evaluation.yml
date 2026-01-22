@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e "./schema"
+          pip install -e "./pyproject/schema"
           pip install -e "./agent[test]"
           pip install -e "./mcp-server[test]"
 

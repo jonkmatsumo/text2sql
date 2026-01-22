@@ -15,11 +15,11 @@ RUN apt-get update && apt-get install -y \
 # the dependency installation layer.
 
 # 1. Common deps
-COPY common/pyproject.toml ./common/
+COPY pyproject/common/pyproject.toml ./pyproject/common/
 # 2. Schema deps
-COPY schema/pyproject.toml ./schema/
+COPY pyproject/schema/pyproject.toml ./pyproject/schema/
 # 3. Ingestion deps
-COPY ingestion/pyproject.toml ./ingestion/
+COPY pyproject/ingestion/pyproject.toml ./pyproject/ingestion/
 # 4. Streamlit app deps
 COPY streamlit-app/pyproject.toml ./streamlit-app/
 # 5. Agent deps
@@ -27,21 +27,21 @@ COPY agent/pyproject.toml ./agent/
 # 6. MCP Server deps
 COPY mcp-server/pyproject.toml ./mcp-server/
 # 7. DAL deps
-COPY dal/pyproject.toml ./dal/
+COPY pyproject/dal/pyproject.toml ./pyproject/dal/
 
 # Create dummy source files for local dependencies enable caching
-# Common expects src/common
+# Common expects src/common relative to root, but config is in pyproject/common which expects ../../src
 RUN mkdir -p src/common && touch src/common/__init__.py
 RUN mkdir -p src/schema && touch src/schema/__init__.py
 RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
 RUN mkdir -p src/agent_core && touch src/agent_core/__init__.py
 RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
-RUN mkdir -p streamlit-app/src/streamlit_app && touch streamlit-app/src/streamlit_app/__init__.py
+RUN mkdir -p src/streamlit_app && touch src/streamlit_app/__init__.py
 RUN mkdir -p src/dal && touch src/dal/__init__.py
 
 # Install dependencies for all packages using cache mounts.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./common -e ./schema -e ./ingestion -e ./agent -e ./mcp-server -e ./dal -e ./streamlit-app
+    pip install -e ./pyproject/common -e ./pyproject/schema -e ./pyproject/ingestion -e ./agent -e ./mcp-server -e ./pyproject/dal -e ./streamlit-app
 
 # --- SOURCE LAYER ---
 # Now copy the actual source code. Changing a .py file will strictly
@@ -57,13 +57,13 @@ COPY src/schema ./src/schema
 COPY src/ingestion ./src/ingestion
 
 # Streamlit source (includes tests now)
-COPY streamlit-app/ ./streamlit-app/
+COPY src/streamlit_app ./src/streamlit_app
 
 # Agent source
 COPY src/agent_core ./src/agent_core
 
 # MCP Server source
-COPY mcp-server/src/ ./mcp-server/src/
+COPY src/mcp_server/ ./src/mcp_server/
 
 # DAL source
 COPY src/dal ./src/dal
@@ -74,13 +74,13 @@ COPY src/dal ./src/dal
 # This is very fast as dependencies are already installed.
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./common \
-    && pip install -e ./schema \
-    && pip install -e ./ingestion \
+    pip install -e ./pyproject/common \
+    && pip install -e ./pyproject/schema \
+    && pip install -e ./pyproject/ingestion \
     && pip install -e ./streamlit-app \
     && pip install -e ./mcp-server \
     && pip install -e ./agent \
-    && pip install -e ./dal
+    && pip install -e ./pyproject/dal
 
 # Expose Streamlit port
 EXPOSE 8501
@@ -89,4 +89,4 @@ EXPOSE 8501
 WORKDIR /app
 
 # Run Streamlit from streamlit_app entrypoint
-CMD ["streamlit", "run", "streamlit-app/src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
 from otel_worker.app import app
 
 

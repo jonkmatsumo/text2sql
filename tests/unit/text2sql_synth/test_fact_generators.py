@@ -1,6 +1,7 @@
 """Tests for fact table generators."""
 
 import pytest
+
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.context import GenerationContext
 from text2sql_synth.context import TimeWindowConfig as CtxTimeWindowConfig

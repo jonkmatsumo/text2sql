@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from text2sql_synth.config import SynthConfig
 from text2sql_synth.export import export_to_directory
 from text2sql_synth.orchestrator import generate_tables
