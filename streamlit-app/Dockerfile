@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.5
 FROM python:3.12-slim
 
+# Install uv provided by Astral
+COPY --from=ghcr.io/astral-sh/uv:0.5.21 /uv /uvx /bin/
+
 WORKDIR /app
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 
@@ -9,84 +12,30 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# --- DEPENDENCY LAYER ---
-# Copy ONLY dependency descriptors for all packages first.
-# This ensures that changes to source code files (*.py) do NOT invalidate
-# the dependency installation layer.
+# Copy workspace definitions
+COPY pyproject.toml uv.lock ./
+COPY pyproject/ pyproject/
+COPY mcp-server/pyproject.toml mcp-server/
+COPY streamlit-app/pyproject.toml streamlit-app/
+COPY agent/pyproject.toml agent/
+COPY observability/otel-worker/pyproject.toml observability/otel-worker/
+COPY synthetic-data/pyproject.toml synthetic-data/
 
-# 1. Common deps
-COPY pyproject/common/pyproject.toml ./pyproject/common/
-# 2. Schema deps
-COPY pyproject/schema/pyproject.toml ./pyproject/schema/
-# 3. Ingestion deps
-COPY pyproject/ingestion/pyproject.toml ./pyproject/ingestion/
-# 4. Streamlit app deps
-COPY streamlit-app/pyproject.toml ./streamlit-app/
-# 5. Agent deps
-COPY agent/pyproject.toml ./agent/
-# 6. MCP Server deps
-COPY mcp-server/pyproject.toml ./mcp-server/
-# 7. DAL deps
-COPY pyproject/dal/pyproject.toml ./pyproject/dal/
+# Optimize cache: Install external dependencies first
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-emit-workspace --no-dev --output-file requirements.txt && \
+    uv venv && \
+    uv pip install -r requirements.txt
 
-# Create dummy source files for local dependencies enable caching
-# Common expects src/common relative to root, but config is in pyproject/common which expects ../../src
-RUN mkdir -p src/common && touch src/common/__init__.py
-RUN mkdir -p src/schema && touch src/schema/__init__.py
-RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
-RUN mkdir -p src/agent_core && touch src/agent_core/__init__.py
-RUN mkdir -p mcp-server/src/mcp_server && touch mcp-server/src/mcp_server/__init__.py
-RUN mkdir -p src/streamlit_app && touch src/streamlit_app/__init__.py
-RUN mkdir -p src/dal && touch src/dal/__init__.py
+# Copy source code
+COPY src/ src/
 
-# Install dependencies for all packages using cache mounts.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./pyproject/common -e ./pyproject/schema -e ./pyproject/ingestion -e ./agent -e ./mcp-server -e ./pyproject/dal -e ./streamlit-app
-
-# --- SOURCE LAYER ---
-# Now copy the actual source code. Changing a .py file will strictly
-# invalidate layers below this point.
-
-# Common source
-COPY src/common ./src/common
-
-# Schema source
-COPY src/schema ./src/schema
-
-# Ingestion source
-COPY src/ingestion ./src/ingestion
-
-# Streamlit source (includes tests now)
-COPY src/streamlit_app ./src/streamlit_app
-
-# Agent source
-COPY src/agent_core ./src/agent_core
-
-# MCP Server source
-COPY src/mcp_server/ ./src/mcp_server/
-
-# DAL source
-COPY src/dal ./src/dal
-
-# --- EDITABLE INSTALL LAYER ---
-# Re-install in editable mode so that imports resolve correctly to the /app/x/src locations
-# and standard development workflows (bind mounts) work as expected.
-# This is very fast as dependencies are already installed.
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./pyproject/common \
-    && pip install -e ./pyproject/schema \
-    && pip install -e ./pyproject/ingestion \
-    && pip install -e ./streamlit-app \
-    && pip install -e ./mcp-server \
-    && pip install -e ./agent \
-    && pip install -e ./pyproject/dal
+# Sync the project (install workspace members in editable mode)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 # Expose Streamlit port
 EXPOSE 8501
 
-# Set working directory to repo root
-WORKDIR /app
-
-# Run Streamlit from streamlit_app entrypoint
-CMD ["streamlit", "run", "src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Run Streamlit (using uv run)
+CMD ["uv", "run", "streamlit", "run", "src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]

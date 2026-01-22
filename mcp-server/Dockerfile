@@ -1,50 +1,47 @@
 # syntax=docker/dockerfile:1.5
 FROM python:3.12-slim
 
+# Install uv provided by Astral
+COPY --from=ghcr.io/astral-sh/uv:0.5.21 /uv /uvx /bin/
+
 WORKDIR /app
 
-# Install build dependencies for hnswlib (system deps rarely change)
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency definition first (cache invalidation layer)
-COPY pyproject/common/pyproject.toml ./pyproject/common/
-COPY pyproject/schema/pyproject.toml ./pyproject/schema/
-COPY pyproject/dal/pyproject.toml ./pyproject/dal/
-COPY pyproject/ingestion/pyproject.toml ./pyproject/ingestion/
-COPY mcp-server/pyproject.toml ./mcp-server/
+# Copy workspace definitions
+COPY pyproject.toml uv.lock ./
+COPY pyproject/ pyproject/
+COPY mcp-server/pyproject.toml mcp-server/
+COPY streamlit-app/pyproject.toml streamlit-app/
+COPY agent/pyproject.toml agent/
+COPY observability/otel-worker/pyproject.toml observability/otel-worker/
+COPY synthetic-data/pyproject.toml synthetic-data/
 
-# Create dummy source to allow pip install to work for dependencies
-# Configuration is in pyproject/common/pyproject.toml, pointing to ../../src
-# So we need to create src/common at the root, AND install from pyproject/common
-RUN mkdir -p src/common && touch src/common/__init__.py
-RUN mkdir -p src/schema && touch src/schema/__init__.py
-RUN mkdir -p src/dal && touch src/dal/__init__.py
-RUN mkdir -p src/ingestion && touch src/ingestion/__init__.py
-RUN mkdir -p src/mcp_server && touch src/mcp_server/__init__.py
+# Optimize cache: Install external dependencies first
+# 1. Export dependencies excluding local workspace packages
+# 2. Create venv
+# 3. Install external dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-emit-workspace --no-dev --output-file requirements.txt && \
+    uv venv && \
+    uv pip install -r requirements.txt
 
-# Install packages with cache mount (so repeat builds are fast)
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./pyproject/common -e ./pyproject/schema -e ./pyproject/dal -e ./pyproject/ingestion -e ./mcp-server
+# Copy source code
+COPY src/ src/
 
-# Copy source code (this changes frequently)
-COPY src/common ./src/common
-COPY src/schema ./src/schema
-COPY src/dal ./src/dal
-COPY src/ingestion ./src/ingestion
-COPY src/mcp_server ./src/mcp_server
+# Sync the project (install workspace members)
+# This step is fast because external deps are already installed
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-# Re-install in editable mode
-# This ensures that imports resolve correctly and bind mounts work.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ./pyproject/common -e ./pyproject/schema -e ./pyproject/dal -e ./pyproject/ingestion -e ./mcp-server
-
-# Download SpaCy model for linguistic canonicalization
-RUN python -m spacy download en_core_web_sm
+# Download SpaCy model
+RUN uv pip install pip && uv run python -m spacy download en_core_web_sm
 
 # Expose SSE port
 EXPOSE 8000
 
 # Run the MCP server
-CMD ["python", "src/mcp_server/main.py"]
+CMD ["uv", "run", "python", "src/mcp_server/main.py"]
