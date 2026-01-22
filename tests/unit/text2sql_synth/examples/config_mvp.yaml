@@ -1,0 +1,40 @@
+# MVP preset configuration for development and integration testing
+# Generates ~62,000 transactions over 31 days (January 2024)
+
+seed: 42
+
+scale:
+  customers: 1000
+  accounts_per_customer_min: 1
+  accounts_per_customer_max: 3
+  merchants: 200
+  txns_per_day: 2000
+  cards_per_account_min: 1
+  cards_per_account_max: 3
+
+time_window:
+  start_date: "2024-01-01"
+  end_date: "2024-01-31"
+
+distribution:
+  seasonality_strength: 0.3
+  long_tail_alpha: 2.0
+  risk_tier_weights: [0.7, 0.2, 0.08, 0.02]
+  transaction_amount_pareto_alpha: 1.5
+  merchant_popularity_zipf_alpha: 1.5
+
+rates:
+  dispute_rate: 0.008
+  refund_rate: 0.02
+  decline_rate: 0.03
+  fraud_rate: 0.001
+  emulator_rate: 0.05
+  freeze_rate: 0.002
+  chargeback_rate: 0.005
+
+output:
+  csv: true
+  parquet: true
+  include_row_hashes: true
+  include_file_hashes: true
+  compression: snappy

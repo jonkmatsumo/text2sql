@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -74,17 +74,16 @@ async def test_normal_input_behavior():
     """Confirm normal inputs do not change behavior."""
     normal_input = "show me all tables"
 
-    # We won't mock sanitize_text here to use the real one
-    with patch("langgraph.graph.StateGraph.compile") as mock_compile:
-        mock_app = MagicMock()
-        mock_app.ainvoke.return_value = {"messages": []}
-        mock_compile.return_value = mock_app
+    # Patch the app object that run_agent_with_tracing actually uses
+    with patch("agent_core.graph.app") as mock_app:
+        # It needs to be an AsyncMock because it's awaited
+        mock_app.ainvoke = AsyncMock(return_value={"messages": []})
 
-        with (
-            patch("agent_core.graph.app", mock_app),
-            patch("agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context),
-        ):
+        # We also need to mock the tools context to avoid MCP connection attempts
+        with patch("agent_core.tools.mcp_tools_context", side_effect=mock_mcp_context):
             await run_agent_with_tracing(normal_input)
 
+        # Verify calls on our mock
+        assert mock_app.ainvoke.called
         inputs = mock_app.ainvoke.call_args[0][0]
         assert inputs["messages"][0].content == "show me all tables"

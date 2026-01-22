@@ -1,0 +1,40 @@
+# Small preset configuration for quick testing
+# Generates minimal data (~1,400 transactions over 7 days)
+
+seed: 42
+
+scale:
+  customers: 100
+  accounts_per_customer_min: 1
+  accounts_per_customer_max: 2
+  merchants: 50
+  txns_per_day: 200
+  cards_per_account_min: 1
+  cards_per_account_max: 2
+
+time_window:
+  start_date: "2024-01-01"
+  end_date: "2024-01-07"
+
+distribution:
+  seasonality_strength: 0.2
+  long_tail_alpha: 2.0
+  risk_tier_weights: [0.7, 0.2, 0.08, 0.02]
+  transaction_amount_pareto_alpha: 1.5
+  merchant_popularity_zipf_alpha: 1.5
+
+rates:
+  dispute_rate: 0.01
+  refund_rate: 0.02
+  decline_rate: 0.03
+  fraud_rate: 0.002
+  emulator_rate: 0.05
+  freeze_rate: 0.002
+  chargeback_rate: 0.005
+
+output:
+  csv: true
+  parquet: true
+  include_row_hashes: true
+  include_file_hashes: true
+  compression: snappy
