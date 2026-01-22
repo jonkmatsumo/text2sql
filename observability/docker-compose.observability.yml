@@ -19,7 +19,7 @@ services:
   otel-worker-migrate:
     build:
       context: .
-      dockerfile: observability/otel-worker/Dockerfile
+      dockerfile: config/docker/otel-worker.Dockerfile
     container_name: otel_worker_migrate
     command: alembic upgrade head
     environment:
@@ -33,7 +33,7 @@ services:
   otel-worker:
     build:
       context: .
-      dockerfile: observability/otel-worker/Dockerfile
+      dockerfile: config/docker/otel-worker.Dockerfile
     container_name: otel_worker
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317

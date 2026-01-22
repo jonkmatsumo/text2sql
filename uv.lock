@@ -2866,7 +2866,7 @@ wheels = [
 [[package]]
 name = "otel-worker"
 version = "0.1.0"
-source = { editable = "observability/otel-worker" }
+source = { editable = "pyproject/otel-worker" }
 dependencies = [
     { name = "alembic" },
     { name = "boto3" },
@@ -4519,7 +4519,7 @@ wheels = [
 [[package]]
 name = "text2sql-agent"
 version = "0.1.0"
-source = { editable = "agent" }
+source = { editable = "pyproject/agent" }
 dependencies = [
     { name = "boto3" },
     { name = "langchain-openai" },
@@ -4651,7 +4651,7 @@ requires-dist = [
 [[package]]
 name = "text2sql-mcp"
 version = "0.1.0"
-source = { editable = "mcp-server" }
+source = { editable = "pyproject/mcp-server" }
 dependencies = [
     { name = "asyncpg" },
     { name = "fastembed" },
@@ -4717,7 +4717,7 @@ provides-extras = ["test"]
 [[package]]
 name = "text2sql-streamlit"
 version = "0.1.0"
-source = { editable = "streamlit-app" }
+source = { editable = "pyproject/streamlit-app" }
 dependencies = [
     { name = "nest-asyncio" },
     { name = "python-dotenv" },
@@ -4759,7 +4759,7 @@ dev = [
 [[package]]
 name = "text2sql-synth"
 version = "0.1.0"
-source = { editable = "synthetic-data" }
+source = { editable = "pyproject/synthetic-data" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },
@@ -4810,15 +4810,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "otel-worker", editable = "observability/otel-worker" },
+    { name = "otel-worker", editable = "pyproject/otel-worker" },
     { name = "schema", editable = "pyproject/schema" },
-    { name = "text2sql-agent", editable = "agent" },
+    { name = "text2sql-agent", editable = "pyproject/agent" },
     { name = "text2sql-common", editable = "pyproject/common" },
     { name = "text2sql-dal", editable = "pyproject/dal" },
     { name = "text2sql-ingestion", editable = "pyproject/ingestion" },
-    { name = "text2sql-mcp", editable = "mcp-server" },
-    { name = "text2sql-streamlit", editable = "streamlit-app" },
-    { name = "text2sql-synth", editable = "synthetic-data" },
+    { name = "text2sql-mcp", editable = "pyproject/mcp-server" },
+    { name = "text2sql-streamlit", editable = "pyproject/streamlit-app" },
+    { name = "text2sql-synth", editable = "pyproject/synthetic-data" },
 ]
 
 [package.metadata.requires-dev]

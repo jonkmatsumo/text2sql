@@ -14,11 +14,6 @@ RUN apt-get update && apt-get install -y \
 # Copy workspace definitions
 COPY pyproject.toml uv.lock ./
 COPY pyproject/ pyproject/
-COPY mcp-server/pyproject.toml mcp-server/
-COPY streamlit-app/pyproject.toml streamlit-app/
-COPY agent/pyproject.toml agent/
-COPY observability/otel-worker/pyproject.toml observability/otel-worker/
-COPY synthetic-data/pyproject.toml synthetic-data/
 
 # Optimize cache: Install external dependencies first
 # 1. Export dependencies excluding local workspace packages

@@ -28,8 +28,8 @@ text2sql-synth = "text2sql_synth.cli:main"
 
 
 [tool.setuptools]
-package-dir = {"" = "../src"}
+package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
-where = ["../src"]
+where = ["../../src"]
 include = ["text2sql_synth*"]
