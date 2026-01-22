@@ -69,4 +69,4 @@ jobs:
           DB_USER: postgres
           DB_PASS: test_password
         run: |
-          uv run pytest -v -m "not integration"
+          uv run pytest -v tests/unit
