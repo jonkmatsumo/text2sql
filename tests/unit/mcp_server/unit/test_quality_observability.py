@@ -108,9 +108,9 @@ class TestGoldenDatasetIsolation:
         ]
 
         # Resolve repo root relative to this test file
-        # tests/unit/test_quality_observability.py -> ../.. -> mcp-server root
-        mcp_server_root = Path(__file__).parent.parent.parent
-        src_root = mcp_server_root / "src"
+        # tests/unit/mcp_server/unit/test_quality_observability.py -> ../../../../.. -> repo root
+        repo_root = Path(__file__).resolve().parents[4]
+        src_root = repo_root / "src"
 
         for module_path in runtime_modules:
             # Convert module path to file path
