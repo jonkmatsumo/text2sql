@@ -16,7 +16,7 @@ def test_metrics_schema_valid():
     assert SCHEMA_PATH.exists()
     schema = json.loads(SCHEMA_PATH.read_text())
     assert schema["title"] == "EvaluationMetricsV1"
-    assert "accuracy" in schema["required"]
+    assert "exact_match_rate" in schema["required"]
 
 
 @pytest.mark.asyncio
