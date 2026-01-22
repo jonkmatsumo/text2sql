@@ -15,7 +15,7 @@ class TestSpanParsing:
 
     def test_span_from_dict_basic(self):
         """Test parsing a basic span dict."""
-        from debug_trace import Span
+        from otel_worker.debug_trace import Span
 
         data = {
             "span_id": "abc123",
@@ -37,7 +37,7 @@ class TestSpanParsing:
 
     def test_span_with_event_seq(self):
         """Test parsing span with event.seq attribute."""
-        from debug_trace import Span
+        from otel_worker.debug_trace import Span
 
         data = {
             "span_id": "abc123",
@@ -54,7 +54,7 @@ class TestSpanParsing:
 
     def test_span_root_has_no_parent(self):
         """Test root span has None parent_span_id."""
-        from debug_trace import Span
+        from otel_worker.debug_trace import Span
 
         data = {
             "span_id": "root123",
@@ -73,7 +73,7 @@ class TestTreeReconstruction:
 
     def test_build_tree_groups_by_parent(self):
         """Test that build_tree groups spans by parent_span_id."""
-        from debug_trace import Span, build_tree
+        from otel_worker.debug_trace import Span, build_tree
 
         spans = [
             Span(
@@ -123,7 +123,7 @@ class TestSortingLogic:
 
     def test_sort_by_start_time(self):
         """Test spans are sorted by start_time."""
-        from debug_trace import Span, sort_key
+        from otel_worker.debug_trace import Span, sort_key
 
         span1 = Span(
             span_id="1",
@@ -151,7 +151,7 @@ class TestSortingLogic:
 
     def test_sort_by_event_seq_when_same_time(self):
         """Test spans with same start_time are sorted by event.seq."""
-        from debug_trace import Span, sort_key
+        from otel_worker.debug_trace import Span, sort_key
 
         same_time = datetime(2026, 1, 17, 10, 0, 0, tzinfo=timezone.utc)
         span1 = Span(
@@ -180,7 +180,7 @@ class TestSortingLogic:
 
     def test_null_event_seq_treated_as_zero(self):
         """Test that None event_seq is treated as 0 for sorting."""
-        from debug_trace import Span, sort_key
+        from otel_worker.debug_trace import Span, sort_key
 
         same_time = datetime(2026, 1, 17, 10, 0, 0, tzinfo=timezone.utc)
         span_null = Span(
