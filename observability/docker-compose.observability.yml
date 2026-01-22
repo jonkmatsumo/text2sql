@@ -6,7 +6,7 @@ services:
     container_name: otel_collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ./config/services/otel-collector/config.yaml:/etc/otel-collector-config.yaml
     environment:
       - OTEL_ENVIRONMENT=${OTEL_ENVIRONMENT:-local}
     ports:
@@ -61,7 +61,7 @@ services:
     user: root
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ./observability/tempo.yaml:/etc/tempo.yaml
+      - ./config/services/tempo/tempo.yaml:/etc/tempo.yaml
       - tempo_data:/tmp/tempo
     ports:
       - "3200:3200" # Tempo HTTP
