@@ -79,5 +79,76 @@ jobs:
             --ignore=agent/tests/test_llm_auth_validation.py \
             --ignore=agent/tests/test_telemetry_unwind.py \
             --ignore=agent/tests/test_otel_setup.py \
+            --ignore=agent/tests/test_otel_metadata.py
+
+  test-uv:
+    name: Test with uv Workspace
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: control_plane
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.21"
+          enable-cache: true
+          cache-suffix: "workspace"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (uv)
+        run: uv sync --frozen
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Run database initialization
+        run: |
+          # Apply control-plane scripts in order
+          for file in database/control-plane/*.sql; do
+            echo "Applying $file..."
+            PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -f "$file" || exit 1
+          done
+          echo "✓ Control-plane database initialized"
+
+      - name: Run tests (uv)
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: control_plane
+          DB_USER: postgres
+          DB_PASS: test_password
+        run: |
+          uv run pytest -v -m "not integration" \
+            --ignore=agent/tests/test_correct.py \
+            --ignore=agent/tests/test_generate.py \
+            --ignore=agent/tests/test_graph.py \
+            --ignore=agent/tests/test_synthesize.py \
+            --ignore=agent/tests/test_llm_auth_validation.py \
+            --ignore=agent/tests/test_telemetry_unwind.py \
+            --ignore=agent/tests/test_otel_setup.py \
             --ignore=agent/tests/test_otel_scaffolding.py \
             --ignore=agent/tests/test_otel_metadata.py
