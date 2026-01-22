@@ -81,3 +81,7 @@ database/query-target/golden/**
 local-data/**
 mlruns/**
 o/**
+dummy_out/
+dummy-out/
+out/
+outputs/
