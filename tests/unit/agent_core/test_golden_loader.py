@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-_GOLDEN_PKG_PATH = Path(__file__).parent.parent.parent / "database" / "query-target" / "golden"
+_GOLDEN_PKG_PATH = Path(__file__).resolve().parents[3] / "database" / "query-target" / "golden"
 sys.path.insert(0, str(_GOLDEN_PKG_PATH.parent))
 
 from golden import (  # noqa: E402

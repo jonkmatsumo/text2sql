@@ -4802,6 +4802,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "msgpack" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -4822,6 +4823,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "msgpack", specifier = ">=1.0.0" },
     { name = "pre-commit", specifier = ">=3.5.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
