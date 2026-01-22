@@ -16,7 +16,7 @@ def isolated_agent_graph():
     """Load agent_core.graph from source to ensure isolation from other tests."""
     # Locate the source file
     # Assuming running from repo root
-    source_path = os.path.abspath("agent/src/agent_core/graph.py")
+    source_path = os.path.abspath("src/agent_core/graph.py")
     if not os.path.exists(source_path):
         pytest.fail(f"Could not find agent_core.graph source at {source_path}")
 

@@ -266,8 +266,8 @@ class TestExampleConfigs:
 
     @pytest.fixture
     def examples_dir(self) -> Path:
-        """Path to examples directory."""
-        return Path(__file__).parent.parent / "examples"
+        """Path to example configurations."""
+        return Path(__file__).parent / "examples"
 
     def test_config_small_yaml(self, examples_dir: Path) -> None:
         """config_small.yaml is valid."""

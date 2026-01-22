@@ -58,7 +58,9 @@ mock_python.PythonOperator = MockTask
 
 def test_dag_import():
     """Verify that the evaluation DAG can be imported and has the expected structure."""
-    dag_path = os.path.join(os.path.dirname(__file__), "../airflow/dags")
+    # Resolve path relative to repo root
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+    dag_path = os.path.join(repo_root, "airflow_evals/airflow/dags")
     sys.path.append(dag_path)
 
     try:

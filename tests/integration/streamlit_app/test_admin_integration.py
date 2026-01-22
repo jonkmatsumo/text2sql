@@ -88,10 +88,14 @@ async def test_admin_panel_reload_button_logic():
         with patch("asyncio.run", side_effect=lambda x: x):
             import importlib.util
 
+            # Resolve path relative to repo root
+            from pathlib import Path
+
+            repo_root = Path(__file__).resolve().parents[3]
+            page_path = repo_root / "src/streamlit_app/pages/3_System_Operations.py"
+
             # We import the module source to run it "as if" Streamlit ran it
-            spec = importlib.util.spec_from_file_location(
-                "System_Operations", "streamlit_app/pages/3_System_Operations.py"
-            )
+            spec = importlib.util.spec_from_file_location("System_Operations", str(page_path))
             val_mod = importlib.util.module_from_spec(spec)
             sys.modules["System_Operations"] = val_mod
             spec.loader.exec_module(val_mod)

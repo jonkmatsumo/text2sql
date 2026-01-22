@@ -452,7 +452,7 @@ class TestDeterminism:
         from text2sql_synth.util.hashing import stable_hash_bytes
 
         # Run 1
-        ctx1 = generate_all(small_config)
+        ctx1, _ = generate_all(small_config)
         hashes1 = {}
         for name, df in ctx1.tables.items():
             # Use CSV string to get stable hash of content
@@ -461,7 +461,7 @@ class TestDeterminism:
             hashes1[name] = stable_hash_bytes(buf.getvalue())
 
         # Run 2
-        ctx2 = generate_all(small_config)
+        ctx2, _ = generate_all(small_config)
         hashes2 = {}
         for name, df in ctx2.tables.items():
             buf = io.BytesIO()

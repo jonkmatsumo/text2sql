@@ -1,17 +1,14 @@
-name: Test Suite
+name: Integration Tests
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
   workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *" # Daily at 2am
 
 jobs:
-  test-unit:
-    name: Unit Tests (uv)
+  test-integration:
+    name: Integration Tests
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -54,19 +51,18 @@ jobs:
 
       - name: Run database initialization
         run: |
-          # Apply control-plane scripts in order
           for file in database/control-plane/*.sql; do
             echo "Applying $file..."
             PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -f "$file" || exit 1
           done
-          echo "✓ Control-plane database initialized"
 
-      - name: Run unit tests
+      - name: Run Integration Tests
         env:
           DB_HOST: localhost
           DB_PORT: 5432
           DB_NAME: control_plane
           DB_USER: postgres
           DB_PASS: test_password
+          RUN_DB_TESTS: 1
         run: |
-          uv run pytest -v tests/unit
+          uv run pytest -v -m integration tests/integration
