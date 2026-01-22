@@ -4,7 +4,7 @@ This directory contains a catalog of canonical multi-turn conversation scripts u
 
 ## Dataset Support
 
-Each script in `catalog.yaml` is supported by specific features of the synthetic data generator:
+Each script in `config/services/text2sql-synth/catalog.yaml` is supported by specific features of the synthetic data generator:
 
 ### 1. "Ever Frozen" Logic
 - **Table**: `event_account_status_change`
