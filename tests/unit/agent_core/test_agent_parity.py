@@ -1,6 +1,6 @@
 import pytest
 
-from agent.tests.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
+from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
 
 
 @pytest.mark.asyncio
