@@ -23,17 +23,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.21"
+          enable-cache: true
+          cache-suffix: "workspace"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: "pip"
 
-      - name: Install dependencies
-        run: |
-          pip install -e "./pyproject/schema"
-          pip install -e "./agent[test]"
-          pip install -e "./mcp-server[test]"
+      - name: Install dependencies (uv)
+        run: uv sync --frozen
 
       - name: Run evaluation suite (Golden Only)
         env:
@@ -41,7 +44,7 @@ jobs:
           DATASET_MODE: ${{ env.DATASET_MODE }}
         run: |
           cd agent
-          python3 scripts/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
+          uv run python3 scripts/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
 
       - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v6

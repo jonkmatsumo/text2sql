@@ -17,21 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.21"
+          enable-cache: true
+          cache-suffix: "workspace"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: "pip"
 
-      - name: Install pre-commit and wrappers
-        run: |
-          pip install pre-commit
-          pip install -e pyproject/common -e pyproject/schema -e pyproject/dal -e pyproject/ingestion
+      - name: Install dependencies (uv)
+        run: uv sync --frozen
 
       - name: Run pre-commit hooks
         run: |
           # Run pre-commit hooks (may modify files)
-          pre-commit run --all-files || true
+          uv run pre-commit run --all-files || true
 
           # Check if any files were modified
           if [ -n "$(git status --porcelain)" ]; then
