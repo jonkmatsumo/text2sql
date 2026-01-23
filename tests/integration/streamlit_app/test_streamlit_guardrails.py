@@ -24,19 +24,27 @@ def test_no_streamlit_wrapper_directory():
         )
 
 
-def test_streamlit_app_is_complete_boundary():
-    """Ensure streamlit_app/ contains all required packaging and test files."""
+def test_packaging_files_moved_to_correct_locations():
+    """Ensure packaging files are moved from streamlit-app/ to central locations.
+
+    We have consolidated packaging to pyproject/ and config/docker/.
+    This test verifies that the old files are gone and new ones exist.
+    """
     repo_root = Path(__file__).resolve().parents[3]
     streamlit_app = repo_root / "streamlit-app"
 
-    required_files = [
-        "pyproject.toml",
-        "Dockerfile",
-    ]
-
-    for required in required_files:
-        path = streamlit_app / required
-        assert path.exists(), (
-            f"Missing required file/directory in streamlit-app/: {required}. "
-            "streamlit-app/ should be the single Streamlit packaging boundary."
+    # 1. Assert legacy files are GONE
+    legacy_files = ["pyproject.toml", "Dockerfile"]
+    for legacy in legacy_files:
+        path = streamlit_app / legacy
+        assert not path.exists(), (
+            f"Legacy file found: {path}. "
+            "This should have been moved during the packaging refactor."
         )
+
+    # 2. Assert new files EXIST
+    new_pyproject = repo_root / "pyproject/streamlit-app/pyproject.toml"
+    assert new_pyproject.exists(), "New pyproject.toml not found in pyproject/streamlit-app/"
+
+    new_dockerfile = repo_root / "config/docker/streamlit-app.Dockerfile"
+    assert new_dockerfile.exists(), "New Dockerfile not found in config/docker/"

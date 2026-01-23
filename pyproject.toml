@@ -20,11 +20,11 @@ members = [
     "pyproject/dal",
     "pyproject/schema",
     "pyproject/ingestion",
-    "mcp-server",
-    "streamlit-app",
-    "agent",
-    "observability/otel-worker",
-    "synthetic-data",
+    "pyproject/mcp-server",
+    "pyproject/streamlit-app",
+    "pyproject/agent",
+    "pyproject/otel-worker",
+    "pyproject/synthetic-data",
 ]
 
 [tool.uv.sources]

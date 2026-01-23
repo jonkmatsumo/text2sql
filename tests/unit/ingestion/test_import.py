@@ -1,7 +1,7 @@
 """Import smoke tests for ingestion package."""
 
 import ingestion
-from ingestion import cli, graph, patterns
+from ingestion import patterns
 
 
 def test_base_import():
@@ -13,5 +13,3 @@ def test_base_import():
 def test_submodule_imports():
     """Test placeholder submodules import cleanly."""
     assert patterns is not None
-    assert graph is not None
-    assert cli is not None

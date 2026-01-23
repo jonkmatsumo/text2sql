@@ -35,7 +35,7 @@ services:
   mcp-server:
     build:
       context: .
-      dockerfile: mcp-server/Dockerfile
+      dockerfile: config/docker/mcp-server.Dockerfile
     image: text2sql-mcp-server:latest
     container_name: text2sql_core
     depends_on:
@@ -78,7 +78,7 @@ services:
   streamlit:
     build:
       context: .
-      dockerfile: streamlit-app/Dockerfile
+      dockerfile: config/docker/streamlit-app.Dockerfile
     container_name: text2sql_streamlit
     depends_on:
       mcp-server:

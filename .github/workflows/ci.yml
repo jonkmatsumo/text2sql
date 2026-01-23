@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies (uv)
         run: uv sync --frozen
 
+      - name: Run Unit Tests
+        run: uv run pytest -v tests/unit
+
       - name: Run pre-commit hooks
         run: |
           # Run pre-commit hooks (may modify files)
@@ -55,7 +58,7 @@ jobs:
 
       - name: Build MCP Server image
         run: |
-          docker build -t bi-agent-mcp:test -f mcp-server/Dockerfile .
+          docker build -t bi-agent-mcp:test -f config/docker/mcp-server.Dockerfile .
 
       - name: Validate docker-compose
         run: |
