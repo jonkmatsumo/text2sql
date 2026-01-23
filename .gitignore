@@ -74,7 +74,9 @@ database/query-target/patterns/*
 database/query-target/corpus/*
 
 database/query-target/golden/**
+
 !database/query-target/golden/**
+database/query-target/golden/__pycache__/
 
 
 # Local data and observability
