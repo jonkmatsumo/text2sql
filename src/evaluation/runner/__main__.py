@@ -4,8 +4,8 @@ import logging
 import sys
 from pathlib import Path
 
-from airflow_evals.runner.config import EvaluationConfig
-from airflow_evals.runner.core import run_evaluation
+from evaluation.runner.config import EvaluationConfig
+from evaluation.runner.core import run_evaluation
 
 # Configure logging to stdout
 logging.basicConfig(

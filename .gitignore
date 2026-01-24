@@ -81,6 +81,7 @@ data/database/query-target/golden/__pycache__/
 
 # Local data and observability
 local-data/**
+local-data/airflow/
 mlruns/**
 o/**
 dummy_out/

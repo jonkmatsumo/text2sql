@@ -169,7 +169,10 @@ text2sql/
 │   ├── schema/                 # Pydantic models and schemas
 │   ├── ingestion/              # Data ingestion and enrichment
 │   ├── otel_worker/            # OpenTelemetry trace processor
-│   └── text2sql_synth/         # Synthetic data generation
+│   ├── text2sql_synth/         # Synthetic data generation
+│   └── evaluation/             # Evaluation runner and Airflow DAGs
+│       ├── runner/             # Evaluation orchestration
+│       └── dags/               # Airflow DAG definitions
 ├── tests/                      # Unit and integration tests
 │   ├── unit/                   # Fast, isolated tests
 │   └── integration/            # Tests requiring running services
@@ -179,13 +182,12 @@ text2sql/
 │   └── observability/          # OTEL and metrics helpers
 ├── config/                     # Configuration files
 │   ├── docker/                 # Dockerfiles
-│   └── services/               # Service-specific configs (grafana, otel, tempo)
+│   └── services/               # Service-specific configs (grafana, otel, tempo, evaluation)
 ├── data/                       # Static data assets
 │   └── database/               # SQL initialization scripts
 │       ├── control-plane/      # Control-plane schema
 │       └── query-target/       # Query-target schema and patterns
 ├── pyproject/                  # uv workspace package manifests
-├── airflow_evals/              # Airflow evaluation DAGs
 ├── docs/                       # Documentation
 ├── docker-compose.infra.yml    # Infrastructure (Postgres, MinIO, Memgraph, MLflow)
 ├── docker-compose.app.yml      # Applications (MCP Server, Streamlit, Seeder)
@@ -335,6 +337,6 @@ and default to Postgres or Memgraph for local development.
 The OpenTelemetry stack is provided in `docker-compose.observability.yml`.
 It includes `otel-collector` and `otel-worker`, and is required for full end-to-end tracing.
 Use `docker-compose.grafana.yml` for Grafana dashboards. The Airflow evaluation stack
-(`docker-compose.evals.yml`) runs DAGs in `airflow_evals/` for automated evaluations.
+(`docker-compose.evals.yml`) runs DAGs in `src/evaluation/dags/` for automated evaluations.
 
 OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`).

@@ -67,12 +67,10 @@ services:
       airflow-init:
         condition: service_completed_successfully
     volumes:
-      - ./airflow_evals/airflow/dags:/opt/airflow/dags
-      - ./airflow_evals/airflow/logs:/opt/airflow/logs
-      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./src/schema:/opt/airflow/plugins/schema_src
-      - ./agent/src:/opt/airflow/plugins/agent_src
-      - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
+      - ./src/evaluation/dags:/opt/airflow/dags
+      - ./local-data/airflow/logs:/opt/airflow/logs
+      - ./local-data/airflow/plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/plugins/src
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow}@postgres-airflow/airflow
@@ -80,7 +78,7 @@ services:
       - AIRFLOW__CELERY__BROKER_URL=redis://:${AIRFLOW_REDIS_PASSWORD:-redis_pass}@redis-airflow:6379/0
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - PYTHONPATH=/opt/airflow/plugins/schema_src:/opt/airflow/plugins/agent_src:/opt/airflow/plugins/airflow_evals_src
+      - PYTHONPATH=/opt/airflow/plugins/src
     ports:
       - "8080:8080"
     networks:
@@ -104,12 +102,10 @@ services:
       airflow-init:
         condition: service_completed_successfully
     volumes:
-      - ./airflow_evals/airflow/dags:/opt/airflow/dags
-      - ./airflow_evals/airflow/logs:/opt/airflow/logs
-      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./src/schema:/opt/airflow/plugins/schema_src
-      - ./agent/src:/opt/airflow/plugins/agent_src
-      - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
+      - ./src/evaluation/dags:/opt/airflow/dags
+      - ./local-data/airflow/logs:/opt/airflow/logs
+      - ./local-data/airflow/plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/plugins/src
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow}@postgres-airflow/airflow
@@ -117,7 +113,7 @@ services:
       - AIRFLOW__CELERY__BROKER_URL=redis://:${AIRFLOW_REDIS_PASSWORD:-redis_pass}@redis-airflow:6379/0
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - PYTHONPATH=/opt/airflow/plugins/schema_src:/opt/airflow/plugins/agent_src:/opt/airflow/plugins/airflow_evals_src
+      - PYTHONPATH=/opt/airflow/plugins/src
     networks:
       - airflow-net
       - airflow-internal
@@ -134,12 +130,10 @@ services:
       airflow-init:
         condition: service_completed_successfully
     volumes:
-      - ./airflow_evals/airflow/dags:/opt/airflow/dags
-      - ./airflow_evals/airflow/logs:/opt/airflow/logs
-      - ./airflow_evals/airflow/plugins:/opt/airflow/plugins
-      - ./src/schema:/opt/airflow/plugins/schema_src
-      - ./agent/src:/opt/airflow/plugins/agent_src
-      - ./airflow_evals:/opt/airflow/plugins/airflow_evals_src
+      - ./src/evaluation/dags:/opt/airflow/dags
+      - ./local-data/airflow/logs:/opt/airflow/logs
+      - ./local-data/airflow/plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/plugins/src
     environment:
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD:-airflow}@postgres-airflow/airflow
@@ -147,7 +141,7 @@ services:
       - AIRFLOW__CELERY__BROKER_URL=redis://:${AIRFLOW_REDIS_PASSWORD:-redis_pass}@redis-airflow:6379/0
       - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - PYTHONPATH=/opt/airflow/plugins/schema_src:/opt/airflow/plugins/agent_src:/opt/airflow/plugins/airflow_evals_src
+      - PYTHONPATH=/opt/airflow/plugins/src
     networks:
       - airflow-net
       - airflow-internal

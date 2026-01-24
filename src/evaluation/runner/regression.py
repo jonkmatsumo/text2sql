@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from airflow_evals.runner.config import EvaluationSummary
+from evaluation.runner.config import EvaluationSummary
 
 
 class RegressionThresholds(BaseModel):
