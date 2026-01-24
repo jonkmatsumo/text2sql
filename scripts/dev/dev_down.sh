@@ -6,7 +6,7 @@ echo "Stopping Text2SQL Dev Stack..."
 docker compose \
   -f docker-compose.infra.yml \
   -f docker-compose.app.yml \
-  -f observability/docker-compose.observability.yml \
+  -f docker-compose.observability.yml \
   down
 
 echo "Stack stopped."
