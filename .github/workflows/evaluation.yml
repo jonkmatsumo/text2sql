@@ -56,7 +56,7 @@ jobs:
         id: gating
         run: |
           SUMMARY_PATH="agent/evaluation_artifacts/ci-run/summary.json"
-          BASELINE_PATH="evaluation/baselines/${{ env.DATASET_MODE }}_baseline.json"
+          BASELINE_PATH="data/evaluation/baselines/${{ env.DATASET_MODE }}_baseline.json"
 
           if [ ! -f "$SUMMARY_PATH" ]; then
             echo "::error::Evaluation summary not found at $SUMMARY_PATH"

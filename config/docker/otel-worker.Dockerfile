@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # They are in "observability/otel-worker/migrations".
 # This is NOT in src/otel_worker. It is a separate dir.
 COPY config/services/otel-worker/alembic.ini .
-COPY observability/otel-worker/migrations/ ./migrations/
+COPY src/otel_worker/migrations/ ./migrations/
 
 EXPOSE 4320
 

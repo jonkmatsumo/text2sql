@@ -13,7 +13,7 @@ services:
     volumes:
       # Mount initialization scripts (Schema -> Data -> Permissions)
       # They execute in alphanumeric order of filenames
-      - ./database/query-target:/docker-entrypoint-initdb.d
+      - ./data/database/query-target:/docker-entrypoint-initdb.d
       - ./local-data/postgres-db:/var/lib/postgresql/data
     ports:
       - "5432:5432" # Exposed to host for DBeaver/manual inspection
@@ -34,7 +34,7 @@ services:
       POSTGRES_PASSWORD: ${CONTROL_DB_PASSWORD:-control_password}
       POSTGRES_DB: agent_control
     volumes:
-      - ./database/control-plane:/docker-entrypoint-initdb.d
+      - ./data/database/control-plane:/docker-entrypoint-initdb.d
       - ./local-data/agent-control-db:/var/lib/postgresql/data
     ports:
       - "5433:5432"
@@ -61,7 +61,9 @@ services:
       - ./local-data/memgraph:/var/lib/memgraph
 
   mlflow-server:
-    build: ./mlflow-server
+    build:
+      context: .
+      dockerfile: config/docker/mlflow-server.Dockerfile
     container_name: mlflow_tracking
     depends_on:
       postgres-db:
