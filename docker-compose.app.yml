@@ -1,7 +1,6 @@
 services:
   seeder:
     image: text2sql-mcp-server:latest
-    container_name: text2sql_seeder
     command: sleep infinity
     depends_on:
       postgres-db:
@@ -37,7 +36,6 @@ services:
       context: .
       dockerfile: config/docker/mcp-server.Dockerfile
     image: text2sql-mcp-server:latest
-    container_name: text2sql_core
     depends_on:
       postgres-db:
         condition: service_healthy
@@ -61,7 +59,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MCP_TRANSPORT: "sse" # SSE transport verified working (Phase 0 audit)
       SPACY_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: text2sql-mcp-server
     ports:
@@ -79,7 +77,6 @@ services:
     build:
       context: .
       dockerfile: config/docker/streamlit-app.Dockerfile
-    container_name: text2sql_streamlit
     depends_on:
       mcp-server:
         condition: service_started
@@ -111,7 +108,7 @@ services:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: text2sql-agent
     ports:
