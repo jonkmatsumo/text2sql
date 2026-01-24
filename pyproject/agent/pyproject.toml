@@ -27,7 +27,7 @@ test = [
     "msgpack",
 ]
 mlflow = [
-    "mlflow==3.8.1",
+    "mlflow>=3.8.1",
     "langchain>=0.3.0",  # Required for mlflow.langchain.autolog()
 ]
 llm-providers = [

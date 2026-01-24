@@ -4563,7 +4563,7 @@ requires-dist = [
     { name = "langchain-postgres", specifier = ">=0.0.16" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "mcp", specifier = ">=1.0.0" },
-    { name = "mlflow", marker = "extra == 'mlflow'", specifier = "==3.8.1" },
+    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=3.8.1" },
     { name = "msgpack", marker = "extra == 'test'" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
