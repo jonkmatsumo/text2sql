@@ -22,7 +22,7 @@ def test_ingestion_patterns_importable():
         pytest.fail(f"Failed to import ingestion.patterns modules: {e}")
 
 
-def test_mcp_server_legacy_path_fail():
+def test_mcp_legacy_patterns_path_fail():
     """Verify that the old path is indeed gone (architecture adherence)."""
     with pytest.raises(ImportError):
         # noqa: F401

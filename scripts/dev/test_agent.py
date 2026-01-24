@@ -4,7 +4,7 @@ import asyncio
 
 from langchain_core.messages import HumanMessage
 
-from agent_core.graph import app
+from agent.graph import app
 
 
 async def test_agent():

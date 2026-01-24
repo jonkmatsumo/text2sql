@@ -19,15 +19,15 @@ flowchart TB
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
 
         %% Nodes
-        RouterNode["Router Node<br/>(LLM)<br/>src/agent_core/nodes/router.py"]
-        ClarifyNode["Clarify Node<br/>(Human Input)<br/>src/agent_core/nodes/clarify.py"]
-        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>src/agent_core/nodes/retrieve.py"]
-        PlanNode["Plan SQL Node<br/>(LLM)<br/>src/agent_core/nodes/plan.py"]
-        GenerateNode["Generate SQL Node<br/>(LLM)<br/>src/agent_core/nodes/generate.py"]
-        ValidateNode["Validate SQL Node<br/>(Logic)<br/>src/agent_core/nodes/validate.py"]
-        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>src/agent_core/nodes/execute.py"]
-        CorrectNode["Correct SQL Node<br/>(LLM)<br/>src/agent_core/nodes/correct.py"]
-        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>src/agent_core/nodes/synthesize.py"]
+        RouterNode["Router Node<br/>(LLM)<br/>src/agent/nodes/router.py"]
+        ClarifyNode["Clarify Node<br/>(Human Input)<br/>src/agent/nodes/clarify.py"]
+        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>src/agent/nodes/retrieve.py"]
+        PlanNode["Plan SQL Node<br/>(LLM)<br/>src/agent/nodes/plan.py"]
+        GenerateNode["Generate SQL Node<br/>(LLM)<br/>src/agent/nodes/generate.py"]
+        ValidateNode["Validate SQL Node<br/>(Logic)<br/>src/agent/nodes/validate.py"]
+        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>src/agent/nodes/execute.py"]
+        CorrectNode["Correct SQL Node<br/>(LLM)<br/>src/agent/nodes/correct.py"]
+        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>src/agent/nodes/synthesize.py"]
         Response["Natural Language Response"]
 
         %% Flow
@@ -161,15 +161,15 @@ flowchart TB
 ```text
 text2sql/
 ├── src/                        # Unified source code
-│   ├── agent_core/             # LangGraph AI agent (nodes, graph, state)
+│   ├── agent/                  # LangGraph AI agent (nodes, graph, state)
 │   ├── mcp_server/             # MCP server (tools, services, DAL integration)
-│   ├── streamlit_app/          # Streamlit UI
+│   ├── ui/                     # Streamlit UI
 │   ├── dal/                    # Data Abstraction Layer
 │   ├── common/                 # Shared utilities
 │   ├── schema/                 # Pydantic models and schemas
 │   ├── ingestion/              # Data ingestion and enrichment
 │   ├── otel_worker/            # OpenTelemetry trace processor
-│   ├── text2sql_synth/         # Synthetic data generation
+│   ├── synthetic_data_gen/     # Synthetic data generation
 │   └── evaluation/             # Evaluation runner and Airflow DAGs
 │       ├── runner/             # Evaluation orchestration
 │       └── dags/               # Airflow DAG definitions
@@ -263,7 +263,7 @@ docker compose -f docker-compose.infra.yml \
 ### 3. Development Workflow (Hot Reload)
 
 Source code is bind-mounted into containers for hot reload.
-- **Streamlit**: Edits to `src/streamlit_app/`, `src/agent_core/` are reflected immediately.
+- **Streamlit**: Edits to `src/ui/`, `src/agent/` are reflected immediately.
 - **MCP Server**: Edits to `src/mcp_server/` are reflected immediately.
 - **OTEL Worker**: Edits to `src/otel_worker` are reflected immediately.
 
@@ -317,7 +317,7 @@ http://localhost:8000/messages
 ```
 `/mcp` is not a valid endpoint. Transport behavior is controlled by `MCP_TRANSPORT`,
 but `/messages` remains the exposed path (see `src/mcp_server/main.py`
-and `src/agent_core/tools.py`).
+and `src/agent/tools.py`).
 
 ## Control-Plane Isolation (Feature-Gated)
 

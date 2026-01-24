@@ -4,7 +4,7 @@ import time
 
 from opentelemetry import trace
 
-from agent_core.telemetry import SpanType, telemetry
+from agent.telemetry import SpanType, telemetry
 
 # Set up logging to see backend warnings if any
 logging.basicConfig(level=logging.INFO)

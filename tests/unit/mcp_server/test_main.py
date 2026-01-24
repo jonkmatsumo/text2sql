@@ -12,7 +12,7 @@ fastmcp_available = importlib.util.find_spec("fastmcp") is not None
 class TestMain:
     """Unit tests for main.py MCP server setup."""
 
-    def test_mcp_server_exists(self):
+    def test_mcp_exists(self):
         """Test that mcp server instance exists."""
         from mcp_server.main import mcp
 

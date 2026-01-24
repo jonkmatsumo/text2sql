@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agent_core.graph import run_agent_with_tracing
+from agent.graph import run_agent_with_tracing
 from evaluation.runner.config import EvaluationCaseResult, EvaluationConfig, EvaluationSummary
 from evaluation.runner.regression import RegressionDetector, RegressionReport
 from schema.evaluation.metrics import MetricSuiteV1

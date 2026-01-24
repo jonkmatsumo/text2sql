@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 
 FORBIDDEN_PACKAGES = {
-    "mcp_server",
-    "agent_core",
-    "text2sql_synth",
-    "streamlit_app",
+    "mcp",
+    "agent",
+    "synthetic_data_gen",
+    "ui",
     "dal",
     "ingestion",
 }

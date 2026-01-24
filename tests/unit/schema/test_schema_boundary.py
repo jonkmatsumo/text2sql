@@ -10,9 +10,9 @@ from pathlib import Path
 def test_schema_has_no_forbidden_imports():
     """Verify schema package does not import forbidden dependencies."""
     forbidden_prefixes = (
-        "mcp_server",
-        "agent_core",
-        "streamlit_app",
+        "mcp",
+        "agent",
+        "ui",
         "asyncpg",
         "neo4j",
         "openai",

@@ -95,7 +95,7 @@ class TestGroundingIntegration:
 
     def test_grounded_query_includes_schema_hints_when_canonicalizer_active(self):
         """When canonicalizer provides mappings, grounded query includes hints."""
-        from agent_core.utils.grounding import ground_query_for_retrieval
+        from agent.utils.grounding import ground_query_for_retrieval
 
         # Mock CanonicalizationService
         mock_service = MagicMock()
