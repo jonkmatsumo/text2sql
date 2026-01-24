@@ -55,7 +55,7 @@ jobs:
       - name: Run database initialization
         run: |
           # Apply control-plane scripts in order
-          for file in database/control-plane/*.sql; do
+          for file in data/database/control-plane/*.sql; do
             echo "Applying $file..."
             PGPASSWORD=test_password psql -h localhost -U postgres -d control_plane -f "$file" || exit 1
           done

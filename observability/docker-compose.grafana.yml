@@ -2,8 +2,9 @@ version: "3.8"
 
 services:
   grafana:
-    build: observability/grafana
-    container_name: text2sql_grafana
+    build:
+      context: ${PWD}
+      dockerfile: config/docker/grafana.Dockerfile
     ports:
       - "3001:3000"
     environment:
@@ -14,8 +15,8 @@ services:
       - CONTROL_DB_PASSWORD=${CONTROL_DB_PASSWORD:-control_password}
     volumes:
       - grafana_data:/var/lib/grafana
-      - ${PWD}/observability/grafana/provisioning:/etc/grafana/provisioning
-      - ${PWD}/observability/grafana/dashboards:/etc/grafana/dashboards
+      - ${PWD}/config/services/grafana/provisioning:/etc/grafana/provisioning
+      - ${PWD}/config/services/grafana/dashboards:/etc/grafana/dashboards
     networks:
       - text2sql_net
     depends_on:

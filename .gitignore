@@ -57,26 +57,26 @@ node_modules/
 *.db
 
 # Query Target (Dataset Agnostic)
-database/query-target/*
-!database/query-target/queries/
-!database/query-target/patterns/
-!database/query-target/corpus/
-!database/query-target/golden/
-!database/query-target/README.md
+data/database/query-target/*
+!data/database/query-target/queries/
+!data/database/query-target/patterns/
+!data/database/query-target/corpus/
+!data/database/query-target/golden/
+!data/database/query-target/README.md
 
 # Subdirectory specific rules
-database/query-target/queries/*
-!database/query-target/queries/example.json
+data/database/query-target/queries/*
+!data/database/query-target/queries/example.json
 
-database/query-target/patterns/*
-!database/query-target/patterns/example.jsonl
+data/database/query-target/patterns/*
+!data/database/query-target/patterns/example.jsonl
 
-database/query-target/corpus/*
+data/database/query-target/corpus/*
 
-database/query-target/golden/**
+data/database/query-target/golden/**
 
-!database/query-target/golden/**
-database/query-target/golden/__pycache__/
+!data/database/query-target/golden/**
+data/database/query-target/golden/__pycache__/
 
 
 # Local data and observability

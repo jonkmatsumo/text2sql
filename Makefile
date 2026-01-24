@@ -22,7 +22,7 @@ otel-migrate:
 	docker compose $(COMPOSE_FILES) run --rm otel-worker-migrate
 
 otel-up:
-	docker compose $(COMPOSE_FILES) up -d otel-collector otel-worker grafana
+	docker compose $(COMPOSE_FILES) up -d otel-collector-svc otel-worker grafana
 
 stress-verify:
 	@echo "Running OTEL Worker Stress Test..."

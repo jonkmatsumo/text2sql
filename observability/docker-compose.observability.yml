@@ -1,9 +1,8 @@
 version: "3.8"
 
 services:
-  otel-collector:
+  otel-collector-svc:
     image: otel/opentelemetry-collector-contrib:0.94.0
-    container_name: otel_collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./config/services/otel-collector/config.yaml:/etc/otel-collector-config.yaml
@@ -18,10 +17,9 @@ services:
 
   otel-worker-migrate:
     build:
-      context: .
+      context: ${PWD}
       dockerfile: config/docker/otel-worker.Dockerfile
-    container_name: otel_worker_migrate
-    command: alembic upgrade head
+    command: /bin/sh -c "sed -i 's|script_location = .*|script_location = migrations|' alembic.ini && uv run alembic upgrade head"
     environment:
       - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
     depends_on:
@@ -32,11 +30,10 @@ services:
 
   otel-worker:
     build:
-      context: .
+      context: ${PWD}
       dockerfile: config/docker/otel-worker.Dockerfile
-    container_name: otel_worker
     environment:
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector-svc:4317
       - POSTGRES_CONNECTION_STRING=postgresql://${CONTROL_DB_USER:-postgres}:${CONTROL_DB_PASSWORD:-control_password}@agent-control-db:5432/agent_control
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
@@ -57,7 +54,6 @@ services:
 
   tempo:
     image: grafana/tempo:latest
-    container_name: tempo
     user: root
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
