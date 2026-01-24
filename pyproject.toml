@@ -12,6 +12,7 @@ dependencies = [
     "text2sql-agent",
     "otel-worker",
     "text2sql-synth",
+    "text2sql-evaluation",
 ]
 
 [tool.uv.workspace]
@@ -25,6 +26,7 @@ members = [
     "pyproject/agent",
     "pyproject/otel-worker",
     "pyproject/synthetic-data",
+    "pyproject/evaluation",
 ]
 
 [tool.uv.sources]
@@ -37,6 +39,7 @@ text2sql-streamlit = { workspace = true }
 text2sql-agent = { workspace = true }
 otel-worker = { workspace = true }
 text2sql-synth = { workspace = true }
+text2sql-evaluation = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -52,7 +55,7 @@ line-length = 100
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["streamlit_app", "agent", "common", "dal", "ingestion", "mcp_server", "observability", "schema"]
+known_first_party = ["streamlit_app", "agent", "common", "dal", "ingestion", "mcp_server", "observability", "schema", "evaluation"]
 known_third_party = ["streamlit", "pandas", "nest_asyncio"]
 # Explicitly skip known virtualenv directories to speed up and avoid confusion
 skip = [".venv", "venv", ".git", "__pycache__", "build", "dist"]

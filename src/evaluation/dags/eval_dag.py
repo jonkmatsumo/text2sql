@@ -49,8 +49,8 @@ def run_evaluation_task(**context):
     """Invoke the evaluation runner library."""
     import asyncio
 
-    from airflow_evals.runner.config import EvaluationConfig
-    from airflow_evals.runner.core import run_evaluation
+    from evaluation.runner.config import EvaluationConfig
+    from evaluation.runner.core import run_evaluation
 
     # Retrieve config from XCom
     ti = context["ti"]

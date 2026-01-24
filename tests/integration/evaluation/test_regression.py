@@ -1,7 +1,7 @@
 import pytest
 
-from airflow_evals.runner.config import EvaluationConfig, EvaluationSummary
-from airflow_evals.runner.regression import RegressionDetector, RegressionThresholds
+from evaluation.runner.config import EvaluationConfig, EvaluationSummary
+from evaluation.runner.regression import RegressionDetector, RegressionThresholds
 
 
 @pytest.fixture

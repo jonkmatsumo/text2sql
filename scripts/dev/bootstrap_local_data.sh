@@ -14,6 +14,7 @@ SERVICES=(
     "agent-control-db"
     "minio"
     "memgraph"
+    "airflow"
 )
 
 echo "Bootstrapping local-data directories in ${DATA_DIR}..."

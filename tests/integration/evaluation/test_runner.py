@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
-from airflow_evals.runner.config import EvaluationConfig, EvaluationSummary
-from airflow_evals.runner.core import EvaluationRunner
+from evaluation.runner.config import EvaluationConfig, EvaluationSummary
+from evaluation.runner.core import EvaluationRunner
 
 # Mock dataset content
 MOCK_DATASET_CONTENT = """
@@ -44,7 +44,7 @@ async def test_runner_execution_flow(eval_env):
         else:
             return {"current_sql": "SELECT * FROM wrong_table", "error": None}
 
-    with patch("airflow_evals.runner.core.run_agent_with_tracing", side_effect=mock_agent_run):
+    with patch("evaluation.runner.core.run_agent_with_tracing", side_effect=mock_agent_run):
         runner = EvaluationRunner(config)
         summary = await runner.run_evaluation()
 
@@ -82,9 +82,7 @@ async def test_runner_handles_system_error(eval_env):
         dataset_path=str(eval_env["dataset"]), output_dir=str(eval_env["output"]), limit=1
     )
 
-    with patch(
-        "airflow_evals.runner.core.run_agent_with_tracing", side_effect=RuntimeError("Boom")
-    ):
+    with patch("evaluation.runner.core.run_agent_with_tracing", side_effect=RuntimeError("Boom")):
         runner = EvaluationRunner(config)
         summary = await runner.run_evaluation()
 
@@ -104,7 +102,7 @@ async def test_runner_handles_system_error(eval_env):
 @pytest.mark.asyncio
 async def test_runner_detects_regression(eval_env):
     """Test that runner checks regression and persists report."""
-    from airflow_evals.runner.regression import RegressionReport
+    from evaluation.runner.regression import RegressionReport
 
     config = EvaluationConfig(
         dataset_path=str(eval_env["dataset"]), output_dir=str(eval_env["output"])
@@ -135,12 +133,12 @@ async def test_runner_detects_regression(eval_env):
         base_latency=1.0,
     )
 
-    with patch("airflow_evals.runner.core.run_agent_with_tracing", side_effect=mock_agent_run):
+    with patch("evaluation.runner.core.run_agent_with_tracing", side_effect=mock_agent_run):
         runner = EvaluationRunner(config)
 
         # Mock load_baseline and check_regression
         with patch.object(runner, "load_baseline", return_value=baseline):
-            with patch("airflow_evals.runner.core.RegressionDetector") as MockDetector:
+            with patch("evaluation.runner.core.RegressionDetector") as MockDetector:
                 MockDetector.return_value.check_regression.return_value = mock_report
 
                 await runner.run_evaluation()

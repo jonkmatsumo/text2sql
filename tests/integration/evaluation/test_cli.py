@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from airflow_evals.runner.__main__ import main
+from evaluation.runner.__main__ import main
 
 # Create a small dataset for CLI testing
 CLI_DATASET = """
@@ -65,9 +65,9 @@ async def test_cli_logic_flow(cli_env):
 
     with patch("sys.argv", test_args):
         # Mock the run_evaluation core function to avoid real execution
-        with patch("airflow_evals.runner.__main__.run_evaluation") as mock_run:
+        with patch("evaluation.runner.__main__.run_evaluation") as mock_run:
             # Setup mock return
-            mock_summary = patch("airflow_evals.runner.config.EvaluationSummary").start()
+            mock_summary = patch("evaluation.runner.config.EvaluationSummary").start()
             mock_summary.run_id = "cli_test_run"
             mock_summary.total_cases = 1
             mock_summary.successful_cases = 1

@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from airflow_evals.runner.config import EvaluationConfig
-from airflow_evals.runner.core import EvaluationRunner, EvaluationSummary
+from evaluation.runner.config import EvaluationConfig
+from evaluation.runner.core import EvaluationRunner, EvaluationSummary
 
 # Mock Schema
-SCHEMA_PATH = Path("airflow_evals/schema/metrics_v1.json")
+SCHEMA_PATH = Path("config/services/evaluation/metrics_v1.json")
 
 
 def test_metrics_schema_valid():
@@ -47,8 +47,8 @@ async def test_mlflow_logging():
     results = []  # we don't inspect results in detail for this test
 
     # Mock mlflow
-    with patch("airflow_evals.runner.core.MLFLOW_AVAILABLE", True):
-        with patch("airflow_evals.runner.core.mlflow") as mock_mlflow:
+    with patch("evaluation.runner.core.MLFLOW_AVAILABLE", True):
+        with patch("evaluation.runner.core.mlflow") as mock_mlflow:
             mock_run = MagicMock()
             mock_mlflow.start_run.return_value.__enter__.return_value = mock_run
 
@@ -79,6 +79,6 @@ async def test_mlflow_graceful_missing():
     runner = EvaluationRunner(config)
     summary = MagicMock()
 
-    with patch("airflow_evals.runner.core.MLFLOW_AVAILABLE", False):
+    with patch("evaluation.runner.core.MLFLOW_AVAILABLE", False):
         # Should not raise
         runner.log_to_mlflow(summary, [])
