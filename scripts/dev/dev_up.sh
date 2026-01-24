@@ -8,7 +8,7 @@ echo "Starting Text2SQL Dev Stack (Infra + App + Observability)..."
 docker compose \
   -f docker-compose.infra.yml \
   -f docker-compose.app.yml \
-  -f observability/docker-compose.observability.yml \
+  -f docker-compose.observability.yml \
   up -d
 
 echo "---------------------------------------------------"

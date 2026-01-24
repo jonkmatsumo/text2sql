@@ -19,15 +19,15 @@ flowchart TB
         AgentState["LangGraph Agent State<br/>Maintains conversation history"]
 
         %% Nodes
-        RouterNode["Router Node<br/>(LLM)<br/>agent/src/agent_core/nodes/router.py"]
-        ClarifyNode["Clarify Node<br/>(Human Input)<br/>agent/src/agent_core/nodes/clarify.py"]
-        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>agent/src/agent_core/nodes/retrieve.py"]
-        PlanNode["Plan SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/plan.py"]
-        GenerateNode["Generate SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/generate.py"]
-        ValidateNode["Validate SQL Node<br/>(Logic)<br/>agent/src/agent_core/nodes/validate.py"]
-        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>agent/src/agent_core/nodes/execute.py"]
-        CorrectNode["Correct SQL Node<br/>(LLM)<br/>agent/src/agent_core/nodes/correct.py"]
-        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>agent/src/agent_core/nodes/synthesize.py"]
+        RouterNode["Router Node<br/>(LLM)<br/>src/agent_core/nodes/router.py"]
+        ClarifyNode["Clarify Node<br/>(Human Input)<br/>src/agent_core/nodes/clarify.py"]
+        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>src/agent_core/nodes/retrieve.py"]
+        PlanNode["Plan SQL Node<br/>(LLM)<br/>src/agent_core/nodes/plan.py"]
+        GenerateNode["Generate SQL Node<br/>(LLM)<br/>src/agent_core/nodes/generate.py"]
+        ValidateNode["Validate SQL Node<br/>(Logic)<br/>src/agent_core/nodes/validate.py"]
+        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>src/agent_core/nodes/execute.py"]
+        CorrectNode["Correct SQL Node<br/>(LLM)<br/>src/agent_core/nodes/correct.py"]
+        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>src/agent_core/nodes/synthesize.py"]
         Response["Natural Language Response"]
 
         %% Flow
@@ -66,7 +66,7 @@ flowchart TB
     end
 
     subgraph MCPServer["🔧 MCP Server (FastMCP, /messages SSE)"]
-        MCPTools["MCP Tools<br/>mcp-server/src/mcp_server/tools/"]
+        MCPTools["MCP Tools<br/>src/mcp_server/tools/"]
 
         subgraph DAL["🛡️ Data Abstraction Layer"]
             I_Store["Protocols<br/>(RegistryStore, GraphStore)"]
@@ -122,14 +122,6 @@ flowchart TB
     PolicyEnforcer -->|"2. Inject Context"| TenantRewriter
     TenantRewriter -->|"3. Execute Read"| Target_RO
     Target_RO --> QueryTargetDB
-
-    style Agent fill:#5B9BD5
-    style MCPServer fill:#FF9800
-    style TargetDB fill:#4CAF50
-    style ControlDB fill:#2196F3
-    style GraphDB fill:#9C27B0
-    style Observability fill:#E1BEE7
-    style DAL fill:#FFCC80,stroke:#F57C00,stroke-width:2px
 ```
 
 
@@ -168,24 +160,39 @@ flowchart TB
 
 ```text
 text2sql/
-├── agent/                      # LangGraph AI agent
-│   ├── src/agent_core/         # Core logic (nodes, graph, state)
-│   ├── tests/                  # Unit tests (Mocked)
-│   └── scripts/                # Evaluation & maintenance scripts
-├── mcp-server/                 # Database access tools (FastMCP)
-│   ├── src/mcp_server/         # Server implementation
-│   │   ├── dal/                # Data Abstraction Layer (Interfaces & Adapters)
-│   │   ├── services/           # Schema linking, indexing, and caching
-│   │   └── tools/              # MCP Tool definitions
-├── database/                   # Seed assets
-│   ├── query-target/           # Target DB schema, data, and patterns
-│   └── control-plane/          # App metadata, RLS, and cache schema
-├── streamlit/                  # Streamlit packaging + Docker assets
-├── streamlit-app/              # Streamlit UI entrypoint (Text_2_SQL_Agent.py)
-├── observability/              # Optional OTEL stack
-├── docker-compose.infra.yml    # Infrastructure services (Postgres, MinIO, etc.)
-├── docker-compose.app.yml      # Application services (Python apps)
-└── docker-compose.test.yml     # Test DB compose file
+├── src/                        # Unified source code
+│   ├── agent_core/             # LangGraph AI agent (nodes, graph, state)
+│   ├── mcp_server/             # MCP server (tools, services, DAL integration)
+│   ├── streamlit_app/          # Streamlit UI
+│   ├── dal/                    # Data Abstraction Layer
+│   ├── common/                 # Shared utilities
+│   ├── schema/                 # Pydantic models and schemas
+│   ├── ingestion/              # Data ingestion and enrichment
+│   ├── otel_worker/            # OpenTelemetry trace processor
+│   └── text2sql_synth/         # Synthetic data generation
+├── tests/                      # Unit and integration tests
+│   ├── unit/                   # Fast, isolated tests
+│   └── integration/            # Tests requiring running services
+├── scripts/                    # Developer and ops scripts
+│   ├── dev/                    # Local development helpers
+│   ├── data/                   # Data generation scripts
+│   └── observability/          # OTEL and metrics helpers
+├── config/                     # Configuration files
+│   ├── docker/                 # Dockerfiles
+│   └── services/               # Service-specific configs (grafana, otel, tempo)
+├── data/                       # Static data assets
+│   └── database/               # SQL initialization scripts
+│       ├── control-plane/      # Control-plane schema
+│       └── query-target/       # Query-target schema and patterns
+├── pyproject/                  # uv workspace package manifests
+├── airflow_evals/              # Airflow evaluation DAGs
+├── docs/                       # Documentation
+├── docker-compose.infra.yml    # Infrastructure (Postgres, MinIO, Memgraph, MLflow)
+├── docker-compose.app.yml      # Applications (MCP Server, Streamlit, Seeder)
+├── docker-compose.observability.yml  # OTEL stack
+├── docker-compose.grafana.yml  # Grafana dashboards
+├── docker-compose.evals.yml    # Airflow evaluation stack
+└── docker-compose.test.yml     # Test database
 ```
 
 ## Quick Start
@@ -210,7 +217,7 @@ Environment variables are grouped by category (not exhaustive):
 *   **DAL provider selectors**: Optional overrides to choose storage backends.
 
 > [!WARNING]
-> **Deprecation Notice**: The Pagila dataset is deprecated and maintained only for legacy verification. The system defaults to `DATASET_MODE=synthetic`. See [docs/deprecations/pagila.md](docs/deprecations/pagila.md) for details.
+> **Deprecation Notice**: The Pagila dataset is deprecated and maintained only for legacy verification. The system defaults to `DATASET_MODE=synthetic`.
 
 ## Local Development
 
@@ -247,16 +254,16 @@ Starts OTEL Collector alongside infra and app.
 
 ```bash
 docker compose -f docker-compose.infra.yml \
-  -f observability/docker-compose.observability.yml \
+  -f docker-compose.observability.yml \
   up -d
 ```
 
 ### 3. Development Workflow (Hot Reload)
 
 Source code is bind-mounted into containers for hot reload.
-- **Streamlit**: Edits to `streamlit/`, `agent/`, `mcp-server/` are reflected immediately.
-- **MCP Server**: Edits to `mcp-server/src` are reflected immediately.
-- **OTEL Worker**: Edits to `observability/otel-worker/src` are reflected immediately.
+- **Streamlit**: Edits to `src/streamlit_app/`, `src/agent_core/` are reflected immediately.
+- **MCP Server**: Edits to `src/mcp_server/` are reflected immediately.
+- **OTEL Worker**: Edits to `src/otel_worker` are reflected immediately.
 
 **Note**:
 - Large directories (`.git`, `local-data`, `docs`) are **not** mounted.
@@ -307,15 +314,15 @@ The MCP server uses SSE under the hood and exposes tools at:
 http://localhost:8000/messages
 ```
 `/mcp` is not a valid endpoint. Transport behavior is controlled by `MCP_TRANSPORT`,
-but `/messages` remains the exposed path (see `mcp-server/src/mcp_server/main.py`
-and `agent/src/agent_core/tools.py`).
+but `/messages` remains the exposed path (see `src/mcp_server/main.py`
+and `src/agent_core/tools.py`).
 
 ## Control-Plane Isolation (Feature-Gated)
 
 Control-plane isolation is disabled by default and gated by `DB_ISOLATION_ENABLED`.
 When enabled, it requires the control-plane DB variables (e.g. `CONTROL_DB_HOST`,
 `CONTROL_DB_USER`, `CONTROL_DB_PASSWORD`) to be configured. See
-`mcp-server/src/mcp_server/config/control_plane.py`.
+`src/mcp_server/config/control_plane.py`.
 
 ## Provider Selectors (Advanced)
 
@@ -325,7 +332,9 @@ and default to Postgres or Memgraph for local development.
 
 ## Observability Stack (OTEL)
 
-The OpenTelemetry stack is provided in `observability/docker-compose.observability.yml`.
+The OpenTelemetry stack is provided in `docker-compose.observability.yml`.
 It includes `otel-collector` and `otel-worker`, and is required for full end-to-end tracing.
+Use `docker-compose.grafana.yml` for Grafana dashboards. The Airflow evaluation stack
+(`docker-compose.evals.yml`) runs DAGs in `airflow_evals/` for automated evaluations.
 
 OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`).

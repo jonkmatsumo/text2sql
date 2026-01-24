@@ -1,6 +1,6 @@
 # Docker Cleanup Tooling
 
-COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f observability/docker-compose.observability.yml -f observability/docker-compose.grafana.yml
+COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.observability.yml -f docker-compose.grafana.yml
 
 .PHONY: help docker-clean docker-clean-deep docker-nuke otel-migrate otel-up eval-airflow-up eval-airflow-down eval-airflow-logs
 
@@ -12,7 +12,6 @@ help:
 	@echo "  make otel-migrate       - Run database migrations for the OTEL worker (manual)"
 	@echo "  make otel-up            - Bring up the observability stack (auto-migrates)"
 
-	@echo "  make stress-verify      - Run stress/stability test for OTEL worker (pip install aiohttp required)"
 	@echo "  make eval-airflow-up    - Start the on-demand Airflow evaluation stack"
 	@echo "  make eval-airflow-down  - Stop the Airflow evaluation stack"
 	@echo "  make eval-airflow-logs  - Tail logs for Airflow services"
@@ -23,10 +22,6 @@ otel-migrate:
 
 otel-up:
 	docker compose $(COMPOSE_FILES) up -d otel-collector-svc otel-worker grafana
-
-stress-verify:
-	@echo "Running OTEL Worker Stress Test..."
-	@python3 observability/otel-worker/tests/stress_test_otel_worker.py --url http://localhost:8002/v1/traces --duration 5 --concurrency 5 --rps 50
 
 # Airflow Evaluation Stack
 eval-airflow-up:
