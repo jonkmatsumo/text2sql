@@ -1,5 +1,5 @@
 # Local documentation (hidden from git, but allow spec/guidance)
-docs/**
+docs/
 
 # Python
 __pycache__/
