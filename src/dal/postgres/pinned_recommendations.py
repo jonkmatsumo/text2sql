@@ -7,19 +7,8 @@ from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
 
 
-@dataclass
-class PinRule:
-    """Dataclass for pinned recommendation rules."""
+from dal.models.recommendations import PinRule
 
-    id: UUID
-    tenant_id: int
-    match_type: str  # 'exact', 'contains'
-    match_value: str
-    registry_example_ids: List[str]  # List of UUIDs as strings
-    priority: int
-    enabled: bool
-    created_at: datetime
-    updated_at: datetime
 
 
 class PostgresPinnedRecommendationStore:
