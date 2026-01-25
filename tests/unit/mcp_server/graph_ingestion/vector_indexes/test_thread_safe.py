@@ -4,10 +4,119 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 import numpy as np
 
-from ingestion.vector_indexes import HNSWIndex, ThreadSafeIndex
+from common.interfaces.vector_index import SearchResult
+from ingestion.vector_indexes import ThreadSafeIndex
+
+
+class MockHNSWIndex:
+    """Mock HNSW index for testing without native binaries."""
+
+    def __init__(
+        self, dim: int = None, max_elements=100000, m=16, ef_construction=200, ef_search=10
+    ):
+        """Initialize mock index."""
+        self.dim = dim
+        self._dim = dim
+        self._m = m
+        self._ef_construction = ef_construction
+        self._ef_search = ef_search
+        self._index = "mock_index" if dim is not None else None
+        self.items = []
+        self.ids = []
+        self.metadata = {}
+
+    def add_items(self, vectors, ids, metadata=None):
+        """Add items to the index."""
+        # Handle 1D input first
+        if getattr(vectors, "ndim", 0) == 1:
+            vectors = vectors.reshape(1, -1)
+
+        # Ensure vectors are at least 2D
+        if len(vectors.shape) == 1:
+            vectors = vectors.reshape(1, -1)
+
+        if len(vectors) != len(ids):
+            raise ValueError(f"vectors and ids length mismatch: {len(vectors)} vs {len(ids)}")
+
+        # Determine dim on first add if not set
+        if self.dim is None:
+            self.dim = vectors.shape[1]
+            self._dim = vectors.shape[1]
+            self._index = "mock_index"
+
+        if len(self.items) == 0:
+            self.items = vectors
+        else:
+            self.items = np.vstack([self.items, vectors])
+
+        self.ids.extend(ids)
+        if metadata:
+            self.metadata.update(metadata)
+
+    def search(self, query_vector, k):
+        """Perform simple dot product search."""
+        if len(self.items) == 0:
+            return []
+
+        # Normalize query
+        norm = np.linalg.norm(query_vector)
+        if norm == 0:
+            return []
+
+        query = query_vector / norm
+
+        # Simple linear scan
+        scores = []
+        for i, item in enumerate(self.items):
+            # Normalize item
+            item_norm = np.linalg.norm(item)
+            if item_norm > 0:
+                vec = item / item_norm
+            else:
+                vec = item
+
+            score = np.dot(query, vec)
+            scores.append((score, self.ids[i]))
+
+        # Sort desc
+        scores.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for score, id in scores[:k]:
+            results.append(SearchResult(id=id, score=float(score), metadata=self.metadata.get(id)))
+
+        return results
+
+    def save(self, path):
+        """Mock save using pickle."""
+        import pickle
+
+        with open(path, "wb") as f:
+            pickle.dump(
+                {"dim": self.dim, "items": self.items, "ids": self.ids, "metadata": self.metadata},
+                f,
+            )
+
+    def load(self, path):
+        """Mock load using pickle."""
+        import pickle
+
+        with open(path, "rb") as f:
+            state = pickle.load(f)
+        self.dim = state["dim"]
+        self._dim = state["dim"]
+        self.items = state["items"]
+        self.ids = state["ids"]
+        self.metadata = state["metadata"]
+        self._index = "mock_index"
+
+    def __len__(self):
+        """Return size of index."""
+        return len(self.ids)
 
 
 class TestThreadSafeIndex:
@@ -15,7 +124,7 @@ class TestThreadSafeIndex:
 
     def test_basic_search(self):
         """Verify basic search through wrapper."""
-        inner = HNSWIndex(dim=2)
+        inner = MockHNSWIndex(dim=2)
         vectors = np.array([[1.0, 0.0], [0.0, 1.0]])
         ids = [1, 2]
         inner.add_items(vectors, ids)
@@ -28,7 +137,7 @@ class TestThreadSafeIndex:
 
     def test_add_items(self):
         """Verify add_items passes through to active index."""
-        safe = ThreadSafeIndex(HNSWIndex(dim=2))
+        safe = ThreadSafeIndex(MockHNSWIndex(dim=2))
         vectors = np.array([[1.0, 0.0]])
         safe.add_items(vectors, [1])
 
@@ -36,8 +145,12 @@ class TestThreadSafeIndex:
 
     def test_create_factory(self):
         """Verify factory creates HNSW index."""
-        safe = ThreadSafeIndex.create(dim=3)
-        assert safe.active_backend == "HNSWIndex"
+        with patch("ingestion.vector_indexes.factory.create_vector_index") as mock_create:
+            mock_create.return_value = MockHNSWIndex(dim=3)
+
+            safe = ThreadSafeIndex.create(dim=3)
+            # ThreadSafeIndex checks type name for active_backend
+            assert safe.active_backend == "MockHNSWIndex"
 
 
 class TestHotSwap:
@@ -45,14 +158,14 @@ class TestHotSwap:
 
     def test_synchronous_update(self):
         """Verify synchronous update swaps index."""
-        old_index = HNSWIndex(dim=2)
+        old_index = MockHNSWIndex(dim=2)
         old_index.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(old_index)
         assert len(safe) == 1
 
         def build_new():
-            new = HNSWIndex(dim=2)
+            new = MockHNSWIndex(dim=2)
             new.add_items(np.array([[1.0, 0.0], [0.0, 1.0]]), [10, 20])
             return new
 
@@ -65,14 +178,14 @@ class TestHotSwap:
 
     def test_async_update(self):
         """Verify async update eventually swaps index."""
-        old_index = HNSWIndex(dim=2)
+        old_index = MockHNSWIndex(dim=2)
         old_index.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(old_index)
 
         def build_new():
             time.sleep(0.1)  # Simulate build time
-            new = HNSWIndex(dim=2)
+            new = MockHNSWIndex(dim=2)
             new.add_items(np.array([[1.0, 0.0], [0.0, 1.0]]), [10, 20])
             return new
 
@@ -89,7 +202,7 @@ class TestHotSwap:
 
     def test_concurrent_reads_during_swap(self):
         """Verify reads continue during swap without errors."""
-        index = HNSWIndex(dim=2)
+        index = MockHNSWIndex(dim=2)
         index.add_items(np.array([[1.0, 0.0]]), [1])
         safe = ThreadSafeIndex(index)
 
@@ -110,7 +223,7 @@ class TestHotSwap:
             time.sleep(0.05)  # Let reads start
 
             def build():
-                new = HNSWIndex(dim=2)
+                new = MockHNSWIndex(dim=2)
                 new.add_items(np.array([[1.0, 0.0]]), [2])
                 return new
 
@@ -130,7 +243,7 @@ class TestErrorHandling:
 
     def test_continues_with_original_on_build_error(self):
         """Verify original index kept when build fails."""
-        primary = HNSWIndex(dim=2)
+        primary = MockHNSWIndex(dim=2)
         primary.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(primary)
@@ -152,7 +265,7 @@ class TestPersistence:
 
     def test_save_and_load(self):
         """Verify save/load through thread-safe wrapper."""
-        original = HNSWIndex(dim=2)
+        original = MockHNSWIndex(dim=2)
         original.add_items(np.array([[1.0, 0.0]]), [1])
 
         safe = ThreadSafeIndex(original)
@@ -164,8 +277,13 @@ class TestPersistence:
             safe.save(path)
 
             # Load into new wrapper
-            safe2 = ThreadSafeIndex.create(dim=2)
-            success = safe2.load(path)
+            # Use mock factory
+            with patch(
+                "ingestion.vector_indexes.factory.create_vector_index",
+                return_value=MockHNSWIndex(dim=2),
+            ):
+                safe2 = ThreadSafeIndex.create(dim=2)
+                success = safe2.load(path)
 
             assert success is True
             assert len(safe2) == 1
@@ -183,7 +301,7 @@ class TestConcurrencyStress:
 
     def test_many_concurrent_reads(self):
         """Stress test with many concurrent reads."""
-        index = HNSWIndex(dim=10)
+        index = MockHNSWIndex(dim=10)
         vectors = np.random.rand(100, 10).astype(np.float32)
         ids = list(range(100))
         index.add_items(vectors, ids)
