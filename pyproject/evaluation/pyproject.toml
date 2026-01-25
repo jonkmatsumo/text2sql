@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Evaluation runner and DAGs for Text-to-SQL agent"
 dependencies = [
     "pydantic>=2.6.0",
-    "mlflow>=2.10.0",
+
     "text2sql-agent",
     "schema",
 ]
