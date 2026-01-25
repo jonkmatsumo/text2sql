@@ -41,11 +41,19 @@ def test_cases():
 @pytest.mark.skip(reason="Requires running MCP server")
 async def test_golden_dataset_easy_cases_integration(test_cases):
     """Test easy difficulty cases against live server."""
-    with patch("agent.graph.mlflow.start_span") as mock_start_trace:
-        # Mock MLflow trace (we still mock MLflow as it's not the SUT)
-        mock_trace = MagicMock()
-        mock_start_trace.return_value.__enter__ = MagicMock(return_value=mock_trace)
-        mock_start_trace.return_value.__exit__ = MagicMock(return_value=False)
+    with patch("agent.graph.telemetry") as mock_telemetry:
+        mock_span = MagicMock()
+        mock_telemetry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_telemetry.start_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_telemetry.capture_context.return_value = MagicMock()
+        mock_telemetry.serialize_context.return_value = {}
+        mock_telemetry.deserialize_context.return_value = MagicMock()
+        mock_telemetry.use_context.return_value.__enter__ = MagicMock(return_value=None)
+        mock_telemetry.use_context.return_value.__exit__ = MagicMock(return_value=False)
+        mock_telemetry.configure = MagicMock()
+        mock_telemetry.update_current_trace = MagicMock()
+        mock_telemetry.get_current_trace_id.return_value = None
+        mock_telemetry.get_current_span.return_value = None
 
         easy_cases = [tc for tc in test_cases if tc.get("difficulty") == "easy"]
 
@@ -70,11 +78,19 @@ async def test_golden_dataset_easy_cases_integration(test_cases):
 @pytest.mark.skip(reason="Requires running MCP server")
 async def test_golden_dataset_aggregation_cases_integration(test_cases):
     """Test aggregation category cases against live server."""
-    with patch("agent.graph.mlflow.start_span") as mock_start_trace:
-        # Mock MLflow trace
-        mock_trace = MagicMock()
-        mock_start_trace.return_value.__enter__ = MagicMock(return_value=mock_trace)
-        mock_start_trace.return_value.__exit__ = MagicMock(return_value=False)
+    with patch("agent.graph.telemetry") as mock_telemetry:
+        mock_span = MagicMock()
+        mock_telemetry.start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
+        mock_telemetry.start_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_telemetry.capture_context.return_value = MagicMock()
+        mock_telemetry.serialize_context.return_value = {}
+        mock_telemetry.deserialize_context.return_value = MagicMock()
+        mock_telemetry.use_context.return_value.__enter__ = MagicMock(return_value=None)
+        mock_telemetry.use_context.return_value.__exit__ = MagicMock(return_value=False)
+        mock_telemetry.configure = MagicMock()
+        mock_telemetry.update_current_trace = MagicMock()
+        mock_telemetry.get_current_trace_id.return_value = None
+        mock_telemetry.get_current_span.return_value = None
 
         agg_cases = [tc for tc in test_cases if "aggregation" in tc.get("category", "")]
 
