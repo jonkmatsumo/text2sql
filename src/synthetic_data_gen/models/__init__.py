@@ -1,4 +1,4 @@
-from synthetic_data_gen.models.config import (
+from .config import (
     DistributionConfig,
     OutputConfig,
     RateConfig,
