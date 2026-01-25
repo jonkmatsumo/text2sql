@@ -31,7 +31,7 @@ class TestValidateSqlNode:
         """Test that valid SQL passes validation."""
         base_state["current_sql"] = "SELECT * FROM customers"
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -54,7 +54,7 @@ class TestValidateSqlNode:
         """Test that query with restricted table fails validation."""
         base_state["current_sql"] = "SELECT * FROM payroll"
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -77,7 +77,7 @@ class TestValidateSqlNode:
         """Test that DROP command fails validation."""
         base_state["current_sql"] = "DROP TABLE customers"
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -99,7 +99,7 @@ class TestValidateSqlNode:
         """Test that missing SQL returns error."""
         base_state["current_sql"] = None
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -127,7 +127,7 @@ class TestValidateSqlNode:
             JOIN orders o ON c.id = o.customer_id
         """
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -150,7 +150,7 @@ class TestValidateSqlNode:
         """Test that metadata is preserved even when validation fails."""
         base_state["current_sql"] = "SELECT * FROM payroll"
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -185,7 +185,7 @@ class TestValidateSqlNode:
             SELECT * FROM ranked_customers WHERE rank <= 10
         """
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),

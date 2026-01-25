@@ -4,7 +4,7 @@ import sys
 
 
 def test_graph_import_no_mlflow():
-    """Verify that importing agent.graph does not load mlflow into sys.modules."""
+    """Verify that importing agent.graph is OTEL-only; mlflow is not loaded."""
     # Run in a subprocess to ensure a clean sys.modules environment
     code = """
 import sys
@@ -54,5 +54,5 @@ else:
 
     assert (
         result.returncode == 0
-    ), f"MLflow was imported or import failed: {result.stdout} {result.stderr}"
+    ), f"mlflow must not be imported: {result.stdout} {result.stderr}"
     assert "success" in result.stdout

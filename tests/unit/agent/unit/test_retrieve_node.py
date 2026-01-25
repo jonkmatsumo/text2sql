@@ -66,11 +66,9 @@ class TestRetrieveContextNode:
         mock_tool.ainvoke = AsyncMock(return_value=json.dumps(sample_graph_data))
 
         with patch("agent.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            with patch("agent.nodes.retrieve.telemetry") as mock_mlflow:
-                # Setup mock for telemetry span
+            with patch("agent.nodes.retrieve.telemetry") as mock_telemetry:
                 mock_span = MagicMock()
-                mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
-                mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"
+                mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 
                 mock_get_tools.return_value = [mock_tool]
 
@@ -103,10 +101,9 @@ class TestRetrieveContextNode:
         mock_tool.ainvoke = AsyncMock(return_value=json.dumps(empty_graph))
 
         with patch("agent.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            with patch("agent.nodes.retrieve.telemetry") as mock_mlflow:
+            with patch("agent.nodes.retrieve.telemetry") as mock_telemetry:
                 mock_span = MagicMock()
-                mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
-                mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"
+                mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 
                 mock_get_tools.return_value = [mock_tool]
 
@@ -121,10 +118,9 @@ class TestRetrieveContextNode:
         from agent.nodes.retrieve import retrieve_context_node
 
         with patch("agent.nodes.retrieve.get_mcp_tools", new_callable=AsyncMock) as mock_get_tools:
-            with patch("agent.nodes.retrieve.telemetry") as mock_mlflow:
+            with patch("agent.nodes.retrieve.telemetry") as mock_telemetry:
                 mock_span = MagicMock()
-                mock_mlflow.start_span.return_value.__enter__.return_value = mock_span
-                mock_mlflow.entities.SpanType.RETRIEVER = "RETRIEVER"
+                mock_telemetry.start_span.return_value.__enter__.return_value = mock_span
 
                 mock_get_tools.return_value = []  # No tools available
 

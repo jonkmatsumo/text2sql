@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-# Define test cases: (backend, expect_mlflow_imported)
+# Define test cases: (backend, expect_import). OTEL-only; we never expect mlflow imported.
 TEST_CASES = [
     ("otel", False),
 ]
@@ -12,7 +12,7 @@ TEST_CASES = [
 
 @pytest.mark.parametrize("backend,expect_import", TEST_CASES)
 def test_otel_isolation(backend, expect_import):
-    """Verify loading agent.graph with different backends respects mlflow import isolation."""
+    """Verify loading agent.graph is OTEL-only; no mlflow import."""
     code = f"""
 import sys
 import os
@@ -81,8 +81,8 @@ else:
     assert result.returncode == 0, f"Subprocess failed for backend {backend}"
 
     if expect_import:
-        assert "STATUS: IMPORTED" in result.stdout, f"Expected mlflow import for backend {backend}"
+        assert "STATUS: IMPORTED" in result.stdout, f"Expected import for backend {backend}"
     else:
         assert (
             "STATUS: NOT_IMPORTED" in result.stdout
-        ), f"Expected NO mlflow import for backend {backend}"
+        ), f"Expected no mlflow import for backend {backend}"

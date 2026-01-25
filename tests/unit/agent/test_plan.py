@@ -79,7 +79,7 @@ class TestPlanSqlNode:
         mock_chain.invoke = MagicMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.plan.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.plan.ChatPromptTemplate") as mock_prompt,
             patch("agent.llm_client.get_llm"),
         ):
@@ -96,7 +96,7 @@ class TestPlanSqlNode:
         base_state["messages"] = []
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.plan.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.llm_client.get_llm"),
         ):
             result = await plan_sql_node(base_state)
@@ -124,7 +124,7 @@ class TestPlanSqlNode:
         mock_chain.invoke = MagicMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.plan.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.plan.ChatPromptTemplate") as mock_prompt,
             patch("agent.llm_client.get_llm"),
         ):
@@ -145,7 +145,7 @@ class TestPlanSqlNode:
         mock_chain.invoke = MagicMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.plan.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.plan.ChatPromptTemplate") as mock_prompt,
             patch("agent.llm_client.get_llm"),
         ):

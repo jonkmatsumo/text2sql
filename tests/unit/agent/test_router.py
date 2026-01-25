@@ -92,7 +92,7 @@ class TestRouterNode:
         mock_chain.invoke = MagicMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -133,7 +133,7 @@ class TestRouterNode:
         )
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -152,7 +152,7 @@ class TestRouterNode:
         base_state["user_clarification"] = "I meant customer region"
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.llm_client.get_llm"),
         ):
             result = await router_node(base_state)
@@ -169,7 +169,7 @@ class TestRouterNode:
         base_state["messages"] = []
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.llm_client.get_llm"),
         ):
             result = await router_node(base_state)
@@ -186,7 +186,7 @@ class TestRouterNode:
         mock_chain.ainvoke = AsyncMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -222,7 +222,7 @@ class TestRouterNode:
         )
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -302,7 +302,7 @@ class TestHardRefusalLogic:
         )
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -344,7 +344,7 @@ class TestHardRefusalLogic:
         mock_chain.ainvoke = AsyncMock(return_value=mock_response)
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),
@@ -398,7 +398,7 @@ class TestHardRefusalLogic:
         )
 
         with (
-            patch("mlflow.start_span", return_value=create_mock_span()),
+            patch("agent.nodes.router.telemetry.start_span", return_value=create_mock_span()),
             patch("agent.nodes.router.ChatPromptTemplate") as mock_prompt,
             patch("agent.nodes.router.get_mcp_tools", AsyncMock(return_value=mock_tools)),
             patch("agent.llm_client.get_llm"),

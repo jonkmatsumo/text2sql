@@ -31,7 +31,7 @@ class TestClarifyNode:
         """Test that no clarification question returns empty dict."""
         base_state["clarification_question"] = None
 
-        with patch("mlflow.start_span") as mock_span:
+        with patch("agent.nodes.clarify.telemetry.start_span") as mock_span:
             mock_span.return_value.__enter__ = lambda s: type(
                 "Span",
                 (),
@@ -54,7 +54,7 @@ class TestClarifyNode:
         mock_user_response = "Customer region"
 
         with (
-            patch("mlflow.start_span") as mock_span,
+            patch("agent.nodes.clarify.telemetry.start_span") as mock_span,
             patch("agent.nodes.clarify.interrupt", return_value=mock_user_response),
         ):
             mock_span.return_value.__enter__ = lambda s: type(
@@ -78,7 +78,7 @@ class TestClarifyNode:
     async def test_without_interrupt_fallback(self, base_state):
         """Test clarify node falls back when interrupt not available."""
         with (
-            patch("mlflow.start_span") as mock_span,
+            patch("agent.nodes.clarify.telemetry.start_span") as mock_span,
             patch("agent.nodes.clarify.interrupt", None),
         ):
             mock_span.return_value.__enter__ = lambda s: type(
@@ -109,7 +109,7 @@ class TestClarifyNode:
             return "User response"
 
         with (
-            patch("mlflow.start_span") as mock_span,
+            patch("agent.nodes.clarify.telemetry.start_span") as mock_span,
             patch("agent.nodes.clarify.interrupt", mock_interrupt),
         ):
             mock_span.return_value.__enter__ = lambda s: type(

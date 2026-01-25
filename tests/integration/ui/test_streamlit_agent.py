@@ -21,7 +21,6 @@ def mock_agent_dependencies():
         "mcp_server.client": MagicMock(),
         "mcp_server.client.sse": MagicMock(),
         "mcp_server.client.streamable_http": MagicMock(),
-        "mlflow": MagicMock(),
         "agent": MagicMock(),
         "agent.graph": MagicMock(),
         "agent.telemetry": MagicMock(),

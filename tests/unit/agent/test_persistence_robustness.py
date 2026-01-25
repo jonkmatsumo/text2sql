@@ -1,12 +1,7 @@
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import HumanMessage
-
-# Set dummy env vars for the test to avoid import errors or config issues
-os.environ["MLFLOW_TRACKING_URI"] = "http://localhost:5001"
-# Patch mlflow to avoid actual connection attempts
 
 
 @pytest.mark.asyncio

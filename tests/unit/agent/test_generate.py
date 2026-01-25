@@ -11,8 +11,8 @@ from agent.state import AgentState
 class TestGenerateSqlNode:
     """Unit tests for generate_sql_node function."""
 
-    def _mock_mlflow_span(self, mock_start_span):
-        """Mock the MLflow span context manager."""
+    def _mock_telemetry_span(self, mock_start_span):
+        """Mock the telemetry span context manager."""
         mock_span = MagicMock()
         mock_start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
         mock_start_span.return_value.__exit__ = MagicMock(return_value=False)
@@ -24,7 +24,7 @@ class TestGenerateSqlNode:
     @patch("agent.nodes.generate.ChatPromptTemplate")
     async def test_generate_sql_node_success(self, mock_prompt_class, mock_llm, mock_start_span):
         """Test successful SQL generation."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         # Create mock prompt template and chain
         mock_prompt = MagicMock()
@@ -74,7 +74,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test SQL extraction from markdown SQL block."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -108,7 +108,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test SQL extraction from generic markdown block."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -142,7 +142,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test SQL extraction when no markdown is present."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -176,7 +176,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test SQL generation with empty schema context."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -214,7 +214,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test that last message content is used when multiple messages exist."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -256,7 +256,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test that whitespace is properly stripped."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt
@@ -290,7 +290,7 @@ class TestGenerateSqlNode:
         self, mock_prompt_class, mock_llm, mock_start_span
     ):
         """Test SQL extraction from complex markdown with multiple code blocks."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
         mock_prompt = MagicMock()
         mock_chain = MagicMock()
         mock_prompt.from_messages.return_value = mock_prompt

@@ -12,8 +12,8 @@ from agent.state import AgentState
 class TestRetrieveContextNode:
     """Unit tests for retrieve_context_node function."""
 
-    def _mock_mlflow_span(self, mock_start_span):
-        """Mock the MLflow span context manager."""
+    def _mock_telemetry_span(self, mock_start_span):
+        """Mock the telemetry span context manager."""
         mock_span = MagicMock()
         mock_start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
         mock_start_span.return_value.__exit__ = MagicMock(return_value=False)
@@ -52,7 +52,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_success(self, mock_get_mcp_tools, mock_start_span):
         """Test successful context retrieval."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         # Create mock tool matching get_semantic_subgraph
         mock_subgraph_tool = MagicMock()
@@ -112,7 +112,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_extracts_query(self, mock_get_mcp_tools, mock_start_span):
         """Test that query is extracted from last message."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -143,7 +143,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_formatting(self, mock_get_mcp_tools, mock_start_span):
         """Test context string formatting."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -182,7 +182,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_empty_results(self, mock_get_mcp_tools, mock_start_span):
         """Test handling of empty search results."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -215,7 +215,7 @@ class TestRetrieveContextNode:
         self, mock_get_mcp_tools, mock_start_span
     ):
         """Test that query is extracted from the last message when multiple messages exist."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -250,7 +250,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_error_handling(self, mock_get_mcp_tools, mock_start_span):
         """Test error handling when MCP tools raise an exception."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_get_mcp_tools.side_effect = Exception("MCP connection error")
 
@@ -274,7 +274,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_single_result(self, mock_get_mcp_tools, mock_start_span):
         """Test context retrieval with a single result."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -308,7 +308,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_max_results(self, mock_get_mcp_tools, mock_start_span):
         """Test retrieval with multiple tables."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         mock_subgraph_tool = MagicMock()
         mock_subgraph_tool.name = "get_semantic_subgraph"
@@ -343,7 +343,7 @@ class TestRetrieveContextNode:
     @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_tool_not_found(self, mock_get_mcp_tools, mock_start_span):
         """Test handling when subgraph tool is not found."""
-        self._mock_mlflow_span(mock_start_span)
+        self._mock_telemetry_span(mock_start_span)
 
         # Return tools without the subgraph tool
         mock_other_tool = MagicMock()

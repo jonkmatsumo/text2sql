@@ -167,7 +167,7 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(child.context.trace_id, root.context.trace_id)
 
     def test_backend_selection_otel_default(self):
-        """Test that the service defaults to OTEL (or memory if no config) but never Dual/MLflow."""
+        """Test that the service defaults to OTEL (or memory if no config) but never Dual or deprecated backends."""
         # By default in tests if TELEMETRY_BACKEND is unset, it might be InMemory or OTEL
         # depending on init logic. Assuming default init with no args uses env vars.
 
@@ -178,19 +178,11 @@ class TestTelemetryService(unittest.TestCase):
 
     def test_backend_selection_legacy_fallback(self):
         """Test that legacy configuration values now fallback to OTEL or compatible default."""
-        # If user still has TELEMETRY_BACKEND=dual or mlflow, it should NOT crash,
-        # but likely use OTEL or just log a warning and use default.
-        # This depends on strict implementation of TelemetryService.__init__.
-        # If the code enforces "no Dual", then this test ensures we don't accidentally get it.
-
+        # Legacy backends (e.g. dual, mlflow) fall back to OTEL and must not crash.
         # We assume the implementation treats unknown/deprecated backends as OTEL or logs warning.
-        # Let's verify it DOES NOT return DualTelemetryBackend.
-
-        # NOTE: checking for DualTelemetryBackend existence is hard if we deleted the import,
-        # so we just check it is OTELTelemetryBackend or InMemory.
+        # NOTE: we just check it is OTELTelemetryBackend or InMemory.
 
         with patch.dict("os.environ", {"TELEMETRY_BACKEND": "mlflow"}):
-            # If the code was updated to map 'mlflow' -> OTEL or just ignore it
             service = TelemetryService()
             self.assertIsInstance(service._backend, OTELTelemetryBackend)
 
