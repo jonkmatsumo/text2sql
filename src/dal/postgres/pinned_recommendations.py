@@ -1,25 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
 from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
-
-
-@dataclass
-class PinRule:
-    """Dataclass for pinned recommendation rules."""
-
-    id: UUID
-    tenant_id: int
-    match_type: str  # 'exact', 'contains'
-    match_value: str
-    registry_example_ids: List[str]  # List of UUIDs as strings
-    priority: int
-    enabled: bool
-    created_at: datetime
-    updated_at: datetime
+from dal.models.recommendations import PinRule
 
 
 class PostgresPinnedRecommendationStore:

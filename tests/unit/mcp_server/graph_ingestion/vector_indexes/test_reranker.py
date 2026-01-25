@@ -5,7 +5,88 @@ import os
 import numpy as np
 import pytest
 
-from ingestion.vector_indexes import HNSWIndex, search_with_rerank
+from common.interfaces.vector_index import SearchResult
+from ingestion.vector_indexes import search_with_rerank
+
+
+class MockHNSWIndex:
+    """Mock HNSW index for testing without native binaries."""
+
+    def __init__(
+        self, dim: int = None, max_elements=100000, m=16, ef_construction=200, ef_search=10
+    ):
+        """Initialize mock index."""
+        self.dim = dim
+        self._dim = dim
+        self._m = m
+        self._ef_construction = ef_construction
+        self._ef_search = ef_search
+        self._index = "mock_index" if dim is not None else None
+        self.items = []
+        self.ids = []
+        self.metadata = {}
+
+    def add_items(self, vectors, ids, metadata=None):
+        """Add items to the index."""
+        # Handle 1D input first
+        if getattr(vectors, "ndim", 0) == 1:
+            vectors = vectors.reshape(1, -1)
+
+        if len(vectors) != len(ids):
+            raise ValueError(f"vectors and ids length mismatch: {len(vectors)} vs {len(ids)}")
+
+        # Determine dim on first add if not set
+        if self.dim is None:
+            self.dim = vectors.shape[1]
+            self._dim = vectors.shape[1]
+            self._index = "mock_index"
+
+        if len(self.items) == 0:
+            self.items = vectors
+        else:
+            self.items = np.vstack([self.items, vectors])
+
+        self.ids.extend(ids)
+        if metadata:
+            self.metadata.update(metadata)
+
+    def search(self, query_vector, k):
+        """Perform simple dot product search."""
+        if len(self.items) == 0:
+            return []
+
+        # Normalize query
+        norm = np.linalg.norm(query_vector)
+        if norm == 0:
+            return []
+
+        query = query_vector / norm
+
+        # Simple linear scan
+        scores = []
+        for i, item in enumerate(self.items):
+            # Normalize item
+            item_norm = np.linalg.norm(item)
+            if item_norm > 0:
+                vec = item / item_norm
+            else:
+                vec = item
+
+            score = np.dot(query, vec)
+            scores.append((score, self.ids[i]))
+
+        # Sort desc
+        scores.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for score, id in scores[:k]:
+            results.append(SearchResult(id=id, score=float(score), metadata=self.metadata.get(id)))
+
+        return results
+
+    def __len__(self):
+        """Return size of index."""
+        return len(self.ids)
 
 
 class TestSearchWithRerank:
@@ -14,7 +95,7 @@ class TestSearchWithRerank:
     @pytest.fixture
     def sample_index(self):
         """Create HNSWIndex with sample data."""
-        index = HNSWIndex(dim=3)
+        index = MockHNSWIndex(dim=3)
         vectors = np.array(
             [
                 [1.0, 0.0, 0.0],  # id=0
@@ -32,7 +113,7 @@ class TestSearchWithRerank:
     @pytest.fixture
     def ground_truth_index(self):
         """Create a second HNSWIndex with same data for validation."""
-        index = HNSWIndex(dim=3)
+        index = MockHNSWIndex(dim=3)
         vectors = np.array(
             [
                 [1.0, 0.0, 0.0],
@@ -96,7 +177,7 @@ class TestSearchWithRerank:
 
     def test_empty_index(self):
         """Verify empty index returns empty results."""
-        index = HNSWIndex(dim=3)
+        index = MockHNSWIndex(dim=3)
         query = np.array([1.0, 0.0, 0.0])
         results = search_with_rerank(index, query, k=3)
         assert results == []
@@ -109,7 +190,7 @@ class TestSearchWithRerank:
 
     def test_metadata_preserved(self):
         """Verify metadata is preserved through reranking."""
-        index = HNSWIndex(dim=2)
+        index = MockHNSWIndex(dim=2)
         vectors = np.array([[1.0, 0.0], [0.0, 1.0]])
         ids = [100, 200]
         metadata = {100: {"name": "table_a"}, 200: {"name": "table_b"}}
@@ -128,8 +209,8 @@ class TestRecallLossLogging:
     def test_recall_loss_logged_when_enabled(self, caplog):
         """Verify recall loss is logged when RECORD_GOLDEN_SET=1."""
         # Create indexes with same data
-        hnsw_index = HNSWIndex(dim=2)
-        gt_index = HNSWIndex(dim=2)
+        hnsw_index = MockHNSWIndex(dim=2)
+        gt_index = MockHNSWIndex(dim=2)
 
         # Same data for both
         vectors = np.array([[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]])

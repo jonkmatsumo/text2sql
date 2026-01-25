@@ -1,6 +1,6 @@
 """Tests for MCP server health and initialization state tracking."""
 
-from mcp_server.health import CheckStatus, InitializationState
+from mcp_server.models.health import CheckStatus, InitializationState
 
 
 class TestInitializationState:

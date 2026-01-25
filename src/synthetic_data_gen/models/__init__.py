@@ -1,4 +1,6 @@
-from synthetic_data_gen.models.config import (
+"""Data models for synthetic data generation."""
+
+from .config import (
     DistributionConfig,
     OutputConfig,
     RateConfig,
