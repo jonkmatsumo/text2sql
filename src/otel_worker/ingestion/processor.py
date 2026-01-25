@@ -7,7 +7,6 @@ import time
 from typing import Dict, List, Set
 
 from otel_worker.config import settings
-from otel_worker.export.mlflow_exporter import export_to_mlflow
 from otel_worker.logging import log_event
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
@@ -188,7 +187,6 @@ class PersistenceCoordinator:
             # 2. Sequential/Parallel Processing Stages
             # A) MinIO Uploads (Concurrent but bounded)
             # B) Postgres Save (Batched transaction)
-            # C) MLflow Export (Concurrent)
 
             # Stage A: MinIO Uploads (Parallel, Bounded)
             async def bounded_upload(tid, svc, data):
@@ -230,23 +228,6 @@ class PersistenceCoordinator:
                 await self._run_with_retry(
                     lambda: asyncio.to_thread(save_traces_batch, trace_units), "Postgres Batch Save"
                 )
-
-            # Stage C: MLflow Export (Best effort, parallel)
-            mlflow_tasks = []
-            for tid in successful_trace_ids:
-                t_ctx = trace_map[tid]
-                mlflow_tasks.append(
-                    asyncio.to_thread(
-                        export_to_mlflow,
-                        tid,
-                        t_ctx["service_name"],
-                        t_ctx["summaries"],
-                        t_ctx["parsed_data"],
-                    )
-                )
-
-            if mlflow_tasks:
-                await asyncio.gather(*mlflow_tasks, return_exceptions=True)
 
             # 3. Finalize items
             # Mark all items as complete

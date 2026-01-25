@@ -1,7 +1,7 @@
 """Telemetry service for abstracting tracing and observability.
 
 This module provides a unified interface for tracing, metrics, and metadata
-logging, allowing the agent to be agnostic of the underlying backend (e.g., MLflow, OTEL).
+logging, allowing the agent to be agnostic of the underlying backend (OTEL).
 """
 
 import abc
@@ -74,7 +74,7 @@ def _setup_otel_sdk():
 
 
 class SpanType(Enum):
-    """Semantic span types mapping to MLflow/OTEL concepts."""
+    """Semantic span types mapping to OTEL concepts."""
 
     CHAIN = "CHAIN"
     TOOL = "TOOL"
@@ -488,13 +488,6 @@ class TelemetryService:
                     "to suppress this warning."
                 )
                 self._backend = OTELTelemetryBackend()
-            elif backend_type == "mlflow":
-                logger.warning(
-                    "TELEMETRY_BACKEND=mlflow is deprecated. MLflow is now a downstream sink "
-                    "via the OTEL worker. Falling back to OTEL-only mode. Update your .env to "
-                    "TELEMETRY_BACKEND=otel to suppress this warning."
-                )
-                self._backend = OTELTelemetryBackend()
             else:
                 self._backend = OTELTelemetryBackend()
 
@@ -506,12 +499,10 @@ class TelemetryService:
         """Configure telemetry settings.
 
         Args:
-            tracking_uri: Ignored (MLflow legacy).
-            autolog: Ignored (MLflow legacy).
+            tracking_uri: Ignored (kept for API compatibility).
+            autolog: Ignored (kept for API compatibility).
             **kwargs: Additional arguments passed to backend configure.
         """
-        # OTEL backend doesn't use tracking_uri or autolog params,
-        # but we accept them for compatibility
         self._backend.configure(**kwargs)
 
     @contextlib.contextmanager
