@@ -52,7 +52,5 @@ else:
 
     result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
 
-    assert (
-        result.returncode == 0
-    ), f"mlflow must not be imported: {result.stdout} {result.stderr}"
+    assert result.returncode == 0, f"mlflow must not be imported: {result.stdout} {result.stderr}"
     assert "success" in result.stdout

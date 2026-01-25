@@ -167,7 +167,10 @@ class TestTelemetryService(unittest.TestCase):
         self.assertEqual(child.context.trace_id, root.context.trace_id)
 
     def test_backend_selection_otel_default(self):
-        """Test that the service defaults to OTEL (or memory if no config) but never Dual or deprecated backends."""
+        """Test default backend selection.
+
+        Ensures service defaults to OTEL (or memory) but never Dual or deprecated backends.
+        """
         # By default in tests if TELEMETRY_BACKEND is unset, it might be InMemory or OTEL
         # depending on init logic. Assuming default init with no args uses env vars.
 

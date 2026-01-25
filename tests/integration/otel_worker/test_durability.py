@@ -38,5 +38,6 @@ class TestPersistenceDurability(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(mock_sink.call_count, 3)
 
+
 if __name__ == "__main__":
     unittest.main()
