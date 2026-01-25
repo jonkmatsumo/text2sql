@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List
 from uuid import UUID
 
+
 @dataclass
 class PinRule:
     """Dataclass for pinned recommendation rules."""
