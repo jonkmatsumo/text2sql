@@ -3,13 +3,74 @@
 import numpy as np
 import pytest
 
+from common.interfaces.vector_index import SearchResult
 from ingestion.table_first_retriever import (
     DEFAULT_MAX_COLUMNS_PER_TABLE,
     TableFirstRetriever,
     format_column_text,
     format_table_text,
 )
-from ingestion.vector_indexes import HNSWIndex
+from ingestion.vector_indexes import HNSWIndex  # noqa: F401
+
+
+class MockHNSWIndex:
+    """Mock HNSW index for testing without native binaries."""
+
+    def __init__(self, dim: int):
+        """Initialize mock index."""
+        self.dim = dim
+        self.items = []
+        self.ids = []
+        self.metadata = {}
+
+    def add_items(self, vectors, ids, metadata=None):
+        """Add items to the index."""
+        if len(self.items) == 0:
+            self.items = vectors
+        else:
+            self.items = np.vstack([self.items, vectors])
+
+        self.ids.extend(ids)
+        if metadata:
+            self.metadata.update(metadata)
+
+    def search(self, query_vector, k):
+        """Perform simple dot product search."""
+        if len(self.items) == 0:
+            return []
+
+        # Normalize query
+        norm = np.linalg.norm(query_vector)
+        if norm > 0:
+            query = query_vector / norm
+        else:
+            query = query_vector
+
+        # Simple linear scan
+        scores = []
+        for i, item in enumerate(self.items):
+            # Normalize item
+            item_norm = np.linalg.norm(item)
+            if item_norm > 0:
+                vec = item / item_norm
+            else:
+                vec = item
+
+            score = np.dot(query, vec)
+            scores.append((score, self.ids[i]))
+
+        # Sort desc
+        scores.sort(key=lambda x: x[0], reverse=True)
+
+        results = []
+        for score, id in scores[:k]:
+            results.append(SearchResult(id=id, score=float(score), metadata=self.metadata.get(id)))
+
+        return results
+
+    def __len__(self):
+        """Return size of index."""
+        return len(self.ids)
 
 
 class TestFormatFunctions:
@@ -49,7 +110,7 @@ class TestTableFirstRetriever:
     def sample_indexes(self):
         """Create sample table and column indexes."""
         # Table index
-        table_index = HNSWIndex(dim=3)
+        table_index = MockHNSWIndex(dim=3)
         table_vectors = np.array(
             [
                 [1.0, 0.0, 0.0],  # users
@@ -66,7 +127,7 @@ class TestTableFirstRetriever:
         table_index.add_items(table_vectors, table_ids, table_metadata)
 
         # Column index
-        column_index = HNSWIndex(dim=3)
+        column_index = MockHNSWIndex(dim=3)
         column_vectors = np.array(
             [
                 [0.9, 0.1, 0.0],  # users.email
@@ -162,8 +223,8 @@ class TestTableFirstRetriever:
 
     def test_empty_tables_returns_empty_columns(self):
         """Verify empty table results returns empty columns."""
-        empty_table_index = HNSWIndex(dim=2)
-        column_index = HNSWIndex(dim=2)
+        empty_table_index = MockHNSWIndex(dim=2)
+        column_index = MockHNSWIndex(dim=2)
         column_index.add_items(
             np.array([[1.0, 0.0]]),
             [1],
@@ -202,7 +263,7 @@ class TestTableFirstWithRerank:
     @pytest.fixture
     def sample_indexes(self):
         """Create indexes for rerank tests."""
-        table_index = HNSWIndex(dim=3)
+        table_index = MockHNSWIndex(dim=3)
         table_vectors = np.array(
             [
                 [1.0, 0.0, 0.0],
@@ -216,7 +277,7 @@ class TestTableFirstWithRerank:
         }
         table_index.add_items(table_vectors, table_ids, table_metadata)
 
-        column_index = HNSWIndex(dim=3)
+        column_index = MockHNSWIndex(dim=3)
         column_vectors = np.array(
             [
                 [0.9, 0.1, 0.0],
