@@ -6,17 +6,14 @@ candidate elements in the database schema context.
 
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, List
 
 import spacy
 
+from mcp_server.services.ambiguity.models.entities import Candidate, Mention
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
 logger = logging.getLogger(__name__)
-
-
-from mcp_server.services.ambiguity.models.entities import Candidate, Mention
 
 
 class MentionExtractor:

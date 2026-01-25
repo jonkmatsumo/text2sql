@@ -6,17 +6,13 @@ validation without LLM calls.
 """
 
 import re
-from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 
 import sqlglot
 from sqlglot import exp
 
 from mcp_server.services.cache.constraint_extractor import QueryConstraints
-
-
 from mcp_server.services.cache.models.validation import ConstraintMismatch, ValidationResult
-
 
 VALID_RATINGS = frozenset({"G", "PG", "PG-13", "R", "NC-17"})
 

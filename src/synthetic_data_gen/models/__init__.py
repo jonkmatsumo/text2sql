@@ -1,3 +1,5 @@
+"""Data models for synthetic data generation."""
+
 from .config import (
     DistributionConfig,
     OutputConfig,
@@ -7,3 +9,13 @@ from .config import (
     SynthConfig,
     TimeWindowConfig,
 )
+
+__all__ = [
+    "DistributionConfig",
+    "OutputConfig",
+    "RateConfig",
+    "ScaleConfig",
+    "ScalePreset",
+    "SynthConfig",
+    "TimeWindowConfig",
+]

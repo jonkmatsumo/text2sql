@@ -7,3 +7,13 @@ from mcp_server.services.recommendation.models.explanation import (
     RecommendationExplanation,
     SelectionSummary,
 )
+
+__all__ = [
+    "DiversityEffects",
+    "DiversityExplanation",
+    "FallbackExplanation",
+    "FilteringExplanation",
+    "PinsExplanation",
+    "RecommendationExplanation",
+    "SelectionSummary",
+]

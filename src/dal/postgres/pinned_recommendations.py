@@ -1,14 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
 from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
-
-
 from dal.models.recommendations import PinRule
-
 
 
 class PostgresPinnedRecommendationStore:

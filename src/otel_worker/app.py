@@ -4,16 +4,16 @@ import gzip
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel
 
 from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
 from otel_worker.logging import log_event
 from otel_worker.metrics.coordinator import aggregation_coordinator, regression_coordinator
+from otel_worker.models.api import PaginatedSpansResponse, PaginatedTracesResponse, TraceDetail
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
     parse_otlp_json_traces,
@@ -30,21 +30,6 @@ from otel_worker.storage.postgres import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-# --- API Models ---
-
-
-# --- API Models ---
-
-
-from otel_worker.models.api import (
-    PaginatedSpansResponse,
-    PaginatedTracesResponse,
-    SpanSummary,
-    TraceDetail,
-    TraceSummary,
-)
 
 
 @asynccontextmanager
