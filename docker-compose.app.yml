@@ -80,8 +80,7 @@ services:
     depends_on:
       mcp-server:
         condition: service_started
-      mlflow-server:
-        condition: service_started
+
       agent-control-db:
         condition: service_started
     environment:
@@ -104,10 +103,7 @@ services:
       CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
       CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
       DB_ISOLATION_ENABLED: "true"
-      MLFLOW_TRACKING_URI: http://mlflow-server:5000
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: text2sql-agent

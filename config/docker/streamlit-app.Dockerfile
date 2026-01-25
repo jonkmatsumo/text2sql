@@ -33,4 +33,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 EXPOSE 8501
 
 # Run Streamlit (using uv run)
-CMD ["uv", "run", "streamlit", "run", "src/streamlit_app/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["uv", "run", "streamlit", "run", "src/ui/Text_2_SQL_Agent.py", "--server.port=8501", "--server.address=0.0.0.0"]

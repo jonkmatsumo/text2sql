@@ -13,23 +13,23 @@ echo "Target: ${TARGET_DIR}"
 mkdir -p "${QUERIES_DIR}"
 
 # Set PYTHONPATH to include synthetic-data source
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/synthetic-data/src"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
 # 1. Generate SQL Schema and Data
 echo "Generating SQL schema and data..."
-python3 -m text2sql_synth.cli export-sql \
+python3 -m synthetic_data_gen.cli export-sql \
     --preset small \
     --out "${TARGET_DIR}" \
     --schema public
 
 # 2. Generate Tables JSON (Summaries)
 echo "Generating tables.json..."
-python3 -m text2sql_synth.cli export-tables-json \
+python3 -m synthetic_data_gen.cli export-tables-json \
     --out "${QUERIES_DIR}"
 
 # 3. Generate Few-Shot Examples
 echo "Generating few-shot examples..."
-python3 -m text2sql_synth.cli export-examples \
+python3 -m synthetic_data_gen.cli export-examples \
     --out "${QUERIES_DIR}"
 
 echo "✅ Synthetic artifacts generated successfully."

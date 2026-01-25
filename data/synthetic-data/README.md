@@ -56,7 +56,7 @@ synthetic-data/
 ├── pyproject.toml
 ├── README.md
 └── src/
-    └── text2sql_synth/
+    └── synthetic_data_gen/
         ├── __init__.py
         ├── cli.py           # CLI entrypoint
         ├── config.py        # Configuration parsing

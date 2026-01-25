@@ -24,16 +24,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f mcp-server/requirements.txt ]; then pip install -r mcp-server/requirements.txt; fi
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          uv sync --no-dev 2>/dev/null || true
 
       - name: Run Enrichment Pipeline
         env:
-          PYTHONPATH: mcp-server/src
+          PYTHONPATH: src
           ENABLE_LLM_ENRICHMENT: ${{ inputs.dry_run == false && 'true' || 'false' }}
-          # Pass other necessary secrets here, e.g., OPENAI_API_KEY, MEMGRAPH credentials
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MEMGRAPH_URI: ${{ secrets.MEMGRAPH_URI }}
           MEMGRAPH_USER: ${{ secrets.MEMGRAPH_USER }}
           MEMGRAPH_PASSWORD: ${{ secrets.MEMGRAPH_PASSWORD }}
         run: |
-          python mcp-server/src/mcp_server/graph_ingestion/enrichment/main.py
+          python -m ingestion.enrichment.main

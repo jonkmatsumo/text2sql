@@ -5,16 +5,16 @@ import pytest
 
 # These tests are guardrails to prevent regression of the DAL migration.
 # They ensure that:
-# 1. No code reappears in mcp-server/src/mcp_server/dal
+# 1. No code reappears in src/mcp_server/dal
 # 2. No imports from mcp_server.dal are introduced anywhere in the repo
 
 
-def test_no_dal_code_in_mcp_server():
-    """Ensure the directory mcp-server/src/mcp_server/dal does not exist."""
+def test_no_dal_code_in_mcp():
+    """Ensure the directory src/mcp/dal does not exist."""
     # Assuming the test is running from the repo root or we can locate the root
     # Adjust path finding logic to be robust
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    dal_path = repo_root / "mcp-server" / "src" / "mcp_server" / "dal"
+    repo_root = Path(__file__).resolve().parents[3]
+    dal_path = repo_root / "src" / "mcp_server" / "dal"
 
     # We intend for this directory to be gone entirely.
     # If it exists, it must be empty or only contain __pycache__ (though ideally gone).
@@ -25,9 +25,9 @@ def test_no_dal_code_in_mcp_server():
     )
 
 
-def test_no_mcp_server_dal_imports_repo_wide():
+def test_no_mcp_dal_imports_repo_wide():
     """Scan the entire repository for any Python files importing from 'mcp_server.dal'."""
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
 
     forbidden_patterns = ["from mcp_server.dal", "import mcp_server.dal", "mcp_server.dal."]
 

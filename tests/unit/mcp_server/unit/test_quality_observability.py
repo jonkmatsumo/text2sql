@@ -108,7 +108,7 @@ class TestGoldenDatasetIsolation:
         ]
 
         # Resolve repo root relative to this test file
-        # tests/unit/mcp_server/unit/test_quality_observability.py -> ../../../../.. -> repo root
+        # tests/unit/mcp/unit/test_quality_observability.py -> ../../../../../ -> repo root
         repo_root = Path(__file__).resolve().parents[4]
         src_root = repo_root / "src"
 

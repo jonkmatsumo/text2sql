@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-text2sql-synth = "text2sql_synth.cli:main"
+text2sql-synth = "synthetic_data_gen.cli:main"
 
 
 
@@ -32,4 +32,4 @@ package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
 where = ["../../src"]
-include = ["text2sql_synth*"]
+include = ["synthetic_data_gen*"]

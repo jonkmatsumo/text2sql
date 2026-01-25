@@ -4,8 +4,8 @@ import asyncio
 from dotenv import load_dotenv
 
 from mcp_server.config.database import Database
-from mcp_server.rag import RagEngine
-from mcp_server.services.cache_service import lookup_cache
+from mcp_server.services.cache import lookup_cache
+from mcp_server.services.rag import RagEngine
 
 # Load environment variables
 load_dotenv()

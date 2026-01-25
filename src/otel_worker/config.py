@@ -19,8 +19,6 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "otel-traces"
 
-    MLFLOW_TRACKING_URI: Optional[str] = None
-    ENABLE_MLFLOW_EXPORT: bool = True
     OTEL_ENVIRONMENT: str = "local"
 
     BATCH_MAX_SIZE: int = 25

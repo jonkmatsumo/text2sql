@@ -7,18 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agent_core.graph import run_agent_with_tracing
+from agent.graph import run_agent_with_tracing
 from evaluation.runner.config import EvaluationCaseResult, EvaluationConfig, EvaluationSummary
 from evaluation.runner.regression import RegressionDetector, RegressionReport
 from schema.evaluation.metrics import MetricSuiteV1
-
-# Optional MLflow import
-try:
-    import mlflow
-
-    MLFLOW_AVAILABLE = True
-except ImportError:
-    MLFLOW_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger("eval_runner")
@@ -184,9 +176,6 @@ class EvaluationRunner:
 
         self.persist_artifacts(results, summary)
 
-        # Log to MLflow if available
-        self.log_to_mlflow(summary, results)
-
         # Check Regression
         regression_report = self.compare_with_baseline(summary)
         if regression_report.is_regression:
@@ -209,7 +198,7 @@ class EvaluationRunner:
 
         Strategy:
         1. Try to find 'baseline_summary.json' in current dir (injected by DAG).
-        2. Or try to find 'latest' in MLflow (not implemented for MVP).
+        2. Or try to find 'latest' baseline (not implemented for MVP).
         """
         # MVP: Look for a specific file path defined in env or config
         baseline_path = os.getenv("EVAL_BASELINE_PATH")
@@ -227,62 +216,6 @@ class EvaluationRunner:
         report_path = self.artifact_dir / "regression_report.json"
         with open(report_path, "w") as f:
             f.write(report.model_dump_json(indent=2))
-
-    def log_to_mlflow(self, summary: EvaluationSummary, results: List[EvaluationCaseResult]):
-        """Log metrics and artifacts to MLflow."""
-        if not MLFLOW_AVAILABLE:
-            logger.info("MLflow not available, skipping logging")
-            return
-
-        try:
-            # Use existing tracking URI or default
-            tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
-            mlflow.set_tracking_uri(tracking_uri)
-
-            # Set experiment
-            experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "text2sql_evaluations")
-            mlflow.set_experiment(experiment_name)
-
-            with mlflow.start_run(run_name=self.run_id):
-                # Log Params
-                mlflow.log_params(
-                    {
-                        "dataset": self.config.dataset_path,
-                        "concurrency": self.config.concurrency,
-                        "tenant_id": self.config.tenant_id,
-                        "seed": self.config.seed,
-                    }
-                )
-                if self.config.git_sha:
-                    mlflow.log_param("git_sha", self.config.git_sha)
-
-                # Log Metrics
-                mlflow.log_metrics(
-                    {
-                        "exact_match_rate": summary.exact_match_rate,
-                        "avg_structural_score": summary.avg_structural_score,
-                        "min_structural_score": summary.min_structural_score,
-                        "accuracy": summary.accuracy,  # Deprecated
-                        "avg_latency_ms": summary.avg_latency_ms,
-                        "p95_latency_ms": summary.p95_latency_ms,
-                        "total_cases": summary.total_cases,
-                        "exact_match_count": summary.exact_match_count,
-                        "successful_cases": summary.successful_cases,  # Deprecated
-                        "failed_cases": summary.failed_cases,  # Deprecated
-                    }
-                )
-
-                # Log Artifacts
-                # We log the specific files we generated in persist_artifacts
-                mlflow.log_artifact(str(self.artifact_dir / "results.json"))
-                mlflow.log_artifact(str(self.artifact_dir / "summary.json"))
-                mlflow.log_artifact(str(self.artifact_dir / "cases.jsonl"))
-
-                logger.info(f"Logged results to MLflow run: {mlflow.active_run().info.run_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to log to MLflow: {e}")
-            # Non-fatal error as per requirements
 
     def persist_artifacts(self, results: List[EvaluationCaseResult], summary: EvaluationSummary):
         """Write results to disk."""
