@@ -3,16 +3,17 @@
 High-performance approximate nearest neighbor search optimized for millions of vectors.
 """
 
+from __future__ import annotations
+
 import pickle
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 
-try:
-    import hnswlib
-except ImportError:
-    hnswlib = None  # Allow import without hnswlib installed
+if TYPE_CHECKING:
+    import hnswlib  # noqa: F401
+
 
 from common.interfaces.vector_index import SearchResult
 
@@ -55,7 +56,9 @@ class HNSWIndex:
         Raises:
             ImportError: If hnswlib is not installed.
         """
-        if hnswlib is None:
+        try:
+            import hnswlib  # noqa: F811
+        except ImportError:
             raise ImportError(
                 "hnswlib is required for HNSWIndex. " "Install with: pip install hnswlib"
             )
@@ -78,7 +81,8 @@ class HNSWIndex:
             self._init_index(dim)
 
     def _init_index(self, dim: int) -> None:
-        """Initialize the hnswlib index with given dimension."""
+        import hnswlib  # noqa: F811
+
         self._dim = dim
         self._index = hnswlib.Index(space="ip", dim=dim)
         self._index.init_index(
@@ -248,7 +252,9 @@ class HNSWIndex:
         Args:
             path: Base file path to load the index from.
         """
-        if hnswlib is None:
+        try:
+            import hnswlib  # noqa: F811
+        except ImportError:
             raise ImportError("hnswlib is required to load HNSWIndex")
 
         # Load metadata first to get dimension
@@ -267,6 +273,8 @@ class HNSWIndex:
         self._vectors_normalized = state.get("vectors_normalized")
 
         # Initialize and load hnswlib index
+        import hnswlib  # noqa: F811
+
         self._index = hnswlib.Index(space="ip", dim=self._dim)
         self._index.load_index(path, max_elements=self._max_elements)
         self._index.set_ef(self._ef_search)
