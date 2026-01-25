@@ -26,10 +26,10 @@ package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
 where = ["../../src"]
-include = ["streamlit_app*"]
+include = ["ui*"]
 
 [tool.coverage.run]
-source = ["streamlit_app"]
+source = ["ui"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",

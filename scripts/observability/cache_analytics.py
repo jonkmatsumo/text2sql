@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 
-from mcp_server.dal.database import Database  # noqa: E402
+from mcp_server.config.database import Database  # noqa: E402
 from mcp_server.services.cache import get_cache_stats  # noqa: E402
 
 

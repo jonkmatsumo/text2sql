@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 FORBIDDEN_PACKAGES = {
-    "mcp_server",
+    "mcp",
 }
 
 

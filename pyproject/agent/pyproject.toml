@@ -26,10 +26,6 @@ test = [
     "pytest-cov>=4.1.0",
     "msgpack",
 ]
-mlflow = [
-    "mlflow==3.8.1",
-    "langchain>=0.3.0",  # Required for mlflow.langchain.autolog()
-]
 llm-providers = [
     "langchain-anthropic>=0.3.0",
     "langchain-google-genai>=2.0.0",
@@ -44,4 +40,4 @@ package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
 where = ["../../src"]
-include = ["agent_core*"]
+include = ["agent*"]

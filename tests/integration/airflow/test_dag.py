@@ -18,7 +18,7 @@ sys.modules["airflow"].DAG.return_value.__enter__.return_value = mock_dag
 def test_eval_dag_structure():
     """Verify DAG tasks and dependencies."""
     # Import the DAG file - this executes the DAG definition
-    from airflow_evals.airflow.dags import eval_dag
+    from evaluation.dags import eval_dag
 
     # Check if PythonOperator was called to create tasks
     # We expect 3 tasks: prepare_run_context, run_evaluation, compute_regression

@@ -8,58 +8,16 @@ import pytest
 # CRITICAL INFRASTRUCTURE FILE - DO NOT DELETE
 # ==============================================================================
 # This file is essential for Pytest configuration and CI/CD pipeline stability.
-# It ensures that 'mcp-server/src' and 'agent/src' are correctly added to sys.path
-# before test collection begins. Removing this file will cause ModuleNotFoundErrors
-# in CI environments.
+# It ensures that 'src' is on sys.path before test collection so all packages
+# (agent, mcp, ui, ingestion, etc.) can be imported.
 # ==============================================================================
 
-# Calculate root directory
 ROOT_DIR = Path(__file__).parent.absolute()
+src_dir = ROOT_DIR / "src"
 
-# Add source directories to sys.path
-# We prepend to ensure these local packages take precedence over installed ones
-# This fixes "ModuleNotFoundError" in CI where editable installs might behave differently
-# or when relying on 'import-mode=importlib' without explicit path setup.
-
-common_src = ROOT_DIR / "common" / "src"
-mcp_server_src = ROOT_DIR / "mcp-server" / "src"
-agent_src = ROOT_DIR / "agent" / "src"
-schema_src = ROOT_DIR / "schema" / "src"
-ingestion_src = ROOT_DIR / "ingestion" / "src"
-
-if str(common_src) not in sys.path:
-    sys.path.insert(0, str(common_src))
-    print(f"conftest.py: Added {common_src} to sys.path")
-
-if str(mcp_server_src) not in sys.path:
-    sys.path.insert(0, str(mcp_server_src))
-    print(f"conftest.py: Added {mcp_server_src} to sys.path")
-
-if str(agent_src) not in sys.path:
-    sys.path.insert(0, str(agent_src))
-    print(f"conftest.py: Added {agent_src} to sys.path")
-
-if str(schema_src) in sys.path:
-    sys.path.remove(str(schema_src))
-sys.path.insert(0, str(schema_src))
-print(f"conftest.py: Preprended {schema_src} to sys.path (shadowing fix)")
-
-if str(ingestion_src) not in sys.path:
-    sys.path.insert(0, str(ingestion_src))
-    print(f"conftest.py: Added {ingestion_src} to sys.path")
-
-inserted_paths = []
-for path in (common_src, mcp_server_src, agent_src, schema_src, ingestion_src):
-    path_str = str(path)
-    if path_str not in sys.path:
-        sys.path.insert(0, path_str)
-        inserted_paths.append(path_str)
-        print(f"conftest.py: Added {path_str} to sys.path")
-
-if inserted_paths:
-    assert not any(
-        "/tests" in path for path in inserted_paths
-    ), "conftest.py: tests paths must not be added to sys.path"
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+    print(f"conftest.py: Added {src_dir} to sys.path")
 
 
 def pytest_collection_modifyitems(config, items):

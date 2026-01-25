@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from mcp_server.db import Database
+from mcp_server.config.database import Database
 
 
 def is_database_available():

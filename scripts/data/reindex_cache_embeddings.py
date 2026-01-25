@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 # Add to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "mcp-server" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ async def reindex_embeddings(dry_run: bool = True) -> dict:
     """
     # Import here to avoid circular imports
     from mcp_server.config.database import Database
-    from mcp_server.rag import RagEngine
+    from mcp_server.services.rag import RagEngine
 
     results = {"processed": 0, "errors": 0, "skipped": 0}
 
@@ -58,7 +58,7 @@ async def reindex_embeddings(dry_run: bool = True) -> dict:
                 try:
                     # Build canonical embedding input
                     # Import constraint extractor (from agent, so adjust path if needed)
-                    from agent_core.cache import extract_constraints
+                    from mcp_server.services.cache import extract_constraints
 
                     constraints = extract_constraints(user_query)
                     canonical = build_canonical_input(user_query, constraints)
