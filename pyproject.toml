@@ -60,6 +60,11 @@ known_third_party = ["streamlit", "pandas", "nest_asyncio"]
 # Explicitly skip known virtualenv directories to speed up and avoid confusion
 skip = [".venv", "venv", ".git", "__pycache__", "build", "dist"]
 
+[tool.uv]
+constraint-dependencies = [
+    "numpy<2.0.0",
+]
+
 [[tool.uv.dependency-metadata]]
 name = "opentelemetry-proto"
 requires-dist = ["protobuf>=3.19"]
