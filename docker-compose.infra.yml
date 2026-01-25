@@ -57,42 +57,6 @@ services:
     volumes:
       - ./local-data/memgraph:/var/lib/memgraph
 
-  mlflow-server:
-    build:
-      context: .
-      dockerfile: config/docker/mlflow-server.Dockerfile
-    depends_on:
-      postgres-db:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    environment:
-      # MLflow backend store (PostgreSQL)
-      MLFLOW_BACKEND_STORE_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-root_password}@postgres-db:5432/mlflow
-      # Artifact store (MinIO S3-compatible)
-      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://mlflow-artifacts/
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-    ports:
-      - "5001:5000"
-    command: >
-      sh -c "mlflow server  --host 0.0.0.0  --port 5000  --backend-store-uri $${MLFLOW_BACKEND_STORE_URI}  --default-artifact-root $${MLFLOW_DEFAULT_ARTIFACT_ROOT}  --allowed-hosts 'mlflow-server,mlflow-server:5000,localhost,localhost:5000,localhost:5001'"
-    networks:
-      - text2sql_net
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:

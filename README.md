@@ -58,11 +58,9 @@ flowchart TB
     subgraph Observability["📡 Observability (Required)"]
         OTEL["OpenTelemetry Stack (Canonical)"]
         OTEL_Worker["OTEL Worker<br/>Postgres + MinIO"]
-        MLflow["MLflow Sink<br/>Summarized Runs"]
 
         Agent --> OTEL
         OTEL --> OTEL_Worker
-        OTEL_Worker --> MLflow
     end
 
     subgraph MCPServer["🔧 MCP Server (FastMCP, /messages SSE)"]
@@ -153,7 +151,6 @@ flowchart TB
 ### 📡 Observability (OTEL-First)
 *   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=otel`).
 *   **Durable Sink**: The OTEL worker provides persistent storage (Postgres) and raw archives (MinIO).
-*   **MLflow Run Sink**: MLflow acts solely as a downstream sink for experiment tracking. Traces are not sent directly to MLflow; they are exported by the OTEL worker to the `otel-traces` experiment.
 *   **Access Point**: Query the OTEL worker API at `http://localhost:4320/api/v1/traces`.
 
 ## Project Structure
@@ -189,7 +186,7 @@ text2sql/
 │       └── query-target/       # Query-target schema and patterns
 ├── pyproject/                  # uv workspace package manifests
 ├── docs/                       # Documentation
-├── docker-compose.infra.yml    # Infrastructure (Postgres, MinIO, Memgraph, MLflow)
+├── docker-compose.infra.yml    # Infrastructure (Postgres, MinIO, Memgraph)
 ├── docker-compose.app.yml      # Applications (MCP Server, Streamlit, Seeder)
 ├── docker-compose.observability.yml  # OTEL stack
 ├── docker-compose.grafana.yml  # Grafana dashboards
@@ -236,7 +233,7 @@ Before starting, bootstrap the local data directories:
 We use a "pull-and-run" model for infrastructure to avoid unnecessary local builds.
 
 **Infrastructure (No Build)**
-Starts Postgres, MinIO, Memgraph, MLflow. These use pinned images and do not rebuild.
+Starts Postgres, MinIO, Memgraph. These use pinned images and do not rebuild.
 
 ```bash
 docker compose -f docker-compose.infra.yml up -d
@@ -292,7 +289,6 @@ We provide `make` targets for safe and deep cleanup.
 |---------|-----|-------------|
 | **Web UI** | `http://localhost:8501` | Streamlit interface |
 | **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
-| **MLflow UI** | `http://localhost:5001` | Downstream sink for summarized runs (Experiment: `otel-traces`) |
 | **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
 
 #### Optional / Advanced Observability Services

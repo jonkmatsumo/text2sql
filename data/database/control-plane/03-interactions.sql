@@ -12,7 +12,7 @@ CREATE TABLE query_interactions (
     model_version TEXT,
     prompt_version TEXT,
     tables_used TEXT[], -- Array of strings
-    trace_id TEXT,      -- Link to MLflow/LangSmith
+    trace_id TEXT,      -- Link to OTEL trace
     tenant_id INTEGER   -- Multi-tenancy support
 );
 
