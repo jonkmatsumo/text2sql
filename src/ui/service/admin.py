@@ -138,21 +138,16 @@ class AdminService:
     @classmethod
     async def list_approved_examples(cls, limit: int = 100, search_query: str = None) -> List[Dict]:
         """List approved few-shot examples."""
-        examples = await cls._request("GET", "/registry/examples", params={"limit": limit})
+        examples = await cls._request(
+            "GET",
+            "/registry/examples",
+            params={"limit": limit, "search": search_query},
+        )
 
         if not isinstance(examples, list):
             return examples
 
-        if not search_query:
-            return examples
-
-        query = search_query.lower()
-        filtered = [
-            ex
-            for ex in examples
-            if query in ex.get("question", "").lower() or query in ex.get("sql_query", "").lower()
-        ]
-        return filtered
+        return examples
 
     @classmethod
     async def get_recommendations(
