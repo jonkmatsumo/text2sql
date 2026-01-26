@@ -1,3 +1,10 @@
+import { Route, Routes } from "react-router-dom";
+import AgentChat from "./routes/AgentChat.jsx";
+
 export default function App() {
-  return <div className="app-shell">Text2SQL React UI</div>;
+  return (
+    <Routes>
+      <Route path="/" element={<AgentChat />} />
+    </Routes>
+  );
 }
