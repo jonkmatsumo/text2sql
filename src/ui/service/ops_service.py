@@ -1,11 +1,14 @@
 """Operations Service for Streamlit Admin Panel."""
 
 import logging
+import os
 from typing import AsyncGenerator
 
-from ui.service.admin import AdminService
+import httpx
 
 logger = logging.getLogger(__name__)
+
+UI_API_URL = os.getenv("UI_API_URL", "http://localhost:8082")
 
 
 class OpsService:
@@ -13,10 +16,15 @@ class OpsService:
 
     @staticmethod
     async def run_pattern_generation(dry_run: bool = False) -> AsyncGenerator[str, None]:
-        """Run pattern generation via MCP tool and yield status."""
-        yield "Requesting pattern generation from MCP server..."
+        """Run pattern generation via UI API and yield status."""
+        yield "Requesting pattern generation from UI API..."
 
-        result = await AdminService._call_tool("generate_patterns", {"dry_run": dry_run})
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{UI_API_URL}/ops/patterns/generate", json={"dry_run": dry_run}
+            )
+            response.raise_for_status()
+            result = response.json()
 
         if isinstance(result, dict) and result.get("success"):
             yield f"✓ Pattern generation completed (Run ID: {result.get('run_id')})"
@@ -34,8 +42,6 @@ class OpsService:
     async def run_schema_hydration() -> AsyncGenerator[str, None]:
         """Run schema hydration and yield logs."""
         yield "Schema hydration migration pending (MCP tool route required)."
-        # For now, keeping as is but it will likely fail if it hits DAL.
-        # User only asked for pattern generation in this prompt.
         yield "Error: Not yet implemented via MCP tool."
 
     @staticmethod
@@ -46,8 +52,11 @@ class OpsService:
 
     @staticmethod
     async def reload_patterns() -> dict:
-        """Trigger backend pattern reload via MCP tool and return result."""
-        result = await AdminService._call_tool("reload_patterns", {})
+        """Trigger backend pattern reload via UI API and return result."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{UI_API_URL}/ops/patterns/reload")
+            response.raise_for_status()
+            result = response.json()
 
         if isinstance(result, dict) and "error" in result and result["error"]:
             return {
