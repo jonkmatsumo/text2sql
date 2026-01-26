@@ -77,3 +77,24 @@ def test_approve_interaction_resolution_type(monkeypatch):
     )
     assert resp.status_code == 200
     assert calls[-1][1]["resolution_type"] == "APPROVED_WITH_SQL_FIX"
+
+
+def test_submit_feedback(monkeypatch):
+    """Forward feedback payload to MCP tool."""
+
+    async def fake_call_tool(name, args):
+        assert name == "submit_feedback"
+        assert args["interaction_id"] == "int-1"
+        assert args["thumb"] == "UP"
+        assert args["comment"] == "nice"
+        return "OK"
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app)
+
+    resp = client.post(
+        "/feedback",
+        json={"interaction_id": "int-1", "thumb": "UP", "comment": "nice"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == "OK"
