@@ -93,6 +93,12 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: text2sql-agent-service
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-query_target}
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+
     ports:
       - "8081:8081"
     volumes:
