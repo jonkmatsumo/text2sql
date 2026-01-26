@@ -24,6 +24,7 @@ members = [
     "pyproject/mcp-server",
     "pyproject/streamlit-app",
     "pyproject/agent",
+    "pyproject/agent-service",
     "pyproject/otel-worker",
     "pyproject/synthetic-data",
     "pyproject/evaluation",
