@@ -215,6 +215,15 @@ try:
             """Instrument the app instance created by the factory."""
             app = original_factory(*args, **kwargs)
             try:
+                from starlette.middleware.cors import CORSMiddleware
+
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=["*"],
+                    allow_credentials=True,
+                    allow_methods=["*"],
+                    allow_headers=["*"],
+                )
                 StarletteInstrumentor().instrument_app(app)
                 # App instrumented successfully
             except Exception as instr_e:

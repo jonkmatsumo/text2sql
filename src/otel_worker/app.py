@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
@@ -53,6 +54,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # --- Query API ---

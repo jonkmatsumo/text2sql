@@ -4,12 +4,21 @@ import uuid
 from typing import Any, Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.graph import run_agent_with_tracing
 from agent.telemetry import telemetry
 
 app = FastAPI(title="Text2SQL Agent Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class AgentRunRequest(BaseModel):

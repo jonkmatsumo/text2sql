@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.mcp_client import MCPClient
@@ -13,6 +14,14 @@ DEFAULT_MCP_URL = "http://localhost:8000/messages"
 DEFAULT_MCP_TRANSPORT = "sse"
 
 app = FastAPI(title="Text2SQL UI API Gateway")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ApproveInteractionRequest(BaseModel):
