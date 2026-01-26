@@ -62,6 +62,14 @@ class PatternGenerateRequest(BaseModel):
     dry_run: bool = False
 
 
+class FeedbackRequest(BaseModel):
+    """Request payload for feedback submission."""
+
+    interaction_id: str
+    thumb: str
+    comment: Optional[str] = None
+
+
 def _resolve_mcp_client() -> MCPClient:
     """Create an MCP client using environment configuration."""
     mcp_url = get_env_str("MCP_SERVER_URL", DEFAULT_MCP_URL)
@@ -251,3 +259,16 @@ async def generate_patterns(request: PatternGenerateRequest) -> Any:
 async def reload_patterns() -> Any:
     """Trigger pattern reload via MCP tool."""
     return await _call_tool("reload_patterns", {})
+
+
+@app.post("/feedback")
+async def submit_feedback(request: FeedbackRequest) -> Any:
+    """Submit user feedback for an interaction."""
+    return await _call_tool(
+        "submit_feedback",
+        {
+            "interaction_id": request.interaction_id,
+            "thumb": request.thumb,
+            "comment": request.comment,
+        },
+    )
