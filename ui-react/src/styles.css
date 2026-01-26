@@ -1,0 +1,12 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.app-shell {
+  padding: 40px;
+}
