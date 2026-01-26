@@ -1,0 +1,24 @@
+[project]
+name = "text2sql-ui-api-gateway"
+version = "0.1.0"
+description = "HTTP gateway for MCP tools used by UI clients"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "text2sql-agent",
+    "text2sql-common",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "../../src"}
+
+[tool.setuptools.packages.find]
+where = ["../../src"]
+include = ["ui_api_gateway*"]

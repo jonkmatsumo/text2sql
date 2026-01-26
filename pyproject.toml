@@ -25,6 +25,7 @@ members = [
     "pyproject/streamlit-app",
     "pyproject/agent",
     "pyproject/agent-service",
+    "pyproject/ui-api-gateway",
     "pyproject/otel-worker",
     "pyproject/synthetic-data",
     "pyproject/evaluation",
