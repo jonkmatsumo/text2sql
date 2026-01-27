@@ -27,6 +27,7 @@ from otel_worker.storage.postgres import (
     init_db,
     list_spans_for_trace,
     list_traces,
+    resolve_trace_id_by_interaction,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -129,6 +130,15 @@ async def api_get_trace(
     if not trace:
         raise HTTPException(status_code=404, detail="Trace not found")
     return trace
+
+
+@app.get("/api/v1/traces/by-interaction/{interaction_id}")
+async def api_resolve_trace(interaction_id: str):
+    """Resolve trace_id by interaction_id."""
+    trace_id = resolve_trace_id_by_interaction(interaction_id)
+    if not trace_id:
+        raise HTTPException(status_code=404, detail="Trace not found for interaction")
+    return {"trace_id": trace_id}
 
 
 @app.get("/api/v1/traces/{trace_id}/spans", response_model=PaginatedSpansResponse)

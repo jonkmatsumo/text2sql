@@ -219,6 +219,21 @@ def list_traces(
         return [dict(row._mapping) for row in result]
 
 
+def _get_trace_metrics(conn, trace_id: str) -> dict:
+    """Best-effort lookup for trace metrics (handles missing table in tests)."""
+    metrics_table = get_table_name("trace_metrics")
+    query = f"""
+        SELECT total_tokens, prompt_tokens, completion_tokens, model_name, estimated_cost_usd
+        FROM {metrics_table}
+        WHERE trace_id = :trace_id
+    """
+    try:
+        row = conn.execute(text(query), {"trace_id": trace_id}).fetchone()
+    except Exception:
+        return {}
+    return dict(row._mapping) if row else {}
+
+
 def get_trace(trace_id: str, include_attributes: bool = False):
     """Fetch a single trace by ID."""
     traces_table = get_table_name("traces")
@@ -235,6 +250,7 @@ def get_trace(trace_id: str, include_attributes: bool = False):
             return None
 
         data = dict(row._mapping)
+        data.update(_get_trace_metrics(conn, trace_id))
 
         # Handle string JSON (e.g. from SQLite)
         for key in ["resource_attributes", "trace_attributes"]:
@@ -286,6 +302,21 @@ def list_spans_for_trace(
                 data.pop("events", None)
             spans.append(data)
         return spans
+
+
+def resolve_trace_id_by_interaction(interaction_id: str) -> str | None:
+    """Resolve a trace ID by interaction_id if available."""
+    traces_table = get_table_name("traces")
+    query = f"""
+        SELECT trace_id
+        FROM {traces_table}
+        WHERE interaction_id = :interaction_id
+        ORDER BY start_time DESC
+        LIMIT 1
+    """
+    with engine.connect() as conn:
+        row = conn.execute(text(query), {"interaction_id": interaction_id}).fetchone()
+        return row[0] if row else None
 
 
 def get_queue_depth() -> int:
