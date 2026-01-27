@@ -14,7 +14,9 @@ const uiApiBase = import.meta.env.VITE_UI_API_URL || "http://localhost:8082";
 export async function runAgent({
   question,
   tenantId,
-  threadId
+  threadId,
+  llmProvider,
+  llmModel
 }: AgentRunRequest): Promise<AgentRunResponse> {
   const response = await fetch(`${agentBase}/agent/run`, {
     method: "POST",
@@ -22,7 +24,9 @@ export async function runAgent({
     body: JSON.stringify({
       question,
       tenant_id: tenantId,
-      thread_id: threadId
+      thread_id: threadId,
+      llm_provider: llmProvider,
+      llm_model: llmModel
     })
   });
 

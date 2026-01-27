@@ -2,6 +2,8 @@ export interface AgentRunRequest {
     question: string;
     tenantId: number;
     threadId: string;
+    llmProvider?: string;
+    llmModel?: string;
 }
 
 export interface AgentRunResponse {
