@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import logging
@@ -17,6 +18,18 @@ engine = create_engine(settings.POSTGRES_URL)
 # Get target schema from environment, default to 'otel'
 TARGET_SCHEMA = os.getenv("OTEL_DB_SCHEMA", "otel")
 MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
+
+
+def _decode_trace_id(trace_id: str | None) -> str | None:
+    """Decode base64 OTLP trace IDs to hex when possible."""
+    if not trace_id:
+        return None
+    if all(c in "0123456789abcdef" for c in trace_id.lower()) and len(trace_id) == 32:
+        return trace_id.lower()
+    try:
+        return base64.b64decode(trace_id).hex()
+    except Exception:
+        return trace_id
 
 
 def get_table_name(table: str) -> str:
@@ -236,7 +249,7 @@ def save_traces_batch(trace_units: list[dict]):
                             {
                                 "trace_id": trace_id,
                                 "span_id": s["span_id"],
-                                "linked_trace_id": link.get("trace_id"),
+                                "linked_trace_id": _decode_trace_id(link.get("trace_id")),
                                 "linked_span_id": link.get("span_id"),
                                 "attributes": json.dumps(link.get("attributes", {})),
                             },
