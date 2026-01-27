@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -14,6 +16,18 @@ STAGE_PATTERNS = {
     "execution": ["validate_and_execute_node"],
     "synthesis": ["synthesize_insight_node"],
 }
+
+
+def _load_cost_map() -> dict:
+    """Load model cost map from environment (per-1k tokens)."""
+    raw = os.getenv("LLM_COSTS_PER_1K_TOKENS_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        logger.warning("Invalid LLM_COSTS_PER_1K_TOKENS_JSON; skipping cost estimates.")
+        return {}
 
 
 def get_stage_from_span_name(span_name: str) -> Optional[str]:
@@ -42,11 +56,19 @@ def compute_trace_metrics(
         "total_tokens": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "model_name": None,
+        "estimated_cost_usd": None,
     }
 
     if spans:
+        model_usage: Dict[str, int] = {}
         for span in spans:
             attrs = span.get("span_attributes") or {}
+            if isinstance(attrs, str):
+                try:
+                    attrs = json.loads(attrs)
+                except Exception:
+                    attrs = {}
             # Allow for both flat attributes and nested dicts if JSON storage varies
             # Common patterns: "llm.token_usage.total_tokens" or "gen_ai.usage.total_tokens"
             # We check specific keys based on our testing conventions
@@ -62,6 +84,28 @@ def compute_trace_metrics(
             metrics["prompt_tokens"] += int(p_tokens)
             metrics["completion_tokens"] += int(c_tokens)
             metrics["total_tokens"] += int(t_tokens)
+
+            model_name = attrs.get("llm.model")
+            if model_name:
+                model_usage[model_name] = model_usage.get(model_name, 0) + int(t_tokens)
+
+        if model_usage:
+            metrics["model_name"] = max(model_usage.items(), key=lambda x: x[1])[0]
+
+        cost_map = _load_cost_map()
+        model_rate = cost_map.get(metrics["model_name"]) if metrics["model_name"] else None
+        if model_rate:
+            prompt_tokens = metrics["prompt_tokens"]
+            completion_tokens = metrics["completion_tokens"]
+            total_tokens = metrics["total_tokens"]
+            if isinstance(model_rate, dict):
+                in_rate = float(model_rate.get("input", 0))
+                out_rate = float(model_rate.get("output", 0))
+                metrics["estimated_cost_usd"] = (prompt_tokens / 1000.0) * in_rate + (
+                    completion_tokens / 1000.0
+                ) * out_rate
+            else:
+                metrics["estimated_cost_usd"] = (total_tokens / 1000.0) * float(model_rate)
 
     return metrics
 
@@ -150,10 +194,12 @@ def run_aggregation(
                     """
                     INSERT INTO otel.trace_metrics (
                         trace_id, service_name, start_time, end_time, duration_ms, has_error,
-                        total_tokens, prompt_tokens, completion_tokens
+                        total_tokens, prompt_tokens, completion_tokens,
+                        model_name, estimated_cost_usd
                     ) VALUES (
                         :trace_id, :service_name, :start_time, :end_time, :duration_ms, :has_error,
-                        :total_tokens, :prompt_tokens, :completion_tokens
+                        :total_tokens, :prompt_tokens, :completion_tokens,
+                        :model_name, :estimated_cost_usd
                     )
                     ON CONFLICT (trace_id) DO UPDATE SET
                         end_time = EXCLUDED.end_time,
@@ -161,7 +207,9 @@ def run_aggregation(
                         has_error = EXCLUDED.has_error,
                         total_tokens = EXCLUDED.total_tokens,
                         prompt_tokens = EXCLUDED.prompt_tokens,
-                        completion_tokens = EXCLUDED.completion_tokens;
+                        completion_tokens = EXCLUDED.completion_tokens,
+                        model_name = EXCLUDED.model_name,
+                        estimated_cost_usd = EXCLUDED.estimated_cost_usd;
                 """
                 ),
                 t_metrics,

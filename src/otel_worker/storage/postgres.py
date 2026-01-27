@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
 
 from otel_worker.config import settings
+from otel_worker.storage.minio import upload_span_payload_blob
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,7 @@ engine = create_engine(settings.POSTGRES_URL)
 
 # Get target schema from environment, default to 'otel'
 TARGET_SCHEMA = os.getenv("OTEL_DB_SCHEMA", "otel")
+MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
 
 
 def get_table_name(table: str) -> str:
@@ -59,6 +62,9 @@ def save_traces_batch(trace_units: list[dict]):
 
     traces_table = get_table_name("traces")
     spans_table = get_table_name("spans")
+    span_events_table = get_table_name("span_events")
+    span_links_table = get_table_name("span_links")
+    span_payloads_table = get_table_name("span_payloads")
 
     with engine.begin() as conn:
         for unit in trace_units:
@@ -136,7 +142,7 @@ def save_traces_batch(trace_units: list[dict]):
                 },
             )
 
-            # Upsert Spans
+            # Upsert Spans and related entities
             for s in summaries:
                 s_start = datetime.fromtimestamp(
                     int(s["start_time_unix_nano"]) / 1e9, tz=timezone.utc
@@ -176,6 +182,137 @@ def save_traces_batch(trace_units: list[dict]):
                         "events": json.dumps(s.get("events", [])),
                     },
                 )
+
+                # Skip span detail tables for lightweight SQLite test environment
+                if engine.dialect.name == "sqlite":
+                    continue
+
+                # Span events
+                for event in s.get("events", []) or []:
+                    event_time = None
+                    if event.get("time_unix_nano"):
+                        event_time = datetime.fromtimestamp(
+                            int(event["time_unix_nano"]) / 1e9, tz=timezone.utc
+                        )
+                    try:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO {span_events_table} (
+                                    trace_id, span_id, event_name, event_time,
+                                    attributes, dropped_attributes_count
+                                ) VALUES (
+                                    :trace_id, :span_id, :event_name, :event_time,
+                                    :attributes, :dropped_attributes_count
+                                )
+                            """
+                            ),
+                            {
+                                "trace_id": trace_id,
+                                "span_id": s["span_id"],
+                                "event_name": event.get("name", "event"),
+                                "event_time": event_time,
+                                "attributes": json.dumps(event.get("attributes", {})),
+                                "dropped_attributes_count": event.get("dropped_attributes_count"),
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Failed to persist span event: {exc}")
+
+                # Span links
+                for link in s.get("links", []) or []:
+                    try:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO {span_links_table} (
+                                    trace_id, span_id, linked_trace_id, linked_span_id, attributes
+                                ) VALUES (
+                                    :trace_id, :span_id, :linked_trace_id,
+                                    :linked_span_id, :attributes
+                                )
+                            """
+                            ),
+                            {
+                                "trace_id": trace_id,
+                                "span_id": s["span_id"],
+                                "linked_trace_id": link.get("trace_id"),
+                                "linked_span_id": link.get("span_id"),
+                                "attributes": json.dumps(link.get("attributes", {})),
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Failed to persist span link: {exc}")
+
+                # Span payloads (prompts, tool inputs/outputs, errors)
+                payload_keys = [
+                    "telemetry.inputs_json",
+                    "telemetry.outputs_json",
+                    "telemetry.error_json",
+                    "llm.prompt.system",
+                    "llm.prompt.user",
+                    "llm.response.text",
+                ]
+                attrs = s.get("attributes", {}) or {}
+                for key in payload_keys:
+                    if key not in attrs:
+                        continue
+
+                    raw_payload = attrs.get(key)
+                    payload_str = raw_payload
+                    payload_obj = None
+                    if isinstance(raw_payload, str):
+                        payload_str = raw_payload
+                        try:
+                            payload_obj = json.loads(raw_payload)
+                        except Exception:
+                            payload_obj = raw_payload
+                    else:
+                        payload_obj = raw_payload
+                        payload_str = json.dumps(raw_payload, default=str)
+
+                    size_bytes = len(payload_str.encode("utf-8"))
+                    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+                    blob_url = None
+                    payload_json = payload_obj
+
+                    if size_bytes > MAX_INLINE_PAYLOAD_BYTES:
+                        try:
+                            blob_url = upload_span_payload_blob(
+                                trace_id, s["span_id"], key, payload_obj
+                            )
+                            payload_json = None
+                        except Exception as exc:
+                            logger.warning(f"Failed to upload payload blob: {exc}")
+
+                    try:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO {span_payloads_table} (
+                                    trace_id, span_id, payload_type, payload_json,
+                                    blob_url, payload_hash, size_bytes, redacted
+                                ) VALUES (
+                                    :trace_id, :span_id, :payload_type, :payload_json,
+                                    :blob_url, :payload_hash, :size_bytes, :redacted
+                                )
+                            """
+                            ),
+                            {
+                                "trace_id": trace_id,
+                                "span_id": s["span_id"],
+                                "payload_type": key,
+                                "payload_json": (
+                                    json.dumps(payload_json) if payload_json is not None else None
+                                ),
+                                "blob_url": blob_url,
+                                "payload_hash": payload_hash,
+                                "size_bytes": size_bytes,
+                                "redacted": False,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Failed to persist span payload: {exc}")
     logger.info(f"Batched saved {len(trace_units)} traces to Postgres")
 
 
@@ -317,6 +454,118 @@ def resolve_trace_id_by_interaction(interaction_id: str) -> str | None:
     with engine.connect() as conn:
         row = conn.execute(text(query), {"interaction_id": interaction_id}).fetchone()
         return row[0] if row else None
+
+
+def get_span_detail(trace_id: str, span_id: str) -> dict | None:
+    """Fetch a span and its related events/links/payloads."""
+    spans_table = get_table_name("spans")
+    events_table = get_table_name("span_events")
+    links_table = get_table_name("span_links")
+    payloads_table = get_table_name("span_payloads")
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                f"""
+                SELECT span_id, trace_id, parent_span_id, name, kind, status_code,
+                       status_message, start_time, end_time, duration_ms, span_attributes, events
+                FROM {spans_table}
+                WHERE trace_id = :trace_id AND span_id = :span_id
+            """
+            ),
+            {"trace_id": trace_id, "span_id": span_id},
+        ).fetchone()
+
+        if not row:
+            return None
+
+        data = dict(row._mapping)
+
+        for key in ["span_attributes", "events"]:
+            val = data.get(key)
+            if isinstance(val, str) and val.strip():
+                try:
+                    data[key] = json.loads(val)
+                except Exception:
+                    pass
+
+        data["links"] = []
+        data["payloads"] = []
+
+        if engine.dialect.name == "sqlite":
+            return data
+
+        try:
+            event_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT event_name, event_time, attributes, dropped_attributes_count
+                    FROM {events_table}
+                    WHERE trace_id = :trace_id AND span_id = :span_id
+                    ORDER BY event_time ASC
+                """
+                ),
+                {"trace_id": trace_id, "span_id": span_id},
+            ).fetchall()
+            data["events"] = []
+            for row in event_rows:
+                ev = dict(row._mapping)
+                if isinstance(ev.get("attributes"), str):
+                    try:
+                        ev["attributes"] = json.loads(ev["attributes"])
+                    except Exception:
+                        pass
+                data["events"].append(ev)
+        except Exception:
+            pass
+
+        try:
+            link_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT linked_trace_id, linked_span_id, attributes
+                    FROM {links_table}
+                    WHERE trace_id = :trace_id AND span_id = :span_id
+                """
+                ),
+                {"trace_id": trace_id, "span_id": span_id},
+            ).fetchall()
+            data["links"] = []
+            for row in link_rows:
+                link = dict(row._mapping)
+                if isinstance(link.get("attributes"), str):
+                    try:
+                        link["attributes"] = json.loads(link["attributes"])
+                    except Exception:
+                        pass
+                data["links"].append(link)
+        except Exception:
+            pass
+
+        try:
+            payload_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT payload_type, payload_json, blob_url, payload_hash, size_bytes, redacted
+                    FROM {payloads_table}
+                    WHERE trace_id = :trace_id AND span_id = :span_id
+                """
+                ),
+                {"trace_id": trace_id, "span_id": span_id},
+            ).fetchall()
+            data["payloads"] = []
+            for row in payload_rows:
+                payload = dict(row._mapping)
+                if isinstance(payload.get("payload_json"), str) and payload["payload_json"]:
+                    try:
+                        payload["payload_json"] = json.loads(payload["payload_json"])
+                    except Exception:
+                        pass
+                data["payloads"].append(payload)
+        except Exception:
+            pass
+
+        return data
 
 
 def get_queue_depth() -> int:

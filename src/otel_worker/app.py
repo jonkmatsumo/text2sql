@@ -14,7 +14,12 @@ from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
 from otel_worker.logging import log_event
 from otel_worker.metrics.coordinator import aggregation_coordinator, regression_coordinator
-from otel_worker.models.api import PaginatedSpansResponse, PaginatedTracesResponse, TraceDetail
+from otel_worker.models.api import (
+    PaginatedSpansResponse,
+    PaginatedTracesResponse,
+    SpanDetail,
+    TraceDetail,
+)
 from otel_worker.otlp.parser import (
     extract_trace_summaries,
     parse_otlp_json_traces,
@@ -23,6 +28,7 @@ from otel_worker.otlp.parser import (
 from otel_worker.storage.minio import get_trace_blob, init_minio
 from otel_worker.storage.postgres import (
     enqueue_ingestion,
+    get_span_detail,
     get_trace,
     init_db,
     list_spans_for_trace,
@@ -169,6 +175,15 @@ async def api_list_spans(
         raise HTTPException(status_code=500, detail="Failed to fetch spans")
 
 
+@app.get("/api/v1/traces/{trace_id}/spans/{span_id}", response_model=SpanDetail)
+async def api_get_span_detail(trace_id: str, span_id: str):
+    """Fetch detailed information for a single span."""
+    span = get_span_detail(trace_id, span_id)
+    if not span:
+        raise HTTPException(status_code=404, detail="Span not found")
+    return span
+
+
 @app.get("/api/v1/traces/{trace_id}/raw")
 async def api_get_raw_trace(trace_id: str):
     """Fetch raw OTLP blob from MinIO if available."""
@@ -180,11 +195,14 @@ async def api_get_raw_trace(trace_id: str):
             status_code=404, detail="Raw blob not found or available for this trace"
         )
 
-    # The raw_blob_url in Postgres is currently implemented as a dummy or full string.
-    # Let's assume we can derive the key or just fetch it.
     try:
-        # We'll use the service name and trace ID to fetch from MinIO
-        blob_data = get_trace_blob(trace_id, trace["service_name"])
+        # Prefer the persisted URL when available, otherwise fallback to derived path.
+        if isinstance(trace.get("raw_blob_url"), str) and trace["raw_blob_url"].startswith("s3://"):
+            # For now, we still rely on service_name/date path in get_trace_blob,
+            # so fallback to derived path if direct URL isn't supported by MinIO client.
+            blob_data = get_trace_blob(trace_id, trace["service_name"])
+        else:
+            blob_data = get_trace_blob(trace_id, trace["service_name"])
         if not blob_data:
             raise HTTPException(status_code=404, detail="Raw blob not found in storage")
         return Response(content=blob_data, media_type="application/json")
