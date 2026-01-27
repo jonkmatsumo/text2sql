@@ -1,0 +1,84 @@
+export type InteractionStatus = "PENDING" | "APPROVED" | "REJECTED" | "UNKNOWN";
+export type FeedbackThumb = "UP" | "DOWN" | "None" | "All";
+
+export interface Interaction {
+    id: string;
+    user_nlq_text: string;
+    generated_sql: string;
+    generated_sql_preview: string;
+    response_payload: string;
+    execution_status: InteractionStatus;
+    thumb?: FeedbackThumb;
+    trace_id?: string;
+    created_at: string;
+    model_version?: string;
+    tables_used?: string[];
+    feedback?: Array<{
+        thumb: FeedbackThumb;
+        comment?: string;
+    }>;
+}
+
+export interface ApprovedExample {
+    id?: string;
+    question: string;
+    sql_query: string;
+    status: string;
+    created_at: string;
+}
+
+export interface PinRule {
+    id: string;
+    tenant_id: number;
+    match_type: "exact" | "contains";
+    match_value: string;
+    registry_example_ids: string[];
+    priority: number;
+    enabled: boolean;
+}
+
+export interface RecommendationMetadata {
+    count_total: number;
+    count_approved: number;
+    count_seeded: number;
+    count_fallback: number;
+    pins_selected_count: number;
+    pins_matched_rules: string[];
+    truncated: boolean;
+}
+
+export interface RecommendationResult {
+    examples: Array<{
+        question: string;
+        source: string;
+        metadata: {
+            fingerprint: string;
+            status: string;
+            pinned?: boolean;
+        };
+    }>;
+    metadata: RecommendationMetadata;
+    fallback_used: boolean;
+}
+
+export interface PatternGenerationMetrics {
+    generated_count: number;
+    created_count: number;
+    updated_count: number;
+}
+
+export interface PatternGenerationResult {
+    success: boolean;
+    run_id?: string;
+    metrics?: PatternGenerationMetrics;
+    error?: string;
+}
+
+export interface PatternReloadResult {
+    success: boolean;
+    message: string;
+    reload_id?: string;
+    duration_ms?: number;
+    pattern_count?: number;
+    error?: string;
+}

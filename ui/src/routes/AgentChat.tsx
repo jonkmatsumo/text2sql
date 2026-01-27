@@ -121,7 +121,7 @@ export default function AgentChat() {
   };
 
   return (
-    <div className="page">
+    <>
       <header className="hero">
         <div>
           <p className="kicker">Text2SQL</p>
@@ -239,7 +239,7 @@ export default function AgentChat() {
           {isLoading ? "Running…" : "Run"}
         </button>
       </form>
-    </div>
+    </>
   );
 }
 
