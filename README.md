@@ -157,10 +157,11 @@ flowchart TB
 
 ```text
 text2sql/
+├── ui/                         # React UI (Vite + TypeScript)
 ├── src/                        # Unified source code
 │   ├── agent/                  # LangGraph AI agent (nodes, graph, state)
 │   ├── mcp_server/             # MCP server (tools, services, DAL integration)
-│   ├── ui/                     # Streamlit UI
+│   ├── ui/                     # Streamlit UI (Legacy)
 │   ├── dal/                    # Data Abstraction Layer
 │   ├── common/                 # Shared utilities
 │   ├── schema/                 # Pydantic models and schemas
@@ -260,7 +261,8 @@ docker compose -f docker-compose.infra.yml \
 ### 3. Development Workflow (Hot Reload)
 
 Source code is bind-mounted into containers for hot reload.
-- **Streamlit**: Edits to `src/ui/`, `src/agent/` are reflected immediately.
+- **React UI**: Edits to `ui/src/` are reflected immediately (port 3000).
+- **Streamlit**: Edits to `src/ui/`, `src/agent/` are reflected immediately (port 8501).
 - **MCP Server**: Edits to `src/mcp_server/` are reflected immediately.
 - **OTEL Worker**: Edits to `src/otel_worker` are reflected immediately.
 
@@ -287,7 +289,8 @@ We provide `make` targets for safe and deep cleanup.
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Web UI** | `http://localhost:8501` | Streamlit interface |
+| **React UI** | `http://localhost:3000` | Modern React + TypeScript interface |
+| **Streamlit UI** | `http://localhost:8501` | Legacy Streamlit interface |
 | **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
 | **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
 

@@ -1,18 +1,15 @@
-"""Agent Service for Streamlit app.
-
-This service handles agent integration, state management, and result processing.
-It encapsulates business logic previously in app_logic.py.
-"""
+"""Agent Service for Streamlit app using HTTP backends."""
 
 import logging
-import sys
-from pathlib import Path
+import os
 from typing import Dict, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
-# Add agent to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent" / "src"))
+AGENT_SERVICE_URL = os.getenv("AGENT_SERVICE_URL", "http://localhost:8081")
+UI_API_URL = os.getenv("UI_API_URL", "http://localhost:8082")
 
 
 class AgentService:
@@ -40,33 +37,17 @@ class AgentService:
         Raises:
             Exception: If agent workflow fails unexpectedly
         """
-        from agent.graph import run_agent_with_tracing
-
-        # Execute with full tracing and logging
-        state = await run_agent_with_tracing(
-            question=question, tenant_id=tenant_id, thread_id=thread_id
-        )
-
-        results = {
-            "sql": state.get("current_sql"),
-            "result": state.get("query_result"),
-            "response": None,
-            "error": state.get("error"),
-            "from_cache": state.get("from_cache", False),
-            "interaction_id": state.get("interaction_id"),
-            "viz_spec": state.get("viz_spec"),
-            "viz_reason": state.get("viz_reason"),
-        }
-
-        # Extract response from messages
-        if state.get("messages"):
-            results["response"] = state["messages"][-1].content
-
-        # Handle clarification
-        if state.get("clarification_question"):
-            results["response"] = state["clarification_question"]
-
-        return results
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{AGENT_SERVICE_URL}/agent/run",
+                json={
+                    "question": question,
+                    "tenant_id": tenant_id,
+                    "thread_id": thread_id,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
 
     @staticmethod
     def format_conversation_entry(question: str, results: Dict) -> Dict:
@@ -111,24 +92,18 @@ class AgentService:
         if not interaction_id:
             return False
 
-        from agent.tools import get_mcp_tools
-
         try:
-            tools = await get_mcp_tools()
-            feedback_tool = next((t for t in tools if t.name == "submit_feedback"), None)
-            if not feedback_tool:
-                logger.error(
-                    "submit_feedback tool not found in MCP tools list",
-                    extra={
-                        "available_tools": [t.name for t in tools],
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{UI_API_URL}/feedback",
+                    json={
+                        "interaction_id": interaction_id,
+                        "thumb": thumb,
+                        "comment": comment,
                     },
                 )
-                return False
-
-            await feedback_tool.ainvoke(
-                {"interaction_id": interaction_id, "thumb": thumb, "comment": comment}
-            )
-            return True
+                response.raise_for_status()
+                return True
         except Exception as e:
             print(f"Error submitting feedback: {e}")
 

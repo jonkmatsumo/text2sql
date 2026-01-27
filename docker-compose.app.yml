@@ -73,6 +73,62 @@ services:
       - ./data/database/query-target/patterns:/app/patterns:ro
     restart: unless-stopped
 
+  agent-service:
+    build:
+      context: .
+      dockerfile: config/docker/agent-service.Dockerfile
+    image: text2sql-agent-service:latest
+    depends_on:
+      mcp-server:
+        condition: service_started
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
+      MCP_SERVER_URL: http://mcp-server:8000/messages
+      MCP_TRANSPORT: sse
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: text2sql-agent-service
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-query_target}
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./agent:/app/agent
+      - ./mcp-server:/app/mcp-server
+      - ./src:/app/src
+    networks:
+      - text2sql_net
+    restart: unless-stopped
+
+  ui-api-gateway:
+    build:
+      context: .
+      dockerfile: config/docker/ui-api-gateway.Dockerfile
+    image: text2sql-ui-api-gateway:latest
+    depends_on:
+      mcp-server:
+        condition: service_started
+    environment:
+      MCP_SERVER_URL: http://mcp-server:8000/messages
+      MCP_TRANSPORT: sse
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./src:/app/src
+      - ./agent:/app/agent
+    networks:
+      - text2sql_net
+    restart: unless-stopped
+
   streamlit:
     build:
       context: .
@@ -91,6 +147,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
       MCP_SERVER_URL: http://mcp-server:8000/messages
       MCP_TRANSPORT: sse # Must match mcp-server transport setting
+      AGENT_SERVICE_URL: http://agent-service:8081
+      UI_API_URL: http://ui-api-gateway:8082
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
       DB_HOST: postgres-db
       DB_PORT: 5432
@@ -115,6 +173,27 @@ services:
       - ./mcp-server:/app/mcp-server
       - ./src:/app/src
       - ./common/tests:/app/common/tests
+    networks:
+      - text2sql_net
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: config/docker/ui.Dockerfile
+      target: development
+    image: text2sql-ui:latest
+    depends_on:
+      - ui-api-gateway
+      - agent-service
+    environment:
+      VITE_AGENT_SERVICE_URL: ${VITE_AGENT_SERVICE_URL:-http://localhost:8081}
+      VITE_UI_API_URL: ${VITE_UI_API_URL:-http://localhost:8082}
+    ports:
+      - "3000:5173"
+    volumes:
+      - ./ui:/app
+      - /app/node_modules
     networks:
       - text2sql_net
     restart: unless-stopped
