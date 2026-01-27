@@ -19,7 +19,7 @@ def test_run_agent_success(monkeypatch):
         }
 
     monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
-    monkeypatch.setattr(agent_app.telemetry, "get_current_trace_id", lambda: "trace-123")
+    monkeypatch.setattr(agent_app.telemetry, "get_current_trace_id", lambda: "a" * 32)
 
     client = TestClient(agent_app.app)
     resp = client.post(
@@ -35,7 +35,7 @@ def test_run_agent_success(monkeypatch):
     assert body["error"] is None
     assert body["from_cache"] is False
     assert body["interaction_id"] == "interaction-1"
-    assert body["trace_id"] == "trace-123"
+    assert body["trace_id"] == "a" * 32
     assert body["viz_spec"] == {"mark": "bar"}
 
 
@@ -53,4 +53,4 @@ def test_run_agent_error(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["error"] == "boom"
-    assert body["trace_id"]
+    assert body["trace_id"] is None

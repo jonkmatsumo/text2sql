@@ -1,5 +1,6 @@
 """HTTP service for running the Text2SQL agent."""
 
+import re
 import uuid
 from typing import Any, Optional
 
@@ -50,6 +51,9 @@ class AgentRunResponse(BaseModel):
     viz_reason: Optional[str] = None
 
 
+_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
 @app.post("/agent/run", response_model=AgentRunResponse)
 async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
     """Run the agent and return UI-compatible results."""
@@ -67,7 +71,9 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         if state.get("clarification_question"):
             response_text = state["clarification_question"]
 
-        trace_id = telemetry.get_current_trace_id() or thread_id
+        trace_id = telemetry.get_current_trace_id()
+        if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
+            trace_id = None
 
         return AgentRunResponse(
             sql=state.get("current_sql"),
@@ -81,4 +87,4 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             viz_reason=state.get("viz_reason"),
         )
     except Exception as exc:
-        return AgentRunResponse(error=str(exc), trace_id=thread_id)
+        return AgentRunResponse(error=str(exc), trace_id=None)
