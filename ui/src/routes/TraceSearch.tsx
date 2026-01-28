@@ -1,9 +1,12 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { listTraces } from "../api";
 import { TraceSummary, ListTracesParams } from "../types";
 
 const DEFAULT_LIMIT = 50;
+
+type SortKey = "start_time" | "duration_ms" | "span_count" | "status";
+type SortDirection = "asc" | "desc";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -34,6 +37,59 @@ interface TraceFilters {
   startTimeLte: string;
 }
 
+interface SortState {
+  key: SortKey;
+  direction: SortDirection;
+}
+
+/** Sort indicator arrow component */
+function SortArrow({ direction, active }: { direction: SortDirection; active: boolean }) {
+  return (
+    <span
+      style={{
+        marginLeft: "4px",
+        opacity: active ? 1 : 0.3,
+        display: "inline-block",
+        transition: "opacity 0.15s"
+      }}
+    >
+      {direction === "asc" ? "▲" : "▼"}
+    </span>
+  );
+}
+
+/** Sortable column header component */
+function SortableHeader({
+  label,
+  sortKey,
+  currentSort,
+  onSort
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentSort: SortState;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = currentSort.key === sortKey;
+  return (
+    <th
+      style={{
+        padding: "12px 8px",
+        fontWeight: 600,
+        cursor: "pointer",
+        userSelect: "none",
+        whiteSpace: "nowrap"
+      }}
+      onClick={() => onSort(sortKey)}
+      role="columnheader"
+      aria-sort={isActive ? (currentSort.direction === "asc" ? "ascending" : "descending") : "none"}
+    >
+      {label}
+      <SortArrow direction={isActive ? currentSort.direction : "desc"} active={isActive} />
+    </th>
+  );
+}
+
 export default function TraceSearch() {
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +101,10 @@ export default function TraceSearch() {
     startTimeGte: "",
     startTimeLte: ""
   });
+  const [sort, setSort] = useState<SortState>({
+    key: "start_time",
+    direction: "desc"
+  });
 
   const loadTraces = useCallback(
     async (append: boolean = false) => {
@@ -54,7 +114,7 @@ export default function TraceSearch() {
       const params: ListTracesParams = {
         limit: DEFAULT_LIMIT,
         offset: append && nextOffset ? nextOffset : 0,
-        order: "desc"
+        order: "desc" // Always fetch newest first from API, sort client-side
       };
 
       if (filters.service.trim()) {
@@ -111,6 +171,35 @@ export default function TraceSearch() {
       startTimeLte: ""
     });
   };
+
+  const handleSort = (key: SortKey) => {
+    setSort((prev) => ({
+      key,
+      direction: prev.key === key && prev.direction === "desc" ? "asc" : "desc"
+    }));
+  };
+
+  // Client-side sorting
+  const sortedTraces = useMemo(() => {
+    const data = [...traces];
+    const { key, direction } = sort;
+    const multiplier = direction === "asc" ? 1 : -1;
+
+    return data.sort((a, b) => {
+      switch (key) {
+        case "start_time":
+          return multiplier * (new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+        case "duration_ms":
+          return multiplier * (a.duration_ms - b.duration_ms);
+        case "span_count":
+          return multiplier * (a.span_count - b.span_count);
+        case "status":
+          return multiplier * a.status.localeCompare(b.status);
+        default:
+          return 0;
+      }
+    });
+  }, [traces, sort]);
 
   return (
     <>
@@ -322,14 +411,34 @@ export default function TraceSearch() {
                     >
                       <th style={{ padding: "12px 8px", fontWeight: 600 }}>Trace ID</th>
                       <th style={{ padding: "12px 8px", fontWeight: 600 }}>Service</th>
-                      <th style={{ padding: "12px 8px", fontWeight: 600 }}>Start Time</th>
-                      <th style={{ padding: "12px 8px", fontWeight: 600 }}>Duration</th>
-                      <th style={{ padding: "12px 8px", fontWeight: 600 }}>Spans</th>
-                      <th style={{ padding: "12px 8px", fontWeight: 600 }}>Status</th>
+                      <SortableHeader
+                        label="Start Time"
+                        sortKey="start_time"
+                        currentSort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableHeader
+                        label="Duration"
+                        sortKey="duration_ms"
+                        currentSort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableHeader
+                        label="Spans"
+                        sortKey="span_count"
+                        currentSort={sort}
+                        onSort={handleSort}
+                      />
+                      <SortableHeader
+                        label="Status"
+                        sortKey="status"
+                        currentSort={sort}
+                        onSort={handleSort}
+                      />
                     </tr>
                   </thead>
                   <tbody>
-                    {traces.map((trace) => (
+                    {sortedTraces.map((trace) => (
                       <tr
                         key={trace.trace_id}
                         style={{ borderBottom: "1px solid var(--border)" }}
