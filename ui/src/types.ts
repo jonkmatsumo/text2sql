@@ -60,3 +60,33 @@ export interface SpanDetail extends SpanSummary {
     links?: Array<Record<string, any>> | null;
     payloads?: Array<Record<string, any>> | null;
 }
+
+/** Summary representation of a trace for list endpoints. */
+export interface TraceSummary {
+    trace_id: string;
+    service_name: string;
+    start_time: string;
+    end_time: string;
+    duration_ms: number;
+    span_count: number;
+    status: string;
+    raw_blob_url?: string | null;
+}
+
+/** Paginated response from list traces endpoint. */
+export interface PaginatedTracesResponse {
+    items: TraceSummary[];
+    total: number;
+    next_offset?: number | null;
+}
+
+/** Query parameters for list traces endpoint. */
+export interface ListTracesParams {
+    service?: string;
+    trace_id?: string;
+    start_time_gte?: string;
+    start_time_lte?: string;
+    limit?: number;
+    offset?: number;
+    order?: "asc" | "desc";
+}
