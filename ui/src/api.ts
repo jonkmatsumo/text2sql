@@ -14,10 +14,15 @@ import {
   PatternGenerationResult,
   PatternReloadResult
 } from "./types/admin";
+import {
+  agentServiceBaseUrl,
+  uiApiBaseUrl,
+  otelWorkerBaseUrl
+} from "./config";
 
-const agentBase = import.meta.env.VITE_AGENT_SERVICE_URL || "http://localhost:8081";
-const uiApiBase = import.meta.env.VITE_UI_API_URL || "http://localhost:8082";
-const otelBase = import.meta.env.VITE_OTEL_WORKER_URL || "http://localhost:4320";
+const agentBase = agentServiceBaseUrl;
+const uiApiBase = uiApiBaseUrl;
+const otelBase = otelWorkerBaseUrl;
 
 export async function runAgent({
   question,
