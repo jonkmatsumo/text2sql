@@ -87,6 +87,28 @@ def get_trace_blob(trace_id: str, service_name: str, date: datetime = None) -> O
         return None
 
 
+def get_blob_by_url(blob_url: str) -> Optional[bytes]:
+    """Fetch and decompress gzipped payload from a full s3:// URL."""
+    if not blob_url.startswith("s3://"):
+        return None
+    path = blob_url.replace("s3://", "", 1)
+    if "/" not in path:
+        return None
+    bucket, object_name = path.split("/", 1)
+    try:
+        response = client.get_object(bucket, object_name)
+        try:
+            gzipped_data = response.read()
+            with gzip.GzipFile(fileobj=io.BytesIO(gzipped_data), mode="rb") as f:
+                return f.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as e:
+        logger.warning(f"Failed to fetch blob {blob_url} from MinIO: {e}")
+        return None
+
+
 def upload_span_payload_blob(
     trace_id: str, span_id: str, payload_type: str, payload: object
 ) -> str:

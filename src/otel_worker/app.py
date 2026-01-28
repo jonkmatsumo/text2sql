@@ -25,7 +25,7 @@ from otel_worker.otlp.parser import (
     parse_otlp_json_traces,
     parse_otlp_traces,
 )
-from otel_worker.storage.minio import get_trace_blob, init_minio
+from otel_worker.storage.minio import get_blob_by_url, get_trace_blob, init_minio
 from otel_worker.storage.postgres import (
     enqueue_ingestion,
     get_span_detail,
@@ -196,12 +196,11 @@ async def api_get_raw_trace(trace_id: str):
         )
 
     try:
-        # Prefer the persisted URL when available, otherwise fallback to derived path.
+        blob_data = None
         if isinstance(trace.get("raw_blob_url"), str) and trace["raw_blob_url"].startswith("s3://"):
-            # For now, we still rely on service_name/date path in get_trace_blob,
-            # so fallback to derived path if direct URL isn't supported by MinIO client.
-            blob_data = get_trace_blob(trace_id, trace["service_name"])
-        else:
+            blob_data = get_blob_by_url(trace["raw_blob_url"])
+
+        if not blob_data:
             blob_data = get_trace_blob(trace_id, trace["service_name"])
         if not blob_data:
             raise HTTPException(status_code=404, detail="Raw blob not found in storage")
