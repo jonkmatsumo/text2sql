@@ -69,7 +69,21 @@ export default function TraceDetail() {
     setIsLoading(true);
     setError(null);
 
-    Promise.all([fetchTraceDetail(traceId), fetchTraceSpans(traceId)])
+    const loadSpans = async () => {
+      const limit = 500;
+      const maxSpans = 5000;
+      let offset = 0;
+      let all: SpanSummary[] = [];
+      while (true) {
+        const page = await fetchTraceSpans(traceId, limit, offset);
+        all = all.concat(page);
+        if (page.length < limit || all.length >= maxSpans) break;
+        offset += limit;
+      }
+      return all;
+    };
+
+    Promise.all([fetchTraceDetail(traceId), loadSpans()])
       .then(([traceData, spansData]) => {
         setTrace(traceData);
         setSpans(spansData);

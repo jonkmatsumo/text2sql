@@ -52,7 +52,7 @@ export default function TraceLink({
         ) : (
           <span>{(traceId || interactionId || "").slice(0, 8)}...</span>
         )}
-        {showCopy && (
+        {showCopy && traceId && (
           <button
             type="button"
             onClick={handleCopy}
@@ -80,7 +80,7 @@ export default function TraceLink({
         ) : (
           <span className="trace-link__btn trace-link__btn--disabled">Trace Unavailable</span>
         )}
-        {showCopy && (
+        {showCopy && traceId && (
           <button
             type="button"
             onClick={handleCopy}
@@ -137,7 +137,7 @@ export default function TraceLink({
           </svg>
         </span>
       )}
-      {showCopy && (
+      {showCopy && traceId && (
         <button
           type="button"
           onClick={handleCopy}
