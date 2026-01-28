@@ -6,6 +6,7 @@ import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
+import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 
@@ -263,6 +264,7 @@ export default function TraceDetail() {
 
         <div className="trace-detail__right">
           <PromptViewer span={selectedSpan} />
+          <ApiLinksPanel traceId={trace.trace_id} />
           <div className="trace-panel">
             <h3>Trace Attributes</h3>
             <pre>{JSON.stringify(trace.trace_attributes, null, 2)}</pre>
