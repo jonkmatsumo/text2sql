@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans } from "../api";
-import { SpanDetail, SpanSummary, TraceDetail } from "../types";
+import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
 import SpanTable from "../components/trace/SpanTable";
@@ -51,7 +51,7 @@ function buildSpanRows(spans: SpanSummary[]): WaterfallRow[] {
 export default function TraceDetail() {
   const { traceId } = useParams();
   const [searchParams] = useSearchParams();
-  const [trace, setTrace] = useState<TraceDetail | null>(null);
+  const [trace, setTrace] = useState<TraceDetailModel | null>(null);
   const [spans, setSpans] = useState<SpanSummary[]>([]);
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
