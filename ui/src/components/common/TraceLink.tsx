@@ -1,28 +1,31 @@
 import React, { useState } from "react";
 
-const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || "http://localhost:3001";
-
 export interface TraceLinkProps {
-  traceId: string;
+  traceId?: string;
+  interactionId?: string;
   variant?: "icon" | "button" | "text";
   showCopy?: boolean;
-  grafanaBaseUrl?: string;
 }
 
-function buildGrafanaUrl(traceId: string, baseUrl: string): string {
-  return `${baseUrl}/d/text2sql-trace-detail?var-trace_id=${traceId}`;
-}
+const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 
 export default function TraceLink({
   traceId,
+  interactionId,
   variant = "icon",
-  showCopy = true,
-  grafanaBaseUrl = GRAFANA_BASE_URL
+  showCopy = true
 }: TraceLinkProps) {
   const [copied, setCopied] = useState(false);
+  const isValidTrace = traceId ? TRACE_ID_RE.test(traceId) : false;
+  const href = isValidTrace
+    ? `/traces/${traceId}`
+    : interactionId
+      ? `/traces/interaction/${interactionId}`
+      : null;
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!traceId) return;
     try {
       await navigator.clipboard.writeText(traceId);
       setCopied(true);
@@ -39,19 +42,16 @@ export default function TraceLink({
     }
   };
 
-  const grafanaUrl = buildGrafanaUrl(traceId, grafanaBaseUrl);
-
   if (variant === "text") {
     return (
       <span className="trace-link trace-link--text">
-        <a
-          href={grafanaUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {traceId.slice(0, 8)}...
-        </a>
+        {href ? (
+          <a href={href} onClick={(e) => e.stopPropagation()}>
+            {(traceId || interactionId || "").slice(0, 8)}...
+          </a>
+        ) : (
+          <span>{(traceId || interactionId || "").slice(0, 8)}...</span>
+        )}
         {showCopy && (
           <button
             type="button"
@@ -69,15 +69,17 @@ export default function TraceLink({
   if (variant === "button") {
     return (
       <span className="trace-link trace-link--button">
-        <a
-          href={grafanaUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="trace-link__btn"
-          onClick={(e) => e.stopPropagation()}
-        >
-          View in Grafana
-        </a>
+        {href ? (
+          <a
+            href={href}
+            className="trace-link__btn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            View Trace
+          </a>
+        ) : (
+          <span className="trace-link__btn trace-link__btn--disabled">Trace Unavailable</span>
+        )}
         {showCopy && (
           <button
             type="button"
@@ -95,29 +97,46 @@ export default function TraceLink({
   // Default: icon variant
   return (
     <span className="trace-link trace-link--icon">
-      <a
-        href={grafanaUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="trace-link__icon"
-        title={`View trace ${traceId} in Grafana`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      {href ? (
+        <a
+          href={href}
+          className="trace-link__icon"
+          title={`View trace ${traceId || interactionId}`}
+          onClick={(e) => e.stopPropagation()}
         >
-          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-      </a>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </a>
+      ) : (
+        <span className="trace-link__icon trace-link__icon--disabled" title="Trace unavailable">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </span>
+      )}
       {showCopy && (
         <button
           type="button"

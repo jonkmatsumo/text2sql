@@ -302,7 +302,13 @@ export default function AgentChat() {
               >
                 <div className="bubble-header">
                   <span>{msg.role === "user" ? "You" : "Assistant"}</span>
-                  {msg.traceId && <TraceLink traceId={msg.traceId} variant="icon" />}
+                  {(msg.traceId || msg.interactionId) && (
+                    <TraceLink
+                      traceId={msg.traceId}
+                      interactionId={msg.interactionId}
+                      variant="icon"
+                    />
+                  )}
                 </div>
                 <div className="bubble-body">
                   {msg.text && <p>{msg.text}</p>}

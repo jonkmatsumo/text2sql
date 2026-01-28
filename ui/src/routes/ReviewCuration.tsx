@@ -202,8 +202,13 @@ export default function ReviewCuration() {
                             {
                                 header: "Trace",
                                 key: "trace_id",
-                                render: (row) => row.trace_id ? (
-                                    <TraceLink traceId={row.trace_id} variant="icon" showCopy={false} />
+                                render: (row) => (row.trace_id || row.id) ? (
+                                    <TraceLink
+                                        traceId={row.trace_id}
+                                        interactionId={row.id}
+                                        variant="icon"
+                                        showCopy={false}
+                                    />
                                 ) : (
                                     <span style={{ color: "var(--muted)" }}>-</span>
                                 )
@@ -364,10 +369,14 @@ export default function ReviewCuration() {
                             </div>
                         )}
 
-                        {selectedInteraction.trace_id && (
+                        {(selectedInteraction.trace_id || selectedInteraction.id) && (
                             <div>
                                 <label style={{ fontWeight: 600, display: "block", marginBottom: "8px" }}>Trace</label>
-                                <TraceLink traceId={selectedInteraction.trace_id} variant="button" />
+                                <TraceLink
+                                    traceId={selectedInteraction.trace_id}
+                                    interactionId={selectedInteraction.id}
+                                    variant="button"
+                                />
                             </div>
                         )}
 

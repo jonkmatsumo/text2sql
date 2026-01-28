@@ -22,3 +22,41 @@ export interface FeedbackRequest {
     thumb: "UP" | "DOWN";
     comment?: string;
 }
+
+export interface TraceDetail {
+    trace_id: string;
+    service_name: string;
+    start_time: string;
+    end_time: string;
+    duration_ms: number;
+    span_count: number;
+    status: string;
+    raw_blob_url?: string | null;
+    resource_attributes?: Record<string, any> | null;
+    trace_attributes?: Record<string, any> | null;
+    total_tokens?: number | null;
+    prompt_tokens?: number | null;
+    completion_tokens?: number | null;
+    model_name?: string | null;
+    estimated_cost_usd?: number | null;
+}
+
+export interface SpanSummary {
+    span_id: string;
+    trace_id: string;
+    parent_span_id?: string | null;
+    name: string;
+    kind: string;
+    status_code: string;
+    status_message?: string | null;
+    start_time: string;
+    end_time: string;
+    duration_ms: number;
+    span_attributes?: Record<string, any> | null;
+    events?: Array<Record<string, any>> | null;
+}
+
+export interface SpanDetail extends SpanSummary {
+    links?: Array<Record<string, any>> | null;
+    payloads?: Array<Record<string, any>> | null;
+}
