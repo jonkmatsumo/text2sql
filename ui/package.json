@@ -12,9 +12,9 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
-    "react-vega": "^7.6.0",
-    "vega": "^5.33.1",
-    "vega-lite": "^5.23.0"
+    "react-vega": "^8.0.0",
+    "vega": "^6.2.0",
+    "vega-lite": "^6.4.2"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",

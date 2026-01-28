@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { VegaLite } from "react-vega";
+import { VegaEmbed } from "react-vega";
 import { listTraces } from "../api";
 import { TraceSummary } from "../types";
 import { grafanaBaseUrl } from "../config";
@@ -145,7 +145,7 @@ function TimeSeriesChart({
     }
   };
 
-  return <VegaLite spec={spec} actions={false} />;
+  return <VegaEmbed spec={spec} options={{ actions: false }} />;
 }
 
 function MetricCard({ panel }: { panel: MetricPanel }) {
