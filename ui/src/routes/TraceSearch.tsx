@@ -624,27 +624,67 @@ export default function TraceSearch() {
           {error && (
             <div
               style={{
-                padding: "16px",
+                padding: "20px",
                 backgroundColor: "rgba(239, 68, 68, 0.1)",
                 border: "1px solid rgba(239, 68, 68, 0.3)",
                 borderRadius: "8px",
-                color: "var(--error)",
-                marginBottom: "16px"
+                marginBottom: "16px",
+                textAlign: "center"
               }}
             >
-              {error}
+              <div style={{ color: "var(--error)", fontWeight: 500, marginBottom: "8px" }}>
+                Failed to load traces
+              </div>
+              <div style={{ color: "var(--muted)", fontSize: "0.9rem", marginBottom: "16px" }}>
+                {error}
+              </div>
+              <button
+                type="button"
+                onClick={() => loadTraces(false)}
+                disabled={isLoading}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: "var(--accent)",
+                  color: "#fff",
+                  fontWeight: 500,
+                  cursor: isLoading ? "wait" : "pointer"
+                }}
+              >
+                {isLoading ? "Retrying..." : "Retry"}
+              </button>
             </div>
           )}
 
-          {isLoading && traces.length === 0 && (
+          {isLoading && traces.length === 0 && !error && (
             <div style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
-              Loading traces...
+              <div style={{ marginBottom: "8px" }}>Loading traces...</div>
+              <div style={{ fontSize: "0.85rem" }}>Fetching from telemetry store</div>
             </div>
           )}
 
           {!isLoading && traces.length === 0 && !error && (
-            <div style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
-              No traces found. Try adjusting your filters.
+            <div style={{ textAlign: "center", padding: "40px" }}>
+              <div style={{ fontSize: "2rem", marginBottom: "12px" }}>No traces found</div>
+              <div style={{ color: "var(--muted)", marginBottom: "20px" }}>
+                No traces match your current filters. Try adjusting your search criteria or time range.
+              </div>
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border)",
+                  backgroundColor: "transparent",
+                  color: "var(--ink)",
+                  fontWeight: 500,
+                  cursor: "pointer"
+                }}
+              >
+                Clear all filters
+              </button>
             </div>
           )}
 
