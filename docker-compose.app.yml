@@ -190,7 +190,7 @@ services:
       VITE_AGENT_SERVICE_URL: ${VITE_AGENT_SERVICE_URL:-http://localhost:8081}
       VITE_UI_API_URL: ${VITE_UI_API_URL:-http://localhost:8082}
     ports:
-      - "3000:5173"
+      - "${UI_PORT:-3005}:5173"
     volumes:
       - ./ui:/app
       - /app/node_modules

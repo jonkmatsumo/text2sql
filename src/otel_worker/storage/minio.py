@@ -85,3 +85,57 @@ def get_trace_blob(trace_id: str, service_name: str, date: datetime = None) -> O
     except Exception as e:
         logger.warning(f"Failed to fetch trace blob {object_name} from MinIO: {e}")
         return None
+
+
+def get_blob_by_url(blob_url: str) -> Optional[bytes]:
+    """Fetch and decompress gzipped payload from a full s3:// URL."""
+    if not blob_url.startswith("s3://"):
+        return None
+    path = blob_url.replace("s3://", "", 1)
+    if "/" not in path:
+        return None
+    bucket, object_name = path.split("/", 1)
+    try:
+        response = client.get_object(bucket, object_name)
+        try:
+            gzipped_data = response.read()
+            with gzip.GzipFile(fileobj=io.BytesIO(gzipped_data), mode="rb") as f:
+                return f.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as e:
+        logger.warning(f"Failed to fetch blob {blob_url} from MinIO: {e}")
+        return None
+
+
+def upload_span_payload_blob(
+    trace_id: str, span_id: str, payload_type: str, payload: object
+) -> str:
+    """Upload gzipped span payload to MinIO and return the object path."""
+    now = datetime.now(timezone.utc)
+    date_path = now.strftime("%Y-%m-%d")
+    safe_type = payload_type.replace("/", "_").replace(" ", "_")
+    object_name = (
+        f"{settings.OTEL_ENVIRONMENT}/payloads/{date_path}/{trace_id}/{span_id}/{safe_type}.json.gz"
+    )
+
+    payload_json = json.dumps(payload, default=str)
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb") as f:
+        f.write(payload_json.encode("utf-8"))
+
+    buffer.seek(0)
+    data_bytes = buffer.getvalue()
+
+    client.put_object(
+        settings.MINIO_BUCKET,
+        object_name,
+        io.BytesIO(data_bytes),
+        length=len(data_bytes),
+        content_type="application/json",
+        metadata={"Content-Encoding": "gzip"},
+    )
+
+    logger.info(f"Uploaded span payload to MinIO: {object_name}")
+    return f"s3://{settings.MINIO_BUCKET}/{object_name}"

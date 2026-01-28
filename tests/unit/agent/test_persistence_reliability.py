@@ -39,8 +39,11 @@ class TestCreateInteractionFailure:
         with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "false"}, clear=False):
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
-                patch("agent.graph.telemetry"),
+                patch("agent.graph.telemetry") as mock_telemetry,
             ):
+                # Properly configure telemetry mock to return expected types
+                mock_telemetry.get_current_trace_id.return_value = None
+                mock_telemetry.get_current_span.return_value = None
 
                 # Should raise RuntimeError because default is fail-closed
                 with pytest.raises(RuntimeError) as exc_info:
@@ -86,8 +89,11 @@ class TestCreateInteractionFailure:
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
                 patch("agent.graph.app", mock_app),
-                patch("agent.graph.telemetry"),
+                patch("agent.graph.telemetry") as mock_telemetry,
             ):
+                # Properly configure telemetry mock to return expected types
+                mock_telemetry.get_current_trace_id.return_value = None
+                mock_telemetry.get_current_span.return_value = None
 
                 # Should NOT raise - continues with interaction_id=None
                 result = await run_agent_with_tracing("My question")
@@ -121,10 +127,13 @@ class TestCreateInteractionFailure:
         with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "true"}, clear=False):
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
-                patch("agent.graph.telemetry"),
+                patch("agent.graph.telemetry") as mock_telemetry,
                 patch("agent.graph.logger") as mock_logger,
                 patch("agent.graph.app", AsyncMock(return_value={"messages": [], "error": None})),
             ):
+                # Properly configure telemetry mock to return expected types
+                mock_telemetry.get_current_trace_id.return_value = None
+                mock_telemetry.get_current_span.return_value = None
 
                 await run_agent_with_tracing("My question")
 

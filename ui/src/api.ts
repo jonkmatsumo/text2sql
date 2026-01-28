@@ -1,4 +1,11 @@
-import { AgentRunRequest, AgentRunResponse, FeedbackRequest } from "./types";
+import {
+  AgentRunRequest,
+  AgentRunResponse,
+  FeedbackRequest,
+  SpanDetail,
+  SpanSummary,
+  TraceDetail
+} from "./types";
 import {
   Interaction,
   ApprovedExample,
@@ -10,11 +17,14 @@ import {
 
 const agentBase = import.meta.env.VITE_AGENT_SERVICE_URL || "http://localhost:8081";
 const uiApiBase = import.meta.env.VITE_UI_API_URL || "http://localhost:8082";
+const otelBase = import.meta.env.VITE_OTEL_WORKER_URL || "http://localhost:4320";
 
 export async function runAgent({
   question,
   tenantId,
-  threadId
+  threadId,
+  llmProvider,
+  llmModel
 }: AgentRunRequest): Promise<AgentRunResponse> {
   const response = await fetch(`${agentBase}/agent/run`, {
     method: "POST",
@@ -22,7 +32,9 @@ export async function runAgent({
     body: JSON.stringify({
       question,
       tenant_id: tenantId,
-      thread_id: threadId
+      thread_id: threadId,
+      llm_provider: llmProvider,
+      llm_model: llmModel
     })
   });
 
@@ -53,6 +65,49 @@ export async function submitFeedback({
   }
 
   return response.json();
+}
+
+export async function fetchTraceDetail(traceId: string): Promise<TraceDetail> {
+  const response = await fetch(`${otelBase}/api/v1/traces/${traceId}?include=attributes`);
+  if (!response.ok) {
+    throw new Error(`Trace fetch failed (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function fetchTraceSpans(
+  traceId: string,
+  limit: number = 500,
+  offset: number = 0
+): Promise<SpanSummary[]> {
+  const response = await fetch(
+    `${otelBase}/api/v1/traces/${traceId}/spans?include=attributes&limit=${limit}&offset=${offset}`
+  );
+  if (!response.ok) {
+    throw new Error(`Span fetch failed (${response.status})`);
+  }
+  const data = await response.json();
+  return data.items || [];
+}
+
+export async function fetchSpanDetail(
+  traceId: string,
+  spanId: string
+): Promise<SpanDetail> {
+  const response = await fetch(`${otelBase}/api/v1/traces/${traceId}/spans/${spanId}`);
+  if (!response.ok) {
+    throw new Error(`Span detail fetch failed (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function resolveTraceByInteraction(interactionId: string): Promise<string> {
+  const response = await fetch(`${otelBase}/api/v1/traces/by-interaction/${interactionId}`);
+  if (!response.ok) {
+    throw new Error(`Trace resolve failed (${response.status})`);
+  }
+  const data = await response.json();
+  return data.trace_id;
 }
 
 export const AdminService = {

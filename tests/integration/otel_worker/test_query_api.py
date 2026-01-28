@@ -88,7 +88,7 @@ class TestQueryAPI(unittest.TestCase):
                 "end_time_unix_nano": int(datetime.now(timezone.utc).timestamp() * 1e9),
                 "status": "STATUS_CODE_OK",
                 "service_name": cls.service_name,
-                "attributes": {"tenant_id": "tenant-1"},
+                "attributes": {"tenant_id": "tenant-1", "interaction_id": "interaction-1"},
             }
         ]
         save_trace_and_spans(cls.trace_id, {}, cls.summaries, "s3://bucket/test-blob")
@@ -132,6 +132,20 @@ class TestQueryAPI(unittest.TestCase):
         data = response.json()
         self.assertGreaterEqual(len(data["items"]), 1)
         self.assertEqual(data["items"][0]["span_id"], "span-1")
+
+    def test_get_span_detail(self):
+        """Test getting span details."""
+        response = self.client.get(f"/api/v1/traces/{self.trace_id}/spans/span-1")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["span_id"], "span-1")
+
+    def test_resolve_trace_by_interaction(self):
+        """Test resolving trace id by interaction id."""
+        response = self.client.get("/api/v1/traces/by-interaction/interaction-1")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["trace_id"], self.trace_id)
 
     def test_get_raw_blob_not_implemented(self):
         """Test getting raw blob from MinIO."""

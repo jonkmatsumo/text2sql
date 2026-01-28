@@ -3,6 +3,7 @@
 import inspect
 import json
 import logging
+import re
 import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -24,6 +25,7 @@ from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_str
 
 logger = logging.getLogger(__name__)
+_TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def run_telemetry_configure():
@@ -321,7 +323,11 @@ async def run_agent_with_tracing(
                         # Use canonical OTEL trace_id if available, fallback to thread_id
                         # This ensures the ID stored in DB matches the trace in Tempo/Grafana
                         otel_trace_id = telemetry.get_current_trace_id()
-                        final_trace_id = otel_trace_id if otel_trace_id else thread_id
+                        final_trace_id = (
+                            otel_trace_id
+                            if otel_trace_id and _TRACE_ID_RE.fullmatch(otel_trace_id)
+                            else None
+                        )
 
                         return await create_tool.ainvoke(
                             {

@@ -11,7 +11,14 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2"
+    "react-router-dom": "^6.26.2",
+    "react-vega": "^7.6.0",
+    "vega": "^6.2.0",
+    "vega-lite": "^5.21.0"
+  },
+  "overrides": {
+    "vega-expression": "^6.1.0",
+    "vega-functions": "^6.1.1"
   },
   "devDependencies": {
     "@types/node": "^25.0.10",

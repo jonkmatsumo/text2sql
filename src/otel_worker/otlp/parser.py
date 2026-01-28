@@ -1,3 +1,4 @@
+import base64
 import logging
 
 from google.protobuf.json_format import MessageToDict, Parse, ParseError
@@ -31,6 +32,78 @@ def parse_otlp_json_traces(body: bytes) -> dict:
         raise ValueError(f"Malformed JSON payload: {e}")
 
 
+def _parse_any_value(value: dict):
+    """Parse OTLP AnyValue into native Python types."""
+    if not isinstance(value, dict):
+        return value
+
+    if "stringValue" in value:
+        return value["stringValue"]
+    if "intValue" in value:
+        return int(value["intValue"])
+    if "boolValue" in value:
+        return bool(value["boolValue"])
+    if "doubleValue" in value:
+        return float(value["doubleValue"])
+    if "bytesValue" in value:
+        try:
+            return base64.b64decode(value["bytesValue"]).decode("utf-8", errors="replace")
+        except Exception:
+            return value["bytesValue"]
+    if "arrayValue" in value:
+        return [
+            _parse_any_value(v.get("value", v))
+            for v in value.get("arrayValue", {}).get("values", [])
+        ]
+    if "kvlistValue" in value:
+        return {
+            kv.get("key"): _parse_any_value(kv.get("value", {}))
+            for kv in value.get("kvlistValue", {}).get("values", [])
+        }
+    return value
+
+
+def _parse_attributes(attributes: list) -> dict:
+    """Parse OTLP attributes list into a dict with native values."""
+    parsed = {}
+    for attr in attributes or []:
+        key = attr.get("key")
+        if not key:
+            continue
+        parsed[key] = _parse_any_value(attr.get("value", {}))
+    return parsed
+
+
+def _parse_events(events: list) -> list[dict]:
+    """Parse OTLP span events to normalized dicts."""
+    parsed = []
+    for event in events or []:
+        parsed.append(
+            {
+                "name": event.get("name"),
+                "time_unix_nano": event.get("timeUnixNano"),
+                "attributes": _parse_attributes(event.get("attributes", [])),
+                "dropped_attributes_count": event.get("droppedAttributesCount"),
+            }
+        )
+    return parsed
+
+
+def _parse_links(links: list) -> list[dict]:
+    """Parse OTLP span links to normalized dicts."""
+    parsed = []
+    for link in links or []:
+        parsed.append(
+            {
+                "trace_id": link.get("traceId"),
+                "span_id": link.get("spanId"),
+                "attributes": _parse_attributes(link.get("attributes", [])),
+                "dropped_attributes_count": link.get("droppedAttributesCount"),
+            }
+        )
+    return parsed
+
+
 def extract_trace_summaries(parsed_data: dict) -> list[dict]:
     """Extract a flat list of traces with basic metadata for easy processing."""
     summaries = []
@@ -38,15 +111,7 @@ def extract_trace_summaries(parsed_data: dict) -> list[dict]:
     resource_spans = parsed_data.get("resourceSpans", [])
     for rs in resource_spans:
         resource = rs.get("resource", {})
-        resource_attributes = {
-            attr["key"]: str(
-                attr["value"].get(
-                    "stringValue",
-                    attr["value"].get("intValue", attr["value"].get("boolValue", "")),
-                )
-            )
-            for attr in resource.get("attributes", [])
-        }
+        resource_attributes = _parse_attributes(resource.get("attributes", []))
         service_name = resource_attributes.get("service.name", "unknown")
 
         scope_spans = rs.get("scopeSpans", [])
@@ -67,18 +132,9 @@ def extract_trace_summaries(parsed_data: dict) -> list[dict]:
                         "end_time_unix_nano": span.get("endTimeUnixNano"),
                         "status": span.get("status", {}).get("code", "STATUS_CODE_UNSET"),
                         "status_message": span.get("status", {}).get("message"),
-                        "attributes": {
-                            attr["key"]: str(
-                                attr["value"].get(
-                                    "stringValue",
-                                    attr["value"].get(
-                                        "intValue", attr["value"].get("boolValue", "")
-                                    ),
-                                )
-                            )
-                            for attr in span.get("attributes", [])
-                        },
-                        "events": span.get("events", []),
+                        "attributes": _parse_attributes(span.get("attributes", [])),
+                        "events": _parse_events(span.get("events", [])),
+                        "links": _parse_links(span.get("links", [])),
                     }
                 )
     return summaries

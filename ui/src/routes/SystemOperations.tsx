@@ -1,19 +1,24 @@
 import React, { useState } from "react";
 import Tabs from "../components/common/Tabs";
+import TraceLink from "../components/common/TraceLink";
 import { OpsService } from "../api";
-import { PatternGenerationResult, PatternReloadResult } from "../types/admin";
+import { PatternReloadResult } from "../types/admin";
+import { useToast } from "../hooks/useToast";
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
     const [logs, setLogs] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
+    const [traceId, setTraceId] = useState("");
+
+    const { show: showToast } = useToast();
 
     const tabs = [
-        { id: "nlp", label: "🧩 NLP Patterns" },
-        { id: "schema", label: "🗄️ Schema" },
-        { id: "cache", label: "🧠 Semantic Cache" },
-        { id: "obs", label: "📊 Observability" }
+        { id: "nlp", label: "NLP Patterns" },
+        { id: "schema", label: "Schema" },
+        { id: "cache", label: "Semantic Cache" },
+        { id: "obs", label: "Observability" }
     ];
 
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
@@ -24,15 +29,18 @@ export default function SystemOperations() {
         try {
             const result = await OpsService.generatePatterns(false);
             if (result.success) {
-                addLog(`✓ Generation complete (ID: ${result.run_id})`);
+                addLog(`Generation complete (ID: ${result.run_id})`);
                 if (result.metrics) {
                     addLog(`Created: ${result.metrics.created_count}, Updated: ${result.metrics.updated_count}`);
                 }
+                showToast("Pattern generation completed successfully", "success");
             } else {
-                addLog(`✗ Generation failed: ${result.error}`);
+                addLog(`Generation failed: ${result.error}`);
+                showToast("Pattern generation failed", "error");
             }
         } catch (err: any) {
-            addLog(`✗ Error: ${err.message}`);
+            addLog(`Error: ${err.message}`);
+            showToast("Pattern generation failed", "error");
         } finally {
             setIsLoading(false);
         }
@@ -44,12 +52,21 @@ export default function SystemOperations() {
             const result = await OpsService.reloadPatterns();
             setReloadResult(result);
             if (result.success) {
-                // Log not needed since we show the card, but for consistency
+                showToast("Patterns reloaded successfully", "success");
+            } else {
+                showToast("Pattern reload failed", "error");
             }
         } catch (err: any) {
-            alert("Reload failed");
+            showToast("Reload failed", "error");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleTraceView = () => {
+        if (!traceId.trim()) {
+            showToast("Please enter a trace ID", "warning");
+            return;
         }
     };
 
@@ -117,17 +134,37 @@ export default function SystemOperations() {
 
                 {activeTab === "schema" && (
                     <div className="panel" style={{ textAlign: "center", padding: "40px" }}>
-                        <h3 style={{ margin: 0 }}>🗄️ Schema Hydration</h3>
+                        <h3 style={{ margin: 0 }}>Schema Hydration</h3>
                         <p className="subtitle" style={{ margin: "12px auto 24px" }}>Propagate structural metadata from Postgres to the graph index.</p>
-                        <button className="pill" style={{ opacity: 0.6, cursor: "not-allowed", border: "none" }}>COMING SOON</button>
+                        <div style={{
+                            display: "inline-block",
+                            padding: "10px 20px",
+                            background: "var(--surface-muted)",
+                            borderRadius: "8px",
+                            color: "var(--muted)",
+                            fontWeight: 600,
+                            border: "1px dashed var(--border)"
+                        }}>
+                            Coming Soon
+                        </div>
                     </div>
                 )}
 
                 {activeTab === "cache" && (
                     <div className="panel" style={{ textAlign: "center", padding: "40px" }}>
-                        <h3 style={{ margin: 0 }}>🧠 Semantic Cache</h3>
+                        <h3 style={{ margin: 0 }}>Semantic Cache</h3>
                         <p className="subtitle" style={{ margin: "12px auto 24px" }}>Re-index vector embeddings for natural language lookups.</p>
-                        <button className="pill" style={{ opacity: 0.6, cursor: "not-allowed", border: "none" }}>COMING SOON</button>
+                        <div style={{
+                            display: "inline-block",
+                            padding: "10px 20px",
+                            background: "var(--surface-muted)",
+                            borderRadius: "8px",
+                            color: "var(--muted)",
+                            fontWeight: 600,
+                            border: "1px dashed var(--border)"
+                        }}>
+                            Coming Soon
+                        </div>
                     </div>
                 )}
 
@@ -142,7 +179,7 @@ export default function SystemOperations() {
                                 rel="noreferrer"
                                 style={{ display: "inline-block", backgroundColor: "var(--accent)", color: "#fff", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", fontWeight: 600 }}
                             >
-                                Open Dashboards ↗
+                                Open Dashboards
                             </a>
                         </div>
 
@@ -153,14 +190,16 @@ export default function SystemOperations() {
                                 <input
                                     type="text"
                                     placeholder="Paste Trace ID..."
+                                    value={traceId}
+                                    onChange={(e) => setTraceId(e.target.value)}
                                     style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}
                                 />
-                                <button
-                                    style={{ background: "#111827", color: "#fff", border: "none", padding: "10px 16px", borderRadius: "8px", cursor: "pointer" }}
-                                >
-                                    View
-                                </button>
                             </div>
+                            {traceId.trim() && (
+                                <div style={{ marginTop: "16px" }}>
+                                    <TraceLink traceId={traceId.trim()} variant="button" />
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

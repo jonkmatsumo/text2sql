@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -22,6 +22,11 @@ class TraceDetail(TraceSummary):
 
     resource_attributes: Optional[dict] = None
     trace_attributes: Optional[dict] = None
+    total_tokens: Optional[int] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    model_name: Optional[str] = None
+    estimated_cost_usd: Optional[float] = None
 
 
 class SpanSummary(BaseModel):
@@ -37,6 +42,15 @@ class SpanSummary(BaseModel):
     start_time: datetime
     end_time: datetime
     duration_ms: int
+    span_attributes: Optional[Dict[str, Any]] = None
+    events: Optional[List[Dict[str, Any]]] = None
+
+
+class SpanDetail(SpanSummary):
+    """Detailed representation of a span with related data."""
+
+    links: Optional[List[Dict[str, Any]]] = None
+    payloads: Optional[List[Dict[str, Any]]] = None
 
 
 class PaginatedTracesResponse(BaseModel):
