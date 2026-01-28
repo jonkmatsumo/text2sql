@@ -604,6 +604,13 @@ body {
   border: 1px solid var(--border);
 }
 
+.trace-panel__header select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .trace-waterfall__header {
   display: grid;
   grid-template-columns: 1fr 160px;

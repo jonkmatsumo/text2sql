@@ -57,6 +57,7 @@ export default function TraceDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState("start_time");
 
   useEffect(() => {
     if (!traceId) return;
@@ -105,6 +106,20 @@ export default function TraceDetail() {
   }, [spans, search]);
 
   const rows = useMemo(() => buildSpanRows(filteredSpans), [filteredSpans]);
+
+  const sortedTableSpans = useMemo(() => {
+    const data = [...filteredSpans];
+    if (sortKey === "duration") {
+      return data.sort((a, b) => b.duration_ms - a.duration_ms);
+    }
+    if (sortKey === "status") {
+      return data.sort((a, b) => a.status_code.localeCompare(b.status_code));
+    }
+    return data.sort(
+      (a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+  }, [filteredSpans, sortKey]);
 
   const traceStart = useMemo(() => {
     if (trace?.start_time) return new Date(trace.start_time).getTime();
@@ -228,14 +243,21 @@ export default function TraceDetail() {
           <div className="trace-panel">
             <div className="trace-panel__header">
               <h3>Span Table</h3>
-              <input
-                type="text"
-                placeholder="Search spans..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Search spans..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
+                  <option value="start_time">Start time</option>
+                  <option value="duration">Duration</option>
+                  <option value="status">Status</option>
+                </select>
+              </div>
             </div>
-            <SpanTable spans={filteredSpans} onSelect={handleSpanSelect} />
+            <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
           </div>
         </div>
 
