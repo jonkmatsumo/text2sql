@@ -39,9 +39,11 @@ async def test_run_agent_persists_on_crash():
     with (
         patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
         patch("agent.graph.app", mock_app),
-        patch("agent.graph.telemetry.update_current_trace"),
-        patch("agent.graph.telemetry"),
+        patch("agent.graph.telemetry") as mock_telemetry,
     ):
+        # Properly configure telemetry mock to return expected types
+        mock_telemetry.get_current_trace_id.return_value = None
+        mock_telemetry.get_current_span.return_value = None
 
         # Run the agent
         result = await run_agent_with_tracing("My question")
@@ -105,9 +107,11 @@ async def test_run_agent_persists_on_success():
     with (
         patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
         patch("agent.graph.app", mock_app),
-        patch("agent.graph.telemetry.update_current_trace"),
-        patch("agent.graph.telemetry"),
+        patch("agent.graph.telemetry") as mock_telemetry,
     ):
+        # Properly configure telemetry mock to return expected types
+        mock_telemetry.get_current_trace_id.return_value = None
+        mock_telemetry.get_current_span.return_value = None
 
         # Run the agent
         result = await run_agent_with_tracing("My question")
