@@ -9,7 +9,8 @@ const navItems = [
     { path: "/", label: "Agent Chat", icon: "💬" },
     { path: "/admin/review", label: "Review & Curation", icon: "📝" },
     { path: "/admin/recommendations", label: "Recommendations", icon: "✨" },
-    { path: "/admin/operations", label: "System Operations", icon: "⚙️" }
+    { path: "/admin/operations", label: "System Operations", icon: "⚙️" },
+    { path: "/admin/traces", label: "Trace Explorer", icon: "🔍" }
 ];
 
 export default function Layout({ children }: LayoutProps) {
