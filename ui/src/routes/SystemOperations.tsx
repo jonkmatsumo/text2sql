@@ -201,37 +201,49 @@ export default function SystemOperations() {
                             </div>
                         </div>
 
-                        {isGrafanaConfigured() && (
-                            <div className="panel">
-                                <h3>Grafana Dashboards</h3>
-                                <p className="subtitle">Real-time metrics for latency, error rates, and model performance.</p>
-                                <a
-                                    href={`${grafanaBaseUrl}/d/text2sql-traces/text2sql-trace-metrics`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{ display: "inline-block", backgroundColor: "transparent", border: "1px solid var(--border)", color: "var(--ink)", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", fontWeight: 500 }}
-                                >
-                                    Open Grafana Dashboards
-                                </a>
-                            </div>
-                        )}
-
-                        {!isGrafanaConfigured() && (
-                            <div className="panel">
-                                <h3>Metrics Dashboards</h3>
-                                <p className="subtitle">Grafana dashboards are available when configured.</p>
+                        <div className="panel">
+                            <h3>Metrics (Preview)</h3>
+                            <p className="subtitle">View basic metrics derived from trace data, including trace volume and error rates.</p>
+                            <Link
+                                to="/admin/observability/metrics"
+                                style={{ display: "inline-block", backgroundColor: "var(--accent)", color: "#fff", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", fontWeight: 600 }}
+                            >
+                                Open Metrics Preview
+                            </Link>
+                            {isGrafanaConfigured() && (
+                                <div style={{ marginTop: "16px" }}>
+                                    <a
+                                        href={`${grafanaBaseUrl}/d/text2sql-traces/text2sql-trace-metrics`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        style={{
+                                            display: "inline-block",
+                                            backgroundColor: "transparent",
+                                            border: "1px solid var(--border)",
+                                            color: "var(--ink)",
+                                            textDecoration: "none",
+                                            padding: "10px 20px",
+                                            borderRadius: "8px",
+                                            fontSize: "0.9rem"
+                                        }}
+                                    >
+                                        Open Grafana Dashboards
+                                    </a>
+                                </div>
+                            )}
+                            {!isGrafanaConfigured() && (
                                 <div style={{
-                                    marginTop: "12px",
-                                    padding: "12px",
+                                    marginTop: "16px",
+                                    padding: "10px 12px",
                                     backgroundColor: "var(--surface-muted)",
-                                    borderRadius: "8px",
-                                    fontSize: "0.9rem",
+                                    borderRadius: "6px",
+                                    fontSize: "0.85rem",
                                     color: "var(--muted)"
                                 }}>
-                                    Set <code>VITE_GRAFANA_BASE_URL</code> to enable Grafana links.
+                                    Set <code>VITE_GRAFANA_BASE_URL</code> for advanced Grafana dashboards.
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
