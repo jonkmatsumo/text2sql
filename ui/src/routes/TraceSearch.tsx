@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom";
 import { listTraces } from "../api";
 import { TraceSummary, ListTracesParams } from "../types";
+import { useOtelHealth } from "../hooks/useOtelHealth";
 
 const DEFAULT_LIMIT = 50;
 
@@ -211,6 +212,7 @@ function FacetChip({
 
 export default function TraceSearch() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { reportFailure, reportSuccess } = useOtelHealth();
 
   // Initialize state from URL
   const initialState = useMemo(() => parseUrlParams(searchParams), []);
@@ -291,13 +293,16 @@ export default function TraceSearch() {
           setTraces(result.items);
         }
         setNextOffset(result.next_offset ?? null);
+        reportSuccess();
       } catch (err: any) {
-        setError(err.message || "Failed to load traces");
+        const errorMessage = err.message || "Failed to load traces";
+        setError(errorMessage);
+        reportFailure(errorMessage);
       } finally {
         setIsLoading(false);
       }
     },
-    [filters, nextOffset]
+    [filters, nextOffset, reportSuccess, reportFailure]
   );
 
   // Load traces on mount and when filters change via URL

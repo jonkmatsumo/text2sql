@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans } from "../api";
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
@@ -7,6 +7,7 @@ import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
+import { useOtelHealth } from "../hooks/useOtelHealth";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 
@@ -59,8 +60,11 @@ export default function TraceDetail() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
+  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
+  const { reportFailure, reportSuccess } = useOtelHealth();
+
+  const loadTrace = useCallback(async () => {
     if (!traceId) return;
     if (!TRACE_ID_RE.test(traceId)) {
       setError("Invalid trace id format.");
@@ -85,16 +89,32 @@ export default function TraceDetail() {
       return all;
     };
 
-    Promise.all([fetchTraceDetail(traceId), loadSpans()])
-      .then(([traceData, spansData]) => {
-        setTrace(traceData);
-        setSpans(spansData);
-      })
-      .catch((err) => {
-        setError(err.message || "Failed to load trace.");
-      })
-      .finally(() => setIsLoading(false));
-  }, [traceId]);
+    try {
+      const [traceData, spansData] = await Promise.all([
+        fetchTraceDetail(traceId),
+        loadSpans()
+      ]);
+      setTrace(traceData);
+      setSpans(spansData);
+      setRetryCount(0);
+      reportSuccess();
+    } catch (err: any) {
+      const errorMessage = err.message || "Failed to load trace.";
+      setError(errorMessage);
+      reportFailure(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [traceId, reportFailure, reportSuccess]);
+
+  useEffect(() => {
+    loadTrace();
+  }, [loadTrace]);
+
+  const handleRetry = () => {
+    setRetryCount((c) => c + 1);
+    loadTrace();
+  };
 
   const filteredSpans = useMemo(() => {
     if (!search.trim()) return spans;
@@ -141,26 +161,106 @@ export default function TraceDetail() {
 
   if (isLoading) {
     return (
-      <div className="panel">
-        <h2>Loading trace...</h2>
-        <p className="subtitle">Trace {traceId}</p>
+      <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
+        <h2 style={{ margin: "0 0 12px 0" }}>Loading trace...</h2>
+        <p className="subtitle" style={{ marginBottom: "8px" }}>
+          Trace ID: <code style={{ fontSize: "0.85rem" }}>{traceId}</code>
+        </p>
+        <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
+          Fetching trace data and spans from telemetry store
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="panel">
-        <h2>Trace unavailable</h2>
-        <p className="error">{error}</p>
+      <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
+        <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>
+          <svg
+            width="48"
+            height="48"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--error)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ display: "inline-block" }}
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        </div>
+        <h2 style={{ margin: "0 0 12px 0", color: "var(--error)" }}>
+          Failed to load trace
+        </h2>
+        <p style={{ color: "var(--muted)", marginBottom: "8px" }}>
+          Trace ID: <code style={{ fontSize: "0.85rem" }}>{traceId}</code>
+        </p>
+        <p style={{ color: "var(--muted)", marginBottom: "24px", fontSize: "0.9rem" }}>
+          {error}
+        </p>
+        <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={handleRetry}
+            disabled={isLoading}
+            style={{
+              padding: "12px 24px",
+              borderRadius: "10px",
+              border: "none",
+              backgroundColor: "var(--accent)",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: isLoading ? "wait" : "pointer"
+            }}
+          >
+            {isLoading ? "Retrying..." : `Retry${retryCount > 0 ? ` (${retryCount})` : ""}`}
+          </button>
+          <Link
+            to="/admin/traces/search"
+            style={{
+              padding: "12px 24px",
+              borderRadius: "10px",
+              border: "1px solid var(--border)",
+              backgroundColor: "transparent",
+              color: "var(--ink)",
+              fontWeight: 500,
+              textDecoration: "none",
+              display: "inline-block"
+            }}
+          >
+            Back to Search
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (!trace) {
     return (
-      <div className="panel">
-        <h2>No trace data</h2>
+      <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
+        <h2 style={{ margin: "0 0 12px 0" }}>No trace data</h2>
+        <p style={{ color: "var(--muted)", marginBottom: "24px" }}>
+          The trace was not found or contains no data.
+        </p>
+        <Link
+          to="/admin/traces/search"
+          style={{
+            padding: "12px 24px",
+            borderRadius: "10px",
+            border: "1px solid var(--border)",
+            backgroundColor: "transparent",
+            color: "var(--ink)",
+            fontWeight: 500,
+            textDecoration: "none",
+            display: "inline-block"
+          }}
+        >
+          Back to Search
+        </Link>
       </div>
     );
   }
