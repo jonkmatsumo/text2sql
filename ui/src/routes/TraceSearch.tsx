@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { listTraces } from "../api";
 import { TraceSummary, ListTracesParams } from "../types";
 
@@ -57,6 +57,60 @@ interface FacetFilters {
 interface SortState {
   key: SortKey;
   direction: SortDirection;
+}
+
+/** Parse URL search params into component state */
+function parseUrlParams(searchParams: URLSearchParams): {
+  filters: TraceFilters;
+  facets: FacetFilters;
+  sort: SortState;
+  page: number;
+} {
+  return {
+    filters: {
+      service: searchParams.get("service") || "",
+      traceId: searchParams.get("trace_id") || "",
+      startTimeGte: searchParams.get("start_gte") || "",
+      startTimeLte: searchParams.get("start_lte") || ""
+    },
+    facets: {
+      status: searchParams.get("status") || "all",
+      durationBucket: (searchParams.get("duration") as DurationBucket) || "all",
+      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all"
+    },
+    sort: {
+      key: (searchParams.get("sort") as SortKey) || "start_time",
+      direction: (searchParams.get("dir") as SortDirection) || "desc"
+    },
+    page: parseInt(searchParams.get("page") || "1", 10)
+  };
+}
+
+/** Build URL search params from component state */
+function buildUrlParams(
+  filters: TraceFilters,
+  facets: FacetFilters,
+  sort: SortState,
+  page: number
+): URLSearchParams {
+  const params = new URLSearchParams();
+
+  // Only add non-default values
+  if (filters.service) params.set("service", filters.service);
+  if (filters.traceId) params.set("trace_id", filters.traceId);
+  if (filters.startTimeGte) params.set("start_gte", filters.startTimeGte);
+  if (filters.startTimeLte) params.set("start_lte", filters.startTimeLte);
+
+  if (facets.status !== "all") params.set("status", facets.status);
+  if (facets.durationBucket !== "all") params.set("duration", facets.durationBucket);
+  if (facets.hasErrors !== "all") params.set("errors", facets.hasErrors);
+
+  if (sort.key !== "start_time") params.set("sort", sort.key);
+  if (sort.direction !== "desc") params.set("dir", sort.direction);
+
+  if (page > 1) params.set("page", page.toString());
+
+  return params;
 }
 
 /** Sort indicator arrow component */
@@ -156,25 +210,54 @@ function FacetChip({
 }
 
 export default function TraceSearch() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Initialize state from URL
+  const initialState = useMemo(() => parseUrlParams(searchParams), []);
+
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [filters, setFilters] = useState<TraceFilters>({
-    service: "",
-    traceId: "",
-    startTimeGte: "",
-    startTimeLte: ""
-  });
-  const [facets, setFacets] = useState<FacetFilters>({
-    status: "all",
-    durationBucket: "all",
-    hasErrors: "all"
-  });
-  const [sort, setSort] = useState<SortState>({
-    key: "start_time",
-    direction: "desc"
-  });
+  const [filters, setFilters] = useState<TraceFilters>(initialState.filters);
+  const [facets, setFacets] = useState<FacetFilters>(initialState.facets);
+  const [sort, setSort] = useState<SortState>(initialState.sort);
+  const [currentPage, setCurrentPage] = useState(initialState.page);
+
+  // Debounce URL updates
+  const urlUpdateTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Update URL when state changes (debounced)
+  useEffect(() => {
+    if (urlUpdateTimeout.current) {
+      clearTimeout(urlUpdateTimeout.current);
+    }
+
+    urlUpdateTimeout.current = setTimeout(() => {
+      const newParams = buildUrlParams(filters, facets, sort, currentPage);
+      const currentStr = searchParams.toString();
+      const newStr = newParams.toString();
+
+      if (currentStr !== newStr) {
+        setSearchParams(newParams, { replace: true });
+      }
+    }, 300);
+
+    return () => {
+      if (urlUpdateTimeout.current) {
+        clearTimeout(urlUpdateTimeout.current);
+      }
+    };
+  }, [filters, facets, sort, currentPage, searchParams, setSearchParams]);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const parsed = parseUrlParams(searchParams);
+    setFilters(parsed.filters);
+    setFacets(parsed.facets);
+    setSort(parsed.sort);
+    setCurrentPage(parsed.page);
+  }, [searchParams]);
 
   const loadTraces = useCallback(
     async (append: boolean = false) => {
@@ -217,19 +300,26 @@ export default function TraceSearch() {
     [filters, nextOffset]
   );
 
+  // Load traces on mount and when filters change via URL
+  const isInitialMount = useRef(true);
   useEffect(() => {
-    loadTraces(false);
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      loadTraces(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setCurrentPage(1);
     loadTraces(false);
   };
 
   const handleLoadMore = () => {
     if (nextOffset !== null) {
       loadTraces(true);
+      setCurrentPage((p) => p + 1);
     }
   };
 
@@ -245,6 +335,7 @@ export default function TraceSearch() {
       durationBucket: "all",
       hasErrors: "all"
     });
+    setCurrentPage(1);
   };
 
   const handleSort = (key: SortKey) => {
