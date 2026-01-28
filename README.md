@@ -321,6 +321,21 @@ The Trace Explorer provides:
 
 When `VITE_GRAFANA_BASE_URL` is configured, "Open in Grafana" links appear as a secondary option.
 
+#### React UI: Local Development
+
+To install and build the React UI locally:
+
+```bash
+cd ui
+npm ci
+npm run build
+```
+
+**Dependency Notes:**
+- The UI uses `vega@^6.x` with `vega-lite@^6.x` for charting. These versions must stay aligned (both 6.x) to avoid peer dependency conflicts.
+- If you encounter peer dependency warnings during `npm ci`, they are typically benign overrides and do not affect functionality.
+- The `react-vega` package bridges React and Vega; its transitive dependencies are automatically resolved.
+
 #### Optional / Advanced Observability Services
 
 | Service | URL | Description |
