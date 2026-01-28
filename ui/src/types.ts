@@ -71,6 +71,8 @@ export interface TraceSummary {
     span_count: number;
     status: string;
     raw_blob_url?: string | null;
+    /** Optional error count - only present if API provides it */
+    error_count?: number | null;
 }
 
 /** Paginated response from list traces endpoint. */

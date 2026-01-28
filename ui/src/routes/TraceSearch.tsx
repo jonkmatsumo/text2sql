@@ -8,6 +8,17 @@ const DEFAULT_LIMIT = 50;
 type SortKey = "start_time" | "duration_ms" | "span_count" | "status";
 type SortDirection = "asc" | "desc";
 
+/** Duration bucket definitions for client-side filtering */
+type DurationBucket = "all" | "fast" | "medium" | "slow" | "very_slow";
+
+const DURATION_BUCKETS: { value: DurationBucket; label: string; min: number; max: number }[] = [
+  { value: "all", label: "All durations", min: 0, max: Infinity },
+  { value: "fast", label: "< 100ms", min: 0, max: 100 },
+  { value: "medium", label: "100ms - 1s", min: 100, max: 1000 },
+  { value: "slow", label: "1s - 10s", min: 1000, max: 10000 },
+  { value: "very_slow", label: "> 10s", min: 10000, max: Infinity }
+];
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
@@ -35,6 +46,12 @@ interface TraceFilters {
   traceId: string;
   startTimeGte: string;
   startTimeLte: string;
+}
+
+interface FacetFilters {
+  status: string; // "all" or specific status
+  durationBucket: DurationBucket;
+  hasErrors: "all" | "yes" | "no";
 }
 
 interface SortState {
@@ -90,6 +107,54 @@ function SortableHeader({
   );
 }
 
+/** Facet chip for quick filtering */
+function FacetChip({
+  label,
+  count,
+  active,
+  onClick
+}: {
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "6px 12px",
+        borderRadius: "16px",
+        border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+        backgroundColor: active ? "var(--accent)" : "transparent",
+        color: active ? "#fff" : "var(--ink)",
+        fontSize: "0.85rem",
+        fontWeight: 500,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        transition: "all 0.15s"
+      }}
+    >
+      {label}
+      {count !== undefined && (
+        <span
+          style={{
+            backgroundColor: active ? "rgba(255,255,255,0.2)" : "var(--surface-muted)",
+            padding: "2px 6px",
+            borderRadius: "10px",
+            fontSize: "0.75rem"
+          }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export default function TraceSearch() {
   const [traces, setTraces] = useState<TraceSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -100,6 +165,11 @@ export default function TraceSearch() {
     traceId: "",
     startTimeGte: "",
     startTimeLte: ""
+  });
+  const [facets, setFacets] = useState<FacetFilters>({
+    status: "all",
+    durationBucket: "all",
+    hasErrors: "all"
   });
   const [sort, setSort] = useState<SortState>({
     key: "start_time",
@@ -170,6 +240,11 @@ export default function TraceSearch() {
       startTimeGte: "",
       startTimeLte: ""
     });
+    setFacets({
+      status: "all",
+      durationBucket: "all",
+      hasErrors: "all"
+    });
   };
 
   const handleSort = (key: SortKey) => {
@@ -179,9 +254,72 @@ export default function TraceSearch() {
     }));
   };
 
+  // Compute available statuses from loaded traces
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    traces.forEach((t) => {
+      const s = t.status.toLowerCase();
+      counts[s] = (counts[s] || 0) + 1;
+    });
+    return counts;
+  }, [traces]);
+
+  const availableStatuses = useMemo(() => Object.keys(statusCounts).sort(), [statusCounts]);
+
+  // Compute duration bucket counts
+  const durationBucketCounts = useMemo(() => {
+    const counts: Record<DurationBucket, number> = {
+      all: traces.length,
+      fast: 0,
+      medium: 0,
+      slow: 0,
+      very_slow: 0
+    };
+    traces.forEach((t) => {
+      if (t.duration_ms < 100) counts.fast++;
+      else if (t.duration_ms < 1000) counts.medium++;
+      else if (t.duration_ms < 10000) counts.slow++;
+      else counts.very_slow++;
+    });
+    return counts;
+  }, [traces]);
+
+  // Check if any trace has error_count field
+  const hasErrorCountField = useMemo(
+    () => traces.some((t) => t.error_count !== undefined && t.error_count !== null),
+    [traces]
+  );
+
+  // Apply facet filters client-side
+  const filteredTraces = useMemo(() => {
+    return traces.filter((trace) => {
+      // Status filter
+      if (facets.status !== "all" && trace.status.toLowerCase() !== facets.status) {
+        return false;
+      }
+
+      // Duration bucket filter
+      if (facets.durationBucket !== "all") {
+        const bucket = DURATION_BUCKETS.find((b) => b.value === facets.durationBucket);
+        if (bucket && (trace.duration_ms < bucket.min || trace.duration_ms >= bucket.max)) {
+          return false;
+        }
+      }
+
+      // Error count filter (only if field exists)
+      if (hasErrorCountField && facets.hasErrors !== "all") {
+        const hasErrors = (trace.error_count ?? 0) > 0;
+        if (facets.hasErrors === "yes" && !hasErrors) return false;
+        if (facets.hasErrors === "no" && hasErrors) return false;
+      }
+
+      return true;
+    });
+  }, [traces, facets, hasErrorCountField]);
+
   // Client-side sorting
   const sortedTraces = useMemo(() => {
-    const data = [...traces];
+    const data = [...filteredTraces];
     const { key, direction } = sort;
     const multiplier = direction === "asc" ? 1 : -1;
 
@@ -199,7 +337,12 @@ export default function TraceSearch() {
           return 0;
       }
     });
-  }, [traces, sort]);
+  }, [filteredTraces, sort]);
+
+  const activeFacetCount =
+    (facets.status !== "all" ? 1 : 0) +
+    (facets.durationBucket !== "all" ? 1 : 0) +
+    (facets.hasErrors !== "all" ? 1 : 0);
 
   return (
     <>
@@ -356,6 +499,111 @@ export default function TraceSearch() {
           </form>
         </div>
 
+        {/* Facets panel - only show when we have traces */}
+        {traces.length > 0 && (
+          <div className="panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ margin: 0 }}>
+                Facets
+                {activeFacetCount > 0 && (
+                  <span style={{ marginLeft: "8px", fontSize: "0.85rem", color: "var(--accent)" }}>
+                    ({activeFacetCount} active)
+                  </span>
+                )}
+              </h3>
+              {activeFacetCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFacets({ status: "all", durationBucket: "all", hasErrors: "all" })}
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border)",
+                    backgroundColor: "transparent",
+                    color: "var(--muted)",
+                    fontSize: "0.85rem",
+                    cursor: "pointer"
+                  }}
+                >
+                  Clear facets
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* Status facet */}
+              {availableStatuses.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: "8px", color: "var(--muted)" }}>
+                    Status
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    <FacetChip
+                      label="All"
+                      count={traces.length}
+                      active={facets.status === "all"}
+                      onClick={() => setFacets((prev) => ({ ...prev, status: "all" }))}
+                    />
+                    {availableStatuses.map((status) => (
+                      <FacetChip
+                        key={status}
+                        label={status.toUpperCase()}
+                        count={statusCounts[status]}
+                        active={facets.status === status}
+                        onClick={() => setFacets((prev) => ({ ...prev, status }))}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Duration bucket facet */}
+              <div>
+                <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: "8px", color: "var(--muted)" }}>
+                  Duration
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {DURATION_BUCKETS.map((bucket) => (
+                    <FacetChip
+                      key={bucket.value}
+                      label={bucket.label}
+                      count={durationBucketCounts[bucket.value]}
+                      active={facets.durationBucket === bucket.value}
+                      onClick={() => setFacets((prev) => ({ ...prev, durationBucket: bucket.value }))}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Error count facet - only show if API provides error_count */}
+              {hasErrorCountField && (
+                <div>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 500, marginBottom: "8px", color: "var(--muted)" }}>
+                    Errors
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    <FacetChip
+                      label="All"
+                      active={facets.hasErrors === "all"}
+                      onClick={() => setFacets((prev) => ({ ...prev, hasErrors: "all" }))}
+                    />
+                    <FacetChip
+                      label="Has errors"
+                      active={facets.hasErrors === "yes"}
+                      onClick={() => setFacets((prev) => ({ ...prev, hasErrors: "yes" }))}
+                    />
+                    <FacetChip
+                      label="No errors"
+                      active={facets.hasErrors === "no"}
+                      onClick={() => setFacets((prev) => ({ ...prev, hasErrors: "no" }))}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="panel">
           <div
             style={{
@@ -367,7 +615,9 @@ export default function TraceSearch() {
           >
             <h3 style={{ margin: 0 }}>Results</h3>
             <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-              {traces.length} trace{traces.length !== 1 ? "s" : ""}
+              {filteredTraces.length === traces.length
+                ? `${traces.length} trace${traces.length !== 1 ? "s" : ""}`
+                : `${filteredTraces.length} of ${traces.length} traces`}
             </span>
           </div>
 
@@ -398,7 +648,13 @@ export default function TraceSearch() {
             </div>
           )}
 
-          {traces.length > 0 && (
+          {traces.length > 0 && filteredTraces.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
+              No traces match the selected facets. Try adjusting your facet filters.
+            </div>
+          )}
+
+          {sortedTraces.length > 0 && (
             <>
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
