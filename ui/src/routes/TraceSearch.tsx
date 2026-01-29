@@ -155,9 +155,24 @@ function SortableHeader({
       onClick={() => onSort(sortKey)}
       role="columnheader"
       aria-sort={isActive ? (currentSort.direction === "asc" ? "ascending" : "descending") : "none"}
+      title="Sorts current page of results only"
     >
-      {label}
-      <SortArrow direction={isActive ? currentSort.direction : "desc"} active={isActive} />
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        {label}
+        <SortArrow direction={isActive ? currentSort.direction : "desc"} active={isActive} />
+        <span
+          style={{
+            fontSize: "0.7em",
+            fontWeight: 400,
+            color: "var(--muted)",
+            backgroundColor: "var(--surface-muted)",
+            padding: "1px 4px",
+            borderRadius: "4px"
+          }}
+        >
+          Page
+        </span>
+      </div>
     </th>
   );
 }
