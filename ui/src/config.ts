@@ -15,6 +15,10 @@ export const agentServiceBaseUrl =
 export const uiApiBaseUrl =
   import.meta.env.VITE_UI_API_URL || "http://localhost:8082";
 
+/** Shared secret for internal service-to-service auth. */
+export const internalAuthToken =
+  import.meta.env.VITE_INTERNAL_AUTH_TOKEN || "";
+
 /**
  * Optional Grafana base URL.
  * When set, enables "Open in Grafana" fallback links.

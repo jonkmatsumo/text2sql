@@ -23,25 +23,17 @@ DEFAULT_MCP_TRANSPORT = "sse"
 
 
 async def get_mcp_tools():
-    """Connect to MCP server and return LangGraph-compatible tool wrappers.
-
-    Uses official MCP SDK for tool discovery.
-
-    The MCP server provides secure, read-only database access through:
-    - list_tables: Discover available tables
-    - get_table_schema: Retrieve detailed schema metadata
-    - execute_sql_query: Execute read-only SQL queries
-    - get_semantic_definitions: Retrieve business metric definitions
-    - search_relevant_tables: Semantic search for relevant tables
-
-    Returns:
-        list: List of MCPToolWrapper instances with telemetry wrapping.
-    """
+    """Connect to MCP server and return LangGraph-compatible tool wrappers."""
     mcp_url = get_env_str("MCP_SERVER_URL", DEFAULT_MCP_URL)
     mcp_transport = get_env_str("MCP_TRANSPORT", DEFAULT_MCP_TRANSPORT)
+    internal_token = get_env_str("INTERNAL_AUTH_TOKEN", "")
+
+    headers = {}
+    if internal_token:
+        headers["X-Internal-Token"] = internal_token
 
     # Create SDK client and discover tools
-    client = MCPClient(server_url=mcp_url, transport=mcp_transport)
+    client = MCPClient(server_url=mcp_url, transport=mcp_transport, headers=headers)
 
     async with client.connect() as mcp:
         tool_infos = await mcp.list_tools()
@@ -50,34 +42,22 @@ async def get_mcp_tools():
         wrappers = []
         for info in tool_infos:
             # Capture current client context for invoke
-            # Note: Each tool needs access to a connected session
             wrapper = create_tool_wrapper(
                 name=info.name,
                 description=info.description,
                 input_schema=info.input_schema,
-                invoke_fn=_create_invoke_fn(mcp_url, mcp_transport, info.name),
+                invoke_fn=_create_invoke_fn(mcp_url, mcp_transport, info.name, headers),
             )
             wrappers.append(_wrap_tool(wrapper))
 
         return wrappers
 
 
-def _create_invoke_fn(server_url: str, transport: str, tool_name: str):
-    """Create an async invoke function that connects and calls a tool.
-
-    Each invocation creates a fresh connection to ensure proper session handling.
-
-    Args:
-        server_url: MCP server URL.
-        transport: Transport type.
-        tool_name: Name of the tool to invoke.
-
-    Returns:
-        Async function that invokes the tool with given arguments.
-    """
+def _create_invoke_fn(server_url: str, transport: str, tool_name: str, headers: dict = None):
+    """Create an async invoke function that connects and calls a tool."""
 
     async def invoke(arguments: dict) -> Any:
-        client = MCPClient(server_url=server_url, transport=transport)
+        client = MCPClient(server_url=server_url, transport=transport, headers=headers)
         async with client.connect() as mcp:
             return await mcp.call_tool(tool_name, arguments)
 

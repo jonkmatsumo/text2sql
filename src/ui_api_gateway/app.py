@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -18,8 +18,22 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
 DEFAULT_MCP_TRANSPORT = "sse"
+INTERNAL_AUTH_TOKEN = get_env_str("INTERNAL_AUTH_TOKEN", "")
 
 app = FastAPI(title="Text2SQL UI API Gateway")
+
+
+async def check_internal_auth(request: Request):
+    """Verify the internal auth token if configured."""
+    if not INTERNAL_AUTH_TOKEN:
+        return
+
+    token = request.headers.get("X-Internal-Token")
+    if token != INTERNAL_AUTH_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing internal auth token",
+        )
 
 
 class OpsJobStatus(str, Enum):
@@ -116,11 +130,16 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = None
 
 
-def _resolve_mcp_client() -> MCPClient:
+async def _resolve_mcp_client() -> MCPClient:
     """Create an MCP client using environment configuration."""
     mcp_url = get_env_str("MCP_SERVER_URL", DEFAULT_MCP_URL)
     mcp_transport = get_env_str("MCP_TRANSPORT", DEFAULT_MCP_TRANSPORT)
-    return MCPClient(server_url=mcp_url, transport=mcp_transport)
+
+    headers = {}
+    if INTERNAL_AUTH_TOKEN:
+        headers["X-Internal-Token"] = INTERNAL_AUTH_TOKEN
+
+    return MCPClient(server_url=mcp_url, transport=mcp_transport, headers=headers)
 
 
 async def _call_tool(tool_name: str, args: dict) -> Any:
@@ -216,7 +235,11 @@ async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: d
             pass
 
 
-@app.post("/ops/schema-hydrate", response_model=OpsJobResponse)
+@app.post(
+    "/ops/schema-hydrate",
+    response_model=OpsJobResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
 async def trigger_schema_hydration(background_tasks: BackgroundTasks) -> Any:
     """Trigger schema hydration job."""
     job_id = uuid4()
@@ -231,7 +254,11 @@ async def trigger_schema_hydration(background_tasks: BackgroundTasks) -> Any:
     return await get_job_status(job_id)
 
 
-@app.post("/ops/semantic-cache/reindex", response_model=OpsJobResponse)
+@app.post(
+    "/ops/semantic-cache/reindex",
+    response_model=OpsJobResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
 async def trigger_cache_reindex(background_tasks: BackgroundTasks) -> Any:
     """Trigger semantic cache re-indexing job."""
     job_id = uuid4()
@@ -245,7 +272,9 @@ async def trigger_cache_reindex(background_tasks: BackgroundTasks) -> Any:
     return await get_job_status(job_id)
 
 
-@app.get("/ops/jobs/{job_id}", response_model=OpsJobResponse)
+@app.get(
+    "/ops/jobs/{job_id}", response_model=OpsJobResponse, dependencies=[Depends(check_internal_auth)]
+)
 async def get_job_status(job_id: UUID) -> Any:
     """Fetch status of a background job."""
     async with ControlPlaneDatabase.get_direct_connection() as conn:
@@ -272,7 +301,7 @@ async def get_job_status(job_id: UUID) -> Any:
         )
 
 
-@app.get("/interactions")
+@app.get("/interactions", dependencies=[Depends(check_internal_auth)])
 async def list_interactions(
     limit: int = Query(50, ge=1),
     offset: int = Query(0, ge=0),
@@ -294,7 +323,7 @@ async def get_interaction_details(interaction_id: str) -> Any:
     return await _call_tool("get_interaction_details", {"interaction_id": interaction_id})
 
 
-@app.post("/interactions/{interaction_id}/approve")
+@app.post("/interactions/{interaction_id}/approve", dependencies=[Depends(check_internal_auth)])
 async def approve_interaction(interaction_id: str, request: ApproveInteractionRequest) -> Any:
     """Approve an interaction and compute resolution type."""
     resolution_type = (

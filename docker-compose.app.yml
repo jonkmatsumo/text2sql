@@ -59,6 +59,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MCP_TRANSPORT: "sse" # SSE transport verified working (Phase 0 audit)
       SPACY_ENABLED: "true"
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: text2sql-mcp-server
@@ -89,6 +90,7 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
       MCP_SERVER_URL: http://mcp-server:8000/messages
       MCP_TRANSPORT: sse
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
       DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -120,6 +122,7 @@ services:
     environment:
       MCP_SERVER_URL: http://mcp-server:8000/messages
       MCP_TRANSPORT: sse
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
     ports:
       - "8082:8082"
     volumes:
@@ -189,6 +192,7 @@ services:
     environment:
       VITE_AGENT_SERVICE_URL: ${VITE_AGENT_SERVICE_URL:-http://localhost:8081}
       VITE_UI_API_URL: ${VITE_UI_API_URL:-http://localhost:8082}
+      VITE_INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
     ports:
       - "${UI_PORT:-3005}:5173"
     volumes:

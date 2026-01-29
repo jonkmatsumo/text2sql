@@ -35,17 +35,20 @@ class MCPClient:
     Args:
         server_url: MCP server endpoint (e.g., http://localhost:8000/messages)
         transport: Transport type ("sse" or "streamable-http")
+        headers: Optional headers for the transport
     """
 
-    def __init__(self, server_url: str, transport: str = "sse"):
+    def __init__(self, server_url: str, transport: str = "sse", headers: dict = None):
         """Initialize MCP client configuration.
 
         Args:
             server_url: The MCP server endpoint URL.
             transport: Transport protocol ("sse" or "streamable-http").
+            headers: Optional headers for HTTP requests.
         """
         self.server_url = server_url
         self.transport = transport.lower()
+        self.headers = headers or {}
         self._session: Optional[ClientSession] = None
         self._streams = None
         self._exit_stack = None
@@ -81,7 +84,7 @@ class MCPClient:
                 from mcp.client.sse import sse_client
 
                 read_stream, write_stream = await stack.enter_async_context(
-                    sse_client(self.server_url)
+                    sse_client(self.server_url, headers=self.headers)
                 )
             else:  # streamable-http
                 from mcp.client.streamable_http import streamable_http_client
