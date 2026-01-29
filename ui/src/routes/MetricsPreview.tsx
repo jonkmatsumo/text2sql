@@ -236,6 +236,15 @@ export default function MetricsPreview() {
     ];
   }, [traces]);
 
+  const timeWindow = useMemo(() => {
+    if (!traces.length) return null;
+    const timestamps = traces.map(t => new Date(t.start_time).getTime());
+    const min = new Date(Math.min(...timestamps));
+    const max = new Date(Math.max(...timestamps));
+    return { min, max };
+  }, [traces]);
+
+  const isTruncated = traces.length >= 500;
   const hasGrafana = !!grafanaBaseUrl;
 
   return (
@@ -245,7 +254,7 @@ export default function MetricsPreview() {
           <p className="kicker">Observability</p>
           <h1>Metrics (Preview)</h1>
           <p className="subtitle">
-            Basic metrics derived from trace data. For advanced dashboards, use Grafana.
+            Basic metrics derived from the <strong>latest 500 traces</strong>. For advanced dashboards, use Grafana.
           </p>
         </div>
       </header>
@@ -268,8 +277,8 @@ export default function MetricsPreview() {
               Preview Mode
             </div>
             <div style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-              These metrics are computed client-side from recent traces. For production monitoring
-              with alerting and longer retention, configure Grafana dashboards.
+              These metrics are computed client-side from the most recent 500 traces.
+              For production monitoring with alerting and longer retention, please configure Grafana dashboards.
             </div>
           </div>
           {hasGrafana && (
@@ -366,9 +375,21 @@ export default function MetricsPreview() {
             ))}
           </div>
 
-          <div style={{ marginTop: "32px", color: "var(--muted)", fontSize: "0.85rem" }}>
-            <strong>Data source:</strong> Last {traces.length} traces from telemetry store.
-            Metrics are aggregated by hour.
+          <div style={{ marginTop: "32px", padding: "16px", backgroundColor: "var(--surface-muted)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+            <div style={{ fontWeight: 600, marginBottom: "8px" }}>Data Scope</div>
+            <div style={{ fontSize: "0.9rem", color: "var(--ink)", display: "grid", gap: "4px" }}>
+                <div>
+                    <strong>Sample Size:</strong> {traces.length} traces {isTruncated && <span style={{color: "var(--error)", fontWeight: 500}}>(Truncated limit)</span>}
+                </div>
+                {timeWindow && (
+                    <div>
+                        <strong>Time Window:</strong> {timeWindow.min.toLocaleString()} — {timeWindow.max.toLocaleString()}
+                    </div>
+                )}
+                <div style={{ color: "var(--muted)", marginTop: "4px", fontStyle: "italic" }}>
+                    * These metrics are calculated client-side from the most recent traces. Older data is not included.
+                </div>
+            </div>
           </div>
         </div>
       )}
