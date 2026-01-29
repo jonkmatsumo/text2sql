@@ -19,6 +19,7 @@ help:
 
 # App stack (infra + app)
 app-up:
+	@./scripts/dev/check_ports.sh
 	@docker network inspect text2sql_net >/dev/null 2>&1 || docker network create text2sql_net
 	docker compose -f docker-compose.infra.yml -f docker-compose.app.yml up --build
 
@@ -27,6 +28,7 @@ otel-migrate:
 	docker compose $(COMPOSE_FILES) run --rm otel-worker-migrate
 
 otel-up:
+	@./scripts/dev/check_ports.sh
 	docker compose $(COMPOSE_FILES) up -d otel-collector-svc otel-worker grafana
 
 # Airflow Evaluation Stack
