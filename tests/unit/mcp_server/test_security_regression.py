@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 
 import mcp_server.tools.execute_sql_query as execute_sql_query_mod
@@ -25,43 +26,51 @@ class TestSecurityRegression:
         assert "forbidden keyword" in result
 
     @pytest.mark.asyncio
-    async def test_bypass_with_set_unblocked(self):
-        """Demonstrate that SET commands are NOT currently blocked.
+    async def test_bypass_with_set_blocked_by_db(self):
+        """Verify that SET commands are passed to DB but should be read-only.
 
-        This represents a P0 risk as it allows altering session state.
+        With hardening, we rely on the DB role/session being read-only.
         """
-        # This is NOT in the forbidden_patterns list
-        # We use a mock to see if it would reach the DB
         mock_conn = AsyncMock()
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
+
+        # Simulate Postgres error for mutative SET if we were in a real DB,
+        # but here we just check if read_only=True was passed to the context manager.
+        mock_get = MagicMock()
+        mock_get.return_value = mock_conn
 
         with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
-            # This query is DANGEROUS but currently NOT blocked by regex
             query = "SET session_replication_role = 'replica';"
             await execute_sql_query(query, tenant_id=1)
 
-            # Verification: It reaches the database
+            # Verification: context manager called with read_only=True
+            mock_get.assert_called_once_with(1, read_only=True)
             mock_conn.fetch.assert_called_once_with(query)
 
     @pytest.mark.asyncio
-    async def test_bypass_with_copy_unblocked(self):
-        """Demonstrate that COPY commands are NOT currently blocked.
+    async def test_db_enforcement_prevents_write(self):
+        """Test that if regex is bypassed, DB error is returned."""
+        # Suppose a new bypass is found that evades regex
+        # e.g. a keyword split by comments if regex was weaker
+        bypass_query = "SELECT 1; /* safe */ INSERT INTO film DEFAULT VALUES;"
 
-        Allows data exfiltration or arbitrary file writes.
-        """
         mock_conn = AsyncMock()
+        # Simulate the error Postgres would throw in a READ ONLY transaction
+        mock_conn.fetch.side_effect = asyncpg.ReadOnlySQLTransactionError(
+            "cannot execute INSERT in a read-only transaction"
+        )
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
         with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
-            query = "COPY (SELECT * FROM film) TO '/tmp/exfil.csv';"
-            await execute_sql_query(query, tenant_id=1)
+            # We need to bypass regex for this test, so let's mock re.search to return None
+            with patch("re.search", return_value=None):
+                result = await execute_sql_query(bypass_query, tenant_id=1)
 
-            # Verification: It reaches the database
-            mock_conn.fetch.assert_called_once_with(query)
+                assert "Database Error:" in result
+                assert "read-only transaction" in result
 
     @pytest.mark.asyncio
     async def test_bypass_with_cte_mutation(self):
