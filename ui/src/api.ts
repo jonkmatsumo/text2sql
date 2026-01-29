@@ -4,7 +4,9 @@ import {
   FeedbackRequest,
   SpanDetail,
   SpanSummary,
-  TraceDetail
+  TraceDetail,
+  ListTracesParams,
+  PaginatedTracesResponse
 } from "./types";
 import {
   Interaction,
@@ -14,10 +16,15 @@ import {
   PatternGenerationResult,
   PatternReloadResult
 } from "./types/admin";
+import {
+  agentServiceBaseUrl,
+  uiApiBaseUrl,
+  otelWorkerBaseUrl
+} from "./config";
 
-const agentBase = import.meta.env.VITE_AGENT_SERVICE_URL || "http://localhost:8081";
-const uiApiBase = import.meta.env.VITE_UI_API_URL || "http://localhost:8082";
-const otelBase = import.meta.env.VITE_OTEL_WORKER_URL || "http://localhost:4320";
+const agentBase = agentServiceBaseUrl;
+const uiApiBase = uiApiBaseUrl;
+const otelBase = otelWorkerBaseUrl;
 
 export async function runAgent({
   question,
@@ -108,6 +115,26 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
   }
   const data = await response.json();
   return data.trace_id;
+}
+
+export async function listTraces(
+  params: ListTracesParams = {}
+): Promise<PaginatedTracesResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.service) searchParams.append("service", params.service);
+  if (params.trace_id) searchParams.append("trace_id", params.trace_id);
+  if (params.start_time_gte) searchParams.append("start_time_gte", params.start_time_gte);
+  if (params.start_time_lte) searchParams.append("start_time_lte", params.start_time_lte);
+  if (params.limit !== undefined) searchParams.append("limit", params.limit.toString());
+  if (params.offset !== undefined) searchParams.append("offset", params.offset.toString());
+  if (params.order) searchParams.append("order", params.order);
+
+  const url = `${otelBase}/api/v1/traces${searchParams.toString() ? `?${searchParams}` : ""}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`List traces failed (${response.status})`);
+  }
+  return response.json();
 }
 
 export const AdminService = {

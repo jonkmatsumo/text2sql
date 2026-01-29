@@ -1,7 +1,7 @@
 import React, { Suspense } from "react";
 
-const VegaLite = React.lazy(() =>
-  import("react-vega").then((module) => ({ default: module.VegaLite }))
+const VegaEmbed = React.lazy(() =>
+  import("react-vega").then((module) => ({ default: module.VegaEmbed }))
 );
 
 export interface VegaChartProps {
@@ -37,9 +37,9 @@ export default function VegaChart({
       }
     >
       <div className={className} style={{ width: "100%" }}>
-        <VegaLite
+        <VegaEmbed
           spec={chartSpec as any}
-          actions={false}
+          options={{ actions: false }}
         />
       </div>
     </Suspense>

@@ -6,6 +6,9 @@ import SystemOperations from "./routes/SystemOperations";
 import AgentChat from "./routes/AgentChat";
 import TraceDetail from "./routes/TraceDetail";
 import TraceResolver from "./routes/TraceResolver";
+import TraceExplorer from "./routes/TraceExplorer";
+import TraceSearch from "./routes/TraceSearch";
+import MetricsPreview from "./routes/MetricsPreview";
 
 export default function App() {
   return (
@@ -17,6 +20,9 @@ export default function App() {
         <Route path="/admin/review" element={<ReviewCuration />} />
         <Route path="/admin/recommendations" element={<Recommendations />} />
         <Route path="/admin/operations" element={<SystemOperations />} />
+        <Route path="/admin/traces" element={<TraceExplorer />} />
+        <Route path="/admin/traces/search" element={<TraceSearch />} />
+        <Route path="/admin/observability/metrics" element={<MetricsPreview />} />
       </Routes>
     </Layout>
   );

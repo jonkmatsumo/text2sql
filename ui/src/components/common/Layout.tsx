@@ -1,5 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
+import OtelHealthBanner from "./OtelHealthBanner";
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -9,15 +10,18 @@ const navItems = [
     { path: "/", label: "Agent Chat", icon: "💬" },
     { path: "/admin/review", label: "Review & Curation", icon: "📝" },
     { path: "/admin/recommendations", label: "Recommendations", icon: "✨" },
-    { path: "/admin/operations", label: "System Operations", icon: "⚙️" }
+    { path: "/admin/operations", label: "System Operations", icon: "⚙️" },
+    { path: "/admin/traces", label: "Trace Explorer", icon: "🔍" }
 ];
 
 export default function Layout({ children }: LayoutProps) {
     const location = useLocation();
 
     return (
-        <div style={{ display: "flex", minHeight: "100vh" }}>
-            {/* Sidebar */}
+        <>
+            <OtelHealthBanner />
+            <div style={{ display: "flex", minHeight: "100vh" }}>
+                {/* Sidebar */}
             <aside
                 style={{
                     width: "280px",
@@ -76,12 +80,13 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
             </aside>
 
-            {/* Main Content */}
-            <main style={{ flex: 1, backgroundColor: "var(--bg)", overflow: "auto" }}>
-                <div className="page" style={{ padding: "48px 40px", maxWidth: "1200px" }}>
-                    {children}
-                </div>
-            </main>
-        </div>
+                {/* Main Content */}
+                <main style={{ flex: 1, backgroundColor: "var(--bg)", overflow: "auto" }}>
+                    <div className="page" style={{ padding: "48px 40px", maxWidth: "1200px" }}>
+                        {children}
+                    </div>
+                </main>
+            </div>
+        </>
     );
 }

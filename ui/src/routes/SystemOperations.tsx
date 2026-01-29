@@ -1,9 +1,11 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import { OpsService } from "../api";
 import { PatternReloadResult } from "../types/admin";
 import { useToast } from "../hooks/useToast";
+import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
@@ -171,33 +173,74 @@ export default function SystemOperations() {
                 {activeTab === "obs" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
                         <div className="panel">
-                            <h3>Grafana Dashboards</h3>
-                            <p className="subtitle">Real-time metrics for latency, error rates, and model performance.</p>
-                            <a
-                                href="http://localhost:3001/d/text2sql-traces/text2sql-trace-metrics"
-                                target="_blank"
-                                rel="noreferrer"
+                            <h3>Trace Explorer</h3>
+                            <p className="subtitle">Browse traces, view span waterfalls, and explore execution details.</p>
+                            <Link
+                                to="/admin/traces"
                                 style={{ display: "inline-block", backgroundColor: "var(--accent)", color: "#fff", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", fontWeight: 600 }}
                             >
-                                Open Dashboards
-                            </a>
+                                Open Trace Explorer
+                            </Link>
+
+                            <div style={{ marginTop: "20px" }}>
+                                <p className="subtitle" style={{ marginBottom: "8px" }}>Quick lookup by trace ID:</p>
+                                <div style={{ display: "flex", gap: "10px" }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Paste Trace ID..."
+                                        value={traceId}
+                                        onChange={(e) => setTraceId(e.target.value)}
+                                        style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}
+                                    />
+                                </div>
+                                {traceId.trim() && (
+                                    <div style={{ marginTop: "12px" }}>
+                                        <TraceLink traceId={traceId.trim()} variant="button" />
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="panel">
-                            <h3>Trace Explorer</h3>
-                            <p className="subtitle">Detailed spans and execution logs for individual requests.</p>
-                            <div style={{ marginTop: "12px", display: "flex", gap: "10px" }}>
-                                <input
-                                    type="text"
-                                    placeholder="Paste Trace ID..."
-                                    value={traceId}
-                                    onChange={(e) => setTraceId(e.target.value)}
-                                    style={{ flex: 1, padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}
-                                />
-                            </div>
-                            {traceId.trim() && (
+                            <h3>Metrics (Preview)</h3>
+                            <p className="subtitle">View basic metrics derived from trace data, including trace volume and error rates.</p>
+                            <Link
+                                to="/admin/observability/metrics"
+                                style={{ display: "inline-block", backgroundColor: "var(--accent)", color: "#fff", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", fontWeight: 600 }}
+                            >
+                                Open Metrics Preview
+                            </Link>
+                            {isGrafanaConfigured() && (
                                 <div style={{ marginTop: "16px" }}>
-                                    <TraceLink traceId={traceId.trim()} variant="button" />
+                                    <a
+                                        href={`${grafanaBaseUrl}/d/text2sql-traces/text2sql-trace-metrics`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        style={{
+                                            display: "inline-block",
+                                            backgroundColor: "transparent",
+                                            border: "1px solid var(--border)",
+                                            color: "var(--ink)",
+                                            textDecoration: "none",
+                                            padding: "10px 20px",
+                                            borderRadius: "8px",
+                                            fontSize: "0.9rem"
+                                        }}
+                                    >
+                                        Open Grafana Dashboards
+                                    </a>
+                                </div>
+                            )}
+                            {!isGrafanaConfigured() && (
+                                <div style={{
+                                    marginTop: "16px",
+                                    padding: "10px 12px",
+                                    backgroundColor: "var(--surface-muted)",
+                                    borderRadius: "6px",
+                                    fontSize: "0.85rem",
+                                    color: "var(--muted)"
+                                }}>
+                                    Set <code>VITE_GRAFANA_BASE_URL</code> for advanced Grafana dashboards.
                                 </div>
                             )}
                         </div>

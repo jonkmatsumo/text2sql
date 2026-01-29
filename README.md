@@ -294,6 +294,48 @@ We provide `make` targets for safe and deep cleanup.
 | **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
 | **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
 
+#### React UI Environment Variables
+
+The React UI supports the following environment variables (set in `.env` or via Vite):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `VITE_OTEL_WORKER_URL` | Yes | `http://localhost:4320` | Base URL for OTEL Worker API (trace data) |
+| `VITE_AGENT_SERVICE_URL` | Yes | `http://localhost:8081` | Base URL for Agent service |
+| `VITE_UI_API_URL` | Yes | `http://localhost:8082` | Base URL for UI API service |
+| `VITE_GRAFANA_BASE_URL` | No | (unset) | Optional Grafana base URL for fallback links |
+
+#### React UI: Trace Explorer
+
+The React UI includes a built-in **Trace Explorer** for viewing trace details without requiring Grafana:
+
+1. Navigate to **Trace Explorer** in the sidebar (or visit `/admin/traces`)
+2. Enter a trace ID or interaction ID to view the trace detail
+3. Use **Trace Search** (`/admin/traces/search`) to browse and filter traces
+
+The Trace Explorer provides:
+- Span waterfall visualization
+- Span table with search and sorting
+- Span detail drawer with full attribute inspection
+- API Links panel for direct access to OTEL endpoints
+
+When `VITE_GRAFANA_BASE_URL` is configured, "Open in Grafana" links appear as a secondary option.
+
+#### React UI: Local Development
+
+To install and build the React UI locally:
+
+```bash
+cd ui
+npm ci
+npm run build
+```
+
+**Dependency Notes:**
+- The UI uses `vega@^6.x` with `vega-lite@^6.x` for charting. These versions must stay aligned (both 6.x) to avoid peer dependency conflicts.
+- If you encounter peer dependency warnings during `npm ci`, they are typically benign overrides and do not affect functionality.
+- The `react-vega` package bridges React and Vega; its transitive dependencies are automatically resolved.
+
 #### Optional / Advanced Observability Services
 
 | Service | URL | Description |
