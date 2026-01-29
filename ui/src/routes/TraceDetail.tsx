@@ -53,29 +53,52 @@ function buildSpanRows(spans: SpanSummary[]): WaterfallRow[] {
 export default function TraceDetail() {
   const { traceId } = useParams();
   const [searchParams] = useSearchParams();
+
   const [trace, setTrace] = useState<TraceDetailModel | null>(null);
+  const [traceError, setTraceError] = useState<string | null>(null);
+  const [isTraceLoading, setIsTraceLoading] = useState(true);
+
   const [spans, setSpans] = useState<SpanSummary[]>([]);
+  const [spansError, setSpansError] = useState<string | null>(null);
+  const [isSpansLoading, setIsSpansLoading] = useState(true);
+
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
-  const [retryCount, setRetryCount] = useState(0);
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
-  const loadTrace = useCallback(async () => {
+  const loadTraceDetailData = useCallback(async () => {
     if (!traceId) return;
     if (!TRACE_ID_RE.test(traceId)) {
-      setError("Invalid trace id format.");
-      setIsLoading(false);
+      setTraceError("Invalid trace id format.");
+      setIsTraceLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    setIsTraceLoading(true);
+    setTraceError(null);
 
-    const loadSpans = async () => {
+    try {
+      const traceData = await fetchTraceDetail(traceId);
+      setTrace(traceData);
+      reportSuccess();
+    } catch (err: any) {
+      const errorMessage = err.message || "Failed to load trace detail.";
+      setTraceError(errorMessage);
+      reportFailure(errorMessage);
+    } finally {
+      setIsTraceLoading(false);
+    }
+  }, [traceId, reportSuccess, reportFailure]);
+
+  const loadSpansData = useCallback(async () => {
+    if (!traceId || !TRACE_ID_RE.test(traceId)) return;
+
+    setIsSpansLoading(true);
+    setSpansError(null);
+
+    const fetchAllSpans = async () => {
       const limit = 500;
       const maxSpans = 5000;
       let offset = 0;
@@ -90,30 +113,32 @@ export default function TraceDetail() {
     };
 
     try {
-      const [traceData, spansData] = await Promise.all([
-        fetchTraceDetail(traceId),
-        loadSpans()
-      ]);
-      setTrace(traceData);
+      const spansData = await fetchAllSpans();
       setSpans(spansData);
-      setRetryCount(0);
-      reportSuccess();
     } catch (err: any) {
-      const errorMessage = err.message || "Failed to load trace.";
-      setError(errorMessage);
-      reportFailure(errorMessage);
+      const errorMessage = err.message || "Failed to load spans.";
+      setSpansError(errorMessage);
+      // We don't report global failure for spans if trace detail succeeded
+      // to avoid triggering global outage banner for partial data issues.
     } finally {
-      setIsLoading(false);
+      setIsSpansLoading(false);
     }
-  }, [traceId, reportFailure, reportSuccess]);
+  }, [traceId]);
 
   useEffect(() => {
-    loadTrace();
-  }, [loadTrace]);
+    if (traceId) {
+      loadTraceDetailData();
+      loadSpansData();
+    }
+  }, [loadTraceDetailData, loadSpansData, traceId]);
 
-  const handleRetry = () => {
-    setRetryCount((c) => c + 1);
-    loadTrace();
+  const handleRetryTrace = () => {
+    loadTraceDetailData();
+    loadSpansData();
+  };
+
+  const handleRetrySpans = () => {
+    loadSpansData();
   };
 
   const filteredSpans = useMemo(() => {
@@ -154,12 +179,15 @@ export default function TraceDetail() {
     if (!traceId) return;
     fetchSpanDetail(traceId, spanId)
       .then((detail) => setSelectedSpan(detail))
-      .catch((err) => setError(err.message || "Failed to load span."));
+      .catch((err) => {
+          // Local error handling for span detail could be improved, but out of scope
+          console.error(err);
+      });
   };
 
   const interactionId = searchParams.get("interactionId");
 
-  if (isLoading) {
+  if (isTraceLoading) {
     return (
       <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
         <h2 style={{ margin: "0 0 12px 0" }}>Loading trace...</h2>
@@ -167,13 +195,13 @@ export default function TraceDetail() {
           Trace ID: <code style={{ fontSize: "0.85rem" }}>{traceId}</code>
         </p>
         <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-          Fetching trace data and spans from telemetry store
+          Fetching trace data from telemetry store
         </p>
       </div>
     );
   }
 
-  if (error) {
+  if (traceError || !trace) {
     return (
       <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
         <div style={{ fontSize: "2.5rem", marginBottom: "16px" }}>
@@ -194,19 +222,18 @@ export default function TraceDetail() {
           </svg>
         </div>
         <h2 style={{ margin: "0 0 12px 0", color: "var(--error)" }}>
-          Failed to load trace
+          {traceError ? "Failed to load trace" : "No trace data"}
         </h2>
         <p style={{ color: "var(--muted)", marginBottom: "8px" }}>
           Trace ID: <code style={{ fontSize: "0.85rem" }}>{traceId}</code>
         </p>
         <p style={{ color: "var(--muted)", marginBottom: "24px", fontSize: "0.9rem" }}>
-          {error}
+          {traceError || "The trace was not found or contains no data."}
         </p>
         <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
           <button
             type="button"
-            onClick={handleRetry}
-            disabled={isLoading}
+            onClick={handleRetryTrace}
             style={{
               padding: "12px 24px",
               borderRadius: "10px",
@@ -214,10 +241,10 @@ export default function TraceDetail() {
               backgroundColor: "var(--accent)",
               color: "#fff",
               fontWeight: 600,
-              cursor: isLoading ? "wait" : "pointer"
+              cursor: "pointer"
             }}
           >
-            {isLoading ? "Retrying..." : `Retry${retryCount > 0 ? ` (${retryCount})` : ""}`}
+            Retry
           </button>
           <Link
             to="/admin/traces/search"
@@ -235,32 +262,6 @@ export default function TraceDetail() {
             Back to Search
           </Link>
         </div>
-      </div>
-    );
-  }
-
-  if (!trace) {
-    return (
-      <div className="panel" style={{ textAlign: "center", padding: "60px 40px" }}>
-        <h2 style={{ margin: "0 0 12px 0" }}>No trace data</h2>
-        <p style={{ color: "var(--muted)", marginBottom: "24px" }}>
-          The trace was not found or contains no data.
-        </p>
-        <Link
-          to="/admin/traces/search"
-          style={{
-            padding: "12px 24px",
-            borderRadius: "10px",
-            border: "1px solid var(--border)",
-            backgroundColor: "transparent",
-            color: "var(--ink)",
-            fontWeight: 500,
-            textDecoration: "none",
-            display: "inline-block"
-          }}
-        >
-          Back to Search
-        </Link>
       </div>
     );
   }
@@ -331,14 +332,48 @@ export default function TraceDetail() {
           <div className="trace-panel">
             <div className="trace-panel__header">
               <h3>Waterfall</h3>
-              <span className="subtitle">{rows.length} spans</span>
+              <span className="subtitle">{isSpansLoading ? "Loading..." : `${rows.length} spans`}</span>
             </div>
-            <WaterfallView
-              rows={rows}
-              traceStart={traceStart}
-              traceDurationMs={traceDuration}
-              onSelect={handleSpanSelect}
-            />
+
+            {isSpansLoading && (
+                <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
+                    Loading spans...
+                </div>
+            )}
+
+            {!isSpansLoading && spansError && (
+                <div style={{ padding: "40px", textAlign: "center", border: "1px dashed var(--error)", borderRadius: "8px", margin: "20px" }}>
+                    <div style={{ color: "var(--error)", marginBottom: "12px", fontWeight: 500 }}>
+                        Failed to load spans
+                    </div>
+                    <div style={{ fontSize: "0.9rem", color: "var(--muted)", marginBottom: "16px" }}>
+                        {spansError}
+                    </div>
+                    <button
+                        onClick={handleRetrySpans}
+                        style={{
+                            padding: "8px 16px",
+                            borderRadius: "6px",
+                            border: "none",
+                            backgroundColor: "var(--surface-muted)",
+                            color: "var(--ink)",
+                            fontWeight: 600,
+                            cursor: "pointer"
+                        }}
+                    >
+                        Retry Spans
+                    </button>
+                </div>
+            )}
+
+            {!isSpansLoading && !spansError && (
+                <WaterfallView
+                    rows={rows}
+                    traceStart={traceStart}
+                    traceDurationMs={traceDuration}
+                    onSelect={handleSpanSelect}
+                />
+            )}
           </div>
 
           <div className="trace-panel">
@@ -350,15 +385,31 @@ export default function TraceDetail() {
                   placeholder="Search spans..."
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
+                  disabled={isSpansLoading || !!spansError}
                 />
-                <select value={sortKey} onChange={(event) => setSortKey(event.target.value)}>
+                <select
+                    value={sortKey}
+                    onChange={(event) => setSortKey(event.target.value)}
+                    disabled={isSpansLoading || !!spansError}
+                >
                   <option value="start_time">Start time</option>
                   <option value="duration">Duration</option>
                   <option value="status">Status</option>
                 </select>
               </div>
             </div>
-            <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+
+            {isSpansLoading && <div style={{ padding: "20px", color: "var(--muted)" }}>Loading...</div>}
+
+            {!isSpansLoading && spansError && (
+                <div style={{ padding: "20px", color: "var(--muted)" }}>
+                    Span data unavailable.
+                </div>
+            )}
+
+            {!isSpansLoading && !spansError && (
+                <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+            )}
           </div>
         </div>
 
