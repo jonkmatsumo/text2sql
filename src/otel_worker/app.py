@@ -34,7 +34,9 @@ from otel_worker.storage.postgres import (
     list_spans_for_trace,
     list_traces,
     resolve_trace_id_by_interaction,
+    safe_queue,
 )
+from otel_worker.storage.reconciliation import reconciliation_coordinator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,15 +51,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize storage: {e}")
 
+    safe_queue.start()
     await monitor.start()
     await coordinator.start()
     await aggregation_coordinator.start()
     await regression_coordinator.start()
+    await reconciliation_coordinator.start()
     yield
+    await reconciliation_coordinator.stop()
     await regression_coordinator.stop()
     await aggregation_coordinator.stop()
     await coordinator.stop()
     await monitor.stop()
+    safe_queue.stop()
 
 
 app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)
