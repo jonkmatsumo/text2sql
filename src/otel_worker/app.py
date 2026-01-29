@@ -15,6 +15,7 @@ from otel_worker.ingestion.processor import coordinator
 from otel_worker.logging import log_event
 from otel_worker.metrics.coordinator import aggregation_coordinator, regression_coordinator
 from otel_worker.models.api import (
+    MetricsPreviewResponse,
     PaginatedSpansResponse,
     PaginatedTracesResponse,
     SpanDetail,
@@ -28,6 +29,7 @@ from otel_worker.otlp.parser import (
 from otel_worker.storage.minio import get_blob_by_url, get_trace_blob, init_minio
 from otel_worker.storage.postgres import (
     enqueue_ingestion,
+    get_metrics_preview,
     get_span_detail,
     get_trace,
     init_db,
@@ -87,6 +89,32 @@ app.add_middleware(
 
 
 # --- Query API ---
+
+
+@app.get("/api/v1/metrics/preview", response_model=MetricsPreviewResponse)
+async def api_get_metrics_preview(
+    window: str = Query("1h", regex="^(15m|1h|24h|7d)$"),
+    service: Optional[str] = Query(None),
+):
+    """Fetch server-side aggregated metrics for preview."""
+    # Parse window to minutes
+    unit = window[-1]
+    value = int(window[:-1])
+    if unit == "m":
+        minutes = value
+    elif unit == "h":
+        minutes = value * 60
+    elif unit == "d":
+        minutes = value * 24 * 60
+    else:
+        raise HTTPException(status_code=400, detail="Invalid window format")
+
+    try:
+        data = get_metrics_preview(window_minutes=minutes, service=service)
+        return data
+    except Exception as e:
+        logger.error(f"Error computing metrics preview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute metrics")
 
 
 @app.get("/api/v1/traces", response_model=PaginatedTracesResponse)

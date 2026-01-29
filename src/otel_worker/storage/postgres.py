@@ -693,3 +693,74 @@ def update_ingestion_status(item_id: int, status: str, error: str = None):
                 ),
                 {"id": item_id, "error": error},
             )
+
+
+def get_metrics_preview(window_minutes: int, service: str = None):
+    """Aggregate metrics over a time window for preview."""
+    from datetime import timedelta
+
+    traces_table = get_table_name("traces")
+    start_time = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+
+    # Base params
+    params = {"start_time": start_time}
+    if service:
+        params["service"] = service
+
+    # Summary query
+    # Percentile is Postgres specific, fallback for SQLite
+    if engine.dialect.name == "postgresql":
+        p95_expr = "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)"
+    else:
+        p95_expr = "AVG(duration_ms)"  # Fallback
+
+    summary_query = f"""
+        SELECT
+            COUNT(*) as total_count,
+            COUNT(*) FILTER (WHERE status = 'ERROR') as error_count,
+            AVG(duration_ms) as avg_duration,
+            {p95_expr} as p95_duration
+        FROM {traces_table}
+        WHERE start_time >= :start_time
+    """
+    if service:
+        summary_query += " AND service_name = :service"
+
+    # Timeseries query
+    # date_trunc is Postgres specific, fallback for SQLite
+    if engine.dialect.name == "postgresql":
+        interval = "1 minute" if window_minutes <= 60 else "1 hour"
+        bucket_expr = f"date_trunc('{interval.split()[1]}', start_time)"
+    else:
+        bucket_expr = "datetime(strftime('%Y-%m-%dT%H:%M:00', start_time))"
+
+    ts_query = f"""
+        SELECT
+            {bucket_expr} as timestamp,
+            COUNT(*) as count,
+            COUNT(*) FILTER (WHERE status = 'ERROR') as error_count,
+            AVG(duration_ms) as avg_duration
+        FROM {traces_table}
+        WHERE start_time >= :start_time
+    """
+    if service:
+        ts_query += " AND service_name = :service"
+    ts_query += " GROUP BY 1 ORDER BY 1 ASC"
+
+    with engine.connect() as conn:
+        s_row = conn.execute(text(summary_query), params).fetchone()
+        summary = (
+            dict(s_row._mapping)
+            if s_row
+            else {"total_count": 0, "error_count": 0, "avg_duration": 0, "p95_duration": 0}
+        )
+
+        ts_rows = conn.execute(text(ts_query), params).fetchall()
+        timeseries = [dict(r._mapping) for r in ts_rows]
+
+        return {
+            "summary": summary,
+            "timeseries": timeseries,
+            "window_minutes": window_minutes,
+            "start_time": start_time,
+        }

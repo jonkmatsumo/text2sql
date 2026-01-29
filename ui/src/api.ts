@@ -6,7 +6,8 @@ import {
   SpanSummary,
   TraceDetail,
   ListTracesParams,
-  PaginatedTracesResponse
+  PaginatedTracesResponse,
+  MetricsPreviewResponse
 } from "./types";
 import {
   Interaction,
@@ -25,6 +26,21 @@ import {
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
 const otelBase = otelWorkerBaseUrl;
+
+export async function fetchMetricsPreview(
+  window: string = "1h",
+  service?: string
+): Promise<MetricsPreviewResponse> {
+  const searchParams = new URLSearchParams({ window });
+  if (service) searchParams.append("service", service);
+
+  const url = `${otelBase}/api/v1/metrics/preview?${searchParams}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Metrics fetch failed (${response.status})`);
+  }
+  return response.json();
+}
 
 export async function runAgent({
   question,

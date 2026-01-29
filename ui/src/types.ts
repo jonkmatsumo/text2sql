@@ -92,3 +92,24 @@ export interface ListTracesParams {
     offset?: number;
     order?: "asc" | "desc";
 }
+
+export interface MetricsBucket {
+    timestamp: string;
+    count: number;
+    error_count: number;
+    avg_duration: number | null;
+}
+
+export interface MetricsSummary {
+    total_count: number;
+    error_count: number;
+    avg_duration: number | null;
+    p95_duration: number | null;
+}
+
+export interface MetricsPreviewResponse {
+    summary: MetricsSummary;
+    timeseries: MetricsBucket[];
+    window_minutes: number;
+    start_time: string;
+}
