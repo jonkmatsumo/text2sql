@@ -20,6 +20,30 @@ const DURATION_BUCKETS: { value: DurationBucket; label: string; min: number; max
   { value: "very_slow", label: "> 10s", min: 10000, max: Infinity }
 ];
 
+const TIME_RANGES = [
+  { label: "15m", value: "15m", ms: 15 * 60 * 1000 },
+  { label: "1h", value: "1h", ms: 60 * 60 * 1000 },
+  { label: "6h", value: "6h", ms: 6 * 60 * 60 * 1000 },
+  { label: "24h", value: "24h", ms: 24 * 60 * 60 * 1000 }
+];
+
+function getRangeValues(range: string): { start_gte: string; start_lte: string } | null {
+  const r = TIME_RANGES.find((tr) => tr.value === range);
+  if (!r) return null;
+  const now = new Date();
+  const start = new Date(now.getTime() - r.ms);
+
+  const toLocalISO = (d: Date) => {
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+  };
+
+  return {
+    start_gte: toLocalISO(start),
+    start_lte: toLocalISO(now)
+  };
+}
+
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
@@ -47,6 +71,7 @@ interface TraceFilters {
   traceId: string;
   startTimeGte: string;
   startTimeLte: string;
+  range?: string;
 }
 
 interface FacetFilters {
@@ -67,12 +92,25 @@ function parseUrlParams(searchParams: URLSearchParams): {
   sort: SortState;
   page: number;
 } {
+  const range = searchParams.get("range");
+  let startTimeGte = searchParams.get("start_gte") || "";
+  let startTimeLte = searchParams.get("start_lte") || "";
+
+  if (range) {
+    const computed = getRangeValues(range);
+    if (computed) {
+      startTimeGte = computed.start_gte;
+      startTimeLte = computed.start_lte;
+    }
+  }
+
   return {
     filters: {
       service: searchParams.get("service") || "",
       traceId: searchParams.get("trace_id") || "",
-      startTimeGte: searchParams.get("start_gte") || "",
-      startTimeLte: searchParams.get("start_lte") || ""
+      startTimeGte,
+      startTimeLte,
+      range: range || undefined
     },
     facets: {
       status: searchParams.get("status") || "all",
@@ -99,8 +137,15 @@ function buildUrlParams(
   // Only add non-default values
   if (filters.service) params.set("service", filters.service);
   if (filters.traceId) params.set("trace_id", filters.traceId);
-  if (filters.startTimeGte) params.set("start_gte", filters.startTimeGte);
-  if (filters.startTimeLte) params.set("start_lte", filters.startTimeLte);
+
+  // If range is active, use that in URL and skip absolute times
+  // If no range, use absolute times if present
+  if (filters.range) {
+    params.set("range", filters.range);
+  } else {
+    if (filters.startTimeGte) params.set("start_gte", filters.startTimeGte);
+    if (filters.startTimeLte) params.set("start_lte", filters.startTimeLte);
+  }
 
   if (facets.status !== "all") params.set("status", facets.status);
   if (facets.durationBucket !== "all") params.set("duration", facets.durationBucket);
@@ -155,9 +200,24 @@ function SortableHeader({
       onClick={() => onSort(sortKey)}
       role="columnheader"
       aria-sort={isActive ? (currentSort.direction === "asc" ? "ascending" : "descending") : "none"}
+      title="Sorts current page of results only"
     >
-      {label}
-      <SortArrow direction={isActive ? currentSort.direction : "desc"} active={isActive} />
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        {label}
+        <SortArrow direction={isActive ? currentSort.direction : "desc"} active={isActive} />
+        <span
+          style={{
+            fontSize: "0.7em",
+            fontWeight: 400,
+            color: "var(--muted)",
+            backgroundColor: "var(--surface-muted)",
+            padding: "1px 4px",
+            borderRadius: "4px"
+          }}
+        >
+          Page
+        </span>
+      </div>
     </th>
   );
 }
@@ -333,7 +393,8 @@ export default function TraceSearch() {
       service: "",
       traceId: "",
       startTimeGte: "",
-      startTimeLte: ""
+      startTimeLte: "",
+      range: undefined
     });
     setFacets({
       status: "all",
@@ -341,6 +402,19 @@ export default function TraceSearch() {
       hasErrors: "all"
     });
     setCurrentPage(1);
+  };
+
+  const handleRangeClick = (range: string) => {
+    const computed = getRangeValues(range);
+    if (computed) {
+      setFilters((prev) => ({
+        ...prev,
+        range,
+        startTimeGte: computed.start_gte,
+        startTimeLte: computed.start_lte
+      }));
+      setCurrentPage(1);
+    }
   };
 
   const handleSort = (key: SortKey) => {
@@ -513,6 +587,31 @@ export default function TraceSearch() {
                 />
               </div>
 
+              <div style={{ gridColumn: "1 / -1", marginTop: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Quick Ranges:</span>
+                  {TIME_RANGES.map((r) => (
+                    <button
+                      key={r.value}
+                      type="button"
+                      onClick={() => handleRangeClick(r.value)}
+                      style={{
+                        padding: "4px 10px",
+                        fontSize: "0.85rem",
+                        borderRadius: "6px",
+                        border: filters.range === r.value ? "1px solid var(--accent)" : "1px solid var(--border)",
+                        backgroundColor: filters.range === r.value ? "var(--accent)" : "transparent",
+                        color: filters.range === r.value ? "#fff" : "var(--ink)",
+                        cursor: "pointer",
+                        transition: "all 0.15s"
+                      }}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label
                   htmlFor="filter-start-gte"
@@ -525,7 +624,11 @@ export default function TraceSearch() {
                   type="datetime-local"
                   value={filters.startTimeGte}
                   onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, startTimeGte: e.target.value }))
+                    setFilters((prev) => ({
+                      ...prev,
+                      startTimeGte: e.target.value,
+                      range: undefined
+                    }))
                   }
                   style={{
                     width: "100%",
@@ -548,7 +651,11 @@ export default function TraceSearch() {
                   type="datetime-local"
                   value={filters.startTimeLte}
                   onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, startTimeLte: e.target.value }))
+                    setFilters((prev) => ({
+                      ...prev,
+                      startTimeLte: e.target.value,
+                      range: undefined
+                    }))
                   }
                   style={{
                     width: "100%",
@@ -595,7 +702,7 @@ export default function TraceSearch() {
           </form>
         </div>
 
-        {/* Facets panel - only show when we have traces */}
+        {/* ... Facets Panel ... */}
         {traces.length > 0 && (
           <div className="panel">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
