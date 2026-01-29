@@ -37,6 +37,7 @@ async def handler(
 
     # Application-Level Security Check (Pre-flight)
     # Reject mutative keywords to prevent injection attacks
+    # TODO (Hardening): Replace regex-based enforcement with DB-level read-only session/role
     forbidden_patterns = [
         r"(?i)\bDROP\b",
         r"(?i)\bDELETE\b",
