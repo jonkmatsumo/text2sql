@@ -23,7 +23,9 @@ export default function PromptViewer({ span }: PromptViewerProps) {
 
   const payloadMap = new Map<string, any>();
   (span.payloads || []).forEach((payload) => {
-    payloadMap.set(payload.payload_type, payload.payload_json ?? payload.blob_url);
+    if (payload.payload_type) {
+      payloadMap.set(payload.payload_type as string, payload.payload_json ?? payload.blob_url);
+    }
   });
 
   const attr = span.span_attributes || {};

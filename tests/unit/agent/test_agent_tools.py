@@ -13,7 +13,7 @@ import importlib.util
 import os
 import sys
 import types
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -93,6 +93,7 @@ class TestGetMcpTools:
             mock_client_class.assert_called_once_with(
                 server_url="http://localhost:8000/mcp",
                 transport="sse",
+                headers=ANY,
             )
 
             # Verify list_tools was called
@@ -125,6 +126,7 @@ class TestGetMcpTools:
             mock_client_class.assert_called_once_with(
                 server_url="http://localhost:8000/messages",
                 transport="sse",
+                headers=ANY,
             )
 
             assert result == []
@@ -149,6 +151,7 @@ class TestGetMcpTools:
             mock_client_class.assert_called_once_with(
                 server_url="http://custom-host:9000/mcp",
                 transport="sse",
+                headers=ANY,
             )
 
     @pytest.mark.asyncio
@@ -171,6 +174,7 @@ class TestGetMcpTools:
             mock_client_class.assert_called_once_with(
                 server_url="http://localhost:8000/messages",
                 transport="streamable-http",
+                headers=ANY,
             )
 
     @pytest.mark.asyncio

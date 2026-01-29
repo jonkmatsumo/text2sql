@@ -16,7 +16,9 @@ export default function PinRuleForm({
     onCancel,
     onSubmit
 }: PinRuleFormProps) {
-    const [matchType, setMatchType] = useState<"exact" | "contains">(initialData?.match_type || "contains");
+    const [matchType, setMatchType] = useState<"exact" | "contains">(
+        (initialData?.match_type as "exact" | "contains") || "contains"
+    );
     const [matchValue, setMatchValue] = useState(initialData?.match_value || "");
     const [signatureKeys, setSignatureKeys] = useState(
         initialData?.registry_example_ids?.join("\n") || ""
@@ -28,11 +30,11 @@ export default function PinRuleForm({
 
     useEffect(() => {
         if (initialData) {
-            setMatchType(initialData.match_type);
-            setMatchValue(initialData.match_value);
+            setMatchType((initialData.match_type as "exact" | "contains") || "contains");
+            setMatchValue(initialData.match_value || "");
             setSignatureKeys(initialData.registry_example_ids?.join("\n") || "");
-            setPriority(initialData.priority);
-            setEnabled(initialData.enabled);
+            setPriority(initialData.priority || 0);
+            setEnabled(initialData.enabled ?? true);
         }
     }, [initialData]);
 

@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import { OpsService } from "../api";
-import { PatternReloadResult } from "../types/admin";
+import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
 
@@ -13,6 +13,7 @@ export default function SystemOperations() {
     const [isLoading, setIsLoading] = useState(false);
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
     const [traceId, setTraceId] = useState("");
+    const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
 
     const { show: showToast } = useToast();
 
@@ -24,6 +25,29 @@ export default function SystemOperations() {
     ];
 
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
+
+    // Polling for active job
+    useEffect(() => {
+        let timer: any;
+        if (activeJob && (activeJob.status === "PENDING" || activeJob.status === "RUNNING")) {
+            timer = setInterval(async () => {
+                try {
+                    const status = await OpsService.getJobStatus(activeJob.id);
+                    setActiveJob(status);
+                    if (status.status === "COMPLETED") {
+                        showToast(`${status.job_type} completed successfully`, "success");
+                        clearInterval(timer);
+                    } else if (status.status === "FAILED") {
+                        showToast(`${status.job_type} failed: ${status.error_message}`, "error");
+                        clearInterval(timer);
+                    }
+                } catch (err) {
+                    console.error("Failed to poll job status", err);
+                }
+            }, 2000);
+        }
+        return () => clearInterval(timer);
+    }, [activeJob, showToast]);
 
     const runPatternGen = async () => {
         setIsLoading(true);
@@ -48,6 +72,32 @@ export default function SystemOperations() {
         }
     };
 
+    const runHydration = async () => {
+        setIsLoading(true);
+        try {
+            const job = await OpsService.hydrateSchema();
+            setActiveJob(job);
+            showToast("Schema hydration started", "info");
+        } catch (err: any) {
+            showToast(`Hydration failed: ${err.message}`, "error");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const runReindex = async () => {
+        setIsLoading(true);
+        try {
+            const job = await OpsService.reindexCache();
+            setActiveJob(job);
+            showToast("Cache re-indexing started", "info");
+        } catch (err: any) {
+            showToast(`Re-indexing failed: ${err.message}`, "error");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const runReload = async () => {
         setIsLoading(true);
         try {
@@ -62,13 +112,6 @@ export default function SystemOperations() {
             showToast("Reload failed", "error");
         } finally {
             setIsLoading(false);
-        }
-    };
-
-    const handleTraceView = () => {
-        if (!traceId.trim()) {
-            showToast("Please enter a trace ID", "warning");
-            return;
         }
     };
 
@@ -87,6 +130,37 @@ export default function SystemOperations() {
             <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
 
             <div style={{ display: "grid", gap: "24px" }}>
+                {activeJob && (
+                    <div className="panel" style={{ border: "1px solid var(--accent)", backgroundColor: "rgba(99, 102, 241, 0.05)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                                <strong style={{ fontSize: "0.9rem", color: "var(--accent)" }}>Active Job: {activeJob.job_type}</strong>
+                                <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>ID: {activeJob.id}</div>
+                            </div>
+                            <div style={{
+                                padding: "4px 12px",
+                                borderRadius: "12px",
+                                fontSize: "0.8rem",
+                                fontWeight: 600,
+                                backgroundColor: activeJob.status === "COMPLETED" ? "#10b981" : activeJob.status === "FAILED" ? "#ef4444" : "#f59e0b",
+                                color: "#fff"
+                            }}>
+                                {activeJob.status}
+                            </div>
+                        </div>
+                        {activeJob.error_message && (
+                            <div style={{ marginTop: "8px", color: "var(--error)", fontSize: "0.85rem" }}>
+                                {activeJob.error_message}
+                            </div>
+                        )}
+                        {activeJob.status === "COMPLETED" && activeJob.result && (
+                            <div style={{ marginTop: "12px", maxHeight: "100px", overflow: "auto", fontSize: "0.8rem", fontFamily: "monospace", backgroundColor: "var(--surface-muted)", padding: "8px", borderRadius: "4px" }}>
+                                {JSON.stringify(activeJob.result, null, 2)}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {activeTab === "nlp" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
                         <div className="panel">
@@ -95,7 +169,7 @@ export default function SystemOperations() {
                             <button
                                 className="feedback button"
                                 onClick={runPatternGen}
-                                disabled={isLoading}
+                                disabled={isLoading || (activeJob?.status === "RUNNING")}
                                 style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", marginTop: "12px" }}
                             >
                                 Run Generation
@@ -113,7 +187,7 @@ export default function SystemOperations() {
                             <button
                                 className="feedback button"
                                 onClick={runReload}
-                                disabled={isLoading}
+                                disabled={isLoading || (activeJob?.status === "RUNNING")}
                                 style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", marginTop: "12px" }}
                             >
                                 Reload Patterns
@@ -138,17 +212,21 @@ export default function SystemOperations() {
                     <div className="panel" style={{ textAlign: "center", padding: "40px" }}>
                         <h3 style={{ margin: 0 }}>Schema Hydration</h3>
                         <p className="subtitle" style={{ margin: "12px auto 24px" }}>Propagate structural metadata from Postgres to the graph index.</p>
-                        <div style={{
-                            display: "inline-block",
-                            padding: "10px 20px",
-                            background: "var(--surface-muted)",
-                            borderRadius: "8px",
-                            color: "var(--muted)",
-                            fontWeight: 600,
-                            border: "1px dashed var(--border)"
-                        }}>
-                            Coming Soon
-                        </div>
+                        <button
+                            onClick={runHydration}
+                            disabled={isLoading || (activeJob?.status === "RUNNING")}
+                            style={{
+                                padding: "12px 24px",
+                                background: "var(--accent)",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "10px",
+                                fontWeight: 600,
+                                cursor: "pointer"
+                            }}
+                        >
+                            Start Hydration
+                        </button>
                     </div>
                 )}
 
@@ -156,17 +234,21 @@ export default function SystemOperations() {
                     <div className="panel" style={{ textAlign: "center", padding: "40px" }}>
                         <h3 style={{ margin: 0 }}>Semantic Cache</h3>
                         <p className="subtitle" style={{ margin: "12px auto 24px" }}>Re-index vector embeddings for natural language lookups.</p>
-                        <div style={{
-                            display: "inline-block",
-                            padding: "10px 20px",
-                            background: "var(--surface-muted)",
-                            borderRadius: "8px",
-                            color: "var(--muted)",
-                            fontWeight: 600,
-                            border: "1px dashed var(--border)"
-                        }}>
-                            Coming Soon
-                        </div>
+                        <button
+                            onClick={runReindex}
+                            disabled={isLoading || (activeJob?.status === "RUNNING")}
+                            style={{
+                                padding: "12px 24px",
+                                background: "var(--accent)",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "10px",
+                                fontWeight: 600,
+                                cursor: "pointer"
+                            }}
+                        >
+                            Start Re-indexing
+                        </button>
                     </div>
                 )}
 

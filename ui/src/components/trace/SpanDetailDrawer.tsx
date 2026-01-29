@@ -58,15 +58,15 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
         <div className="trace-drawer__grid">
           <div>
             <span>Prompt</span>
-            <strong>{tokenInputs ?? "—"}</strong>
+            <strong>{tokenInputs != null ? String(tokenInputs) : "—"}</strong>
           </div>
           <div>
             <span>Completion</span>
-            <strong>{tokenOutputs ?? "—"}</strong>
+            <strong>{tokenOutputs != null ? String(tokenOutputs) : "—"}</strong>
           </div>
           <div>
             <span>Total</span>
-            <strong>{tokenTotal ?? "—"}</strong>
+            <strong>{tokenTotal != null ? String(tokenTotal) : "—"}</strong>
           </div>
         </div>
       </div>

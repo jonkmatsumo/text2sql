@@ -36,7 +36,8 @@ async def handler(
         return json.dumps({"error": error_msg})
 
     # Application-Level Security Check (Pre-flight)
-    # Reject mutative keywords to prevent injection attacks
+    # Reject mutative keywords to provide immediate feedback.
+    # Note: Real enforcement happens at the DB session/transaction level.
     forbidden_patterns = [
         r"(?i)\bDROP\b",
         r"(?i)\bDELETE\b",
@@ -56,7 +57,7 @@ async def handler(
                 "Read-only access only."
             )
 
-    async with Database.get_connection(tenant_id) as conn:
+    async with Database.get_connection(tenant_id, read_only=True) as conn:
         try:
             # Execution
             if params:

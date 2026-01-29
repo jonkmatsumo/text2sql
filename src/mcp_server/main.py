@@ -233,6 +233,24 @@ try:
                     allow_methods=["*"],
                     allow_headers=["*"],
                 )
+
+                # Internal Auth Middleware
+                from starlette.middleware.base import BaseHTTPMiddleware
+                from starlette.responses import JSONResponse
+
+                class InternalAuthMiddleware(BaseHTTPMiddleware):
+                    async def dispatch(self, request, call_next):
+                        token = get_env_str("INTERNAL_AUTH_TOKEN", "")
+                        if token:
+                            # Skip auth for health and messages
+                            if request.url.path not in ["/health", "/messages"]:
+                                request_token = request.headers.get("X-Internal-Token")
+                                if request_token != token:
+                                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+                        return await call_next(request)
+
+                app.add_middleware(InternalAuthMiddleware)
+
                 StarletteInstrumentor().instrument_app(app)
                 # App instrumented successfully
             except Exception as instr_e:

@@ -14,6 +14,7 @@ class TraceSummary(BaseModel):
     duration_ms: int
     span_count: int
     status: str
+    error_count: Optional[int] = None
     raw_blob_url: Optional[str] = None
 
 
@@ -67,3 +68,30 @@ class PaginatedSpansResponse(BaseModel):
     items: List[SpanSummary]
     total: int
     next_offset: Optional[int] = None
+
+
+class MetricsBucket(BaseModel):
+    """Aggregated metrics for a single time bucket."""
+
+    timestamp: datetime
+    count: int
+    error_count: int
+    avg_duration: Optional[float] = None
+
+
+class MetricsSummary(BaseModel):
+    """Overall aggregated metrics for a time window."""
+
+    total_count: int
+    error_count: int
+    avg_duration: Optional[float] = None
+    p95_duration: Optional[float] = None
+
+
+class MetricsPreviewResponse(BaseModel):
+    """Response containing aggregated metrics for preview."""
+
+    summary: MetricsSummary
+    timeseries: List[MetricsBucket]
+    window_minutes: int
+    start_time: datetime

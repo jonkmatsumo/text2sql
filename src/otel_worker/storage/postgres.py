@@ -3,6 +3,8 @@ import hashlib
 import json
 import logging
 import os
+import threading
+from collections import deque
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
@@ -20,6 +22,66 @@ TARGET_SCHEMA = os.getenv("OTEL_DB_SCHEMA", "otel")
 MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
 
 
+class SafeIngestQueue:
+    """Manages ingestion with an in-memory buffer fallback during Postgres spikes."""
+
+    def __init__(self, max_buffer_size: int = 5000):
+        """Initialize the safe ingest queue."""
+        self.buffer = deque(maxlen=max_buffer_size)
+        self._lock = threading.Lock()
+        self._worker_thread = None
+        self._stopping = False
+
+    def start(self):
+        """Start the background drain worker."""
+        self._stopping = False
+        self._worker_thread = threading.Thread(target=self._drain_loop, daemon=True)
+        self._worker_thread.start()
+        logger.info("SafeIngestQueue drain worker started")
+
+    def stop(self):
+        """Stop the background drain worker."""
+        self._stopping = True
+        if self._worker_thread:
+            self._worker_thread.join(timeout=5.0)
+
+    def enqueue(self, payload_json: dict, trace_id: str = None):
+        """Enqueue the payload to Postgres, falling back to memory if it fails."""
+        try:
+            return enqueue_ingestion_direct(payload_json, trace_id)
+        except Exception as e:
+            logger.warning(f"Postgres ingestion failed, buffering in memory: {e}")
+            with self._lock:
+                self.buffer.append({"payload": payload_json, "trace_id": trace_id})
+            return -1
+
+    def _drain_loop(self):
+        """Periodically flush memory buffer to Postgres."""
+        while not self._stopping:
+            item = None
+            with self._lock:
+                if self.buffer:
+                    item = self.buffer[0]  # Peek
+
+            if item:
+                try:
+                    enqueue_ingestion_direct(item["payload"], item["trace_id"])
+                    with self._lock:
+                        self.buffer.popleft()  # Success, remove it
+                    logger.info(
+                        f"Recovered buffered ingestion item (Remaining: {len(self.buffer)})"
+                    )
+                except Exception:
+                    # PG still down, wait before retry
+                    threading.Event().wait(10.0)
+            else:
+                threading.Event().wait(2.0)
+
+
+# Global instance
+safe_queue = SafeIngestQueue()
+
+
 def _decode_trace_id(trace_id: str | None) -> str | None:
     """Decode base64 OTLP trace IDs to hex when possible."""
     if not trace_id:
@@ -33,7 +95,7 @@ def _decode_trace_id(trace_id: str | None) -> str | None:
 
 
 def get_table_name(table: str) -> str:
-    """Return table name with optional schema prefix."""
+    """Return the table name with an optional schema prefix."""
     if TARGET_SCHEMA:
         return f"{TARGET_SCHEMA}.{table}"
     return table
@@ -54,22 +116,8 @@ def init_db():
         raise RuntimeError(f"Missing OTEL schema: {e}")
 
 
-def save_trace_and_spans(trace_id: str, trace_data: dict, summaries: list[dict], raw_blob_url: str):
-    """
-    Save trace summary and its spans to Postgres using the migration-hardened schema.
-
-    Legacy wrapper for save_traces_batch for a single trace.
-    """
-    save_traces_batch(
-        [{"trace_id": trace_id, "summaries": summaries, "raw_blob_url": raw_blob_url}]
-    )
-
-
 def save_traces_batch(trace_units: list[dict]):
-    """Save multiple traces and their spans in a single Postgres transaction.
-
-    Each unit should have: trace_id, summaries, raw_blob_url.
-    """
+    """Save multiple traces and their spans in a single Postgres transaction."""
     if not trace_units:
         return
 
@@ -369,21 +417,6 @@ def list_traces(
         return [dict(row._mapping) for row in result]
 
 
-def _get_trace_metrics(conn, trace_id: str) -> dict:
-    """Best-effort lookup for trace metrics (handles missing table in tests)."""
-    metrics_table = get_table_name("trace_metrics")
-    query = f"""
-        SELECT total_tokens, prompt_tokens, completion_tokens, model_name, estimated_cost_usd
-        FROM {metrics_table}
-        WHERE trace_id = :trace_id
-    """
-    try:
-        row = conn.execute(text(query), {"trace_id": trace_id}).fetchone()
-    except Exception:
-        return {}
-    return dict(row._mapping) if row else {}
-
-
 def get_trace(trace_id: str, include_attributes: bool = False):
     """Fetch a single trace by ID."""
     traces_table = get_table_name("traces")
@@ -400,7 +433,6 @@ def get_trace(trace_id: str, include_attributes: bool = False):
             return None
 
         data = dict(row._mapping)
-        data.update(_get_trace_metrics(conn, trace_id))
 
         # Handle string JSON (e.g. from SQLite)
         for key in ["resource_attributes", "trace_attributes"]:
@@ -589,8 +621,8 @@ def get_queue_depth() -> int:
         return result.scalar()
 
 
-def enqueue_ingestion(payload_json: dict, trace_id: str = None) -> int:
-    """Write raw OTLP payload to ingestion queue for durable buffering."""
+def enqueue_ingestion_direct(payload_json: dict, trace_id: str = None) -> int:
+    """Write the raw OTLP payload directly to the DB queue table."""
     queue_table = get_table_name("ingestion_queue")
     with engine.begin() as conn:
         result = conn.execute(
@@ -606,14 +638,16 @@ def enqueue_ingestion(payload_json: dict, trace_id: str = None) -> int:
         return result.scalar()
 
 
+def enqueue_ingestion(payload_json: dict, trace_id: str = None) -> int:
+    """Public entry point for enqueuing traces."""
+    return safe_queue.enqueue(payload_json, trace_id)
+
+
 def poll_ingestion_queue(limit: int = 10) -> list[dict]:
     """Fetch pending items from the ingestion queue and mark them as processing."""
     queue_table = get_table_name("ingestion_queue")
-    # Using a simple SELECT ... FOR UPDATE SKIP LOCKED if supported (Postgres 9.5+)
-    # or just a simple update + return.
-    # We'll use a transaction to claim items.
+    # Atomic claim: update status to 'processing' and return the rows
     with engine.begin() as conn:
-        # Atomic claim: update status to 'processing' and return the rows
         query = f"""
             UPDATE {queue_table}
             SET status = 'processing', attempts = attempts + 1
@@ -642,8 +676,6 @@ def update_ingestion_status(item_id: int, status: str, error: str = None):
     queue_table = get_table_name("ingestion_queue")
     with engine.begin() as conn:
         if status == "complete":
-            # We can delete on success to keep the queue small,
-            # or just mark it. Let's mark it for now but maybe delete in a cleanup job.
             conn.execute(
                 text(f"UPDATE {queue_table} SET status = 'complete' WHERE id = :id"),
                 {"id": item_id},
@@ -661,3 +693,74 @@ def update_ingestion_status(item_id: int, status: str, error: str = None):
                 ),
                 {"id": item_id, "error": error},
             )
+
+
+def get_metrics_preview(window_minutes: int, service: str = None):
+    """Aggregate metrics over a time window for preview."""
+    from datetime import timedelta
+
+    traces_table = get_table_name("traces")
+    start_time = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+
+    # Base params
+    params = {"start_time": start_time}
+    if service:
+        params["service"] = service
+
+    # Summary query
+    # Percentile is Postgres specific, fallback for SQLite
+    if engine.dialect.name == "postgresql":
+        p95_expr = "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)"
+    else:
+        p95_expr = "AVG(duration_ms)"  # Fallback
+
+    summary_query = f"""
+        SELECT
+            COUNT(*) as total_count,
+            COUNT(*) FILTER (WHERE status = 'ERROR') as error_count,
+            AVG(duration_ms) as avg_duration,
+            {p95_expr} as p95_duration
+        FROM {traces_table}
+        WHERE start_time >= :start_time
+    """
+    if service:
+        summary_query += " AND service_name = :service"
+
+    # Timeseries query
+    # date_trunc is Postgres specific, fallback for SQLite
+    if engine.dialect.name == "postgresql":
+        interval = "1 minute" if window_minutes <= 60 else "1 hour"
+        bucket_expr = f"date_trunc('{interval.split()[1]}', start_time)"
+    else:
+        bucket_expr = "datetime(strftime('%Y-%m-%dT%H:%M:00', start_time))"
+
+    ts_query = f"""
+        SELECT
+            {bucket_expr} as timestamp,
+            COUNT(*) as count,
+            COUNT(*) FILTER (WHERE status = 'ERROR') as error_count,
+            AVG(duration_ms) as avg_duration
+        FROM {traces_table}
+        WHERE start_time >= :start_time
+    """
+    if service:
+        ts_query += " AND service_name = :service"
+    ts_query += " GROUP BY 1 ORDER BY 1 ASC"
+
+    with engine.connect() as conn:
+        s_row = conn.execute(text(summary_query), params).fetchone()
+        summary = (
+            dict(s_row._mapping)
+            if s_row
+            else {"total_count": 0, "error_count": 0, "avg_duration": 0, "p95_duration": 0}
+        )
+
+        ts_rows = conn.execute(text(ts_query), params).fetchall()
+        timeseries = [dict(r._mapping) for r in ts_rows]
+
+        return {
+            "summary": summary,
+            "timeseries": timeseries,
+            "window_minutes": window_minutes,
+            "start_time": start_time,
+        }

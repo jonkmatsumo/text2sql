@@ -186,17 +186,17 @@ export default function Recommendations() {
                         data={pins}
                         isLoading={isLoading}
                         columns={[
-                            { header: "Type", key: "match_type", render: (r) => <strong>{r.match_type.toUpperCase()}</strong> },
+                            { header: "Type", key: "match_type", render: (r) => <strong>{r.match_type?.toUpperCase()}</strong> },
                             { header: "Value", key: "match_value", render: (r) => <code style={{ color: "var(--accent)" }}>{r.match_value}</code> },
                             {
                                 header: "Pins",
                                 key: "registry_example_ids",
                                 render: (r) => (
                                     <span
-                                        title={r.registry_example_ids.join("\n")}
+                                        title={r.registry_example_ids?.join("\n") || ""}
                                         style={{ cursor: "help", borderBottom: "1px dotted var(--muted)" }}
                                     >
-                                        {r.registry_example_ids.length} items
+                                        {r.registry_example_ids?.length || 0} items
                                     </span>
                                 )
                             },

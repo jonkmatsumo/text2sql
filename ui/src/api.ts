@@ -6,7 +6,8 @@ import {
   SpanSummary,
   TraceDetail,
   ListTracesParams,
-  PaginatedTracesResponse
+  PaginatedTracesResponse,
+  MetricsPreviewResponse
 } from "./types";
 import {
   Interaction,
@@ -19,30 +20,46 @@ import {
 import {
   agentServiceBaseUrl,
   uiApiBaseUrl,
-  otelWorkerBaseUrl
+  otelWorkerBaseUrl,
+  internalAuthToken
 } from "./config";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
 const otelBase = otelWorkerBaseUrl;
 
-export async function runAgent({
-  question,
-  tenantId,
-  threadId,
-  llmProvider,
-  llmModel
-}: AgentRunRequest): Promise<AgentRunResponse> {
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  if (internalAuthToken) {
+    headers["X-Internal-Token"] = internalAuthToken;
+  }
+  return headers;
+}
+
+export async function fetchMetricsPreview(
+  window: string = "1h",
+  service?: string
+): Promise<MetricsPreviewResponse> {
+  const searchParams = new URLSearchParams({ window });
+  if (service) searchParams.append("service", service);
+
+  const url = `${otelBase}/api/v1/metrics/preview?${searchParams}`;
+  const response = await fetch(url, {
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    throw new Error(`Metrics fetch failed (${response.status})`);
+  }
+  return response.json();
+}
+
+export async function runAgent(request: AgentRunRequest): Promise<AgentRunResponse> {
   const response = await fetch(`${agentBase}/agent/run`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,
-      tenant_id: tenantId,
-      thread_id: threadId,
-      llm_provider: llmProvider,
-      llm_model: llmModel
-    })
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
   });
 
   if (!response.ok) {
@@ -52,19 +69,11 @@ export async function runAgent({
   return response.json();
 }
 
-export async function submitFeedback({
-  interactionId,
-  thumb,
-  comment
-}: FeedbackRequest): Promise<any> {
+export async function submitFeedback(request: FeedbackRequest): Promise<any> {
   const response = await fetch(`${uiApiBase}/feedback`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      interaction_id: interactionId,
-      thumb,
-      comment
-    })
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
   });
 
   if (!response.ok) {
@@ -148,13 +157,17 @@ export const AdminService = {
       thumb,
       status
     });
-    const response = await fetch(`${uiApiBase}/interactions?${params}`);
+    const response = await fetch(`${uiApiBase}/interactions?${params}`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) throw new Error("Failed to load interactions");
     return response.json();
   },
 
   async getInteractionDetails(id: string): Promise<Interaction> {
-    const response = await fetch(`${uiApiBase}/interactions/${id}`);
+    const response = await fetch(`${uiApiBase}/interactions/${id}`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) throw new Error("Failed to load interaction details");
     return response.json();
   },
@@ -167,7 +180,7 @@ export const AdminService = {
   ): Promise<string> {
     const response = await fetch(`${uiApiBase}/interactions/${id}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         corrected_sql: correctedSql,
         original_sql: originalSql,
@@ -185,7 +198,7 @@ export const AdminService = {
   ): Promise<string> {
     const response = await fetch(`${uiApiBase}/interactions/${id}/reject`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ reason, notes })
     });
     if (!response.ok) throw new Error("Failed to reject interaction");
@@ -195,7 +208,7 @@ export const AdminService = {
   async publishApproved(limit: number = 50): Promise<any> {
     const response = await fetch(`${uiApiBase}/registry/publish-approved`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ limit })
     });
     if (!response.ok) throw new Error("Failed to publish approved interactions");
@@ -205,14 +218,18 @@ export const AdminService = {
   async listExamples(limit: number = 100, search?: string): Promise<ApprovedExample[]> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (search) params.append("search", search);
-    const response = await fetch(`${uiApiBase}/registry/examples?${params}`);
+    const response = await fetch(`${uiApiBase}/registry/examples?${params}`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) throw new Error("Failed to load examples");
     return response.json();
   },
 
   async listPins(tenantId: number): Promise<PinRule[]> {
     const params = new URLSearchParams({ tenant_id: tenantId.toString() });
-    const response = await fetch(`${uiApiBase}/pins?${params}`);
+    const response = await fetch(`${uiApiBase}/pins?${params}`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) throw new Error("Failed to list pins");
     return response.json();
   },
@@ -222,7 +239,7 @@ export const AdminService = {
     const url = isUpdate ? `${uiApiBase}/pins/${data.id}` : `${uiApiBase}/pins`;
     const response = await fetch(url, {
       method: isUpdate ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
     if (!response.ok) throw new Error("Failed to upsert pin");
@@ -232,7 +249,8 @@ export const AdminService = {
   async deletePin(id: string, tenantId: number): Promise<{ success: boolean }> {
     const params = new URLSearchParams({ tenant_id: tenantId.toString() });
     const response = await fetch(`${uiApiBase}/pins/${id}?${params}`, {
-      method: "DELETE"
+      method: "DELETE",
+      headers: getAuthHeaders()
     });
     if (!response.ok) throw new Error("Failed to delete pin");
     return response.json();
@@ -248,7 +266,7 @@ export const OpsService = {
   ): Promise<RecommendationResult> {
     const response = await fetch(`${uiApiBase}/recommendations/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         query,
         tenant_id: tenantId,
@@ -263,7 +281,7 @@ export const OpsService = {
   async generatePatterns(dryRun: boolean = false): Promise<PatternGenerationResult> {
     const response = await fetch(`${uiApiBase}/ops/patterns/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ dry_run: dryRun })
     });
     if (!response.ok) throw new Error("Pattern generation failed");
@@ -272,9 +290,36 @@ export const OpsService = {
 
   async reloadPatterns(): Promise<PatternReloadResult> {
     const response = await fetch(`${uiApiBase}/ops/patterns/reload`, {
-      method: "POST"
+      method: "POST",
+      headers: getAuthHeaders()
     });
     if (!response.ok) throw new Error("Pattern reload failed");
+    return response.json();
+  },
+
+  async hydrateSchema(): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/schema-hydrate`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error("Schema hydration failed");
+    return response.json();
+  },
+
+  async reindexCache(): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/semantic-cache/reindex`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error("Cache re-indexing failed");
+    return response.json();
+  },
+
+  async getJobStatus(jobId: string): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) throw new Error("Failed to fetch job status");
     return response.json();
   }
 };

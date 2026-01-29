@@ -1,84 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { VegaEmbed } from "react-vega";
-import { listTraces } from "../api";
-import { TraceSummary } from "../types";
+import { fetchMetricsPreview } from "../api";
+import { MetricsPreviewResponse, MetricsBucket } from "../types";
 import { grafanaBaseUrl } from "../config";
-
-interface TimeSeriesPoint {
-  timestamp: Date;
-  value: number;
-}
 
 interface MetricPanel {
   title: string;
   description: string;
-  data: TimeSeriesPoint[];
+  data: { timestamp: string; value: number }[];
   color: string;
   unit?: string;
 }
 
-function aggregateByHour(
-  traces: TraceSummary[],
-  extractor: (trace: TraceSummary) => number
-): TimeSeriesPoint[] {
-  if (!traces.length) return [];
-
-  const buckets = new Map<string, { timestamp: Date; sum: number; count: number }>();
-
-  traces.forEach((trace) => {
-    const date = new Date(trace.start_time);
-    // Round to hour
-    date.setMinutes(0, 0, 0);
-    const key = date.toISOString();
-
-    if (!buckets.has(key)) {
-      buckets.set(key, { timestamp: date, sum: 0, count: 0 });
-    }
-    const bucket = buckets.get(key)!;
-    bucket.sum += extractor(trace);
-    bucket.count += 1;
-  });
-
-  return Array.from(buckets.values())
-    .map((b) => ({ timestamp: b.timestamp, value: b.count }))
-    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-}
-
-function aggregateErrorRateByHour(traces: TraceSummary[]): TimeSeriesPoint[] {
-  if (!traces.length) return [];
-
-  const buckets = new Map<string, { timestamp: Date; errors: number; total: number }>();
-
-  traces.forEach((trace) => {
-    const date = new Date(trace.start_time);
-    date.setMinutes(0, 0, 0);
-    const key = date.toISOString();
-
-    if (!buckets.has(key)) {
-      buckets.set(key, { timestamp: date, errors: 0, total: 0 });
-    }
-    const bucket = buckets.get(key)!;
-    bucket.total += 1;
-    if (trace.status.toLowerCase() === "error") {
-      bucket.errors += 1;
-    }
-  });
-
-  return Array.from(buckets.values())
-    .map((b) => ({
-      timestamp: b.timestamp,
-      value: b.total > 0 ? (b.errors / b.total) * 100 : 0
-    }))
-    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-}
+const WINDOW_OPTIONS = [
+  { label: "Last 15 Minutes", value: "15m" },
+  { label: "Last Hour", value: "1h" },
+  { label: "Last 24 Hours", value: "24h" },
+  { label: "Last 7 Days", value: "7d" }
+];
 
 function TimeSeriesChart({
   data,
   color,
   unit
 }: {
-  data: TimeSeriesPoint[];
+  data: { timestamp: string; value: number }[];
   color: string;
   unit?: string;
 }) {
@@ -93,7 +40,7 @@ function TimeSeriesChart({
           borderRadius: "8px"
         }}
       >
-        No data available
+        No data available in this window
       </div>
     );
   }
@@ -103,10 +50,7 @@ function TimeSeriesChart({
     width: "container",
     height: 200,
     data: {
-      values: data.map((d) => ({
-        timestamp: d.timestamp.toISOString(),
-        value: d.value
-      }))
+      values: data
     },
     mark: {
       type: "area",
@@ -163,99 +107,100 @@ function MetricCard({ panel }: { panel: MetricPanel }) {
 }
 
 export default function MetricsPreview() {
-  const [traces, setTraces] = useState<TraceSummary[]>([]);
+  const [metrics, setMetrics] = useState<MetricsPreviewResponse | null>(null);
+  const [window, setWindow] = useState("1h");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadMetrics = async (currentWindow: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const data = await fetchMetricsPreview(currentWindow);
+      setMetrics(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to load metrics data");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadTraces = async () => {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        // Load recent traces to compute metrics
-        const result = await listTraces({
-          limit: 500,
-          order: "desc"
-        });
-        setTraces(result.items);
-      } catch (err: any) {
-        setError(err.message || "Failed to load metrics data");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadTraces();
-  }, []);
+    loadMetrics(window);
+  }, [window]);
 
   const panels: MetricPanel[] = useMemo(() => {
-    if (!traces.length) return [];
+    if (!metrics || !metrics.timeseries) return [];
 
     return [
       {
         title: "Traces Over Time",
-        description: "Number of traces recorded per hour",
-        data: aggregateByHour(traces, () => 1),
+        description: "Number of traces recorded",
+        data: metrics.timeseries.map((b: MetricsBucket) => ({
+          timestamp: b.timestamp,
+          value: b.count
+        })),
         color: "#6366f1",
         unit: "traces"
       },
       {
         title: "Error Rate Over Time",
-        description: "Percentage of traces with error status per hour",
-        data: aggregateErrorRateByHour(traces),
+        description: "Percentage of traces with error status",
+        data: metrics.timeseries.map((b: MetricsBucket) => ({
+          timestamp: b.timestamp,
+          value: b.count > 0 ? (b.error_count / b.count) * 100 : 0
+        })),
         color: "#ef4444",
         unit: "% errors"
       },
       {
         title: "Average Duration Over Time",
-        description: "Average trace duration in milliseconds per hour",
-        data: (() => {
-          const buckets = new Map<string, { timestamp: Date; sum: number; count: number }>();
-          traces.forEach((trace) => {
-            const date = new Date(trace.start_time);
-            date.setMinutes(0, 0, 0);
-            const key = date.toISOString();
-            if (!buckets.has(key)) {
-              buckets.set(key, { timestamp: date, sum: 0, count: 0 });
-            }
-            const bucket = buckets.get(key)!;
-            bucket.sum += trace.duration_ms;
-            bucket.count += 1;
-          });
-          return Array.from(buckets.values())
-            .map((b) => ({
-              timestamp: b.timestamp,
-              value: b.count > 0 ? b.sum / b.count : 0
-            }))
-            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-        })(),
+        description: "Average trace duration in milliseconds",
+        data: metrics.timeseries.map((b: MetricsBucket) => ({
+          timestamp: b.timestamp,
+          value: b.avg_duration || 0
+        })),
         color: "#10b981",
         unit: "ms"
       }
     ];
-  }, [traces]);
+  }, [metrics]);
 
-  const timeWindow = useMemo(() => {
-    if (!traces.length) return null;
-    const timestamps = traces.map(t => new Date(t.start_time).getTime());
-    const min = new Date(Math.min(...timestamps));
-    const max = new Date(Math.max(...timestamps));
-    return { min, max };
-  }, [traces]);
-
-  const isTruncated = traces.length >= 500;
   const hasGrafana = !!grafanaBaseUrl;
 
   return (
     <>
       <header className="hero">
-        <div>
-          <p className="kicker">Observability</p>
-          <h1>Metrics (Preview)</h1>
-          <p className="subtitle">
-            Basic metrics derived from the <strong>latest 500 traces</strong>. For advanced dashboards, use Grafana.
-          </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+          <div>
+            <p className="kicker">Observability</p>
+            <h1>Metrics (Preview)</h1>
+            <p className="subtitle">
+              Server-side aggregated metrics. For advanced dashboards, use Grafana.
+            </p>
+          </div>
+          <div style={{ marginBottom: "8px" }}>
+            <select
+              value={window}
+              onChange={(e) => setWindow(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+                backgroundColor: "var(--surface)",
+                color: "var(--ink)",
+                fontWeight: 500,
+                cursor: "pointer"
+              }}
+            >
+              {WINDOW_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </header>
 
@@ -274,11 +219,10 @@ export default function MetricsPreview() {
         >
           <div>
             <div style={{ fontWeight: 500, marginBottom: "4px" }}>
-              Preview Mode
+              Live System Data
             </div>
             <div style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
-              These metrics are computed client-side from the most recent 500 traces.
-              For production monitoring with alerting and longer retention, please configure Grafana dashboards.
+              These metrics are aggregated across the entire telemetry store for the selected window.
             </div>
           </div>
           {hasGrafana && (
@@ -305,7 +249,7 @@ export default function MetricsPreview() {
 
       {isLoading && (
         <div className="panel" style={{ textAlign: "center", padding: "60px" }}>
-          <div style={{ color: "var(--muted)" }}>Loading metrics data...</div>
+          <div style={{ color: "var(--muted)" }}>Aggregating metrics...</div>
         </div>
       )}
 
@@ -319,7 +263,7 @@ export default function MetricsPreview() {
           </div>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => loadMetrics(window)}
             style={{
               padding: "10px 20px",
               borderRadius: "8px",
@@ -335,16 +279,16 @@ export default function MetricsPreview() {
         </div>
       )}
 
-      {!isLoading && !error && traces.length === 0 && (
+      {!isLoading && !error && metrics && metrics.summary.total_count === 0 && (
         <div className="panel" style={{ textAlign: "center", padding: "60px" }}>
           <div style={{ fontSize: "1.2rem", marginBottom: "12px" }}>
-            No trace data available
+            No trace data available in this window
           </div>
           <div style={{ color: "var(--muted)", marginBottom: "20px" }}>
-            Metrics will appear once traces are recorded in the telemetry store.
+            Try selecting a larger window or generate some activity in the Agent Chat.
           </div>
           <Link
-            to="/admin/traces/search"
+            to="/"
             style={{
               padding: "10px 20px",
               borderRadius: "8px",
@@ -356,12 +300,12 @@ export default function MetricsPreview() {
               display: "inline-block"
             }}
           >
-            Go to Trace Search
+            Go to Agent Chat
           </Link>
         </div>
       )}
 
-      {!isLoading && !error && panels.length > 0 && (
+      {!isLoading && !error && metrics && metrics.summary.total_count > 0 && (
         <div>
           <div
             style={{
@@ -376,19 +320,29 @@ export default function MetricsPreview() {
           </div>
 
           <div style={{ marginTop: "32px", padding: "16px", backgroundColor: "var(--surface-muted)", borderRadius: "8px", border: "1px solid var(--border)" }}>
-            <div style={{ fontWeight: 600, marginBottom: "8px" }}>Data Scope</div>
-            <div style={{ fontSize: "0.9rem", color: "var(--ink)", display: "grid", gap: "4px" }}>
+            <div style={{ fontWeight: 600, marginBottom: "8px" }}>Window Summary</div>
+            <div style={{ fontSize: "0.9rem", color: "var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
                 <div>
-                    <strong>Sample Size:</strong> {traces.length} traces {isTruncated && <span style={{color: "var(--error)", fontWeight: 500}}>(Truncated limit)</span>}
+                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Total Traces</div>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.total_count}</div>
                 </div>
-                {timeWindow && (
-                    <div>
-                        <strong>Time Window:</strong> {timeWindow.min.toLocaleString()} — {timeWindow.max.toLocaleString()}
+                <div>
+                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Errors</div>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 700, color: metrics.summary.error_count > 0 ? "var(--error)" : "inherit" }}>
+                        {metrics.summary.error_count} ({((metrics.summary.error_count / metrics.summary.total_count) * 100).toFixed(1)}%)
                     </div>
-                )}
-                <div style={{ color: "var(--muted)", marginTop: "4px", fontStyle: "italic" }}>
-                    * These metrics are calculated client-side from the most recent traces. Older data is not included.
                 </div>
+                <div>
+                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Avg Duration</div>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.avg_duration?.toFixed(0)} ms</div>
+                </div>
+                <div>
+                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>P95 Duration</div>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.p95_duration?.toFixed(0)} ms</div>
+                </div>
+            </div>
+            <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--border)", fontSize: "0.85rem", color: "var(--muted)" }}>
+                <strong>Window Start:</strong> {new Date(metrics.start_time).toLocaleString()}
             </div>
           </div>
         </div>

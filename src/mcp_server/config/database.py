@@ -33,8 +33,9 @@ class Database:
         db_host = get_env_str("DB_HOST", "localhost")
         db_port = get_env_int("DB_PORT", 5432)
         db_name = get_env_str("DB_NAME", "pagila")
-        db_user = get_env_str("DB_USER", "text2sql_ro")
-        db_pass = get_env_str("DB_PASS", "secure_agent_pass")
+        # Default to the hardened mcp_reader role
+        db_user = get_env_str("DB_USER", "mcp_reader")
+        db_pass = get_env_str("DB_PASS", "mcp_secure_pass")
 
         dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
@@ -45,7 +46,10 @@ class Database:
                 min_size=5,
                 max_size=20,
                 command_timeout=60,
-                server_settings={"application_name": "bi_agent_mcp"},
+                server_settings={
+                    "application_name": "bi_agent_mcp",
+                    "default_transaction_read_only": "on",
+                },
             )
             print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
 
@@ -63,7 +67,12 @@ class Database:
             print("✓ Graph store connection established (via factory)")
 
             # Ensure operational schema exists
-            await cls.ensure_schema()
+            # NOTE: If using mcp_reader, this may fail if tables don't exist.
+            # In production, schema should be managed via migrations by a privileged user.
+            try:
+                await cls.ensure_schema()
+            except Exception as e:
+                print(f"⚠ Schema ensuring failed (expected if using mcp_reader): {e}")
 
             cls._cache_store = get_cache_store()
             cls._example_store = get_example_store()
@@ -88,6 +97,8 @@ class Database:
         if cls._pool is None:
             return
 
+        # Use a privileged connection for schema setup if needed,
+        # but here we just try with the current pool.
         async with cls._pool.acquire() as conn:
             # Table for NLP patterns (synonyms -> canonical values)
             await conn.execute(
@@ -220,13 +231,14 @@ class Database:
 
     @classmethod
     @asynccontextmanager
-    async def get_connection(cls, tenant_id: Optional[int] = None):
+    async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = True):
         """Yield a Postgres connection with the tenant context securely set.
 
         Guarantees cleanup via transaction scoping.
 
         Args:
             tenant_id: Optional tenant identifier. If None, connection operates without RLS context.
+            read_only: If True, enforces a read-only transaction. Defaults to True for security.
 
         Yields:
             asyncpg.Connection: A connection with tenant context set for the transaction.
@@ -237,7 +249,7 @@ class Database:
         async with cls._pool.acquire() as conn:
             # Start a transaction block.
             # Everything inside here is atomic.
-            async with conn.transaction():
+            async with conn.transaction(readonly=read_only):
                 if tenant_id is not None:
                     # set_config with is_local=True scopes the setting to this transaction.
                     # It will be automatically unset when the transaction block exits.
