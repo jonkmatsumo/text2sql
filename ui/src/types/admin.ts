@@ -1,3 +1,5 @@
+import { components as UIComponents } from "../gen/ui_types";
+
 export type InteractionStatus = "PENDING" | "APPROVED" | "REJECTED" | "UNKNOWN";
 export type FeedbackThumb = "UP" | "DOWN" | "None" | "All";
 
@@ -27,15 +29,7 @@ export interface ApprovedExample {
     created_at: string;
 }
 
-export interface PinRule {
-    id: string;
-    tenant_id: number;
-    match_type: "exact" | "contains";
-    match_value: string;
-    registry_example_ids: string[];
-    priority: number;
-    enabled: boolean;
-}
+export type PinRule = UIComponents["schemas"]["PinRuleUpsertRequest"] & { id: string };
 
 export interface RecommendationMetadata {
     count_total: number;
@@ -82,3 +76,6 @@ export interface PatternReloadResult {
     pattern_count?: number;
     error?: string;
 }
+
+export type OpsJobStatus = UIComponents["schemas"]["OpsJobStatus"];
+export type OpsJobResponse = UIComponents["schemas"]["OpsJobResponse"];
