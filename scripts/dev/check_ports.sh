@@ -6,9 +6,12 @@ set -e
 
 # Load .env if present
 if [ -f .env ]; then
-  set -a
-  source .env
-  set +a
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip comments and empty lines
+    if [[ ! "$line" =~ ^# ]] && [[ "$line" =~ = ]]; then
+      export "$line"
+    fi
+  done < .env
 fi
 
 # Resolve ports with defaults matching docker-compose files
