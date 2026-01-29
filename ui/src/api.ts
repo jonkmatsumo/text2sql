@@ -42,23 +42,11 @@ export async function fetchMetricsPreview(
   return response.json();
 }
 
-export async function runAgent({
-  question,
-  tenantId,
-  threadId,
-  llmProvider,
-  llmModel
-}: AgentRunRequest): Promise<AgentRunResponse> {
+export async function runAgent(request: AgentRunRequest): Promise<AgentRunResponse> {
   const response = await fetch(`${agentBase}/agent/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,
-      tenant_id: tenantId,
-      thread_id: threadId,
-      llm_provider: llmProvider,
-      llm_model: llmModel
-    })
+    body: JSON.stringify(request)
   });
 
   if (!response.ok) {
@@ -68,19 +56,11 @@ export async function runAgent({
   return response.json();
 }
 
-export async function submitFeedback({
-  interactionId,
-  thumb,
-  comment
-}: FeedbackRequest): Promise<any> {
+export async function submitFeedback(request: FeedbackRequest): Promise<any> {
   const response = await fetch(`${uiApiBase}/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      interaction_id: interactionId,
-      thumb,
-      comment
-    })
+    body: JSON.stringify(request)
   });
 
   if (!response.ok) {

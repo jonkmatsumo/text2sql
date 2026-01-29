@@ -3,17 +3,9 @@ import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import { OpsService } from "../api";
-import { PatternReloadResult } from "../types/admin";
+import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
-
-interface JobStatus {
-    id: string;
-    job_type: string;
-    status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
-    error_message?: string;
-    result?: any;
-}
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
@@ -21,7 +13,7 @@ export default function SystemOperations() {
     const [isLoading, setIsLoading] = useState(false);
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
     const [traceId, setTraceId] = useState("");
-    const [activeJob, setActiveJob] = useState<JobStatus | null>(null);
+    const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
 
     const { show: showToast } = useToast();
 

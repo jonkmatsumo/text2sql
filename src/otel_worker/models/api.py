@@ -14,6 +14,7 @@ class TraceSummary(BaseModel):
     duration_ms: int
     span_count: int
     status: str
+    error_count: Optional[int] = None
     raw_blob_url: Optional[str] = None
 
 

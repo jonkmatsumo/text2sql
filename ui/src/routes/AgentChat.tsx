@@ -127,24 +127,22 @@ export default function AgentChat() {
     try {
       const result = await runAgent({
         question: prompt,
-        tenantId,
-        threadId: threadIdRef.current,
-        llmProvider,
-        llmModel
+        tenant_id: tenantId,
+        thread_id: threadIdRef.current
       });
 
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: result.response,
-          sql: result.sql,
+          text: result.response ?? undefined,
+          sql: result.sql ?? undefined,
           result: result.result,
-          error: result.error,
-          interactionId: result.interaction_id,
+          error: result.error ?? undefined,
+          interactionId: result.interaction_id ?? undefined,
           fromCache: result.from_cache,
           vizSpec: result.viz_spec,
-          traceId: result.trace_id
+          traceId: result.trace_id ?? undefined
         }
       ]);
     } catch (err: any) {
@@ -160,7 +158,7 @@ export default function AgentChat() {
     comment?: string
   ) => {
     try {
-      await submitFeedback({ interactionId, thumb, comment });
+      await submitFeedback({ interaction_id: interactionId, thumb, comment });
       setFeedbackState((prev) => ({ ...prev, [interactionId]: "done" }));
     } catch (err: any) {
       setFeedbackState((prev) => ({
