@@ -292,5 +292,27 @@ export const OpsService = {
     });
     if (!response.ok) throw new Error("Pattern reload failed");
     return response.json();
+  },
+
+  async hydrateSchema(): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/schema-hydrate`, {
+      method: "POST"
+    });
+    if (!response.ok) throw new Error("Schema hydration failed");
+    return response.json();
+  },
+
+  async reindexCache(): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/semantic-cache/reindex`, {
+      method: "POST"
+    });
+    if (!response.ok) throw new Error("Cache re-indexing failed");
+    return response.json();
+  },
+
+  async getJobStatus(jobId: string): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}`);
+    if (!response.ok) throw new Error("Failed to fetch job status");
+    return response.json();
   }
 };

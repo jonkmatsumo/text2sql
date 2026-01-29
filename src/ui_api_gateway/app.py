@@ -1,19 +1,47 @@
-"""HTTP gateway that exposes MCP tools as JSON endpoints for UI clients."""
-
+import json
+import logging
+from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.mcp_client import MCPClient
 from agent.tools import unpack_mcp_result
 from common.config.env import get_env_str
+from dal.control_plane import ControlPlaneDatabase
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
 DEFAULT_MCP_TRANSPORT = "sse"
 
 app = FastAPI(title="Text2SQL UI API Gateway")
+
+
+class OpsJobStatus(str, Enum):
+    """Status of an operational background job."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class OpsJobResponse(BaseModel):
+    """Response model for job status."""
+
+    id: UUID
+    job_type: str
+    status: OpsJobStatus
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    result: Dict[str, Any] = {}
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,6 +168,108 @@ def _filter_examples(
         for ex in examples
         if query in ex.get("question", "").lower() or query in ex.get("sql_query", "").lower()
     ]
+
+
+async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: dict):
+    """Background worker to execute an ops job via MCP."""
+    try:
+        # 1. Update status to RUNNING
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                "UPDATE ops_jobs SET status = 'RUNNING' WHERE id = $1",
+                job_id,
+            )
+
+        # 2. Call MCP tool
+        result = await _call_tool(tool_name, tool_args)
+
+        # 3. Finalize status
+        status = "COMPLETED"
+        error_msg = None
+        if isinstance(result, dict) and "error" in result:
+            status = "FAILED"
+            error_msg = result["error"]
+
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET status = $2, finished_at = NOW(), error_message = $3, result = $4
+                WHERE id = $1
+                """,
+                job_id,
+                status,
+                error_msg,
+                json.dumps(result) if not isinstance(result, str) else result,
+            )
+
+    except Exception as e:
+        logger.error(f"Job {job_id} failed: {e}")
+        try:
+            async with ControlPlaneDatabase.get_direct_connection() as conn:
+                await conn.execute(
+                    "UPDATE ops_jobs SET status = 'FAILED', error_message = $2 WHERE id = $1",
+                    job_id,
+                    str(e),
+                )
+        except Exception:
+            pass
+
+
+@app.post("/ops/schema-hydrate", response_model=OpsJobResponse)
+async def trigger_schema_hydration(background_tasks: BackgroundTasks) -> Any:
+    """Trigger schema hydration job."""
+    job_id = uuid4()
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        await conn.execute(
+            "INSERT INTO ops_jobs (id, job_type, status) "
+            "VALUES ($1, 'SCHEMA_HYDRATION', 'PENDING')",
+            job_id,
+        )
+
+    background_tasks.add_task(_run_ops_job, job_id, "SCHEMA_HYDRATION", "hydrate_schema", {})
+    return await get_job_status(job_id)
+
+
+@app.post("/ops/semantic-cache/reindex", response_model=OpsJobResponse)
+async def trigger_cache_reindex(background_tasks: BackgroundTasks) -> Any:
+    """Trigger semantic cache re-indexing job."""
+    job_id = uuid4()
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        await conn.execute(
+            "INSERT INTO ops_jobs (id, job_type, status) VALUES ($1, 'CACHE_REINDEX', 'PENDING')",
+            job_id,
+        )
+
+    background_tasks.add_task(_run_ops_job, job_id, "CACHE_REINDEX", "reindex_semantic_cache", {})
+    return await get_job_status(job_id)
+
+
+@app.get("/ops/jobs/{job_id}", response_model=OpsJobResponse)
+async def get_job_status(job_id: UUID) -> Any:
+    """Fetch status of a background job."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM ops_jobs WHERE id = $1", job_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Handle result parsing
+        res = row["result"]
+        if isinstance(res, str):
+            try:
+                res = json.loads(res)
+            except Exception:
+                res = {"raw": res}
+
+        return OpsJobResponse(
+            id=row["id"],
+            job_type=row["job_type"],
+            status=row["status"],
+            started_at=row["started_at"],
+            finished_at=row.get("finished_at"),
+            error_message=row.get("error_message"),
+            result=res or {},
+        )
 
 
 @app.get("/interactions")

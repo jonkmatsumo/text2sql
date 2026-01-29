@@ -65,7 +65,8 @@ class ControlPlaneDatabase:
             )
             print(f"✓ Control-plane pool established: {db_user}@{db_host}/{db_name}")
             await cls.ensure_pinned_recommendations_schema()
-            logger.info("Ensured pinned_recommendations schema exists in control-plane DB")
+            await cls.ensure_ops_jobs_schema()
+            logger.info("Ensured control-plane DB schema is up to date")
         except Exception as e:
             msg = f"✗ Failed to connect to control-plane DB: {e}"
             print(msg)
@@ -84,6 +85,30 @@ class ControlPlaneDatabase:
             except ValueError:
                 pass
             cls._pool = None
+
+    @classmethod
+    async def ensure_ops_jobs_schema(cls) -> None:
+        """Ensure ops_jobs table exists in control-plane DB."""
+        if cls._pool is None:
+            return
+
+        async with cls._pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ops_jobs (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL
+                        CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')),
+                    started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    finished_at TIMESTAMPTZ,
+                    error_message TEXT,
+                    payload JSONB DEFAULT '{}'::jsonb,
+                    result JSONB DEFAULT '{}'::jsonb
+                );
+                """
+            )
+            logger.info("Ensured ops_jobs table exists")
 
     @classmethod
     async def ensure_pinned_recommendations_schema(cls) -> None:

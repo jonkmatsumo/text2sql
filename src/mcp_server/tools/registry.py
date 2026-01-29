@@ -49,6 +49,8 @@ CANONICAL_TOOLS: Set[str] = {
     "reload_patterns",
     "manage_pin_rules",
     "generate_patterns",
+    "hydrate_schema",
+    "reindex_semantic_cache",
 }
 
 
@@ -86,8 +88,10 @@ def register_all(mcp: "FastMCP") -> None:
     )
     from mcp_server.tools.admin.generate_patterns import handler as generate_patterns
     from mcp_server.tools.admin.get_interaction_details import handler as get_interaction_details
+    from mcp_server.tools.admin.hydrate_schema import handler as hydrate_schema
     from mcp_server.tools.admin.list_approved_examples import handler as list_approved_examples
     from mcp_server.tools.admin.list_interactions import handler as list_interactions
+    from mcp_server.tools.admin.reindex_cache import handler as reindex_cache
     from mcp_server.tools.admin.reject_interaction import handler as reject_interaction
     from mcp_server.tools.admin.reload_patterns import handler as reload_patterns
 
@@ -160,5 +164,7 @@ def register_all(mcp: "FastMCP") -> None:
     mcp.tool(name="reload_patterns")(reload_patterns)
     mcp.tool(name="manage_pin_rules")(manage_pin_rules)
     mcp.tool(name="generate_patterns")(generate_patterns)
+    mcp.tool(name="hydrate_schema")(hydrate_schema)
+    mcp.tool(name="reindex_semantic_cache")(reindex_cache)
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

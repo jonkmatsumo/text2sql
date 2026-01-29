@@ -132,20 +132,48 @@ class MaintenanceService:
         """Hydrate Memgraph from Postgres schema."""
         yield "Starting schema hydration..."
 
-        # We will integrate the actual GraphHydrator here later or now?
-        # The plan says "Wraps GraphHydrator logic".
-        # For Phase 1, we just need the stub or basic integration.
-        # Let's import it to see if it works, or leave as comment if it's complex dependency.
+        from mcp_server.services.rag.indexer import index_all_tables
+
         try:
-            # Note: The original CLI logic might need refactoring to separate logging from execution
-            # For now, we yield a placeholder
-            yield "Hydration logic invoked."
-        except ImportError:
-            yield "Error: Could not import hydration logic."
+            # This logic should ideally be made async if it involves heavy IO
+            # For now we call it directly
+            await index_all_tables()
+            yield "Hydration logic completed successfully."
+        except Exception as e:
+            yield f"Error during hydration: {e}"
 
     @staticmethod
     async def reindex_cache() -> AsyncGenerator[str, None]:
-        """Re-index the semantic cache."""
+        """Re-index the semantic cache (Unified Registry)."""
         yield "Starting cache re-indexing..."
-        # STUB
-        yield "Cache re-indexed (STUB)."
+
+        from dal.factory import get_registry_store
+        from mcp_server.services.rag import RagEngine
+
+        store = get_registry_store()
+
+        try:
+            # 1. Fetch all non-tombstoned items
+            # Note: This might be heavy for very large registries
+            # In a real system, we'd process in batches.
+            pairs = await store.lookup_semantic_candidates(
+                embedding=[0] * 384,  # Dummy embedding to get all
+                tenant_id=None,
+                threshold=-1.0,  # All
+                limit=10000,
+            )
+
+            yield f"Found {len(pairs)} items to re-embed."
+
+            for i, pair in enumerate(pairs):
+                # Re-generate embedding
+                new_embedding = await RagEngine.embed_text(pair.question)
+                pair.embedding = new_embedding
+                await store.store_pair(pair)
+
+                if (i + 1) % 10 == 0:
+                    yield f"Processed {i + 1}/{len(pairs)} items..."
+
+            yield "Cache re-indexing completed."
+        except Exception as e:
+            yield f"Error during re-indexing: {e}"
