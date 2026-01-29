@@ -7,8 +7,24 @@ import { useOtelHealth } from "../../hooks/useOtelHealth";
  */
 export default function OtelHealthBanner() {
   const { health, checkHealth } = useOtelHealth();
+  const [isDismissed, setIsDismissed] = React.useState(() => {
+    return sessionStorage.getItem("otel_banner_dismissed") === "true";
+  });
 
-  if (health.isHealthy) {
+  // Reset dismissal when health recovers, so future failures will be shown
+  React.useEffect(() => {
+    if (health.isHealthy) {
+      setIsDismissed(false);
+      sessionStorage.removeItem("otel_banner_dismissed");
+    }
+  }, [health.isHealthy]);
+
+  const handleDismiss = () => {
+    setIsDismissed(true);
+    sessionStorage.setItem("otel_banner_dismissed", "true");
+  };
+
+  if (health.isHealthy || isDismissed) {
     return null;
   }
 
@@ -27,7 +43,8 @@ export default function OtelHealthBanner() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "16px"
+        gap: "16px",
+        boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -54,22 +71,43 @@ export default function OtelHealthBanner() {
           </span>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => checkHealth()}
-        style={{
-          padding: "6px 16px",
-          borderRadius: "6px",
-          border: "1px solid #dc2626",
-          backgroundColor: "#fff",
-          color: "#dc2626",
-          fontWeight: 500,
-          fontSize: "0.85rem",
-          cursor: "pointer"
-        }}
-      >
-        Retry Connection
-      </button>
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button
+          type="button"
+          onClick={() => checkHealth()}
+          style={{
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: "1px solid #dc2626",
+            backgroundColor: "#fff",
+            color: "#dc2626",
+            fontWeight: 500,
+            fontSize: "0.85rem",
+            cursor: "pointer"
+          }}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          style={{
+            padding: "6px 12px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: "transparent",
+            color: "#991b1b",
+            fontSize: "1.2rem",
+            lineHeight: 1,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center"
+          }}
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
+      </div>
     </div>
   );
 }
