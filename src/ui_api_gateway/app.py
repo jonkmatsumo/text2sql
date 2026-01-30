@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -7,20 +8,136 @@ from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agent.mcp_client import MCPClient
 from agent.tools import unpack_mcp_result
 from common.config.env import get_env_str
 from dal.control_plane import ControlPlaneDatabase
+from ui_api_gateway.ops_jobs import OpsJobsClient, use_legacy_dal
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Custom Exceptions for MCP/Tool Failures
+# ---------------------------------------------------------------------------
+
+
+class MCPError(Exception):
+    """Base exception for MCP-related failures."""
+
+    def __init__(self, message: str, code: str = "MCP_ERROR", details: dict = None):
+        """Initialize MCP error with message, code, and optional details."""
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.details = details or {}
+
+
+class MCPUpstreamError(MCPError):
+    """Raised when MCP tool invocation fails (upstream/tool error)."""
+
+    def __init__(self, message: str, details: dict = None):
+        """Initialize upstream error with message and optional details."""
+        super().__init__(message, code="MCP_UPSTREAM_ERROR", details=details)
+
+
+class MCPTimeoutError(MCPError):
+    """Raised when MCP tool invocation times out."""
+
+    def __init__(self, message: str = "MCP tool invocation timed out", details: dict = None):
+        """Initialize timeout error with message and optional details."""
+        super().__init__(message, code="MCP_TIMEOUT", details=details)
+
+
+class MCPConnectionError(MCPError):
+    """Raised when connection to MCP server fails."""
+
+    def __init__(self, message: str = "Failed to connect to MCP server", details: dict = None):
+        """Initialize connection error with message and optional details."""
+        super().__init__(message, code="MCP_CONNECTION_ERROR", details=details)
+
 
 DEFAULT_MCP_URL = "http://localhost:8000/messages"
 DEFAULT_MCP_TRANSPORT = "sse"
 INTERNAL_AUTH_TOKEN = get_env_str("INTERNAL_AUTH_TOKEN", "")
 
-app = FastAPI(title="Text2SQL UI API Gateway")
+
+@asynccontextmanager
+async def lifespan(app):
+    """Lifespan handler for gateway startup/shutdown."""
+    # Startup: Initialize OpsJobsClient if not using legacy DAL
+    if not use_legacy_dal():
+        await OpsJobsClient.init()
+        logger.info("Gateway using OpsJobsClient (new isolated DAL path)")
+    else:
+        logger.info("Gateway using legacy ControlPlaneDatabase path")
+    yield
+    # Shutdown: Close OpsJobsClient connection pool
+    if not use_legacy_dal():
+        await OpsJobsClient.close()
+
+
+app = FastAPI(title="Text2SQL UI API Gateway", lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Exception Handlers - Map MCP errors to proper HTTP status codes
+# ---------------------------------------------------------------------------
+
+
+def _build_error_response(exc: MCPError, request_id: str = None) -> dict:
+    """Build a standardized error response payload."""
+    return {
+        "error": {
+            "message": exc.message,
+            "code": exc.code,
+            "details": exc.details,
+            "request_id": request_id,
+        }
+    }
+
+
+@app.exception_handler(MCPTimeoutError)
+async def mcp_timeout_handler(request: Request, exc: MCPTimeoutError) -> JSONResponse:
+    """Handle MCP timeout errors with 504 Gateway Timeout."""
+    request_id = request.headers.get("X-Request-ID")
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content=_build_error_response(exc, request_id),
+    )
+
+
+@app.exception_handler(MCPConnectionError)
+async def mcp_connection_handler(request: Request, exc: MCPConnectionError) -> JSONResponse:
+    """Handle MCP connection errors with 502 Bad Gateway."""
+    request_id = request.headers.get("X-Request-ID")
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content=_build_error_response(exc, request_id),
+    )
+
+
+@app.exception_handler(MCPUpstreamError)
+async def mcp_upstream_handler(request: Request, exc: MCPUpstreamError) -> JSONResponse:
+    """Handle MCP upstream/tool errors with 502 Bad Gateway."""
+    request_id = request.headers.get("X-Request-ID")
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content=_build_error_response(exc, request_id),
+    )
+
+
+@app.exception_handler(MCPError)
+async def mcp_error_handler(request: Request, exc: MCPError) -> JSONResponse:
+    """Handle generic MCP errors with 502 Bad Gateway."""
+    request_id = request.headers.get("X-Request-ID")
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content=_build_error_response(exc, request_id),
+    )
 
 
 async def check_internal_auth(request: Request):
@@ -142,15 +259,70 @@ async def _resolve_mcp_client() -> MCPClient:
     return MCPClient(server_url=mcp_url, transport=mcp_transport, headers=headers)
 
 
+def _classify_mcp_exception(exc: Exception, tool_name: str) -> MCPError:
+    """Classify an exception into the appropriate MCPError subclass.
+
+    Args:
+        exc: The original exception.
+        tool_name: Name of the tool that was being called.
+
+    Returns:
+        An MCPError subclass instance with appropriate classification.
+    """
+    exc_str = str(exc).lower()
+    details = {"tool_name": tool_name, "original_error": str(exc)}
+
+    # Timeout classification
+    if "timeout" in exc_str or "timed out" in exc_str:
+        return MCPTimeoutError(
+            message=f"MCP tool '{tool_name}' timed out",
+            details=details,
+        )
+
+    # Connection classification
+    if any(
+        kw in exc_str
+        for kw in [
+            "connection",
+            "connect",
+            "refused",
+            "unreachable",
+            "dns",
+            "resolve",
+            "network",
+        ]
+    ):
+        return MCPConnectionError(
+            message=f"Failed to connect to MCP server for tool '{tool_name}'",
+            details=details,
+        )
+
+    # Default: upstream tool error
+    return MCPUpstreamError(
+        message=f"MCP tool '{tool_name}' failed: {exc}",
+        details=details,
+    )
+
+
 async def _call_tool(tool_name: str, args: dict) -> Any:
-    """Invoke an MCP tool and normalize its response."""
+    """Invoke an MCP tool and normalize its response.
+
+    Raises:
+        MCPTimeoutError: If the tool invocation times out.
+        MCPConnectionError: If connection to MCP server fails.
+        MCPUpstreamError: If the tool execution fails.
+    """
     try:
         client = _resolve_mcp_client()
         async with client.connect() as mcp:
             result = await mcp.call_tool(tool_name, arguments=args)
         return unpack_mcp_result(result)
+    except (MCPError, MCPTimeoutError, MCPConnectionError, MCPUpstreamError):
+        # Re-raise our own exceptions
+        raise
     except Exception as exc:
-        return {"error": str(exc)}
+        logger.warning("MCP tool '%s' failed: %s", tool_name, exc)
+        raise _classify_mcp_exception(exc, tool_name) from exc
 
 
 def _filter_interactions(
@@ -189,50 +361,116 @@ def _filter_examples(
     ]
 
 
-async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: dict):
-    """Background worker to execute an ops job via MCP."""
-    try:
-        # 1. Update status to RUNNING
+async def _update_job_status_running(job_id: UUID) -> None:
+    """Update job status to RUNNING using configured client."""
+    if use_legacy_dal():
         async with ControlPlaneDatabase.get_direct_connection() as conn:
-            await conn.execute(
-                "UPDATE ops_jobs SET status = 'RUNNING' WHERE id = $1",
-                job_id,
-            )
+            await conn.execute("UPDATE ops_jobs SET status = 'RUNNING' WHERE id = $1", job_id)
+    else:
+        await OpsJobsClient.update_status(job_id, "RUNNING")
 
-        # 2. Call MCP tool
-        result = await _call_tool(tool_name, tool_args)
 
-        # 3. Finalize status
-        status = "COMPLETED"
-        error_msg = None
-        if isinstance(result, dict) and "error" in result:
-            status = "FAILED"
-            error_msg = result["error"]
-
+async def _update_job_status_completed(job_id: UUID, result: Any) -> None:
+    """Update job status to COMPLETED using configured client."""
+    if use_legacy_dal():
         async with ControlPlaneDatabase.get_direct_connection() as conn:
             await conn.execute(
                 """
                 UPDATE ops_jobs
-                SET status = $2, finished_at = NOW(), error_message = $3, result = $4
+                SET status = 'COMPLETED', finished_at = NOW(), result = $2
                 WHERE id = $1
                 """,
                 job_id,
-                status,
-                error_msg,
                 json.dumps(result) if not isinstance(result, str) else result,
             )
+    else:
+        await OpsJobsClient.update_status(job_id, "COMPLETED", result=result)
 
-    except Exception as e:
-        logger.error(f"Job {job_id} failed: {e}")
+
+async def _update_job_status_failed(job_id: UUID, error_message: str) -> None:
+    """Update job status to FAILED using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET status = 'FAILED', finished_at = NOW(), error_message = $2
+                WHERE id = $1
+                """,
+                job_id,
+                error_message,
+            )
+    else:
+        await OpsJobsClient.update_status(job_id, "FAILED", error_message=error_message)
+
+
+async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: dict):
+    """Background worker to execute an ops job via MCP."""
+    try:
+        # 1. Update status to RUNNING
+        await _update_job_status_running(job_id)
+
+        # 2. Call MCP tool (raises MCPError on failure)
+        result = await _call_tool(tool_name, tool_args)
+
+        # 3. Finalize status as COMPLETED
+        await _update_job_status_completed(job_id, result)
+
+    except MCPError as e:
+        # MCP-specific failures - log and record structured error
+        logger.error("Job %s failed (MCP): %s", job_id, e.message)
         try:
-            async with ControlPlaneDatabase.get_direct_connection() as conn:
-                await conn.execute(
-                    "UPDATE ops_jobs SET status = 'FAILED', error_message = $2 WHERE id = $1",
-                    job_id,
-                    str(e),
-                )
+            await _update_job_status_failed(job_id, e.message)
         except Exception:
             pass
+
+    except Exception as e:
+        logger.error("Job %s failed: %s", job_id, e)
+        try:
+            await _update_job_status_failed(job_id, str(e))
+        except Exception:
+            pass
+
+
+async def _create_job(job_id: UUID, job_type: str) -> None:
+    """Create a new ops job using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                "INSERT INTO ops_jobs (id, job_type, status) VALUES ($1, $2, 'PENDING')",
+                job_id,
+                job_type,
+            )
+    else:
+        await OpsJobsClient.create_job(job_id, job_type)
+
+
+async def _get_job(job_id: UUID) -> Optional[dict]:
+    """Fetch job record using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            row = await conn.fetchrow("SELECT * FROM ops_jobs WHERE id = $1", job_id)
+            if not row:
+                return None
+
+            res = row["result"]
+            if isinstance(res, str):
+                try:
+                    res = json.loads(res)
+                except Exception:
+                    res = {"raw": res}
+
+            return {
+                "id": row["id"],
+                "job_type": row["job_type"],
+                "status": row["status"],
+                "started_at": row["started_at"],
+                "finished_at": row.get("finished_at"),
+                "error_message": row.get("error_message"),
+                "result": res or {},
+            }
+    else:
+        return await OpsJobsClient.get_job(job_id)
 
 
 @app.post(
@@ -243,13 +481,7 @@ async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: d
 async def trigger_schema_hydration(background_tasks: BackgroundTasks) -> Any:
     """Trigger schema hydration job."""
     job_id = uuid4()
-    async with ControlPlaneDatabase.get_direct_connection() as conn:
-        await conn.execute(
-            "INSERT INTO ops_jobs (id, job_type, status) "
-            "VALUES ($1, 'SCHEMA_HYDRATION', 'PENDING')",
-            job_id,
-        )
-
+    await _create_job(job_id, "SCHEMA_HYDRATION")
     background_tasks.add_task(_run_ops_job, job_id, "SCHEMA_HYDRATION", "hydrate_schema", {})
     return await get_job_status(job_id)
 
@@ -262,12 +494,7 @@ async def trigger_schema_hydration(background_tasks: BackgroundTasks) -> Any:
 async def trigger_cache_reindex(background_tasks: BackgroundTasks) -> Any:
     """Trigger semantic cache re-indexing job."""
     job_id = uuid4()
-    async with ControlPlaneDatabase.get_direct_connection() as conn:
-        await conn.execute(
-            "INSERT INTO ops_jobs (id, job_type, status) VALUES ($1, 'CACHE_REINDEX', 'PENDING')",
-            job_id,
-        )
-
+    await _create_job(job_id, "CACHE_REINDEX")
     background_tasks.add_task(_run_ops_job, job_id, "CACHE_REINDEX", "reindex_semantic_cache", {})
     return await get_job_status(job_id)
 
@@ -277,28 +504,19 @@ async def trigger_cache_reindex(background_tasks: BackgroundTasks) -> Any:
 )
 async def get_job_status(job_id: UUID) -> Any:
     """Fetch status of a background job."""
-    async with ControlPlaneDatabase.get_direct_connection() as conn:
-        row = await conn.fetchrow("SELECT * FROM ops_jobs WHERE id = $1", job_id)
-        if not row:
-            raise HTTPException(status_code=404, detail="Job not found")
+    job = await _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-        # Handle result parsing
-        res = row["result"]
-        if isinstance(res, str):
-            try:
-                res = json.loads(res)
-            except Exception:
-                res = {"raw": res}
-
-        return OpsJobResponse(
-            id=row["id"],
-            job_type=row["job_type"],
-            status=row["status"],
-            started_at=row["started_at"],
-            finished_at=row.get("finished_at"),
-            error_message=row.get("error_message"),
-            result=res or {},
-        )
+    return OpsJobResponse(
+        id=job["id"],
+        job_type=job["job_type"],
+        status=job["status"],
+        started_at=job["started_at"],
+        finished_at=job.get("finished_at"),
+        error_message=job.get("error_message"),
+        result=job.get("result") or {},
+    )
 
 
 @app.get("/interactions", dependencies=[Depends(check_internal_auth)])
@@ -310,10 +528,11 @@ async def list_interactions(
 ) -> Any:
     """List interactions with optional UI-equivalent filters."""
     interactions = await _call_tool("list_interactions", {"limit": limit, "offset": offset})
-    if isinstance(interactions, dict) and "error" in interactions:
-        return interactions
     if not isinstance(interactions, list):
-        return {"error": f"Unexpected response format: {interactions}"}
+        raise MCPUpstreamError(
+            message="Unexpected response format from list_interactions",
+            details={"response": str(interactions)[:200]},
+        )
     return _filter_interactions(interactions, thumb, status)
 
 
@@ -372,10 +591,11 @@ async def list_registry_examples(
         "list_approved_examples",
         {"tenant_id": tenant_id, "limit": limit},
     )
-    if isinstance(examples, dict) and "error" in examples:
-        return examples
     if not isinstance(examples, list):
-        return {"error": f"Unexpected response format: {examples}"}
+        raise MCPUpstreamError(
+            message="Unexpected response format from list_approved_examples",
+            details={"response": str(examples)[:200]},
+        )
     return _filter_examples(examples, search)
 
 

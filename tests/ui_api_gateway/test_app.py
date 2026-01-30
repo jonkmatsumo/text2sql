@@ -1,6 +1,106 @@
 from fastapi.testclient import TestClient
 
 from ui_api_gateway import app as gateway_app
+from ui_api_gateway.app import MCPConnectionError, MCPTimeoutError, MCPUpstreamError
+
+# ---------------------------------------------------------------------------
+# Error Handling Tests (Phase 1 - Protocol Error Hardening)
+# ---------------------------------------------------------------------------
+
+
+def test_call_tool_connection_error_returns_502(monkeypatch):
+    """MCP connection failures should return 502 Bad Gateway."""
+
+    async def fake_call_tool(name, args):
+        raise MCPConnectionError(
+            message="Failed to connect to MCP server",
+            details={"tool_name": name},
+        )
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app, raise_server_exceptions=False)
+
+    resp = client.get("/interactions")
+    assert resp.status_code == 502
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == "MCP_CONNECTION_ERROR"
+    assert "message" in body["error"]
+
+
+def test_call_tool_timeout_error_returns_504(monkeypatch):
+    """MCP timeout failures should return 504 Gateway Timeout."""
+
+    async def fake_call_tool(name, args):
+        raise MCPTimeoutError(
+            message="MCP tool timed out",
+            details={"tool_name": name},
+        )
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app, raise_server_exceptions=False)
+
+    resp = client.get("/interactions")
+    assert resp.status_code == 504
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == "MCP_TIMEOUT"
+
+
+def test_call_tool_upstream_error_returns_502(monkeypatch):
+    """MCP upstream/tool failures should return 502 Bad Gateway."""
+
+    async def fake_call_tool(name, args):
+        raise MCPUpstreamError(
+            message="Tool execution failed",
+            details={"tool_name": name},
+        )
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app, raise_server_exceptions=False)
+
+    resp = client.get("/interactions")
+    assert resp.status_code == 502
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == "MCP_UPSTREAM_ERROR"
+
+
+def test_unexpected_response_format_returns_502(monkeypatch):
+    """Unexpected MCP response format should return 502."""
+
+    async def fake_call_tool(name, args):
+        # Return a dict instead of expected list for list_interactions
+        return {"unexpected": "format"}
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app, raise_server_exceptions=False)
+
+    resp = client.get("/interactions")
+    assert resp.status_code == 502
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == "MCP_UPSTREAM_ERROR"
+
+
+def test_error_response_includes_request_id(monkeypatch):
+    """Error responses should include request_id when provided."""
+
+    async def fake_call_tool(name, args):
+        raise MCPUpstreamError(message="Tool failed")
+
+    monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)
+    client = TestClient(gateway_app.app, raise_server_exceptions=False)
+
+    resp = client.get("/interactions", headers={"X-Request-ID": "test-req-123"})
+    assert resp.status_code == 502
+    body = resp.json()
+    assert body["error"]["request_id"] == "test-req-123"
+
+
+# ---------------------------------------------------------------------------
+# Existing Tests (Functional Behavior)
+# ---------------------------------------------------------------------------
 
 
 def test_list_interactions_filters(monkeypatch):

@@ -64,9 +64,10 @@ class ControlPlaneDatabase:
                 server_settings={"application_name": "agent_control_plane"},
             )
             print(f"✓ Control-plane pool established: {db_user}@{db_host}/{db_name}")
-            await cls.ensure_pinned_recommendations_schema()
-            await cls.ensure_ops_jobs_schema()
-            logger.info("Ensured control-plane DB schema is up to date")
+
+            # Schema validation (no DDL - migrations should be run separately)
+            await cls._validate_schema()
+
         except Exception as e:
             msg = f"✗ Failed to connect to control-plane DB: {e}"
             print(msg)
@@ -87,8 +88,57 @@ class ControlPlaneDatabase:
             cls._pool = None
 
     @classmethod
+    async def _validate_schema(cls) -> None:
+        """Validate that required tables exist.
+
+        This method checks for the existence of required tables and logs warnings
+        if they're missing. It does NOT create tables - migrations should be run
+        separately via scripts/migrations/migrate.py.
+        """
+        if cls._pool is None:
+            return
+
+        required_tables = ["ops_jobs", "pinned_recommendations"]
+        missing_tables = []
+
+        async with cls._pool.acquire() as conn:
+            for table in required_tables:
+                exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = $1
+                    )
+                    """,
+                    table,
+                )
+                if not exists:
+                    missing_tables.append(table)
+
+        if missing_tables:
+            logger.warning(
+                "Control-plane tables missing: %s. "
+                "Run migrations: python scripts/migrations/migrate.py",
+                ", ".join(missing_tables),
+            )
+        else:
+            logger.info("Control-plane schema validation passed")
+
+    @classmethod
     async def ensure_ops_jobs_schema(cls) -> None:
-        """Ensure ops_jobs table exists in control-plane DB."""
+        """Ensure ops_jobs table exists in control-plane DB.
+
+        DEPRECATED: This method runs DDL on startup which causes race conditions
+        in multi-replica deployments. Use scripts/migrations/migrate.py instead.
+        """
+        import warnings
+
+        warnings.warn(
+            "ensure_ops_jobs_schema is deprecated. Use scripts/migrations/migrate.py",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         if cls._pool is None:
             return
 
@@ -112,7 +162,20 @@ class ControlPlaneDatabase:
 
     @classmethod
     async def ensure_pinned_recommendations_schema(cls) -> None:
-        """Ensure pinned_recommendations schema exists in control-plane DB."""
+        """Ensure pinned_recommendations schema exists in control-plane DB.
+
+        DEPRECATED: This method runs DDL on startup which causes race conditions
+        in multi-replica deployments. Use scripts/migrations/migrate.py instead.
+        """
+        import warnings
+
+        warnings.warn(
+            "ensure_pinned_recommendations_schema is deprecated. "
+            "Use scripts/migrations/migrate.py",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         if cls._pool is None:
             return
 
