@@ -48,7 +48,9 @@ async def test_reload_patterns_integration():
         await service.reload_patterns()
 
         # Verify fetch called
-        mock_conn.fetch.assert_called_with("SELECT label, pattern, id FROM nlp_patterns")
+        mock_conn.fetch.assert_called_with(
+            "SELECT label, pattern, id FROM nlp_patterns WHERE deleted_at IS NULL"
+        )
 
         # Verify patterns added to ruler
         # This depends on how we mocked NLP.
