@@ -462,7 +462,69 @@ export interface IngestionRun {
   error_message?: string;
 }
 
+export interface IngestionTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  config: any;
+  created_at: string;
+  updated_at: string;
+}
+
 export const IngestionService = {
+  async listTemplates(): Promise<IngestionTemplate[]> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/templates`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list templates");
+    return response.json();
+  },
+
+  async createTemplate(data: { name: string; description?: string; config: any }): Promise<IngestionTemplate> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/templates`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) await throwApiError(response, "Failed to create template");
+    return response.json();
+  },
+
+  async deleteTemplate(id: string): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/templates/${id}`, {
+      method: "DELETE",
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to delete template");
+    return response.json();
+  },
+
+  async getMetrics(window: string = "7d"): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/metrics?window=${window}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to get ingestion metrics");
+    return response.json();
+  },
+
+  async rollbackRun(runId: string, patterns?: any[]): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/rollback`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ confirm_run_id: runId, patterns })
+    });
+    if (!response.ok) await throwApiError(response, "Rollback failed");
+    return response.json();
+  },
+
+  async getRunPatterns(runId: string): Promise<any[]> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/patterns`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list run patterns");
+    return response.json();
+  },
+
   async listRuns(status?: string): Promise<IngestionRun[]> {
     const params = new URLSearchParams();
     if (status) params.append("status", status);
