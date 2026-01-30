@@ -12,6 +12,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from agent.mcp_client import MCPClient
+from agent.mcp_client.manager import create_resilient_invoke_fn
 from agent.mcp_client.tool_wrapper import create_tool_wrapper
 from common.config.env import get_env_str
 
@@ -38,30 +39,18 @@ async def get_mcp_tools():
     async with client.connect() as mcp:
         tool_infos = await mcp.list_tools()
 
-        # Create wrappers with bound invoke functions
+        # Create wrappers with bound invoke functions using resilient retry logic
         wrappers = []
         for info in tool_infos:
-            # Capture current client context for invoke
             wrapper = create_tool_wrapper(
                 name=info.name,
                 description=info.description,
                 input_schema=info.input_schema,
-                invoke_fn=_create_invoke_fn(mcp_url, mcp_transport, info.name, headers),
+                invoke_fn=create_resilient_invoke_fn(mcp_url, mcp_transport, info.name, headers),
             )
             wrappers.append(_wrap_tool(wrapper))
 
         return wrappers
-
-
-def _create_invoke_fn(server_url: str, transport: str, tool_name: str, headers: dict = None):
-    """Create an async invoke function that connects and calls a tool."""
-
-    async def invoke(arguments: dict) -> Any:
-        client = MCPClient(server_url=server_url, transport=transport, headers=headers)
-        async with client.connect() as mcp:
-            return await mcp.call_tool(tool_name, arguments)
-
-    return invoke
 
 
 def _wrap_tool(tool):
