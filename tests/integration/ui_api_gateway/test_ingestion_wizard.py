@@ -12,7 +12,10 @@ async def async_client():
     """Create an async client for testing."""
     # Initialize Database for the test session
     try:
+        from dal.control_plane import ControlPlaneDatabase
+
         await Database.init()
+        await ControlPlaneDatabase.init()
     except Exception as e:
         print(f"DB Init failed: {e}")
         # Pass through, might fail later
@@ -20,12 +23,19 @@ async def async_client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
 
+    from dal.control_plane import ControlPlaneDatabase
+
+    await ControlPlaneDatabase.close()
     await Database.close()
 
 
 @pytest.mark.asyncio
 async def test_ingestion_wizard_flow(async_client: AsyncClient):
     """Test the full ingestion wizard flow via API."""
+    # 0. Cleanup existing test data
+    async with Database.get_connection(tenant_id=1) as conn:
+        await conn.execute("DELETE FROM nlp_patterns WHERE label = 'RATING_TEST'")
+
     # 1. Analyze
     analyze_payload = {"target_tables": ["category", "film_rating"]}
 
@@ -37,7 +47,7 @@ async def test_ingestion_wizard_flow(async_client: AsyncClient):
                 "table": "film_rating",
                 "column": "rating",
                 "values": ["G", "PG", "PG-13"],
-                "label": "RATING",
+                "label": "RATING_TEST",
             }
         ],
         "trusted_patterns": [],
@@ -63,8 +73,8 @@ async def test_ingestion_wizard_flow(async_client: AsyncClient):
 
     # Mock LLM suggestions
     mock_suggestions = [
-        {"id": "G", "label": "RATING", "pattern": "general audience", "accepted": True},
-        {"id": "PG", "label": "RATING", "pattern": "parental guidance", "accepted": True},
+        {"id": "G", "label": "RATING_TEST", "pattern": "general audience test", "accepted": True},
+        {"id": "PG", "label": "RATING_TEST", "pattern": "parental guidance test", "accepted": True},
     ]
 
     # We patch inside ui_api_gateway.app or ingestion.patterns.generator depending on import
@@ -97,11 +107,11 @@ async def test_ingestion_wizard_flow(async_client: AsyncClient):
     # 3. Commit
     # Mock suggestions to commit (user might have edited them)
     suggestions_to_commit = [
-        {"id": "G", "label": "RATING", "pattern": "general audience", "accepted": True},
+        {"id": "G", "label": "RATING_TEST", "pattern": "general audience test", "accepted": True},
         {
             "id": "PG",
-            "label": "RATING",
-            "pattern": "parental guidance",
+            "label": "RATING_TEST",
+            "pattern": "parental guidance test",
             "accepted": True,
             "is_new": True,
         },
@@ -122,10 +132,10 @@ async def test_ingestion_wizard_flow(async_client: AsyncClient):
 
     # Verify DB insertion
     async with Database.get_connection(tenant_id=1) as conn:
-        rows = await conn.fetch("SELECT * FROM nlp_patterns WHERE label = 'RATING'")
+        rows = await conn.fetch("SELECT * FROM nlp_patterns WHERE label = 'RATING_TEST'")
         patterns = [r["pattern"] for r in rows]
-        assert "general audience" in patterns
-        assert "parental guidance" in patterns
+        assert "general audience test" in patterns
+        assert "parental guidance test" in patterns
 
         # Verify run status
         row = await conn.fetchrow("SELECT status FROM nlp_pattern_runs WHERE id = $1", run_id)
