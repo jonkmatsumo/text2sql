@@ -210,6 +210,39 @@ app.add_middleware(
 # --- Ingestion Wizard Models ---
 
 
+class IngestionMetrics(BaseModel):
+    """Aggregated metrics for ingestion runs."""
+
+    total_runs: int
+    total_patterns_generated: int
+    total_patterns_accepted: int
+    avg_acceptance_rate: float
+    runs_by_day: List[Dict[str, Any]]
+
+
+class IngestionRunSummary(BaseModel):
+    """Summary of an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+
+
+class IngestionRunResponse(BaseModel):
+    """Detailed response for an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+    config_snapshot: Dict[str, Any]
+    metrics: Dict[str, Any]
+    error_message: Optional[str] = None
+
+
 class IngestionTemplateCreate(BaseModel):
     """Payload for creating or updating an ingestion template."""
 
@@ -278,37 +311,11 @@ class CommitResponse(BaseModel):
     hydration_job_id: UUID
 
 
-class IngestionMetrics(BaseModel):
-    """Aggregated metrics for ingestion runs."""
+class RollbackRequest(BaseModel):
+    """Payload for rolling back an ingestion run."""
 
-    total_runs: int
-    total_patterns_generated: int
-    total_patterns_accepted: int
-    avg_acceptance_rate: float
-    runs_by_day: List[Dict[str, Any]]
-
-
-class IngestionRunSummary(BaseModel):
-    """Summary of an ingestion run."""
-
-    id: UUID
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    status: str
-    target_table: Optional[str] = None
-
-
-class IngestionRunResponse(BaseModel):
-    """Detailed response for an ingestion run."""
-
-    id: UUID
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    status: str
-    target_table: Optional[str] = None
-    config_snapshot: Dict[str, Any]
-    metrics: Dict[str, Any]
-    error_message: Optional[str] = None
+    patterns: Optional[List[Dict[str, str]]] = None
+    confirm_run_id: str
 
 
 class ApproveInteractionRequest(BaseModel):
@@ -902,6 +909,90 @@ async def get_ingestion_run(run_id: UUID):
         )
 
 
+@app.get(
+    "/ops/ingestion/runs/{run_id}/patterns",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_run_patterns(run_id: UUID):
+    """List all patterns associated with an ingestion run."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        rows = await conn.fetch(
+            """
+            SELECT pattern_label as label, pattern_text as pattern, action
+            FROM nlp_pattern_run_items
+            WHERE run_id = $1
+            """,
+            run_id,
+        )
+        return [dict(r) for r in rows]
+
+
+@app.post(
+    "/ops/ingestion/runs/{run_id}/rollback",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def rollback_run(run_id: UUID, request: RollbackRequest):
+    """Roll back patterns created by a specific ingestion run."""
+    if request.confirm_run_id != str(run_id):
+        raise HTTPException(status_code=400, detail="Confirmation Run ID mismatch")
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        if request.patterns:
+            # Rollback selected patterns
+            for p in request.patterns:
+                await conn.execute(
+                    "UPDATE nlp_patterns SET deleted_at = NOW() WHERE label = $1 AND pattern = $2",
+                    p["label"],
+                    p["pattern"],
+                )
+                await conn.execute(
+                    """
+                    UPDATE nlp_pattern_run_items
+                    SET action = 'DELETED'
+                    WHERE run_id = $1 AND pattern_label = $2 AND pattern_text = $3
+                    """,
+                    run_id,
+                    p["label"],
+                    p["pattern"],
+                )
+        else:
+            # Rollback ALL created by this run
+            items = await conn.fetch(
+                """
+                SELECT pattern_label, pattern_text
+                FROM nlp_pattern_run_items
+                WHERE run_id = $1 AND action = 'CREATED'
+                """,
+                run_id,
+            )
+            for item in items:
+                await conn.execute(
+                    "UPDATE nlp_patterns SET deleted_at = NOW() WHERE label = $1 AND pattern = $2",
+                    item["pattern_label"],
+                    item["pattern_text"],
+                )
+
+            await conn.execute(
+                """
+                UPDATE nlp_pattern_run_items
+                SET action = 'DELETED'
+                WHERE run_id = $1 AND action = 'CREATED'
+                """,
+                run_id,
+            )
+
+        await conn.execute(
+            """
+            UPDATE nlp_pattern_runs
+            SET status = 'ROLLED_BACK', error_message = 'Rolled back by operator'
+            WHERE id = $1
+            """,
+            run_id,
+        )
+
+        return {"success": True}
+
+
 @app.post(
     "/ops/ingestion/analyze",
     response_model=AnalyzeResponse,
@@ -1037,6 +1128,22 @@ async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundT
                 p["label"],
                 p["pattern"],
             )
+
+            # Record association
+            await conn.execute(
+                """
+                INSERT INTO nlp_pattern_run_items
+                    (run_id, pattern_id, pattern_label, pattern_text, action)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT DO NOTHING
+                """,
+                request.run_id,
+                p["id"],
+                p["label"],
+                p["pattern"],
+                "CREATED" if res.endswith("1") else "UNCHANGED",
+            )
+
             if res.endswith("1"):
                 inserted_count += 1
 

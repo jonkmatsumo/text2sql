@@ -232,7 +232,9 @@ class CanonicalizationService:
             # Check if table exists first (in case running before migration,
             # though ensure_schema should handle it).
             # But typically we just query.
-            rows = await conn.fetch("SELECT label, pattern, id FROM nlp_patterns")
+            rows = await conn.fetch(
+                "SELECT label, pattern, id FROM nlp_patterns WHERE deleted_at IS NULL"
+            )
 
             for row in rows:
                 patterns.append(

@@ -99,6 +99,7 @@ class Database:
                     label TEXT NOT NULL,       -- Entity Label (e.g., "RATING")
                     pattern TEXT NOT NULL,     -- The pattern/synonym (e.g., "general audiences")
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP,
                     PRIMARY KEY (label, pattern)
                 );
                 """
@@ -117,7 +118,9 @@ class Database:
                     config_snapshot JSONB DEFAULT '{}'::jsonb,
                     error_message TEXT,
                     metrics JSONB DEFAULT '{}'::jsonb,
-                    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'AWAITING_REVIEW'))
+                    CHECK (status IN (
+                        'RUNNING', 'COMPLETED', 'FAILED', 'AWAITING_REVIEW', 'ROLLED_BACK'
+                    ))
                 );
                 """
             )
