@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import Tabs from "../components/common/Tabs";
 import DataTable from "../components/common/DataTable";
 import Modal from "../components/common/Modal";
 import FilterSelect from "../components/common/FilterSelect";
 import TraceLink from "../components/common/TraceLink";
+import VirtualList from "../components/common/VirtualList";
 import { AdminService } from "../api";
 import { Interaction, ApprovedExample } from "../types/admin";
 import { useQueryParams } from "../hooks/useQueryParams";
@@ -84,7 +85,7 @@ export default function ReviewCuration() {
         }
     }, [activeTab, filters.thumb, filters.status, searchQuery]);
 
-    const handleRowClick = async (item: Interaction) => {
+    const handleRowClick = useCallback(async (item: Interaction) => {
         setIsLoading(true);
         try {
             const details = await AdminService.getInteractionDetails(item.id);
@@ -97,7 +98,7 @@ export default function ReviewCuration() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [showToast]);
 
     const handleApprove = async () => {
         if (!selectedInteraction) return;
@@ -150,6 +151,49 @@ export default function ReviewCuration() {
         }
     }, [selectedInteraction?.response_payload]);
 
+    const renderInteractionRow = useCallback((item: Interaction, index: number) => (
+        <div
+            key={item.id}
+            onClick={() => handleRowClick(item)}
+            style={{
+                display: "grid",
+                gridTemplateColumns: "2fr 2fr 80px 100px 140px 60px",
+                gap: "12px",
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--border)",
+                cursor: "pointer",
+                backgroundColor: index % 2 === 0 ? "transparent" : "var(--surface-muted)",
+                alignItems: "center",
+                height: "56px",
+                boxSizing: "border-box"
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "var(--surface-muted)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = index % 2 === 0 ? "transparent" : "var(--surface-muted)"; }}
+        >
+            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.user_nlq_text || "—"}
+            </div>
+            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <code style={{ fontSize: "0.8rem" }}>{item.generated_sql_preview || "—"}</code>
+            </div>
+            <div>{item.thumb || "—"}</div>
+            <div>{item.execution_status || "—"}</div>
+            <div>{item.created_at ? item.created_at.replace("T", " ").slice(0, 16) : "—"}</div>
+            <div>
+                {(item.trace_id || item.id) ? (
+                    <TraceLink
+                        traceId={item.trace_id}
+                        interactionId={item.id}
+                        variant="icon"
+                        showCopy={false}
+                    />
+                ) : (
+                    <span style={{ color: "var(--muted)" }}>-</span>
+                )}
+            </div>
+        </div>
+    ), [handleRowClick]);
+
     return (
         <>
             <header className="hero">
@@ -181,40 +225,45 @@ export default function ReviewCuration() {
                         />
                     </div>
 
-                    <DataTable
-                        data={interactions}
-                        isLoading={isLoading}
-                        onRowClick={handleRowClick}
-                        columns={[
-                            { header: "NLQ Text", key: "user_nlq_text" },
-                            {
-                                header: "SQL Preview",
-                                key: "generated_sql_preview",
-                                render: (row) => <code style={{ fontSize: "0.8rem" }}>{row.generated_sql_preview}</code>
-                            },
-                            { header: "Feedback", key: "thumb" },
-                            { header: "Status", key: "execution_status" },
-                            {
-                                header: "Created At",
-                                key: "created_at",
-                                render: (row) => row.created_at.replace("T", " ").slice(0, 16)
-                            },
-                            {
-                                header: "Trace",
-                                key: "trace_id",
-                                render: (row) => (row.trace_id || row.id) ? (
-                                    <TraceLink
-                                        traceId={row.trace_id}
-                                        interactionId={row.id}
-                                        variant="icon"
-                                        showCopy={false}
-                                    />
-                                ) : (
-                                    <span style={{ color: "var(--muted)" }}>-</span>
-                                )
-                            }
-                        ]}
-                    />
+                    {isLoading && <div className="loading">Loading data...</div>}
+
+                    {!isLoading && interactions.length === 0 && (
+                        <div className="loading" style={{ padding: "40px" }}>No items found.</div>
+                    )}
+
+                    {!isLoading && interactions.length > 0 && (
+                        <div className="table-wrap">
+                            {/* Static header */}
+                            <div
+                                style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "2fr 2fr 80px 100px 140px 60px",
+                                    gap: "12px",
+                                    padding: "12px 16px",
+                                    backgroundColor: "var(--surface-muted)",
+                                    borderBottom: "1px solid var(--border)",
+                                    fontWeight: 600,
+                                    fontSize: "0.85rem",
+                                    color: "var(--muted)"
+                                }}
+                            >
+                                <div>NLQ Text</div>
+                                <div>SQL Preview</div>
+                                <div>Feedback</div>
+                                <div>Status</div>
+                                <div>Created At</div>
+                                <div>Trace</div>
+                            </div>
+                            {/* Virtualized rows */}
+                            <VirtualList
+                                items={interactions}
+                                rowHeight={56}
+                                height={Math.min(interactions.length * 56, 600)}
+                                overscan={6}
+                                renderRow={renderInteractionRow}
+                            />
+                        </div>
+                    )}
                 </>
             )}
 
