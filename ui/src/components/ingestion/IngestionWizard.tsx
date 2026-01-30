@@ -22,6 +22,7 @@ export default function IngestionWizard({ onExit }: Props) {
   const [runId, setRunId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<IngestionCandidate[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [originalSuggestions, setOriginalSuggestions] = useState<Suggestion[]>([]);
   const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +30,8 @@ export default function IngestionWizard({ onExit }: Props) {
   // Step 2 State
   const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
   const [newSynonymInputs, setNewSynonymInputs] = useState<Record<string, string>>({});
+  const [reviewedCandidates, setReviewedCandidates] = useState<Set<number>>(new Set());
+  const [modifiedCandidates, setModifiedCandidates] = useState<Set<number>>(new Set());
 
   const { show: showToast } = useToast();
 
@@ -36,7 +39,6 @@ export default function IngestionWizard({ onExit }: Props) {
   useEffect(() => {
     let timer: any;
     if (hydrationJobId && step === "complete") {
-        // Initial fetch
         OpsService.getJobStatus(hydrationJobId).then(setActiveJob).catch(console.error);
 
         timer = setInterval(async () => {
@@ -74,9 +76,13 @@ export default function IngestionWizard({ onExit }: Props) {
     try {
       const selected = candidates.filter(c => c.selected);
       const res = await IngestionService.enrich(runId, selected);
-      setSuggestions(res.suggestions.map(s => ({ ...s, accepted: true })));
-      setActiveCandidateIdx(0); // Reset to first candidate
+      const initialSuggestions = res.suggestions.map(s => ({ ...s, accepted: true }));
+      setSuggestions(initialSuggestions);
+      setOriginalSuggestions(JSON.parse(JSON.stringify(initialSuggestions)));
+      setActiveCandidateIdx(0);
       setStep("review_suggestions");
+      setReviewedCandidates(new Set());
+      setModifiedCandidates(new Set());
     } catch (err: any) {
       setError(err.message || "Enrichment failed");
       setStep("review_candidates");
@@ -86,10 +92,24 @@ export default function IngestionWizard({ onExit }: Props) {
 
   const handleCommit = async () => {
     if (!runId) return;
+    const approved = suggestions.filter(s => s.accepted);
+
+    if (approved.length === 0) {
+        showToast("Cannot commit empty pattern set. Accept at least one suggestion.", "error");
+        return;
+    }
+
+    // Warn on suspicious strings
+    const suspicious = approved.filter(s => s.pattern.length > 50 || s.pattern.trim() === "");
+    if (suspicious.length > 0) {
+        if (!window.confirm(`Warning: ${suspicious.length} patterns are unusually long or empty. Proceed anyway?`)) {
+            return;
+        }
+    }
+
     setStep("committing");
     setError(null);
     try {
-      const approved = suggestions.filter(s => s.accepted);
       const res = await IngestionService.commit(runId, approved);
       setHydrationJobId(res.hydration_job_id);
       setStep("complete");
@@ -113,6 +133,8 @@ export default function IngestionWizard({ onExit }: Props) {
       const newSuggestions = [...suggestions];
       newSuggestions[suggIndex].accepted = !newSuggestions[suggIndex].accepted;
       setSuggestions(newSuggestions);
+      setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
+      setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
   };
 
   const addSynonym = (canonicalId: string, label: string) => {
@@ -129,6 +151,38 @@ export default function IngestionWizard({ onExit }: Props) {
       };
       setSuggestions([...suggestions, newSug]);
       setNewSynonymInputs({ ...newSynonymInputs, [key]: "" });
+      setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
+      setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
+  };
+
+  const bulkAction = (action: 'accept' | 'reject' | 'reset') => {
+      const selectedCandidates = candidates.filter(c => c.selected);
+      const activeCandidate = selectedCandidates[activeCandidateIdx];
+      if (!activeCandidate) return;
+
+      const newSuggestions = [...suggestions];
+
+      if (action === 'reset') {
+          // Reset only for this candidate
+          const resetSuggestions = originalSuggestions.filter(s => s.label === activeCandidate.label);
+          // Replace in main list
+          const otherSuggestions = suggestions.filter(s => s.label !== activeCandidate.label);
+          setSuggestions([...otherSuggestions, ...JSON.parse(JSON.stringify(resetSuggestions))]);
+          setModifiedCandidates(prev => {
+              const next = new Set(prev);
+              next.delete(activeCandidateIdx);
+              return next;
+          });
+      } else {
+          newSuggestions.forEach(s => {
+              if (s.label === activeCandidate.label) {
+                  s.accepted = action === 'accept';
+              }
+          });
+          setSuggestions(newSuggestions);
+          setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
+      }
+      setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
   };
 
   return (
@@ -239,22 +293,36 @@ export default function IngestionWizard({ onExit }: Props) {
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                         {candidates.filter(c => c.selected).map((c, i) => {
                              const isActive = i === activeCandidateIdx;
+                             const isModified = modifiedCandidates.has(i);
+                             const isReviewed = reviewedCandidates.has(i);
+
                              return (
                                 <button
                                     key={i}
-                                    onClick={() => setActiveCandidateIdx(i)}
+                                    onClick={() => {
+                                        setActiveCandidateIdx(i);
+                                        setReviewedCandidates(new Set(reviewedCandidates).add(i));
+                                    }}
                                     style={{
                                         textAlign: "left",
                                         padding: "8px 12px",
                                         background: isActive ? "var(--surface-muted)" : "transparent",
-                                        border: "none",
+                                        border: isActive ? "1px solid var(--accent)" : "1px solid transparent",
                                         borderRadius: "6px",
                                         cursor: "pointer",
                                         fontWeight: isActive ? 600 : 400,
-                                        color: isActive ? "var(--ink)" : "var(--muted)"
+                                        color: isActive ? "var(--ink)" : "var(--muted)",
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center"
                                     }}
                                 >
-                                    {c.table}.{c.column}
+                                    <span>{c.table}.{c.column}</span>
+                                    {isModified ? (
+                                        <span title="Modified" style={{ color: "#f59e0b" }}>●</span>
+                                    ) : isReviewed ? (
+                                        <span title="Reviewed" style={{ color: "#10b981" }}>✓</span>
+                                    ) : null}
                                 </button>
                              );
                         })}
@@ -271,8 +339,17 @@ export default function IngestionWizard({ onExit }: Props) {
 
                        return (
                            <div>
-                               <h3 style={{ marginTop: 0 }}>{activeCandidate.table}.{activeCandidate.column}</h3>
-                               <p className="subtitle">Entity Label: <code>{activeCandidate.label}</code></p>
+                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+                                   <div>
+                                       <h3 style={{ marginTop: 0, marginBottom: "4px" }}>{activeCandidate.table}.{activeCandidate.column}</h3>
+                                       <p className="subtitle" style={{ margin: 0 }}>Entity Label: <code>{activeCandidate.label}</code></p>
+                                   </div>
+                                   <div style={{ display: "flex", gap: "8px" }}>
+                                       <button onClick={() => bulkAction('accept')} style={{ fontSize: "0.8rem", padding: "4px 8px", borderRadius: "4px", border: "1px solid var(--border)", cursor: "pointer" }}>Accept All</button>
+                                       <button onClick={() => bulkAction('reject')} style={{ fontSize: "0.8rem", padding: "4px 8px", borderRadius: "4px", border: "1px solid var(--border)", cursor: "pointer" }}>Reject All</button>
+                                       <button onClick={() => bulkAction('reset')} style={{ fontSize: "0.8rem", padding: "4px 8px", borderRadius: "4px", border: "1px solid var(--border)", cursor: "pointer" }}>Reset</button>
+                                   </div>
+                               </div>
 
                                <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                                    {activeCandidate.values.map(val => {
@@ -300,6 +377,7 @@ export default function IngestionWizard({ onExit }: Props) {
                                                                {s.pattern}
                                                            </span>
                                                            {s.is_new && <span style={{ fontSize: "0.7rem", background: "#dcfce7", color: "#166534", padding: "2px 6px", borderRadius: "4px" }}>NEW</span>}
+                                                           {s.pattern.length > 50 && <span title="Unusually long pattern" style={{ color: "#ef4444" }}>⚠</span>}
                                                        </label>
                                                    ))}
                                                </div>
