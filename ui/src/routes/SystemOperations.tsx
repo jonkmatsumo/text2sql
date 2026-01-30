@@ -4,24 +4,10 @@ import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import IngestionWizard from "../components/ingestion/IngestionWizard";
 import IngestionDashboard from "../components/ingestion/IngestionDashboard";
-import { OpsService, ApiError } from "../api";
+import { OpsService, ApiError, getErrorMessage } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
-
-/**
- * Extract user-friendly error message from error object.
- * Uses ApiError.displayMessage when available for better UX.
- */
-function getErrorMessage(err: unknown): string {
-    if (err instanceof ApiError) {
-        return err.displayMessage;
-    }
-    if (err instanceof Error) {
-        return err.message;
-    }
-    return "An unexpected error occurred";
-}
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");

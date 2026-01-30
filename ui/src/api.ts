@@ -92,6 +92,20 @@ export class ApiError extends Error {
 }
 
 /**
+ * Extract user-friendly error message from an error object.
+ * Uses ApiError.displayMessage when available for better UX.
+ */
+export function getErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    return err.displayMessage;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "An unexpected error occurred";
+}
+
+/**
  * Parse error response body and throw ApiError.
  * Falls back to generic error if response cannot be parsed.
  */
@@ -142,7 +156,7 @@ export async function fetchMetricsPreview(
     headers: getAuthHeaders()
   });
   if (!response.ok) {
-    throw new Error(`Metrics fetch failed (${response.status})`);
+    await throwApiError(response, "Failed to fetch metrics");
   }
   return response.json();
 }
@@ -155,7 +169,7 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunRespon
   });
 
   if (!response.ok) {
-    throw new Error(`Agent service error (${response.status})`);
+    await throwApiError(response, "Agent service error");
   }
 
   return response.json();
@@ -178,7 +192,7 @@ export async function submitFeedback(request: FeedbackRequest): Promise<any> {
 export async function fetchTraceDetail(traceId: string): Promise<TraceDetail> {
   const response = await fetch(`${otelBase}/api/v1/traces/${traceId}?include=attributes`);
   if (!response.ok) {
-    throw new Error(`Trace fetch failed (${response.status})`);
+    await throwApiError(response, "Failed to fetch trace");
   }
   return response.json();
 }
@@ -192,7 +206,7 @@ export async function fetchTraceSpans(
     `${otelBase}/api/v1/traces/${traceId}/spans?include=attributes&limit=${limit}&offset=${offset}`
   );
   if (!response.ok) {
-    throw new Error(`Span fetch failed (${response.status})`);
+    await throwApiError(response, "Failed to fetch spans");
   }
   const data = await response.json();
   return data.items || [];
@@ -204,7 +218,7 @@ export async function fetchSpanDetail(
 ): Promise<SpanDetail> {
   const response = await fetch(`${otelBase}/api/v1/traces/${traceId}/spans/${spanId}`);
   if (!response.ok) {
-    throw new Error(`Span detail fetch failed (${response.status})`);
+    await throwApiError(response, "Failed to fetch span details");
   }
   return response.json();
 }
@@ -212,7 +226,7 @@ export async function fetchSpanDetail(
 export async function resolveTraceByInteraction(interactionId: string): Promise<string> {
   const response = await fetch(`${otelBase}/api/v1/traces/by-interaction/${interactionId}`);
   if (!response.ok) {
-    throw new Error(`Trace resolve failed (${response.status})`);
+    await throwApiError(response, "Failed to resolve trace");
   }
   const data = await response.json();
   return data.trace_id;
@@ -233,7 +247,7 @@ export async function listTraces(
   const url = `${otelBase}/api/v1/traces${searchParams.toString() ? `?${searchParams}` : ""}`;
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`List traces failed (${response.status})`);
+    await throwApiError(response, "Failed to list traces");
   }
   return response.json();
 }

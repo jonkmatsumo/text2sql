@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans } from "../api";
+import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans, getErrorMessage } from "../api";
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
@@ -83,8 +83,8 @@ export default function TraceDetail() {
       const traceData = await fetchTraceDetail(traceId);
       setTrace(traceData);
       reportSuccess();
-    } catch (err: any) {
-      const errorMessage = err.message || "Failed to load trace detail.";
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err);
       setTraceError(errorMessage);
       reportFailure(errorMessage);
     } finally {
@@ -115,8 +115,8 @@ export default function TraceDetail() {
     try {
       const spansData = await fetchAllSpans();
       setSpans(spansData);
-    } catch (err: any) {
-      const errorMessage = err.message || "Failed to load spans.";
+    } catch (err: unknown) {
+      const errorMessage = getErrorMessage(err);
       setSpansError(errorMessage);
       // We don't report global failure for spans if trace detail succeeded
       // to avoid triggering global outage banner for partial data issues.

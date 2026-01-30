@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { IngestionService, IngestionCandidate, Suggestion, OpsService, IngestionRun, IngestionTemplate } from "../../api";
+import { IngestionService, IngestionCandidate, Suggestion, OpsService, IngestionRun, IngestionTemplate, getErrorMessage } from "../../api";
 import { OpsJobResponse } from "../../types/admin";
 import { useToast } from "../../hooks/useToast";
 
@@ -80,8 +80,8 @@ export default function IngestionWizard({ onExit }: Props) {
 
       // Update URL
       setSearchParams({ run_id: id });
-    } catch (err: any) {
-      setError("Failed to load ingestion run");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
       showToast("Failed to load run", "error");
     } finally {
       setIsLoading(false);
@@ -150,8 +150,8 @@ export default function IngestionWizard({ onExit }: Props) {
       setCandidates(res.candidates.map((c) => ({ ...c, selected: true })));
       setStep("review_candidates");
       setSearchParams({ run_id: res.run_id });
-    } catch (err: any) {
-      setError(err.message || "Analysis failed");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
       setStep("intro");
       showToast("Analysis failed", "error");
     }
@@ -166,8 +166,8 @@ export default function IngestionWizard({ onExit }: Props) {
       const selected = candidates.filter((c) => c.selected);
       const res = await IngestionService.enrich(runId, selected);
       setEnrichJobId(res.job_id);
-    } catch (err: any) {
-      setError(err.message || "Enrichment failed");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
       setStep("review_candidates");
       showToast("Enrichment failed", "error");
     }
@@ -209,8 +209,8 @@ export default function IngestionWizard({ onExit }: Props) {
       setHydrationJobId(res.hydration_job_id);
       setStep("complete");
       showToast("Ingestion committed successfully", "success");
-    } catch (err: any) {
-      setError(err.message || "Commit failed");
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
       setStep("review_suggestions");
       showToast("Commit failed", "error");
     }
