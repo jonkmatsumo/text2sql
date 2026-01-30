@@ -237,6 +237,13 @@ class EnrichResponse(BaseModel):
     suggestions: List[Dict[str, Any]]
 
 
+class EnrichAsyncResponse(BaseModel):
+    """Response payload for async enrichment trigger."""
+
+    run_id: UUID
+    job_id: UUID
+
+
 class CommitRequest(BaseModel):
     """Request payload for committing patterns."""
 
@@ -487,6 +494,85 @@ async def _update_job_status_failed(job_id: UUID, error_message: str) -> None:
         await OpsJobsClient.update_status(job_id, "FAILED", error_message=error_message)
 
 
+async def _update_job_progress(job_id: UUID, progress: Dict[str, Any]) -> None:
+    """Update job progress using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET result = COALESCE(result, '{}'::jsonb) || $2
+                WHERE id = $1
+                """,
+                job_id,
+                json.dumps(progress),
+            )
+    else:
+        await OpsJobsClient.update_progress(job_id, progress)
+
+
+async def _run_enrich_job(job_id: UUID, run_id: UUID, selected_candidates: List[Dict]):
+    """Background worker to execute pattern enrichment."""
+    try:
+        await _update_job_status_running(job_id)
+
+        from ingestion.patterns.generator import get_openai_client
+
+        client = await get_openai_client()
+        threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
+        detector = EnumLikeColumnDetector(threshold=threshold)
+
+        all_suggestions = []
+        total = len(selected_candidates)
+
+        for i, candidate in enumerate(selected_candidates):
+            # Update progress
+            await _update_job_progress(job_id, {"processed": i, "total": total})
+
+            # Enrich single candidate
+            suggestions = await generate_suggestions(
+                [candidate], client, detector, run_id=str(run_id)
+            )
+            all_suggestions.extend(suggestions)
+
+            # Update config_snapshot with partial results
+            async with Database.get_connection(tenant_id=1) as conn:
+                row = await conn.fetchrow(
+                    "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", run_id
+                )
+                if row:
+                    snapshot = (
+                        json.loads(row["config_snapshot"])
+                        if isinstance(row["config_snapshot"], str)
+                        else row["config_snapshot"]
+                    )
+                    snapshot["draft_patterns"] = all_suggestions
+                    # Update ui_state
+                    if "ui_state" not in snapshot:
+                        snapshot["ui_state"] = {}
+                    snapshot["ui_state"]["current_step"] = "review_suggestions"
+                    snapshot["ui_state"]["last_updated_at"] = datetime.now().isoformat()
+
+                    await conn.execute(
+                        "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",
+                        run_id,
+                        json.dumps(snapshot),
+                    )
+
+        await _update_job_status_completed(
+            job_id,
+            {
+                "status": "SUCCESS",
+                "total_suggestions": len(all_suggestions),
+                "processed": total,
+                "total": total,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Enrichment job {job_id} failed: {e}")
+        await _update_job_status_failed(job_id, str(e))
+
+
 async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: dict):
     """Background worker to execute an ops job via MCP."""
     try:
@@ -690,59 +776,22 @@ async def analyze_source(request: AnalyzeRequest):
 
 @app.post(
     "/ops/ingestion/enrich",
-    response_model=EnrichResponse,
+    response_model=EnrichAsyncResponse,
     dependencies=[Depends(check_internal_auth)],
 )
-async def enrich_candidates(request: EnrichRequest):
-    """Generate suggestions for selected candidates using LLM."""
+async def enrich_candidates(request: EnrichRequest, background_tasks: BackgroundTasks):
+    """Trigger enrichment suggestions for selected candidates as a background job."""
     if len(request.selected_candidates) > MAX_ENRICH_BATCH_SIZE:
         raise HTTPException(
             status_code=400,
             detail=f"Too many candidates selected. Max batch size is {MAX_ENRICH_BATCH_SIZE}.",
         )
 
-    from ingestion.patterns.generator import get_openai_client
+    job_id = uuid4()
+    await _create_job(job_id, "PATTERN_ENRICHMENT")
+    background_tasks.add_task(_run_enrich_job, job_id, request.run_id, request.selected_candidates)
 
-    client = await get_openai_client()
-
-    threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
-    detector = EnumLikeColumnDetector(threshold=threshold)
-
-    try:
-        suggestions = await generate_suggestions(
-            request.selected_candidates, client, detector, run_id=str(request.run_id)
-        )
-    except Exception as e:
-        logger.error(f"Enrichment failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    async with Database.get_connection(tenant_id=1) as conn:
-        row = await conn.fetchrow(
-            "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", request.run_id
-        )
-        if row:
-            snapshot = (
-                json.loads(row["config_snapshot"])
-                if isinstance(row["config_snapshot"], str)
-                else row["config_snapshot"]
-            )
-            snapshot["draft_patterns"] = suggestions
-            snapshot["ui_state"] = {
-                "current_step": "review_suggestions",
-                "selected_candidates": [
-                    {"table": c["table"], "column": c["column"]}
-                    for c in request.selected_candidates
-                ],
-                "last_updated_at": datetime.now().isoformat(),
-            }
-
-            await conn.execute(
-                "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",
-                request.run_id,
-                json.dumps(snapshot),
-            )
-
-    return EnrichResponse(suggestions=suggestions)
+    return EnrichAsyncResponse(run_id=request.run_id, job_id=job_id)
 
 
 @app.post(

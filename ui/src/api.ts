@@ -441,8 +441,9 @@ export interface Suggestion {
   is_new?: boolean; // UI state (manual add)
 }
 
-export interface EnrichResponse {
-  suggestions: Suggestion[];
+export interface EnrichAsyncResponse {
+  run_id: string;
+  job_id: string;
 }
 
 export interface CommitResponse {
@@ -490,7 +491,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async enrich(runId: string, selectedCandidates: IngestionCandidate[]): Promise<EnrichResponse> {
+  async enrich(runId: string, selectedCandidates: IngestionCandidate[]): Promise<EnrichAsyncResponse> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/enrich`, {
       method: "POST",
       headers: getAuthHeaders(),

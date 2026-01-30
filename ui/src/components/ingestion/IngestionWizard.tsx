@@ -25,118 +25,145 @@ export default function IngestionWizard({ onExit }: Props) {
   const [candidates, setCandidates] = useState<IngestionCandidate[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [originalSuggestions, setOriginalSuggestions] = useState<Suggestion[]>([]);
-  const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [recentRuns, setRecentRuns] = useState<IngestionRun[]>([]);
+    const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
+    const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
+    const [enrichJobId, setEnrichJobId] = useState<string | null>(null);
+    const [enrichJobStatus, setEnrichJobStatus] = useState<OpsJobResponse | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [recentRuns, setRecentRuns] = useState<IngestionRun[]>([]);
 
-  // Step 2 State
-  const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
-  const [newSynonymInputs, setNewSynonymInputs] = useState<Record<string, string>>({});
-  const [reviewedCandidates, setReviewedCandidates] = useState<Set<number>>(new Set());
-  const [modifiedCandidates, setModifiedCandidates] = useState<Set<number>>(new Set());
+    // Step 2 State
+    const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
+    const [newSynonymInputs, setNewSynonymInputs] = useState<Record<string, string>>({});
+    const [reviewedCandidates, setReviewedCandidates] = useState<Set<number>>(new Set());
+    const [modifiedCandidates, setModifiedCandidates] = useState<Set<number>>(new Set());
 
-  const { show: showToast } = useToast();
+    const { show: showToast } = useToast();
 
-  const runIdFromUrl = searchParams.get("run_id");
+    const runIdFromUrl = searchParams.get("run_id");
 
-  useEffect(() => {
-    if (runIdFromUrl && !runId) {
-      loadRun(runIdFromUrl);
-    }
-  }, [runIdFromUrl]);
-
-  useEffect(() => {
-    if (step === "intro") {
-      IngestionService.listRuns("AWAITING_REVIEW").then(setRecentRuns).catch(console.error);
-    }
-  }, [step]);
-
-  const loadRun = async (id: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const run = await IngestionService.getRun(id);
-      setRunId(run.id);
-      const snapshot = run.config_snapshot || {};
-      setCandidates(snapshot.candidates || []);
-      setSuggestions(snapshot.draft_patterns || []);
-      setOriginalSuggestions(JSON.parse(JSON.stringify(snapshot.draft_patterns || [])));
-
-      const uiState = snapshot.ui_state || {};
-      if (uiState.current_step) {
-        setStep(uiState.current_step as WizardStep);
-      } else {
-        setStep("review_candidates");
+    useEffect(() => {
+      if (runIdFromUrl && !runId) {
+        loadRun(runIdFromUrl);
       }
+    }, [runIdFromUrl]);
 
-      // Update URL
-      setSearchParams({ run_id: id });
-    } catch (err: any) {
-      setError("Failed to load ingestion run");
-      showToast("Failed to load run", "error");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    useEffect(() => {
+      if (step === "intro") {
+        IngestionService.listRuns("AWAITING_REVIEW").then(setRecentRuns).catch(console.error);
+      }
+    }, [step]);
 
-  // Polling Effect for Hydration Job
-  useEffect(() => {
-    let timer: any;
-    if (hydrationJobId && step === "complete") {
-        OpsService.getJobStatus(hydrationJobId).then(setActiveJob).catch(console.error);
+    const loadRun = async (id: string) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const run = await IngestionService.getRun(id);
+        setRunId(run.id);
+        const snapshot = run.config_snapshot || {};
+        setCandidates(snapshot.candidates || []);
+        setSuggestions(snapshot.draft_patterns || []);
+        setOriginalSuggestions(JSON.parse(JSON.stringify(snapshot.draft_patterns || [])));
 
-        timer = setInterval(async () => {
-            try {
-                const status = await OpsService.getJobStatus(hydrationJobId);
-                setActiveJob(status);
-                if (status.status === "COMPLETED" || status.status === "FAILED") {
-                    clearInterval(timer);
-                }
-            } catch (e) { console.error(e); }
-        }, 2000);
-    }
-    return () => clearInterval(timer);
-  }, [hydrationJobId, step]);
+        const uiState = snapshot.ui_state || {};
+        if (uiState.current_step) {
+          setStep(uiState.current_step as WizardStep);
+        } else {
+          setStep("review_candidates");
+        }
 
-  const handleAnalyze = async () => {
-    setStep("analyzing");
-    setError(null);
-    try {
-      const res = await IngestionService.analyze();
-      setRunId(res.run_id);
-      setCandidates(res.candidates.map(c => ({ ...c, selected: true })));
-      setStep("review_candidates");
-    } catch (err: any) {
-      setError(err.message || "Analysis failed");
-      setStep("intro");
-      showToast("Analysis failed", "error");
-    }
-  };
+        // Update URL
+        setSearchParams({ run_id: id });
+      } catch (err: any) {
+        setError("Failed to load ingestion run");
+        showToast("Failed to load run", "error");
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const handleEnrich = async () => {
-    if (!runId) return;
-    setStep("enriching");
-    setError(null);
-    try {
-      const selected = candidates.filter(c => c.selected);
-      const res = await IngestionService.enrich(runId, selected);
-      const initialSuggestions = res.suggestions.map(s => ({ ...s, accepted: true }));
-      setSuggestions(initialSuggestions);
-      setOriginalSuggestions(JSON.parse(JSON.stringify(initialSuggestions)));
-      setActiveCandidateIdx(0);
-      setStep("review_suggestions");
-      setReviewedCandidates(new Set());
-      setModifiedCandidates(new Set());
-    } catch (err: any) {
-      setError(err.message || "Enrichment failed");
-      setStep("review_candidates");
-      showToast("Enrichment failed", "error");
-    }
-  };
+    // Polling Effect for Hydration Job
+    useEffect(() => {
+      let timer: any;
+      if (hydrationJobId && step === "complete") {
+          OpsService.getJobStatus(hydrationJobId).then(setActiveJob).catch(console.error);
 
-  const handleCommit = async () => {
+          timer = setInterval(async () => {
+              try {
+                  const status = await OpsService.getJobStatus(hydrationJobId);
+                  setActiveJob(status);
+                  if (status.status === "COMPLETED" || status.status === "FAILED") {
+                      clearInterval(timer);
+                  }
+              } catch (e) { console.error(e); }
+          }, 2000);
+      }
+      return () => clearInterval(timer);
+    }, [hydrationJobId, step]);
+
+    // Polling Effect for Enrichment Job
+    useEffect(() => {
+      let timer: any;
+      if (enrichJobId && step === "enriching") {
+          timer = setInterval(async () => {
+              try {
+                  const status = await OpsService.getJobStatus(enrichJobId);
+                  setEnrichJobStatus(status);
+                  if (status.status === "COMPLETED") {
+                      clearInterval(timer);
+                      // Load results from run
+                      if (runId) {
+                          const run = await IngestionService.getRun(runId);
+                          const initialSuggestions = run.config_snapshot?.draft_patterns || [];
+                          setSuggestions(initialSuggestions);
+                          setOriginalSuggestions(JSON.parse(JSON.stringify(initialSuggestions)));
+                          setActiveCandidateIdx(0);
+                          setStep("review_suggestions");
+                      }
+                  } else if (status.status === "FAILED") {
+                      clearInterval(timer);
+                      setError(status.error_message || "Enrichment job failed");
+                      showToast("Enrichment failed", "error");
+                  }
+              } catch (e) { console.error(e); }
+          }, 2000);
+      }
+      return () => clearInterval(timer);
+    }, [enrichJobId, step, runId, showToast]);
+
+    const handleAnalyze = async () => {
+      setStep("analyzing");
+      setError(null);
+      try {
+        const res = await IngestionService.analyze();
+        setRunId(res.run_id);
+        setCandidates(res.candidates.map(c => ({ ...c, selected: true })));
+        setStep("review_candidates");
+        setSearchParams({ run_id: res.run_id });
+      } catch (err: any) {
+        setError(err.message || "Analysis failed");
+        setStep("intro");
+        showToast("Analysis failed", "error");
+      }
+    };
+
+    const handleEnrich = async () => {
+      if (!runId) return;
+      setStep("enriching");
+      setError(null);
+      setEnrichJobStatus(null);
+      try {
+        const selected = candidates.filter(c => c.selected);
+        const res = await IngestionService.enrich(runId, selected);
+        setEnrichJobId(res.job_id);
+      } catch (err: any) {
+        setError(err.message || "Enrichment failed");
+        setStep("review_candidates");
+        showToast("Enrichment failed", "error");
+      }
+    };
+    const handleCommit = async () => {
     if (!runId) return;
     const approved = suggestions.filter(s => s.accepted);
 
@@ -346,7 +373,22 @@ export default function IngestionWizard({ onExit }: Props) {
         {step === "enriching" && (
             <div style={{ textAlign: "center", padding: "40px" }}>
                 <p>Generating synonyms with LLM...</p>
-                <div>Loading...</div>
+                {enrichJobStatus && (
+                    <div style={{ marginTop: "20px", maxWidth: "400px", margin: "20px auto" }}>
+                        <div style={{ width: "100%", background: "var(--surface-muted)", height: "8px", borderRadius: "4px", overflow: "hidden" }}>
+                            <div style={{
+                                width: `${((enrichJobStatus.result?.processed || 0) / (enrichJobStatus.result?.total || 1)) * 100}%`,
+                                background: "var(--accent)",
+                                height: "100%",
+                                transition: "width 0.3s ease"
+                            }} />
+                        </div>
+                        <p style={{ marginTop: "8px", fontSize: "0.9rem", color: "var(--muted)" }}>
+                            Processed {enrichJobStatus.result?.processed || 0} of {enrichJobStatus.result?.total || 0} candidates
+                        </p>
+                    </div>
+                )}
+                <div style={{ marginTop: "16px" }}>Loading...</div>
             </div>
         )}
 
