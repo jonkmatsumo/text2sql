@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
+import IngestionWizard from "../components/ingestion/IngestionWizard";
 import { OpsService, ApiError } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
@@ -28,6 +29,7 @@ export default function SystemOperations() {
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
     const [traceId, setTraceId] = useState("");
     const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
+    const [showWizard, setShowWizard] = useState(false);
 
     const { show: showToast } = useToast();
 
@@ -130,6 +132,21 @@ export default function SystemOperations() {
         }
     };
 
+    if (showWizard) {
+        return (
+            <>
+                <header className="hero">
+                    <div>
+                        <p className="kicker">Maintenance & Ops</p>
+                        <h1>Ingestion Wizard</h1>
+                        <p className="subtitle">Interactive schema analysis and pattern generation.</p>
+                    </div>
+                </header>
+                <IngestionWizard onExit={() => setShowWizard(false)} />
+            </>
+        );
+    }
+
     return (
         <>
             <header className="hero">
@@ -181,13 +198,31 @@ export default function SystemOperations() {
                         <div className="panel">
                             <h3>Generate Patterns</h3>
                             <p className="subtitle">Refresh entity patterns using DB values and LLM synonyms.</p>
+
+                            <button
+                                onClick={() => setShowWizard(true)}
+                                style={{
+                                    width: "100%",
+                                    background: "#10b981",
+                                    color: "#fff",
+                                    border: "none",
+                                    padding: "12px",
+                                    borderRadius: "10px",
+                                    cursor: "pointer",
+                                    marginTop: "12px",
+                                    fontWeight: 600
+                                }}
+                            >
+                                New Ingestion Run (Wizard)
+                            </button>
+
                             <button
                                 className="feedback button"
                                 onClick={runPatternGen}
                                 disabled={isLoading || (activeJob?.status === "RUNNING")}
-                                style={{ width: "100%", background: "var(--accent)", color: "#fff", border: "none", padding: "12px", borderRadius: "10px", cursor: "pointer", marginTop: "12px" }}
+                                style={{ width: "100%", background: "var(--surface-muted)", color: "var(--ink)", border: "1px solid var(--border)", padding: "12px", borderRadius: "10px", cursor: "pointer", marginTop: "12px" }}
                             >
-                                Run Generation
+                                Run Legacy Generation (Auto)
                             </button>
                             {logs.length > 0 && (
                                 <div style={{ marginTop: "20px", padding: "12px", backgroundColor: "#1e1e20", color: "#fefefe", borderRadius: "12px", fontSize: "0.85rem", fontFamily: "monospace", maxHeight: "200px", overflow: "auto" }}>
