@@ -385,30 +385,34 @@ async def generate_suggestions(
     run_id: Optional[str] = None,
 ) -> List[Dict]:
     """Generate suggested patterns using LLM for the provided candidates."""
-    untrusted_patterns = []
+    all_patterns = []
+    llm_tasks = []
 
     for candidate in candidates:
         values = candidate["values"]
         label = candidate["label"]
 
-        # Add base patterns for values
-        # These are technically "trusted" as they are exact matches,
-        # but we return them here as part of the suggestion block for review
-        # or we could append them to trusted_patterns.
-        # Logic in original code added them to trusted_patterns.
-        # Here we will return them as part of the output, let caller merge.
-        # WAIT: The original code added them to trusted_patterns.
-        # Let's follow that pattern or keep them separate?
-        # The prompt says: "generate_suggestions... -> suggestions[]"
-        # I'll return everything generated from these candidates.
+        # 1. Base patterns (Trusted)
+        for v in values:
+            all_patterns.append({"label": label, "pattern": v.lower(), "id": v})
 
-        # LLM Enrichment
+        # 2. LLM Enrichment (Untrusted)
         if client and values and len(values) <= detector.threshold * 2:
             logger.info(f"Enriching {label} with LLM...")
-            synonyms = await enrich_values_with_llm(client, label, values, run_id=run_id)
-            untrusted_patterns.extend(synonyms)
+            llm_tasks.append(enrich_values_with_llm(client, label, values, run_id=run_id))
 
-    return untrusted_patterns
+    # Execute LLM tasks in parallel
+    if llm_tasks:
+        logger.info(f"Running {len(llm_tasks)} enrichment tasks in parallel...")
+        results = await asyncio.gather(*llm_tasks, return_exceptions=True)
+
+        for res in results:
+            if isinstance(res, Exception):
+                logger.error(f"Enrichment task failed: {res}")
+            elif isinstance(res, list):
+                all_patterns.extend(res)
+
+    return all_patterns
 
 
 async def commit_patterns(

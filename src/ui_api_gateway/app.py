@@ -22,6 +22,7 @@ from ui_api_gateway.ops_jobs import OpsJobsClient, use_legacy_dal
 
 logger = logging.getLogger(__name__)
 
+MAX_ENRICH_BATCH_SIZE = 5
 
 # ---------------------------------------------------------------------------
 # Custom Exceptions for MCP/Tool Failures
@@ -594,6 +595,12 @@ async def analyze_source(request: AnalyzeRequest):
 )
 async def enrich_candidates(request: EnrichRequest):
     """Generate suggestions for selected candidates using LLM."""
+    if len(request.selected_candidates) > MAX_ENRICH_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many candidates selected. Max batch size is {MAX_ENRICH_BATCH_SIZE}.",
+        )
+
     from ingestion.patterns.generator import get_openai_client
 
     client = await get_openai_client()
@@ -639,8 +646,22 @@ async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundT
     """Commit patterns to DB and trigger hydration."""
     approved = request.approved_patterns
     inserted_count = 0
+    patterns_generated = 0
 
     async with Database.get_connection(tenant_id=1) as conn:
+        # Get draft count for telemetry
+        row = await conn.fetchrow(
+            "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", request.run_id
+        )
+        if row:
+            snapshot = (
+                json.loads(row["config_snapshot"])
+                if isinstance(row["config_snapshot"], str)
+                else row["config_snapshot"]
+            )
+            patterns_generated = len(snapshot.get("draft_patterns", []))
+
+        # Insert patterns
         for p in approved:
             res = await conn.execute(
                 """
@@ -655,6 +676,20 @@ async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundT
             if res.endswith("1"):
                 inserted_count += 1
 
+        # Trigger Hydration
+        job_id = uuid4()
+        await _create_job(job_id, "SCHEMA_HYDRATION")
+        background_tasks.add_task(_run_ops_job, job_id, "SCHEMA_HYDRATION", "hydrate_schema", {})
+
+        # Update Run Status with Metrics & Linkage
+        metrics = {
+            "inserted_count": inserted_count,
+            "hydration_job_id": str(job_id),
+            "patterns_generated": patterns_generated,
+            "patterns_accepted": len(approved),
+            "patterns_rejected": max(0, patterns_generated - len(approved)),
+        }
+
         await conn.execute(
             """
             UPDATE nlp_pattern_runs
@@ -662,12 +697,21 @@ async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundT
             WHERE id = $1
             """,
             request.run_id,
-            json.dumps({"inserted_count": inserted_count}),
+            json.dumps(metrics),
         )
 
-    job_id = uuid4()
-    await _create_job(job_id, "SCHEMA_HYDRATION")
-    background_tasks.add_task(_run_ops_job, job_id, "SCHEMA_HYDRATION", "hydrate_schema", {})
+    # Telemetry Logging
+    logger.info(
+        "Ingestion Commit",
+        extra={
+            "event": "ingestion_commit",
+            "run_id": str(request.run_id),
+            "patterns_generated": metrics["patterns_generated"],
+            "patterns_accepted": metrics["patterns_accepted"],
+            "patterns_rejected": metrics["patterns_rejected"],
+            "hydration_job_id": metrics["hydration_job_id"],
+        },
+    )
 
     return CommitResponse(inserted_count=inserted_count, hydration_job_id=job_id)
 
