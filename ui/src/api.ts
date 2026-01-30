@@ -28,6 +28,98 @@ const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
 const otelBase = otelWorkerBaseUrl;
 
+// ---------------------------------------------------------------------------
+// API Error Handling
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured error response from the gateway.
+ * Matches the error format: { error: { message, code, details, request_id } }
+ */
+export interface ApiErrorDetails {
+  message: string;
+  code: string;
+  details?: Record<string, unknown>;
+  request_id?: string;
+}
+
+/**
+ * Custom error class for API failures with structured details.
+ */
+export class ApiError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+  public readonly details: Record<string, unknown>;
+  public readonly requestId?: string;
+
+  constructor(
+    message: string,
+    status: number,
+    code: string = "UNKNOWN_ERROR",
+    details: Record<string, unknown> = {},
+    requestId?: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+    this.requestId = requestId;
+  }
+
+  /**
+   * Human-readable error message for display in UI.
+   */
+  get displayMessage(): string {
+    if (this.code === "MCP_CONNECTION_ERROR") {
+      return "Backend service is unavailable. Please try again later.";
+    }
+    if (this.code === "MCP_TIMEOUT") {
+      return "Request timed out. Please try again.";
+    }
+    if (this.code === "MCP_UPSTREAM_ERROR") {
+      return this.message || "An error occurred while processing your request.";
+    }
+    return this.message;
+  }
+
+  /**
+   * Check if this is a gateway/upstream error (5xx).
+   */
+  get isUpstreamError(): boolean {
+    return this.status >= 500 && this.status < 600;
+  }
+}
+
+/**
+ * Parse error response body and throw ApiError.
+ * Falls back to generic error if response cannot be parsed.
+ */
+async function throwApiError(response: Response, fallbackMessage: string): Promise<never> {
+  let errorDetails: ApiErrorDetails | undefined;
+
+  try {
+    const body = await response.json();
+    if (body?.error && typeof body.error === "object") {
+      errorDetails = body.error;
+    }
+  } catch {
+    // Response is not JSON, use fallback
+  }
+
+  if (errorDetails) {
+    throw new ApiError(
+      errorDetails.message || fallbackMessage,
+      response.status,
+      errorDetails.code,
+      errorDetails.details || {},
+      errorDetails.request_id
+    );
+  }
+
+  throw new ApiError(fallbackMessage, response.status);
+}
+
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
@@ -77,7 +169,7 @@ export async function submitFeedback(request: FeedbackRequest): Promise<any> {
   });
 
   if (!response.ok) {
-    throw new Error(`Feedback error (${response.status})`);
+    await throwApiError(response, "Failed to submit feedback");
   }
 
   return response.json();
@@ -160,7 +252,7 @@ export const AdminService = {
     const response = await fetch(`${uiApiBase}/interactions?${params}`, {
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to load interactions");
+    if (!response.ok) await throwApiError(response, "Failed to load interactions");
     return response.json();
   },
 
@@ -168,7 +260,7 @@ export const AdminService = {
     const response = await fetch(`${uiApiBase}/interactions/${id}`, {
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to load interaction details");
+    if (!response.ok) await throwApiError(response, "Failed to load interaction details");
     return response.json();
   },
 
@@ -187,7 +279,7 @@ export const AdminService = {
         notes
       })
     });
-    if (!response.ok) throw new Error("Failed to approve interaction");
+    if (!response.ok) await throwApiError(response, "Failed to approve interaction");
     return response.json();
   },
 
@@ -201,7 +293,7 @@ export const AdminService = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ reason, notes })
     });
-    if (!response.ok) throw new Error("Failed to reject interaction");
+    if (!response.ok) await throwApiError(response, "Failed to reject interaction");
     return response.json();
   },
 
@@ -211,7 +303,7 @@ export const AdminService = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ limit })
     });
-    if (!response.ok) throw new Error("Failed to publish approved interactions");
+    if (!response.ok) await throwApiError(response, "Failed to publish approved interactions");
     return response.json();
   },
 
@@ -221,7 +313,7 @@ export const AdminService = {
     const response = await fetch(`${uiApiBase}/registry/examples?${params}`, {
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to load examples");
+    if (!response.ok) await throwApiError(response, "Failed to load examples");
     return response.json();
   },
 
@@ -230,7 +322,7 @@ export const AdminService = {
     const response = await fetch(`${uiApiBase}/pins?${params}`, {
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to list pins");
+    if (!response.ok) await throwApiError(response, "Failed to list pins");
     return response.json();
   },
 
@@ -242,7 +334,7 @@ export const AdminService = {
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    if (!response.ok) throw new Error("Failed to upsert pin");
+    if (!response.ok) await throwApiError(response, "Failed to upsert pin");
     return response.json();
   },
 
@@ -252,7 +344,7 @@ export const AdminService = {
       method: "DELETE",
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to delete pin");
+    if (!response.ok) await throwApiError(response, "Failed to delete pin");
     return response.json();
   }
 };
@@ -274,7 +366,7 @@ export const OpsService = {
         enable_fallback: enableFallback
       })
     });
-    if (!response.ok) throw new Error("Recommendation run failed");
+    if (!response.ok) await throwApiError(response, "Recommendation run failed");
     return response.json();
   },
 
@@ -284,7 +376,7 @@ export const OpsService = {
       headers: getAuthHeaders(),
       body: JSON.stringify({ dry_run: dryRun })
     });
-    if (!response.ok) throw new Error("Pattern generation failed");
+    if (!response.ok) await throwApiError(response, "Pattern generation failed");
     return response.json();
   },
 
@@ -293,7 +385,7 @@ export const OpsService = {
       method: "POST",
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Pattern reload failed");
+    if (!response.ok) await throwApiError(response, "Pattern reload failed");
     return response.json();
   },
 
@@ -302,7 +394,7 @@ export const OpsService = {
       method: "POST",
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Schema hydration failed");
+    if (!response.ok) await throwApiError(response, "Schema hydration failed");
     return response.json();
   },
 
@@ -311,7 +403,7 @@ export const OpsService = {
       method: "POST",
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Cache re-indexing failed");
+    if (!response.ok) await throwApiError(response, "Cache re-indexing failed");
     return response.json();
   },
 
@@ -319,7 +411,7 @@ export const OpsService = {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}`, {
       headers: getAuthHeaders()
     });
-    if (!response.ok) throw new Error("Failed to fetch job status");
+    if (!response.ok) await throwApiError(response, "Failed to fetch job status");
     return response.json();
   }
 };

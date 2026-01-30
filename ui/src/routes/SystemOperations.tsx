@@ -2,10 +2,24 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
-import { OpsService } from "../api";
+import { OpsService, ApiError } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
+
+/**
+ * Extract user-friendly error message from error object.
+ * Uses ApiError.displayMessage when available for better UX.
+ */
+function getErrorMessage(err: unknown): string {
+    if (err instanceof ApiError) {
+        return err.displayMessage;
+    }
+    if (err instanceof Error) {
+        return err.message;
+    }
+    return "An unexpected error occurred";
+}
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
@@ -64,9 +78,10 @@ export default function SystemOperations() {
                 addLog(`Generation failed: ${result.error}`);
                 showToast("Pattern generation failed", "error");
             }
-        } catch (err: any) {
-            addLog(`Error: ${err.message}`);
-            showToast("Pattern generation failed", "error");
+        } catch (err: unknown) {
+            const message = getErrorMessage(err);
+            addLog(`Error: ${message}`);
+            showToast(message, "error");
         } finally {
             setIsLoading(false);
         }
@@ -78,8 +93,8 @@ export default function SystemOperations() {
             const job = await OpsService.hydrateSchema();
             setActiveJob(job);
             showToast("Schema hydration started", "info");
-        } catch (err: any) {
-            showToast(`Hydration failed: ${err.message}`, "error");
+        } catch (err: unknown) {
+            showToast(getErrorMessage(err), "error");
         } finally {
             setIsLoading(false);
         }
@@ -91,8 +106,8 @@ export default function SystemOperations() {
             const job = await OpsService.reindexCache();
             setActiveJob(job);
             showToast("Cache re-indexing started", "info");
-        } catch (err: any) {
-            showToast(`Re-indexing failed: ${err.message}`, "error");
+        } catch (err: unknown) {
+            showToast(getErrorMessage(err), "error");
         } finally {
             setIsLoading(false);
         }
@@ -108,8 +123,8 @@ export default function SystemOperations() {
             } else {
                 showToast("Pattern reload failed", "error");
             }
-        } catch (err: any) {
-            showToast("Reload failed", "error");
+        } catch (err: unknown) {
+            showToast(getErrorMessage(err), "error");
         } finally {
             setIsLoading(false);
         }
