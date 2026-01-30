@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -173,95 +172,53 @@ mcp = FastMCP("text2sql-agent", lifespan=lifespan)
 register_all(mcp)
 
 
-# Add health endpoint for readiness checks
-# FastMCP exposes underlying Starlette app via mcp._app or mcp.http_app
+# ---------------------------------------------------------------------------
+# Middleware Integration (replaces previous monkey-patching approach)
+# ---------------------------------------------------------------------------
+# FastMCP exposes http_app as a factory. We wrap it to add middleware cleanly.
+# See mcp_server/middleware.py for the middleware stack.
+
 try:
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route
+    from mcp_server.middleware import create_health_route, get_middleware_stack, instrument_app
 
-    async def health_handler(request):
-        """Health/readiness endpoint reflecting initialization status.
-
-        Returns:
-            200 with ready=true if all required checks passed
-            503 with ready=false and failure details if any required check failed
-        """
-        from mcp_server.health import init_state
-
-        status = init_state.as_dict()
-        http_status = 200 if init_state.is_ready else 503
-        return JSONResponse(status, status_code=http_status)
-
-    # Access the underlying Starlette app and add route
-    if hasattr(mcp, "_app") and mcp._app is not None:
-        mcp._app.routes.append(Route("/health", health_handler, methods=["GET"]))
-        logger.info("Registered /health endpoint on _app")
-    elif hasattr(mcp, "http_app"):
-        # http_app is a factory - we can't add routes to it directly here
-        # Route will be added when the app is created
-        logger.info("Health endpoint will be registered when HTTP app is created")
-except ImportError:
-    logger.warning("Could not import starlette - /health endpoint not available")
-
-
-# GLOBAL PATCH: Apply OTEL Instrumentation via Factory Wrapper
-# This must be at module level because FastMCP likely imports 'mcp'
-# instead of running __main__.
-try:
     if hasattr(mcp, "http_app"):
-        original_factory = mcp.http_app
+        _original_factory = mcp.http_app
 
-        def patched_factory(*args, **kwargs):
-            """Instrument the app instance created by the factory."""
-            app = original_factory(*args, **kwargs)
+        def _wrapped_factory(*args, **kwargs):
+            """Create MCP app with middleware via factory wrapper.
+
+            This approach:
+            - Uses a factory wrapper instead of direct patching
+            - Adds middleware through Starlette's standard mechanism
+            - Is documented and maintainable
+            - Avoids modifying FastMCP internals directly
+            """
+            app = _original_factory(*args, **kwargs)
             try:
-                from starlette.middleware.cors import CORSMiddleware
+                # Add health endpoint
+                app.routes.insert(0, create_health_route())
 
-                app.add_middleware(
-                    CORSMiddleware,
-                    allow_origins=[
-                        "http://localhost:5173",
-                        "http://127.0.0.1:5173",
-                        "http://localhost:3000",
-                        "http://127.0.0.1:3000",
-                        "http://localhost:8501",
-                        "http://127.0.0.1:8501",
-                        "http://localhost:8080",
-                        "http://127.0.0.1:8080",
-                    ],
-                    allow_credentials=True,
-                    allow_methods=["*"],
-                    allow_headers=["*"],
-                )
+                # Add middleware (CORS, Auth)
+                for middleware in reversed(get_middleware_stack()):
+                    app.add_middleware(middleware.cls, **middleware.kwargs)
 
-                # Internal Auth Middleware
-                from starlette.middleware.base import BaseHTTPMiddleware
-                from starlette.responses import JSONResponse
+                # Apply OTEL instrumentation
+                instrument_app(app)
 
-                class InternalAuthMiddleware(BaseHTTPMiddleware):
-                    async def dispatch(self, request, call_next):
-                        token = get_env_str("INTERNAL_AUTH_TOKEN", "")
-                        if token:
-                            # Skip auth for health and messages
-                            if request.url.path not in ["/health", "/messages"]:
-                                request_token = request.headers.get("X-Internal-Token")
-                                if request_token != token:
-                                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
-                        return await call_next(request)
-
-                app.add_middleware(InternalAuthMiddleware)
-
-                StarletteInstrumentor().instrument_app(app)
-                # App instrumented successfully
-            except Exception as instr_e:
-                logging.error(f"Failed to instrument app: {instr_e}")
+                logger.info("MCP app configured with middleware and health endpoint")
+            except Exception as e:
+                logger.error("Failed to configure MCP app middleware: %s", e)
             return app
 
-        mcp.http_app = patched_factory
+        mcp.http_app = _wrapped_factory
+        logger.info("MCP http_app factory wrapped with middleware support")
     else:
-        logging.warning("Could not find mcp.http_app factory to patch")
+        logger.warning("mcp.http_app not found - middleware not configured")
+
+except ImportError as e:
+    logger.warning("Could not import middleware module: %s", e)
 except Exception as e:
-    logging.error(f"Error: Could not apply instrumentation wrapper: {e}")
+    logger.error("Error configuring MCP middleware: %s", e)
 
 
 if __name__ == "__main__":
