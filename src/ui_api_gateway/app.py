@@ -13,12 +13,16 @@ from pydantic import BaseModel, Field
 
 from agent.mcp_client import MCPClient
 from agent.tools import unpack_mcp_result
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_list, get_env_str
 from dal.control_plane import ControlPlaneDatabase
+from dal.database import Database
+from ingestion.patterns.enum_detector import EnumLikeColumnDetector
+from ingestion.patterns.generator import detect_candidates, generate_suggestions
 from ui_api_gateway.ops_jobs import OpsJobsClient, use_legacy_dal
 
 logger = logging.getLogger(__name__)
 
+MAX_ENRICH_BATCH_SIZE = 5
 
 # ---------------------------------------------------------------------------
 # Custom Exceptions for MCP/Tool Failures
@@ -74,10 +78,21 @@ async def lifespan(app):
         logger.info("Gateway using OpsJobsClient (new isolated DAL path)")
     else:
         logger.info("Gateway using legacy ControlPlaneDatabase path")
+
+    # Initialize Main Database for Ingestion Wizard (Direct Access)
+    try:
+        await Database.init()
+        logger.info("Gateway initialized Main Database connection for Ingestion Wizard")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Main Database: {e}")
+
     yield
     # Shutdown: Close OpsJobsClient connection pool
     if not use_legacy_dal():
         await OpsJobsClient.close()
+
+    # Close Main Database
+    await Database.close()
 
 
 app = FastAPI(title="Text2SQL UI API Gateway", lifespan=lifespan)
@@ -190,6 +205,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Ingestion Wizard Models ---
+
+
+class AnalyzeRequest(BaseModel):
+    """Request payload for analyzing database for pattern candidates."""
+
+    target_tables: Optional[List[str]] = None
+
+
+class AnalyzeResponse(BaseModel):
+    """Response payload for analysis result."""
+
+    run_id: UUID
+    candidates: List[Dict[str, Any]]
+    warnings: List[str] = []
+
+
+class EnrichRequest(BaseModel):
+    """Request payload for enriching selected candidates."""
+
+    run_id: UUID
+    selected_candidates: List[Dict[str, Any]]  # subset of candidates
+
+
+class EnrichResponse(BaseModel):
+    """Response payload for enrichment suggestions."""
+
+    suggestions: List[Dict[str, Any]]
+
+
+class CommitRequest(BaseModel):
+    """Request payload for committing patterns."""
+
+    run_id: UUID
+    approved_patterns: List[Dict[str, Any]]
+
+
+class CommitResponse(BaseModel):
+    """Response payload for commit operation."""
+
+    inserted_count: int
+    hydration_job_id: UUID
 
 
 class ApproveInteractionRequest(BaseModel):
@@ -471,6 +530,190 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
             }
     else:
         return await OpsJobsClient.get_job(job_id)
+
+
+# --- Ingestion Wizard Endpoints ---
+
+
+@app.post(
+    "/ops/ingestion/analyze",
+    response_model=AnalyzeResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def analyze_source(request: AnalyzeRequest):
+    """Analyze database for pattern candidates."""
+    run_id = uuid4()
+
+    # Init tools
+    introspector = Database.get_schema_introspector()
+    threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
+    allowlist = get_env_list("ENUM_VALUE_ALLOWLIST", [])
+    denylist = get_env_list("ENUM_VALUE_DENYLIST", [])
+
+    detector = EnumLikeColumnDetector(
+        threshold=threshold,
+        allowlist=allowlist,
+        denylist=denylist,
+    )
+
+    # 1. Detect
+    try:
+        # We need a connection for detection (sampling)
+        # Database.get_connection() handles this
+        async with Database.get_connection(tenant_id=1) as conn:
+            result = await detect_candidates(
+                introspector, detector, target_tables=request.target_tables, conn=conn
+            )
+    except Exception as e:
+        logger.error(f"Detection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    candidates = result["candidates"]
+    trusted_patterns = result["trusted_patterns"]
+
+    # 2. Store Run
+    snapshot = {"candidates": candidates, "trusted_patterns": trusted_patterns, "warnings": []}
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        await conn.execute(
+            """
+            INSERT INTO nlp_pattern_runs
+            (id, status, config_snapshot, metrics)
+            VALUES ($1, 'AWAITING_REVIEW', $2, '{}'::jsonb)
+            """,
+            run_id,
+            json.dumps(snapshot),
+        )
+
+    return AnalyzeResponse(run_id=run_id, candidates=candidates, warnings=[])
+
+
+@app.post(
+    "/ops/ingestion/enrich",
+    response_model=EnrichResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def enrich_candidates(request: EnrichRequest):
+    """Generate suggestions for selected candidates using LLM."""
+    if len(request.selected_candidates) > MAX_ENRICH_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many candidates selected. Max batch size is {MAX_ENRICH_BATCH_SIZE}.",
+        )
+
+    from ingestion.patterns.generator import get_openai_client
+
+    client = await get_openai_client()
+
+    threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
+    detector = EnumLikeColumnDetector(threshold=threshold)
+
+    try:
+        suggestions = await generate_suggestions(
+            request.selected_candidates, client, detector, run_id=str(request.run_id)
+        )
+    except Exception as e:
+        logger.error(f"Enrichment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        row = await conn.fetchrow(
+            "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", request.run_id
+        )
+        if row:
+            snapshot = (
+                json.loads(row["config_snapshot"])
+                if isinstance(row["config_snapshot"], str)
+                else row["config_snapshot"]
+            )
+            snapshot["draft_patterns"] = suggestions
+
+            await conn.execute(
+                "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",
+                request.run_id,
+                json.dumps(snapshot),
+            )
+
+    return EnrichResponse(suggestions=suggestions)
+
+
+@app.post(
+    "/ops/ingestion/commit",
+    response_model=CommitResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundTasks):
+    """Commit patterns to DB and trigger hydration."""
+    approved = request.approved_patterns
+    inserted_count = 0
+    patterns_generated = 0
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        # Get draft count for telemetry
+        row = await conn.fetchrow(
+            "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", request.run_id
+        )
+        if row:
+            snapshot = (
+                json.loads(row["config_snapshot"])
+                if isinstance(row["config_snapshot"], str)
+                else row["config_snapshot"]
+            )
+            patterns_generated = len(snapshot.get("draft_patterns", []))
+
+        # Insert patterns
+        for p in approved:
+            res = await conn.execute(
+                """
+                INSERT INTO nlp_patterns (id, label, pattern)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (label, pattern) DO NOTHING
+                """,
+                p["id"],
+                p["label"],
+                p["pattern"],
+            )
+            if res.endswith("1"):
+                inserted_count += 1
+
+        # Trigger Hydration
+        job_id = uuid4()
+        await _create_job(job_id, "SCHEMA_HYDRATION")
+        background_tasks.add_task(_run_ops_job, job_id, "SCHEMA_HYDRATION", "hydrate_schema", {})
+
+        # Update Run Status with Metrics & Linkage
+        metrics = {
+            "inserted_count": inserted_count,
+            "hydration_job_id": str(job_id),
+            "patterns_generated": patterns_generated,
+            "patterns_accepted": len(approved),
+            "patterns_rejected": max(0, patterns_generated - len(approved)),
+        }
+
+        await conn.execute(
+            """
+            UPDATE nlp_pattern_runs
+            SET status = 'COMPLETED', completed_at = NOW(), metrics = $2
+            WHERE id = $1
+            """,
+            request.run_id,
+            json.dumps(metrics),
+        )
+
+    # Telemetry Logging
+    logger.info(
+        "Ingestion Commit",
+        extra={
+            "event": "ingestion_commit",
+            "run_id": str(request.run_id),
+            "patterns_generated": metrics["patterns_generated"],
+            "patterns_accepted": metrics["patterns_accepted"],
+            "patterns_rejected": metrics["patterns_rejected"],
+            "hydration_job_id": metrics["hydration_job_id"],
+        },
+    )
+
+    return CommitResponse(inserted_count=inserted_count, hydration_job_id=job_id)
 
 
 @app.post(

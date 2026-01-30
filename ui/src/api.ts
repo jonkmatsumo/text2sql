@@ -415,3 +415,75 @@ export const OpsService = {
     return response.json();
   }
 };
+
+// --- Ingestion Wizard Types & Service ---
+
+export interface IngestionCandidate {
+  table: string;
+  column: string;
+  values: string[];
+  label: string;
+  // UI state
+  selected?: boolean;
+}
+
+export interface AnalyzeResponse {
+  run_id: string;
+  candidates: IngestionCandidate[];
+  warnings: string[];
+}
+
+export interface Suggestion {
+  id: string; // Canonical value
+  label: string;
+  pattern: string; // Synonym
+  accepted?: boolean; // UI state
+  is_new?: boolean; // UI state (manual add)
+}
+
+export interface EnrichResponse {
+  suggestions: Suggestion[];
+}
+
+export interface CommitResponse {
+  inserted_count: number;
+  hydration_job_id: string;
+}
+
+export const IngestionService = {
+  async analyze(targetTables?: string[]): Promise<AnalyzeResponse> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/analyze`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ target_tables: targetTables })
+    });
+    if (!response.ok) await throwApiError(response, "Analysis failed");
+    return response.json();
+  },
+
+  async enrich(runId: string, selectedCandidates: IngestionCandidate[]): Promise<EnrichResponse> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/enrich`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        run_id: runId,
+        selected_candidates: selectedCandidates
+      })
+    });
+    if (!response.ok) await throwApiError(response, "Enrichment failed");
+    return response.json();
+  },
+
+  async commit(runId: string, approvedPatterns: Suggestion[]): Promise<CommitResponse> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/commit`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        run_id: runId,
+        approved_patterns: approvedPatterns
+      })
+    });
+    if (!response.ok) await throwApiError(response, "Commit failed");
+    return response.json();
+  }
+};

@@ -117,7 +117,7 @@ class Database:
                     config_snapshot JSONB DEFAULT '{}'::jsonb,
                     error_message TEXT,
                     metrics JSONB DEFAULT '{}'::jsonb,
-                    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED'))
+                    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'AWAITING_REVIEW'))
                 );
                 """
             )
