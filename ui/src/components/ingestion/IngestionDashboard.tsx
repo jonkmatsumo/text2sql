@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { IngestionService, IngestionRun } from "../../api";
 import { useToast } from "../../hooks/useToast";
+import IngestionRunDetail from "./IngestionRunDetail";
 
 export default function IngestionDashboard() {
   const [metrics, setMetrics] = useState<any>(null);
   const [recentRuns, setRecentRuns] = useState<IngestionRun[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const { show: showToast } = useToast();
 
   useEffect(() => {
@@ -29,6 +31,10 @@ export default function IngestionDashboard() {
   };
 
   if (isLoading) return <div className="panel">Loading dashboard...</div>;
+
+  if (selectedRunId) {
+    return <IngestionRunDetail runId={selectedRunId} onBack={() => setSelectedRunId(null)} />;
+  }
 
   return (
     <div style={{ display: "grid", gap: "24px" }}>
@@ -114,15 +120,16 @@ export default function IngestionDashboard() {
                         {run.status}
                       </span>
                     </td>
-                    <td style={{ padding: "12px" }}>{run.status === "COMPLETED" ? `${rate}%` : "-"}</td>
-                    <td style={{ padding: "12px" }}>
-                      <button
-                        onClick={() => window.location.href=`?run_id=${run.id}`}
-                        style={{ background: "transparent", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "4px", cursor: "pointer" }}
-                      >
-                        View
-                      </button>
-                    </td>
+                                        <td style={{ padding: "12px" }}>{run.status === "COMPLETED" ? `${rate}%` : "-"}</td>
+                                        <td style={{ padding: "12px" }}>
+                                          <button
+                                            onClick={() => setSelectedRunId(run.id)}
+                                            style={{ background: "transparent", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "4px", cursor: "pointer" }}
+                                          >
+                                            View Details
+                                          </button>
+                                        </td>
+
                   </tr>
                 );
               })}
