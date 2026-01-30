@@ -274,18 +274,24 @@ class TestGetMcpTools:
                 mock_client_class.return_value.connect.return_value = mock_connect_cm
                 mock_client.list_tools = AsyncMock(return_value=mock_tool_infos)
 
-                # Setup invocation mock
-                mock_client.call_tool = AsyncMock(return_value={"tables": ["film"]})
+                # Also patch the resilient invoke function that's used for tool calls
+                # The invoke_fn now uses create_resilient_invoke_fn which creates a new manager
+                async def mock_invoke(arguments):
+                    return {"tables": ["film"]}
 
-                tools = await get_mcp_tools()
-                tool = tools[0]
+                with patch(
+                    "agent.tools.create_resilient_invoke_fn",
+                    return_value=mock_invoke,
+                ):
+                    tools = await get_mcp_tools()
+                    tool = tools[0]
 
-                # Test with config=None (default)
-                result1 = await tool.ainvoke({"query": "test"})
-                assert result1 == {"tables": ["film"]}
+                    # Test with config=None (default)
+                    result1 = await tool.ainvoke({"query": "test"})
+                    assert result1 == {"tables": ["film"]}
 
-                # Test with config=dict (LangGraph style)
-                result2 = await tool.ainvoke(
-                    {"query": "test2"}, config={"tags": ["test"], "callbacks": []}
-                )
-                assert result2 == {"tables": ["film"]}
+                    # Test with config=dict (LangGraph style)
+                    result2 = await tool.ainvoke(
+                        {"query": "test2"}, config={"tags": ["test"], "callbacks": []}
+                    )
+                    assert result2 == {"tables": ["film"]}

@@ -21,14 +21,21 @@ class TestControlPlaneDatabase:
         ControlPlaneDatabase._isolation_enabled = False
 
     @pytest.mark.asyncio
-    async def test_init_applies_pinned_schema(self):
-        """Ensure pinned_recommendations schema is applied on init."""
+    async def test_init_validates_schema_without_ddl(self):
+        """Ensure init() validates schema but does NOT run DDL.
+
+        After the hardening changes, startup should only validate that tables
+        exist, not create them. DDL should be run via migrations separately.
+        """
         mock_pool = AsyncMock(spec=asyncpg.Pool)
         mock_conn = AsyncMock()
         mock_acquire = AsyncMock()
         mock_acquire.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_acquire.__aexit__ = AsyncMock(return_value=False)
         mock_pool.acquire.return_value = mock_acquire
+
+        # Mock fetchval to return True (tables exist)
+        mock_conn.fetchval = AsyncMock(return_value=True)
 
         env_vars = {
             "DB_ISOLATION_ENABLED": "true",
@@ -47,20 +54,13 @@ class TestControlPlaneDatabase:
             ):
                 await ControlPlaneDatabase.init()
 
-        executed_sql = " ".join(call.args[0] for call in mock_conn.execute.call_args_list)
-        assert "CREATE TABLE IF NOT EXISTS pinned_recommendations" in executed_sql
-        assert "CREATE OR REPLACE FUNCTION update_modified_column" in executed_sql
-        assert "DROP TRIGGER IF EXISTS update_pinned_recos_modtime" in executed_sql
-        assert "CREATE TRIGGER update_pinned_recos_modtime" in executed_sql
+        # Verify schema validation queries were made (SELECT, not CREATE)
+        fetchval_calls = mock_conn.fetchval.call_args_list
+        assert len(fetchval_calls) >= 2  # At least ops_jobs and pinned_recommendations
 
-        # Verify order: Function before Trigger
-        calls = [call.args[0] for call in mock_conn.execute.call_args_list]
-        func_idx = next(
-            i
-            for i, c in enumerate(calls)
-            if "CREATE OR REPLACE FUNCTION update_modified_column" in c
-        )
-        trigger_idx = next(
-            i for i, c in enumerate(calls) if "CREATE TRIGGER update_pinned_recos_modtime" in c
-        )
-        assert func_idx < trigger_idx
+        # Verify NO DDL was executed
+        execute_calls = mock_conn.execute.call_args_list
+        for call in execute_calls:
+            sql = call.args[0] if call.args else ""
+            assert "CREATE TABLE" not in sql, "Startup should not run CREATE TABLE DDL"
+            assert "CREATE TRIGGER" not in sql, "Startup should not run CREATE TRIGGER DDL"
