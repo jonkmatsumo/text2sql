@@ -543,11 +543,11 @@ export const IngestionService = {
     return response.json();
   },
 
-  async analyze(targetTables?: string[]): Promise<AnalyzeResponse> {
+  async analyze(targetTables?: string[], templateId?: string): Promise<AnalyzeResponse> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/analyze`, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify({ target_tables: targetTables })
+      body: JSON.stringify({ target_tables: targetTables, template_id: templateId })
     });
     if (!response.ok) await throwApiError(response, "Analysis failed");
     return response.json();

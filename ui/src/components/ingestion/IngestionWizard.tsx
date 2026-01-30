@@ -411,14 +411,14 @@ export default function IngestionWizard({ onExit }: Props) {
                 <div style={{ width: "100%", background: "var(--surface-muted)", height: "8px", borderRadius: "4px", overflow: "hidden" }}>
                   <div
                     style={{
-                      width: `${((enrichJobStatus.result?.processed || 0) / (enrichJobStatus.result?.total || 1)) * 100}%`,
+                      width: `${((Number(enrichJobStatus.result?.processed) || 0) / (Number(enrichJobStatus.result?.total) || 1)) * 100}%`,
                       background: "var(--accent)",
                       height: "100%",
                       transition: "width 0.3s ease",
                     }}
                   />
                 </div>
-                <p style={{ marginTop: "8px", fontSize: "0.9rem", color: "var(--muted)" }}>Processed {enrichJobStatus.result?.processed || 0} of {enrichJobStatus.result?.total || 0} candidates</p>
+                <p style={{ marginTop: "8px", fontSize: "0.9rem", color: "var(--muted)" }}>Processed {Number(enrichJobStatus.result?.processed) || 0} of {Number(enrichJobStatus.result?.total) || 0} candidates</p>
               </div>
             )}
             <div style={{ marginTop: "16px" }}>Loading...</div>
