@@ -1,383 +1,196 @@
-# Text 2 SQL
+# Text2SQL
 
-A natural language interface that enables users to query databases using plain English. This project demonstrates an intelligent system that bridges the gap between natural language and SQL.
+A natural language to SQL system that converts plain English queries into executable SQL. Built on **ANN-based Retrieval Augmented Generation (RAG)** and **Semantic Caching** for fast, accurate results.
 
-The system automatically:
-*   **Understands intent**: Deciphers the meaning behind user questions.
-*   **Retrieves context**: Finds relevant database tables and schemas.
-*   **Executes securely**: Generates and runs SQL queries with built-in safety checks.
-*   **Formats results**: Returns data in a clear, user-friendly format.
+## Core Capabilities
 
-Designed for security and scalability, it uses modern containerization and secure access patterns to ensure robust performance.
+- **ANN Vector Search** — HNSW-based retrieval for schema linking and few-shot examples
+- **Semantic Cache** — SpaCy-powered canonicalization for deterministic query matching
+- **Graph-Aware RAG** — Memgraph integration for FK traversal and relational context
+- **Multi-Tenant Security** — AST-based policy enforcement and RLS injection
+- **MCP Protocol** — Extensible tool interface for any MCP-compliant agent
 
-## System Flow
+## System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Agent["🤖 Agent System (LangGraph)"]
-        UserQuery["User Query<br/>'Show movies'"]
-        AgentState["LangGraph Agent State<br/>Maintains conversation history"]
+    subgraph Agent["Agent (LangGraph)"]
+        UserQuery["User Query"]
+        AgentState["Agent State"]
 
-        %% Nodes
-        RouterNode["Router Node<br/>(LLM)<br/>src/agent/nodes/router.py"]
-        ClarifyNode["Clarify Node<br/>(Human Input)<br/>src/agent/nodes/clarify.py"]
-        RetrieveNode["Retrieve Context Node<br/>(Tool)<br/>src/agent/nodes/retrieve.py"]
-        PlanNode["Plan SQL Node<br/>(LLM)<br/>src/agent/nodes/plan.py"]
-        GenerateNode["Generate SQL Node<br/>(LLM)<br/>src/agent/nodes/generate.py"]
-        ValidateNode["Validate SQL Node<br/>(Logic)<br/>src/agent/nodes/validate.py"]
-        ExecuteNode["Execute SQL Node<br/>(Tool)<br/>src/agent/nodes/execute.py"]
-        CorrectNode["Correct SQL Node<br/>(LLM)<br/>src/agent/nodes/correct.py"]
-        SynthesizeNode["Synthesize Insight Node<br/>(LLM)<br/>src/agent/nodes/synthesize.py"]
-        Response["Natural Language Response"]
+        RouterNode["Router"]
+        ClarifyNode["Clarify"]
+        RetrieveNode["Retrieve Context"]
+        PlanNode["Plan SQL"]
+        GenerateNode["Generate SQL"]
+        ValidateNode["Validate SQL"]
+        ExecuteNode["Execute SQL"]
+        CorrectNode["Correct SQL"]
+        SynthesizeNode["Synthesize"]
+        Response["Response"]
 
-        %% Flow
-        UserQuery --> AgentState
-        AgentState --> RetrieveNode
-        RetrieveNode --> RouterNode
-
-        RouterNode -->|"Ambiguous?"| ClarifyNode
-        ClarifyNode -->|"User feedback"| RetrieveNode
-
-        RouterNode -->|"Clear"| PlanNode
-        PlanNode --> GenerateNode
-        GenerateNode --> ValidateNode
-
+        UserQuery --> AgentState --> RetrieveNode --> RouterNode
+        RouterNode -->|"Ambiguous"| ClarifyNode -->|"Feedback"| RetrieveNode
+        RouterNode -->|"Clear"| PlanNode --> GenerateNode --> ValidateNode
         ValidateNode -->|"Invalid"| CorrectNode
         ValidateNode -->|"Valid"| ExecuteNode
-
-        ExecuteNode -->|"Success"| SynthesizeNode
-        ExecuteNode -->|"Error"| CorrectNode
-
-        CorrectNode -->|"Retry (Loop)"| ValidateNode
-        SynthesizeNode --> Response
-
-        %% Fallback for max retries
-        ExecuteNode -->|"Max Retries"| Response
+        ExecuteNode -->|"Success"| SynthesizeNode --> Response
+        ExecuteNode -->|"Error"| CorrectNode -->|"Retry"| ValidateNode
     end
 
-    subgraph Observability["📡 Observability (Required)"]
-        OTEL["OpenTelemetry Stack (Canonical)"]
-        OTEL_Worker["OTEL Worker<br/>Postgres + MinIO"]
+    subgraph MCPServer["MCP Server"]
+        MCPTools["Tools"]
+        VectorIndex["ANN Index (hnswlib)"]
+        Canonicalizer["Canonicalizer (SpaCy)"]
+        PolicyEnforcer["Policy Enforcer"]
+        TenantRewriter["Tenant Rewriter"]
 
-        Agent --> OTEL
-        OTEL --> OTEL_Worker
-    end
-
-    subgraph MCPServer["🔧 MCP Server (FastMCP, /messages SSE)"]
-        MCPTools["MCP Tools<br/>src/mcp_server/tools/"]
-
-        subgraph DAL["🛡️ Data Abstraction Layer"]
-            I_Store["Protocols<br/>(RegistryStore, GraphStore)"]
-            Impl_PG["Postgres Adapter<br/>(Unified Registry, Introspection)"]
-            Impl_MG["Memgraph Adapter<br/>(Cypher)"]
-
-            I_Store --> Impl_PG
-            I_Store --> Impl_MG
+        subgraph DAL["Data Abstraction Layer"]
+            Impl_PG["Postgres Adapter"]
+            Impl_MG["Memgraph Adapter"]
         end
-
-        VectorIndex["ANN Vector Index<br/>(hnswlib)<br/>In-Memory"]
-        Canonicalizer["Linguistic Canonicalization<br/>(SpaCy + EntityRuler)"]
-        PatternGen["Pattern Generator<br/>(LLM + Strict Validator)"]
-        RegistryService["Unified Registry Service<br/>(Unified Lifecycle)"]
-        PolicyEnforcer["Runtime Policy Enforcer<br/>AST-based Query Guardrail"]
-        TenantRewriter["Tenant Rewriter<br/>AST-based RLS Injection"]
-
-        PatternGen -->|"Updates"| Canonicalizer
     end
 
-    subgraph ControlDB["🛡️ Control-Plane (Postgres, optional)"]
-        QueryRegistry["Query Registry (query_pairs)<br/>Cache + Examples + Golden<br/>pgvector index"]
-        SchemaEmbeddings["Schema Embeddings<br/>Table/Column context"]
-        Tenants["Tenant Registry<br/>RLS & Policies"]
+    subgraph ControlDB["Control-Plane DB"]
+        QueryRegistry["Query Registry<br/>(Cache + Examples)"]
+        SchemaEmbeddings["Schema Embeddings"]
     end
 
-    subgraph TargetDB["🗄️ Query-Target (Postgres)"]
-        QueryTargetDB["Synthetic Dataset<br/>Financial domain"]
-        Target_RO["Read-only User<br/>(text2sql_ro)"]
+    subgraph TargetDB["Query-Target DB"]
+        QueryTargetDB["Target Data"]
+        Target_RO["Read-only Access"]
     end
 
-    subgraph GraphDB["🔷 Memgraph (Graph DB)"]
-        SchemaGraph["Schema Graph<br/>Tables, Columns, FKs"]
+    subgraph GraphDB["Memgraph"]
+        SchemaGraph["Schema Graph"]
     end
 
-    %% Agent to MCP Server
-    RetrieveNode -->|"Call Tool"| MCPTools
-    ExecuteNode -->|"Call Tool"| MCPTools
-
-    %% MCP Server Internal Connections
+    RetrieveNode -->|"Tool Call"| MCPTools
+    ExecuteNode -->|"Tool Call"| MCPTools
     MCPTools --> DAL
-    DAL --> Impl_PG
     Impl_PG --> QueryRegistry
     Impl_PG --> SchemaEmbeddings
-    Impl_PG --> Tenants
-    Impl_PG --> QueryTargetDB
-    Impl_PG -.-> PatternGen
-
     Impl_MG --> SchemaGraph
-
-    %% Execution flow with Hardening
-    MCPTools -->|"1. Validate Logic"| PolicyEnforcer
-    PolicyEnforcer -->|"2. Inject Context"| TenantRewriter
-    TenantRewriter -->|"3. Execute Read"| Target_RO
-    Target_RO --> QueryTargetDB
+    MCPTools --> PolicyEnforcer --> TenantRewriter --> Target_RO --> QueryTargetDB
 ```
 
+## Key Features
 
-## Key Features & Architecture
+### ANN-Based RAG
+- **Triple-Filter Schema Linking**: Structural backbone → Value spy → Semantic reranker
+- **HNSW Vector Search**: Millisecond-latency retrieval via `hnswlib`
+- **Enriched Embeddings**: Auto-generated descriptions for business domain semantics
 
-### 🔍 Retrieval Augmented Generation (RAG) Using Approximate Nearest Neighbors (ANN)
-*   **Dense Schema Linking**: Uses a **Triple-Filter Strategy** (Structural Backbone, Value Spy, Semantic Reranker) to intelligently prune relevant tables and columns, resolving "Context Starvation".
-*   **Scalable Vector Search**: Implements **HNSW (Hierarchical Navigable Small Worlds)** via `hnswlib` for millisecond-latency search across schema embeddings and few-shot examples.
-*   **Graph-Aware RAG**: Integrates Memgraph to traverse database relationships (Foreign Keys), ensuring retrieved contexts maintain relational integrity.
-*   **Enriched Ingestion**: Automatically generates high-fidelity descriptions and embeddings during seeding, ensuring the agent understands business domain semantics.
+### Semantic Caching
+- **Signature Keys**: SpaCy-generated canonical identifiers for semantic deduplication
+- **Pattern Discovery**: LLM-powered synonym generation (e.g., "active" → "live", "running")
+- **Multi-Role Registry**: Single `query_pairs` table serves as cache, few-shot examples, and golden test cases
+- **AST Verification**: Cache hits validated via SQL predicate matching
 
-### 🚀 Unified NLQ↔SQL Registry & Semantic Caching
-*   **Canonical Identifiers**: Every query pair is anchored by a **SpaCy-generated signature key**, ensuring that semantically identical questions share a single source of truth.
-*   **Automated Pattern Discovery**: A dedicated **Pattern Generation Agent** introspects the database and uses an LLM to generate colloquial synonyms for domain-specific values (e.g., "active" → "live", "running"), normalized and validated before being compiled into the SpaCy EntityRuler.
-*   **Multi-Role Lifecycle**: A single entry in the `query_pairs` registry can serve multiple roles:
-    *   **Cache**: Fast runtime lookups for repeating queries.
-    *   **Example**: High-quality few-shot examples for LLM guidance.
-    *   **Golden**: Verified test cases for evaluation and regression testing.
-*   **Trust Levels**: Clear distinction between `verified` human-curated data and `autogenerated` machine results.
-*   **Deterministic Guardrails**: Cache hits are cross-verified via AST parsing to ensure SQL predicates match user intent.
-
-### 🛡️ Extensible Foundation: Multi-Provider LLM & Multi-Engine Database Support
-*   **Extensible Tooling**: Built on the **Model Context Protocol (MCP)**, making database tools accessible to any MCP-compliant agent or client.
-*   **Data Abstraction Layer (DAL)**: Decouples business logic from storage with strict interfaces (`RegistryStore`, `GraphStore`) and pluggable provider adapters where implemented. Today, Postgres (registry / metadata) and Memgraph (graph traversal) are the supported backends. Planned extensions to additional data sources (e.g. MySQL and other analytical backends) are tracked in [Issue #62](https://github.com/jonkmatsumo/text2sql/issues/62) and are not yet implemented.
-*   **Runtime Policy Enforcement**: Supports an optional **dual-database architecture** to separate sensitive control-plane data (tenants, keys, registry) from the query-target data.
-*   **AST-Based Security**: Employs `sqlglot` for AST traversal to strictly enforce read-only access and inject tenant isolation predicates at runtime.
-*   **Provider Agnostic**: Seamlessly switch between OpenAI, Anthropic, and Google Gemini via a unified LLM client factory.
-
-### 📡 Observability (OTEL-First)
-*   **Canonical Tracing**: All services emit to OpenTelemetry by default (`TELEMETRY_BACKEND=otel`).
-*   **Durable Sink**: The OTEL worker provides persistent storage (Postgres) and raw archives (MinIO).
-*   **Access Point**: Query the OTEL worker API at `http://localhost:4320/api/v1/traces`.
-
-## Project Structure
-
-```text
-text2sql/
-├── ui/                         # React UI (Vite + TypeScript)
-├── src/                        # Unified source code
-│   ├── agent/                  # LangGraph AI agent (nodes, graph, state)
-│   ├── mcp_server/             # MCP server (tools, services, DAL integration)
-│   ├── ui/                     # Streamlit UI (Legacy)
-│   ├── dal/                    # Data Abstraction Layer
-│   ├── common/                 # Shared utilities
-│   ├── schema/                 # Pydantic models and schemas
-│   ├── ingestion/              # Data ingestion and enrichment
-│   ├── otel_worker/            # OpenTelemetry trace processor
-│   ├── synthetic_data_gen/     # Synthetic data generation
-│   └── evaluation/             # Evaluation runner and Airflow DAGs
-│       ├── runner/             # Evaluation orchestration
-│       └── dags/               # Airflow DAG definitions
-├── tests/                      # Unit and integration tests
-│   ├── unit/                   # Fast, isolated tests
-│   └── integration/            # Tests requiring running services
-├── scripts/                    # Developer and ops scripts
-│   ├── dev/                    # Local development helpers
-│   ├── data/                   # Data generation scripts
-│   └── observability/          # OTEL and metrics helpers
-├── config/                     # Configuration files
-│   ├── docker/                 # Dockerfiles
-│   └── services/               # Service-specific configs (grafana, otel, tempo, evaluation)
-├── data/                       # Static data assets
-│   └── database/               # SQL initialization scripts
-│       ├── control-plane/      # Control-plane schema
-│       └── query-target/       # Query-target schema and patterns
-├── pyproject/                  # uv workspace package manifests
-├── docs/                       # Documentation
-├── docker-compose.infra.yml    # Infrastructure (Postgres, MinIO, Memgraph)
-├── docker-compose.app.yml      # Applications (MCP Server, Streamlit, Seeder)
-├── docker-compose.observability.yml  # OTEL stack
-├── docker-compose.grafana.yml  # Grafana dashboards
-├── docker-compose.evals.yml    # Airflow evaluation stack
-└── docker-compose.test.yml     # Test database
-```
+### Security & Extensibility
+- **AST-Based Guards**: `sqlglot` enforces read-only access and tenant isolation
+- **Dual-DB Architecture**: Optional separation of control-plane and query-target data
+- **Provider Agnostic**: Supports OpenAI, Anthropic, and Google Gemini
 
 ## Quick Start
 
 ### Prerequisites
-*   Docker & Docker Compose
-*   Python 3.12+ (for local development)
+- Docker & Docker Compose
+- Python 3.12+ (for local development)
 
-### Environment Configuration (Non-Telemetry)
+### Setup
 
-Create a local `.env` from the template:
 ```bash
+# Configure environment
 cp .env.example .env
-```
 
-Do not rely on hardcoded defaults for passwords or secrets; set them explicitly.
-
-Environment variables are grouped by category (not exhaustive):
-*   **Core DB connection**: Postgres host/port/name/user/password used by DAL-backed stores.
-*   **MCP connectivity**: MCP server URL and transport for agent/UI calls.
-*   **LLM provider selection**: Provider + model settings and provider API key.
-*   **DAL provider selectors**: Optional overrides to choose storage backends.
-
-> [!WARNING]
-> **Deprecation Notice**: The Pagila dataset is deprecated and maintained only for legacy verification. The system defaults to `DATASET_MODE=synthetic`.
-
-## Local Development
-
-### 1. Initial Setup
-
-Before starting, bootstrap the local data directories:
-
-```bash
+# Bootstrap local data directories
 ./scripts/dev/bootstrap_local_data.sh
-```
 
-### 2. Services Bring-Up
-
-We use a "pull-and-run" model for infrastructure to avoid unnecessary local builds.
-
-**Infrastructure (No Build)**
-Starts Postgres, MinIO, Memgraph. These use pinned images and do not rebuild.
-
-```bash
+# Start infrastructure (Postgres, MinIO, Memgraph)
 docker compose -f docker-compose.infra.yml up -d
+
+# Start application services
+docker compose -f docker-compose.infra.yml -f docker-compose.app.yml up -d --build
+
+# Optional: Start observability stack
+docker compose -f docker-compose.infra.yml -f docker-compose.observability.yml up -d
 ```
-
-**Application (Build)**
-Starts API Server, Streamlit App, Seeder, and Workers. Checks for code changes.
-
-```bash
-docker compose -f docker-compose.infra.yml \
-  -f docker-compose.app.yml \
-  up -d --build
-```
-
-**Optional: Observability**
-Starts OTEL Collector alongside infra and app.
-
-```bash
-docker compose -f docker-compose.infra.yml \
-  -f docker-compose.observability.yml \
-  up -d
-```
-
-### 3. Development Workflow (Hot Reload)
-
-Source code is bind-mounted into containers for hot reload.
-- **React UI**: Edits to `ui/src/` are reflected immediately (port 3000).
-- **Streamlit**: Edits to `src/ui/`, `src/agent/` are reflected immediately (port 8501).
-- **MCP Server**: Edits to `src/mcp_server/` are reflected immediately.
-- **OTEL Worker**: Edits to `src/otel_worker` are reflected immediately.
-
-**Note**:
-- Large directories (`.git`, `local-data`, `docs`) are **not** mounted.
-- Dependency changes (e.g., `pyproject.toml`) always require a rebuild (`--build`).
-- If a code change is not reflected, rebuild the app service.
-
-### 4. Cleanup
-
-We provide `make` targets for safe and deep cleanup.
-
-| Command | Action | Impact |
-|---------|--------|--------|
-| `make docker-clean` | Stops containers, prunes dangling images | **Safe** (No data loss) |
-| `make docker-clean-deep` | Also prunes unused images/cache | **Safe** (Reclaims disk) |
-| `make docker-nuke` | **DESTRUCTIVE:** Removes volumes & `./local-data` | **Data Loss** (Resets everything) |
-
-> **Warning**: `make docker-nuke` will delete all your local database data.
 
 ### Access Points
 
-#### Primary / User-Facing Services
-
 | Service | URL | Description |
 |---------|-----|-------------|
-| **React UI** | `http://localhost:3000` | Modern React + TypeScript interface |
-| **Streamlit UI** | `http://localhost:8501` | Legacy Streamlit interface |
-| **MCP Server** | `http://localhost:8000/messages` | FastMCP tool server (SSE) |
-| **Memgraph** | Ports `7687`, `7444`, `3000` | Exposed Memgraph service ports |
+| React UI | `http://localhost:3000` | Primary interface |
+| Streamlit UI | `http://localhost:8501` | Legacy interface |
+| MCP Server | `http://localhost:8000/messages` | Tool server (SSE) |
+| OTEL Worker | `http://localhost:4320` | Trace API |
+| Memgraph | `7687`, `7444`, `3000` | Graph database |
 
-#### React UI Environment Variables
+### React UI Environment
 
-The React UI supports the following environment variables (set in `.env` or via Vite):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_OTEL_WORKER_URL` | `http://localhost:4320` | OTEL Worker API |
+| `VITE_AGENT_SERVICE_URL` | `http://localhost:8081` | Agent service |
+| `VITE_UI_API_URL` | `http://localhost:8082` | UI API service |
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VITE_OTEL_WORKER_URL` | Yes | `http://localhost:4320` | Base URL for OTEL Worker API (trace data) |
-| `VITE_AGENT_SERVICE_URL` | Yes | `http://localhost:8081` | Base URL for Agent service |
-| `VITE_UI_API_URL` | Yes | `http://localhost:8082` | Base URL for UI API service |
-| `VITE_GRAFANA_BASE_URL` | No | (unset) | Optional Grafana base URL for fallback links |
+## Project Structure
 
-#### React UI: Trace Explorer
+```
+text2sql/
+├── ui/                     # React UI (Vite + TypeScript)
+├── src/
+│   ├── agent/              # LangGraph agent
+│   ├── mcp_server/         # MCP server and tools
+│   ├── dal/                # Data Abstraction Layer
+│   ├── ingestion/          # Pattern ingestion
+│   ├── otel_worker/        # Trace processor
+│   └── evaluation/         # Eval runner and Airflow DAGs
+├── tests/                  # Unit and integration tests
+├── scripts/                # Dev and ops scripts
+├── config/                 # Docker and service configs
+└── data/database/          # SQL init scripts
+```
 
-The React UI includes a built-in **Trace Explorer** for viewing trace details without requiring Grafana:
+## Development
 
-1. Navigate to **Trace Explorer** in the sidebar (or visit `/admin/traces`)
-2. Enter a trace ID or interaction ID to view the trace detail
-3. Use **Trace Search** (`/admin/traces/search`) to browse and filter traces
+### Hot Reload
+Source code is bind-mounted for live updates:
+- **React UI**: `ui/src/` → port 3000
+- **Streamlit**: `src/ui/`, `src/agent/` → port 8501
+- **MCP Server**: `src/mcp_server/`
+- **OTEL Worker**: `src/otel_worker/`
 
-The Trace Explorer provides:
-- Span waterfall visualization
-- Span table with search and sorting
-- Span detail drawer with full attribute inspection
-- API Links panel for direct access to OTEL endpoints
+Dependency changes require rebuild (`--build`).
 
-When `VITE_GRAFANA_BASE_URL` is configured, "Open in Grafana" links appear as a secondary option.
+### Cleanup
 
-#### React UI: Local Development
+| Command | Action |
+|---------|--------|
+| `make docker-clean` | Stop containers, prune dangling images |
+| `make docker-clean-deep` | Also prune unused images/cache |
+| `make docker-nuke` | **Destructive**: Remove volumes and `./local-data` |
 
-To install and build the React UI locally:
-
+### Testing
 ```bash
-cd ui
-npm ci
-npm run build
+# Unit tests
+pytest tests/unit/
+
+# Integration tests (requires running services)
+docker compose -f docker-compose.test.yml up -d
+pytest tests/integration/
 ```
 
-**Dependency Notes:**
-- The UI uses `vega@^6.x` with `vega-lite@^6.x` for charting. These versions must stay aligned (both 6.x) to avoid peer dependency conflicts.
-- If you encounter peer dependency warnings during `npm ci`, they are typically benign overrides and do not affect functionality.
-- The `react-vega` package bridges React and Vega; its transitive dependencies are automatically resolved.
+## Configuration
 
-#### Optional / Advanced Observability Services
+### Control-Plane Isolation
+Disabled by default. Enable with `DB_ISOLATION_ENABLED=true` and configure `CONTROL_DB_*` variables.
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| **OTEL Worker (Optional)** | `http://localhost:4320` | Canonical trace store and query API (no user-facing UI). |
+### Provider Selectors
+Optional overrides for storage backends:
+- `GRAPH_STORE_PROVIDER` — defaults to Memgraph
+- `CACHE_STORE_PROVIDER` — defaults to Postgres
 
-Most users do not need to interact with the OTEL worker directly. It exists to support advanced observability workflows and custom trace storage.
-
-## Testing
-
-Unit tests can be run locally with `pytest`.
-Integration tests may require running services and relevant environment variables.
-Use `docker-compose.test.yml` to spin up a test Postgres instance when needed.
-
-## MCP Server Endpoint & Transport
-
-The MCP server uses SSE under the hood and exposes tools at:
-```
-http://localhost:8000/messages
-```
-`/mcp` is not a valid endpoint. Transport behavior is controlled by `MCP_TRANSPORT`,
-but `/messages` remains the exposed path (see `src/mcp_server/main.py`
-and `src/agent/tools.py`).
-
-## Control-Plane Isolation (Feature-Gated)
-
-Control-plane isolation is disabled by default and gated by `DB_ISOLATION_ENABLED`.
-When enabled, it requires the control-plane DB variables (e.g. `CONTROL_DB_HOST`,
-`CONTROL_DB_USER`, `CONTROL_DB_PASSWORD`) to be configured. See
-`src/mcp_server/config/control_plane.py`.
-
-## Provider Selectors (Advanced)
-
-Several environment variables exist to select storage backends when alternative providers
-are implemented (e.g. `GRAPH_STORE_PROVIDER`, `CACHE_STORE_PROVIDER`). These are optional
-and default to Postgres or Memgraph for local development.
-
-## Observability Stack (OTEL)
-
-The OpenTelemetry stack is provided in `docker-compose.observability.yml`.
-It includes `otel-collector` and `otel-worker`, and is required for full end-to-end tracing.
-Use `docker-compose.grafana.yml` for Grafana dashboards. The Airflow evaluation stack
-(`docker-compose.evals.yml`) runs DAGs in `src/evaluation/dags/` for automated evaluations.
-
-OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`).
+### Observability
+OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`). The stack includes `otel-collector` and `otel-worker` for trace storage and querying.
