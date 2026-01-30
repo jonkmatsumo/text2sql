@@ -152,6 +152,29 @@ class OpsJobsClient:
                 )
 
     @classmethod
+    async def update_progress(
+        cls,
+        job_id: UUID,
+        progress: dict,
+    ) -> None:
+        """Update job progress metadata.
+
+        Args:
+            job_id: Job identifier.
+            progress: Progress metadata to merge into result.
+        """
+        async with cls.get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET result = COALESCE(result, '{}'::jsonb) || $2::jsonb
+                WHERE id = $1
+                """,
+                job_id,
+                json.dumps(progress),
+            )
+
+    @classmethod
     async def get_job(cls, job_id: UUID) -> Optional[dict]:
         """Fetch job status by ID.
 

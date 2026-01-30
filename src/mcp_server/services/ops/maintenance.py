@@ -58,7 +58,9 @@ class MaintenanceService:
             async with Database.get_connection() as conn:
                 # We fetch all existing patterns to diff.
                 # Note: This might be heavy if nlp_patterns is huge, but for MVP/v1 is fine.
-                rows = await conn.fetch("SELECT label, pattern, id FROM nlp_patterns")
+                rows = await conn.fetch(
+                    "SELECT label, pattern, id FROM nlp_patterns WHERE deleted_at IS NULL"
+                )
                 for r in rows:
                     existing_map[(r["label"], r["pattern"])] = r["id"]
 
@@ -92,7 +94,10 @@ class MaintenanceService:
                     INSERT INTO nlp_patterns (id, label, pattern)
                     VALUES ($1, $2, $3)
                     ON CONFLICT (label, pattern)
-                    DO UPDATE SET id = EXCLUDED.id, created_at = CURRENT_TIMESTAMP
+                    DO UPDATE SET
+                        id = EXCLUDED.id,
+                        created_at = CURRENT_TIMESTAMP,
+                        deleted_at = NULL
                     """,
                     data,
                 )

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import IngestionWizard from "../components/ingestion/IngestionWizard";
+import IngestionDashboard from "../components/ingestion/IngestionDashboard";
 import { OpsService, ApiError } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
@@ -35,6 +36,7 @@ export default function SystemOperations() {
 
     const tabs = [
         { id: "nlp", label: "NLP Patterns" },
+        { id: "ingestion", label: "Ingestion Dash" },
         { id: "schema", label: "Schema" },
         { id: "cache", label: "Semantic Cache" },
         { id: "obs", label: "Observability" }
@@ -192,6 +194,8 @@ export default function SystemOperations() {
                         )}
                     </div>
                 )}
+
+                {activeTab === "ingestion" && <IngestionDashboard />}
 
                 {activeTab === "nlp" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>

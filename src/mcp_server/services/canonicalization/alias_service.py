@@ -35,6 +35,7 @@ class CanonicalAliasService:
                     SELECT id, label, pattern
                     FROM nlp_patterns
                     WHERE label IN ('TABLE', 'COLUMN')
+                      AND deleted_at IS NULL
                     """
                 )
 

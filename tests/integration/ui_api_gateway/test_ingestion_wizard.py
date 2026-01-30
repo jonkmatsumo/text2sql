@@ -88,20 +88,25 @@ async def test_ingestion_wizard_flow(async_client: AsyncClient):
                 "ingestion.patterns.generator.get_openai_client",
                 return_value="mock_client",
             ):
-                resp = await async_client.post("/ops/ingestion/enrich", json=enrich_payload)
+                with patch("ui_api_gateway.app._create_job"):
+                    with patch("ui_api_gateway.app._update_job_status_running"):
+                        with patch("ui_api_gateway.app._update_job_progress"):
+                            with patch("ui_api_gateway.app._update_job_status_completed"):
+                                resp = await async_client.post(
+                                    "/ops/ingestion/enrich", json=enrich_payload
+                                )
 
     assert resp.status_code == 200
+    # Response model changed to EnrichAsyncResponse
     enrich_data = resp.json()
-    assert len(enrich_data["suggestions"]) == 2
+    assert "job_id" in enrich_data
 
-    # Verify snapshot update
+    # Verify snapshot update (mocked background task logic)
     async with Database.get_connection(tenant_id=1) as conn:
         row = await conn.fetchrow(
             "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", run_id
         )
         snapshot = row["config_snapshot"]
-        # snapshot is a string in asyncpg if not decoded, but app.py handles it.
-        # Here just verify it's not empty
         assert snapshot is not None
 
     # 3. Commit

@@ -210,10 +210,63 @@ app.add_middleware(
 # --- Ingestion Wizard Models ---
 
 
+class IngestionMetrics(BaseModel):
+    """Aggregated metrics for ingestion runs."""
+
+    total_runs: int
+    total_patterns_generated: int
+    total_patterns_accepted: int
+    avg_acceptance_rate: float
+    runs_by_day: List[Dict[str, Any]]
+
+
+class IngestionRunSummary(BaseModel):
+    """Summary of an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+
+
+class IngestionRunResponse(BaseModel):
+    """Detailed response for an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+    config_snapshot: Dict[str, Any]
+    metrics: Dict[str, Any]
+    error_message: Optional[str] = None
+
+
+class IngestionTemplateCreate(BaseModel):
+    """Payload for creating or updating an ingestion template."""
+
+    name: str
+    description: Optional[str] = None
+    config: Dict[str, Any]
+
+
+class IngestionTemplate(BaseModel):
+    """Detailed response for an ingestion template."""
+
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    config: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 class AnalyzeRequest(BaseModel):
     """Request payload for analyzing database for pattern candidates."""
 
     target_tables: Optional[List[str]] = None
+    template_id: Optional[UUID] = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -237,6 +290,13 @@ class EnrichResponse(BaseModel):
     suggestions: List[Dict[str, Any]]
 
 
+class EnrichAsyncResponse(BaseModel):
+    """Response payload for async enrichment trigger."""
+
+    run_id: UUID
+    job_id: UUID
+
+
 class CommitRequest(BaseModel):
     """Request payload for committing patterns."""
 
@@ -251,7 +311,15 @@ class CommitResponse(BaseModel):
     hydration_job_id: UUID
 
 
+class RollbackRequest(BaseModel):
+    """Payload for rolling back an ingestion run."""
+
+    patterns: Optional[List[Dict[str, str]]] = None
+    confirm_run_id: str
+
+
 class ApproveInteractionRequest(BaseModel):
+    # ... (lines below unchanged)
     """Request payload for approving an interaction."""
 
     corrected_sql: str
@@ -463,6 +531,85 @@ async def _update_job_status_failed(job_id: UUID, error_message: str) -> None:
         await OpsJobsClient.update_status(job_id, "FAILED", error_message=error_message)
 
 
+async def _update_job_progress(job_id: UUID, progress: Dict[str, Any]) -> None:
+    """Update job progress using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET result = COALESCE(result, '{}'::jsonb) || $2
+                WHERE id = $1
+                """,
+                job_id,
+                json.dumps(progress),
+            )
+    else:
+        await OpsJobsClient.update_progress(job_id, progress)
+
+
+async def _run_enrich_job(job_id: UUID, run_id: UUID, selected_candidates: List[Dict]):
+    """Background worker to execute pattern enrichment."""
+    try:
+        await _update_job_status_running(job_id)
+
+        from ingestion.patterns.generator import get_openai_client
+
+        client = await get_openai_client()
+        threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
+        detector = EnumLikeColumnDetector(threshold=threshold)
+
+        all_suggestions = []
+        total = len(selected_candidates)
+
+        for i, candidate in enumerate(selected_candidates):
+            # Update progress
+            await _update_job_progress(job_id, {"processed": i, "total": total})
+
+            # Enrich single candidate
+            suggestions = await generate_suggestions(
+                [candidate], client, detector, run_id=str(run_id)
+            )
+            all_suggestions.extend(suggestions)
+
+            # Update config_snapshot with partial results
+            async with Database.get_connection(tenant_id=1) as conn:
+                row = await conn.fetchrow(
+                    "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", run_id
+                )
+                if row:
+                    snapshot = (
+                        json.loads(row["config_snapshot"])
+                        if isinstance(row["config_snapshot"], str)
+                        else row["config_snapshot"]
+                    )
+                    snapshot["draft_patterns"] = all_suggestions
+                    # Update ui_state
+                    if "ui_state" not in snapshot:
+                        snapshot["ui_state"] = {}
+                    snapshot["ui_state"]["current_step"] = "review_suggestions"
+                    snapshot["ui_state"]["last_updated_at"] = datetime.now().isoformat()
+
+                    await conn.execute(
+                        "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",
+                        run_id,
+                        json.dumps(snapshot),
+                    )
+
+        await _update_job_status_completed(
+            job_id,
+            {
+                "status": "SUCCESS",
+                "total_suggestions": len(all_suggestions),
+                "processed": total,
+                "total": total,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Enrichment job {job_id} failed: {e}")
+        await _update_job_status_failed(job_id, str(e))
+
+
 async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: dict):
     """Background worker to execute an ops job via MCP."""
     try:
@@ -535,6 +682,317 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
 # --- Ingestion Wizard Endpoints ---
 
 
+@app.get(
+    "/ops/ingestion/templates",
+    response_model=List[IngestionTemplate],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_ingestion_templates():
+    """List all ingestion configuration templates."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        rows = await conn.fetch("SELECT * FROM ingestion_templates ORDER BY name")
+        return [
+            IngestionTemplate(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                config=(
+                    json.loads(row["config"]) if isinstance(row["config"], str) else row["config"]
+                ),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+
+@app.post(
+    "/ops/ingestion/templates",
+    response_model=IngestionTemplate,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def create_ingestion_template(request: IngestionTemplateCreate):
+    """Create a new ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO ingestion_templates (name, description, config)
+            VALUES ($1, $2, $3)
+            RETURNING *
+            """,
+            request.name,
+            request.description,
+            json.dumps(request.config),
+        )
+        return IngestionTemplate(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            config=json.loads(row["config"]) if isinstance(row["config"], str) else row["config"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@app.put(
+    "/ops/ingestion/templates/{template_id}",
+    response_model=IngestionTemplate,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def update_ingestion_template(template_id: UUID, request: IngestionTemplateCreate):
+    """Update an existing ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE ingestion_templates
+            SET name = $1, description = $2, config = $3, updated_at = NOW()
+            WHERE id = $4
+            RETURNING *
+            """,
+            request.name,
+            request.description,
+            json.dumps(request.config),
+            template_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Template not found")
+        return IngestionTemplate(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            config=json.loads(row["config"]) if isinstance(row["config"], str) else row["config"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@app.delete(
+    "/ops/ingestion/templates/{template_id}",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def delete_ingestion_template(template_id: UUID):
+    """Delete an ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        res = await conn.execute("DELETE FROM ingestion_templates WHERE id = $1", template_id)
+        if res == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Template not found")
+        return {"success": True}
+
+
+@app.get(
+    "/ops/ingestion/metrics",
+    response_model=IngestionMetrics,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_ingestion_metrics(window: str = Query("7d")):
+    """Get aggregated metrics for ingestion runs over a time window."""
+    days = 7
+    if window.endswith("d"):
+        try:
+            days = int(window[:-1])
+        except ValueError:
+            pass
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        # Aggregates
+        stats = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) as total_runs,
+                SUM(COALESCE((metrics->>'patterns_generated')::int, 0)) as total_gen,
+                SUM(COALESCE((metrics->>'patterns_accepted')::int, 0)) as total_acc
+            FROM nlp_pattern_runs
+            WHERE started_at > NOW() - (interval '1 day' * $1)
+            """,
+            days,
+        )
+
+        # Runs by day
+        by_day = await conn.fetch(
+            """
+            SELECT
+                date_trunc('day', started_at) as day,
+                COUNT(*) as count,
+                SUM(COALESCE((metrics->>'patterns_accepted')::int, 0)) as accepted
+            FROM nlp_pattern_runs
+            WHERE started_at > NOW() - (interval '1 day' * $1)
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            days,
+        )
+
+        total_runs = stats["total_runs"] or 0
+        total_gen = stats["total_gen"] or 0
+        total_acc = stats["total_acc"] or 0
+        avg_rate = (total_acc / total_gen) if total_gen > 0 else 0.0
+
+        return IngestionMetrics(
+            total_runs=total_runs,
+            total_patterns_generated=total_gen,
+            total_patterns_accepted=total_acc,
+            avg_acceptance_rate=avg_rate,
+            runs_by_day=[
+                {
+                    "day": r["day"].isoformat() if r["day"] else None,
+                    "count": r["count"],
+                    "accepted": r["accepted"] or 0,
+                }
+                for r in by_day
+            ],
+        )
+
+
+@app.get(
+    "/ops/ingestion/runs",
+    response_model=List[IngestionRunSummary],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_ingestion_runs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List recent ingestion runs."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        query = "SELECT id, started_at, completed_at, status, target_table FROM nlp_pattern_runs"
+        params = []
+        if status:
+            query += " WHERE status = $1"
+            params.append(status)
+
+        query += f" ORDER BY started_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+        params.extend([limit, offset])
+
+        rows = await conn.fetch(query, *params)
+        return [
+            IngestionRunSummary(
+                id=row["id"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+                status=row["status"],
+                target_table=row["target_table"],
+            )
+            for row in rows
+        ]
+
+
+@app.get(
+    "/ops/ingestion/runs/{run_id}",
+    response_model=IngestionRunResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_ingestion_run(run_id: UUID):
+    """Get detailed information for a specific ingestion run."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        row = await conn.fetchrow("SELECT * FROM nlp_pattern_runs WHERE id = $1", run_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Ingestion run not found")
+
+        config_snapshot = row["config_snapshot"]
+        if isinstance(config_snapshot, str):
+            config_snapshot = json.loads(config_snapshot)
+
+        metrics = row["metrics"]
+        if isinstance(metrics, str):
+            metrics = json.loads(metrics)
+
+        return IngestionRunResponse(
+            id=row["id"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            status=row["status"],
+            target_table=row["target_table"],
+            config_snapshot=config_snapshot,
+            metrics=metrics or {},
+            error_message=row["error_message"],
+        )
+
+
+@app.get(
+    "/ops/ingestion/runs/{run_id}/patterns",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_run_patterns(run_id: UUID):
+    """List all patterns associated with an ingestion run."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        rows = await conn.fetch(
+            """
+            SELECT pattern_label as label, pattern_text as pattern, action
+            FROM nlp_pattern_run_items
+            WHERE run_id = $1
+            """,
+            run_id,
+        )
+        return [dict(r) for r in rows]
+
+
+@app.post(
+    "/ops/ingestion/runs/{run_id}/rollback",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def rollback_run(run_id: UUID, request: RollbackRequest):
+    """Roll back patterns created by a specific ingestion run."""
+    if request.confirm_run_id != str(run_id):
+        raise HTTPException(status_code=400, detail="Confirmation Run ID mismatch")
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        if request.patterns:
+            # Rollback selected patterns
+            for p in request.patterns:
+                await conn.execute(
+                    "UPDATE nlp_patterns SET deleted_at = NOW() WHERE label = $1 AND pattern = $2",
+                    p["label"],
+                    p["pattern"],
+                )
+                await conn.execute(
+                    """
+                    UPDATE nlp_pattern_run_items
+                    SET action = 'DELETED'
+                    WHERE run_id = $1 AND pattern_label = $2 AND pattern_text = $3
+                    """,
+                    run_id,
+                    p["label"],
+                    p["pattern"],
+                )
+        else:
+            # Rollback ALL created by this run
+            items = await conn.fetch(
+                """
+                SELECT pattern_label, pattern_text
+                FROM nlp_pattern_run_items
+                WHERE run_id = $1 AND action = 'CREATED'
+                """,
+                run_id,
+            )
+            for item in items:
+                await conn.execute(
+                    "UPDATE nlp_patterns SET deleted_at = NOW() WHERE label = $1 AND pattern = $2",
+                    item["pattern_label"],
+                    item["pattern_text"],
+                )
+
+            await conn.execute(
+                """
+                UPDATE nlp_pattern_run_items
+                SET action = 'DELETED'
+                WHERE run_id = $1 AND action = 'CREATED'
+                """,
+                run_id,
+            )
+
+        await conn.execute(
+            """
+            UPDATE nlp_pattern_runs
+            SET status = 'ROLLED_BACK', error_message = 'Rolled back by operator'
+            WHERE id = $1
+            """,
+            run_id,
+        )
+
+        return {"success": True}
+
+
 @app.post(
     "/ops/ingestion/analyze",
     response_model=AnalyzeResponse,
@@ -543,6 +1001,22 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
 async def analyze_source(request: AnalyzeRequest):
     """Analyze database for pattern candidates."""
     run_id = uuid4()
+
+    target_tables = request.target_tables
+
+    if request.template_id:
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            template = await conn.fetchrow(
+                "SELECT config FROM ingestion_templates WHERE id = $1", request.template_id
+            )
+            if template:
+                config = (
+                    json.loads(template["config"])
+                    if isinstance(template["config"], str)
+                    else template["config"]
+                )
+                if not target_tables:
+                    target_tables = config.get("target_tables")
 
     # Init tools
     introspector = Database.get_schema_introspector()
@@ -562,7 +1036,7 @@ async def analyze_source(request: AnalyzeRequest):
         # Database.get_connection() handles this
         async with Database.get_connection(tenant_id=1) as conn:
             result = await detect_candidates(
-                introspector, detector, target_tables=request.target_tables, conn=conn
+                introspector, detector, target_tables=target_tables, conn=conn
             )
     except Exception as e:
         logger.error(f"Detection failed: {e}")
@@ -572,7 +1046,17 @@ async def analyze_source(request: AnalyzeRequest):
     trusted_patterns = result["trusted_patterns"]
 
     # 2. Store Run
-    snapshot = {"candidates": candidates, "trusted_patterns": trusted_patterns, "warnings": []}
+    ui_state = {
+        "current_step": "review_candidates",
+        "selected_candidates": [],
+        "last_updated_at": datetime.now().isoformat(),
+    }
+    snapshot = {
+        "candidates": candidates,
+        "trusted_patterns": trusted_patterns,
+        "warnings": [],
+        "ui_state": ui_state,
+    }
 
     async with Database.get_connection(tenant_id=1) as conn:
         await conn.execute(
@@ -590,51 +1074,22 @@ async def analyze_source(request: AnalyzeRequest):
 
 @app.post(
     "/ops/ingestion/enrich",
-    response_model=EnrichResponse,
+    response_model=EnrichAsyncResponse,
     dependencies=[Depends(check_internal_auth)],
 )
-async def enrich_candidates(request: EnrichRequest):
-    """Generate suggestions for selected candidates using LLM."""
+async def enrich_candidates(request: EnrichRequest, background_tasks: BackgroundTasks):
+    """Trigger enrichment suggestions for selected candidates as a background job."""
     if len(request.selected_candidates) > MAX_ENRICH_BATCH_SIZE:
         raise HTTPException(
             status_code=400,
             detail=f"Too many candidates selected. Max batch size is {MAX_ENRICH_BATCH_SIZE}.",
         )
 
-    from ingestion.patterns.generator import get_openai_client
+    job_id = uuid4()
+    await _create_job(job_id, "PATTERN_ENRICHMENT")
+    background_tasks.add_task(_run_enrich_job, job_id, request.run_id, request.selected_candidates)
 
-    client = await get_openai_client()
-
-    threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
-    detector = EnumLikeColumnDetector(threshold=threshold)
-
-    try:
-        suggestions = await generate_suggestions(
-            request.selected_candidates, client, detector, run_id=str(request.run_id)
-        )
-    except Exception as e:
-        logger.error(f"Enrichment failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    async with Database.get_connection(tenant_id=1) as conn:
-        row = await conn.fetchrow(
-            "SELECT config_snapshot FROM nlp_pattern_runs WHERE id = $1", request.run_id
-        )
-        if row:
-            snapshot = (
-                json.loads(row["config_snapshot"])
-                if isinstance(row["config_snapshot"], str)
-                else row["config_snapshot"]
-            )
-            snapshot["draft_patterns"] = suggestions
-
-            await conn.execute(
-                "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",
-                request.run_id,
-                json.dumps(snapshot),
-            )
-
-    return EnrichResponse(suggestions=suggestions)
+    return EnrichAsyncResponse(run_id=request.run_id, job_id=job_id)
 
 
 @app.post(
@@ -673,6 +1128,22 @@ async def commit_ingestion(request: CommitRequest, background_tasks: BackgroundT
                 p["label"],
                 p["pattern"],
             )
+
+            # Record association
+            await conn.execute(
+                """
+                INSERT INTO nlp_pattern_run_items
+                    (run_id, pattern_id, pattern_label, pattern_text, action)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT DO NOTHING
+                """,
+                request.run_id,
+                p["id"],
+                p["label"],
+                p["pattern"],
+                "CREATED" if res.endswith("1") else "UNCHANGED",
+            )
+
             if res.endswith("1"):
                 inserted_count += 1
 
