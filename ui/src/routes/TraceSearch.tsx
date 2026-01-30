@@ -3,6 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { listTraces } from "../api";
 import { TraceSummary, ListTracesParams } from "../types";
 import { useOtelHealth } from "../hooks/useOtelHealth";
+import { LoadingState } from "../components/common/LoadingState";
+import { EmptyState } from "../components/common/EmptyState";
+import { ErrorState } from "../components/common/ErrorState";
 
 const DEFAULT_LIMIT = 50;
 
@@ -825,70 +828,35 @@ export default function TraceSearch() {
           </div>
 
           {error && (
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "rgba(239, 68, 68, 0.1)",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                borderRadius: "8px",
-                marginBottom: "16px",
-                textAlign: "center"
-              }}
-            >
-              <div style={{ color: "var(--error)", fontWeight: 500, marginBottom: "8px" }}>
-                Failed to load traces
-              </div>
-              <div style={{ color: "var(--muted)", fontSize: "0.9rem", marginBottom: "16px" }}>
-                {error}
-              </div>
-              <button
-                type="button"
-                onClick={() => loadTraces(false)}
-                disabled={isLoading}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: "var(--accent)",
-                  color: "#fff",
-                  fontWeight: 500,
-                  cursor: isLoading ? "wait" : "pointer"
-                }}
-              >
-                {isLoading ? "Retrying..." : "Retry"}
-              </button>
-            </div>
+            <ErrorState error={error} onRetry={() => loadTraces(false)} />
           )}
 
           {isLoading && traces.length === 0 && !error && (
-            <div style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
-              <div style={{ marginBottom: "8px" }}>Loading traces...</div>
-              <div style={{ fontSize: "0.85rem" }}>Fetching from telemetry store</div>
-            </div>
+            <LoadingState message="Loading traces..." />
           )}
 
           {!isLoading && traces.length === 0 && !error && (
-            <div style={{ textAlign: "center", padding: "40px" }}>
-              <div style={{ fontSize: "2rem", marginBottom: "12px" }}>No traces found</div>
-              <div style={{ color: "var(--muted)", marginBottom: "20px" }}>
-                No traces match your current filters. Try adjusting your search criteria or time range.
-              </div>
-              <button
-                type="button"
-                onClick={handleClearFilters}
-                style={{
-                  padding: "10px 20px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border)",
-                  backgroundColor: "transparent",
-                  color: "var(--ink)",
-                  fontWeight: 500,
-                  cursor: "pointer"
-                }}
-              >
-                Clear all filters
-              </button>
-            </div>
+            <EmptyState
+              title="No traces found"
+              description="No traces match your current filters. Try adjusting your search criteria or time range."
+              action={
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    backgroundColor: "transparent",
+                    color: "var(--ink)",
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear all filters
+                </button>
+              }
+            />
           )}
 
           {traces.length > 0 && filteredTraces.length === 0 && (

@@ -1,4 +1,6 @@
 import React, { useMemo } from "react";
+import { LoadingState } from "./LoadingState";
+import { EmptyState } from "./EmptyState";
 
 interface Column<T> {
     key: keyof T | string;
@@ -20,11 +22,11 @@ export default function DataTable<T>({
     isLoading
 }: DataTableProps<T>) {
     if (isLoading) {
-        return <div className="loading">Loading data...</div>;
+        return <LoadingState message="Loading data..." />;
     }
 
     if (!data || data.length === 0) {
-        return <div className="loading" style={{ padding: "40px" }}>No items found.</div>;
+        return <EmptyState title="No items found" />;
     }
 
     return (
