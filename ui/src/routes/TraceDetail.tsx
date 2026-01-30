@@ -61,6 +61,8 @@ export default function TraceDetail() {
   const [spans, setSpans] = useState<SpanSummary[]>([]);
   const [spansError, setSpansError] = useState<string | null>(null);
   const [isSpansLoading, setIsSpansLoading] = useState(true);
+  const [isLoadingMoreSpans, setIsLoadingMoreSpans] = useState(false);
+  const [hasPartialData, setHasPartialData] = useState(false);
 
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
   const [search, setSearch] = useState("");
@@ -92,36 +94,78 @@ export default function TraceDetail() {
     }
   }, [traceId, reportSuccess, reportFailure]);
 
-  const loadSpansData = useCallback(async () => {
+  const loadSpansData = useCallback(async (resumeFromOffset?: number) => {
     if (!traceId || !TRACE_ID_RE.test(traceId)) return;
 
-    setIsSpansLoading(true);
-    setSpansError(null);
+    const isResume = resumeFromOffset !== undefined;
 
-    const fetchAllSpans = async () => {
-      const limit = 500;
-      const maxSpans = 5000;
-      let offset = 0;
-      let all: SpanSummary[] = [];
-      while (true) {
-        const page = await fetchTraceSpans(traceId, limit, offset);
-        all = all.concat(page);
-        if (page.length < limit || all.length >= maxSpans) break;
-        offset += limit;
-      }
-      return all;
-    };
+    if (!isResume) {
+      setIsSpansLoading(true);
+      setSpansError(null);
+      setHasPartialData(false);
+      setSpans([]);
+    } else {
+      setIsLoadingMoreSpans(true);
+      setSpansError(null);
+    }
+
+    const limit = 500;
+    const maxSpans = 5000;
+    let offset = resumeFromOffset ?? 0;
+    let pageNumber = isResume ? Math.floor(offset / limit) + 1 : 1;
 
     try {
-      const spansData = await fetchAllSpans();
-      setSpans(spansData);
+      while (true) {
+        const page = await fetchTraceSpans(traceId, limit, offset);
+
+        // Append page results incrementally
+        setSpans((prev) => {
+          const existingIds = new Set(prev.map((s) => s.span_id));
+          const newSpans = page.filter((s) => !existingIds.has(s.span_id));
+          return [...prev, ...newSpans];
+        });
+
+        // First page arrived - mark initial loading complete
+        if (pageNumber === 1) {
+          setIsSpansLoading(false);
+          if (page.length === limit) {
+            setIsLoadingMoreSpans(true);
+          }
+        }
+
+        // Check if we're done
+        if (page.length < limit) {
+          // Last page
+          setIsLoadingMoreSpans(false);
+          break;
+        }
+
+        offset += limit;
+        pageNumber++;
+
+        if (offset >= maxSpans) {
+          setIsLoadingMoreSpans(false);
+          break;
+        }
+      }
     } catch (err: unknown) {
       const errorMessage = getErrorMessage(err);
       setSpansError(errorMessage);
+      setIsLoadingMoreSpans(false);
+
+      // Check if we have any spans already - that means partial data
+      setSpans((currentSpans) => {
+        if (currentSpans.length > 0) {
+          setHasPartialData(true);
+        }
+        return currentSpans;
+      });
+
       // We don't report global failure for spans if trace detail succeeded
       // to avoid triggering global outage banner for partial data issues.
     } finally {
       setIsSpansLoading(false);
+      setIsLoadingMoreSpans(false);
     }
   }, [traceId]);
 
@@ -139,6 +183,11 @@ export default function TraceDetail() {
 
   const handleRetrySpans = () => {
     loadSpansData();
+  };
+
+  const handleRetryRemainingSpans = () => {
+    // Resume from where we left off
+    loadSpansData(spans.length);
   };
 
   const filteredSpans = useMemo(() => {
@@ -332,16 +381,18 @@ export default function TraceDetail() {
           <div className="trace-panel">
             <div className="trace-panel__header">
               <h3>Waterfall</h3>
-              <span className="subtitle">{isSpansLoading ? "Loading..." : `${rows.length} spans`}</span>
+              <span className="subtitle">
+                {isSpansLoading ? "Loading..." : isLoadingMoreSpans ? `${rows.length} spans (loading more...)` : `${rows.length} spans`}
+              </span>
             </div>
 
-            {isSpansLoading && (
+            {isSpansLoading && spans.length === 0 && (
                 <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
                     Loading spans...
                 </div>
             )}
 
-            {!isSpansLoading && spansError && (
+            {!isSpansLoading && spansError && spans.length === 0 && (
                 <div style={{ padding: "40px", textAlign: "center", border: "1px dashed var(--error)", borderRadius: "8px", margin: "20px" }}>
                     <div style={{ color: "var(--error)", marginBottom: "12px", fontWeight: 500 }}>
                         Failed to load spans
@@ -366,13 +417,53 @@ export default function TraceDetail() {
                 </div>
             )}
 
-            {!isSpansLoading && !spansError && (
-                <WaterfallView
-                    rows={rows}
-                    traceStart={traceStart}
-                    traceDurationMs={traceDuration}
-                    onSelect={handleSpanSelect}
-                />
+            {spans.length > 0 && (
+                <>
+                    {hasPartialData && spansError && (
+                        <div style={{
+                            padding: "12px 16px",
+                            margin: "12px",
+                            backgroundColor: "#fef3c7",
+                            border: "1px solid #fcd34d",
+                            borderRadius: "8px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px"
+                        }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ color: "#b45309", fontWeight: 500 }}>Some spans failed to load</span>
+                                <span style={{ color: "#92400e", fontSize: "0.85rem" }}>({spansError})</span>
+                            </div>
+                            <button
+                                onClick={handleRetryRemainingSpans}
+                                style={{
+                                    padding: "6px 12px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #fcd34d",
+                                    backgroundColor: "#fef3c7",
+                                    color: "#b45309",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    fontSize: "0.85rem"
+                                }}
+                            >
+                                Retry remaining
+                            </button>
+                        </div>
+                    )}
+                    <WaterfallView
+                        rows={rows}
+                        traceStart={traceStart}
+                        traceDurationMs={traceDuration}
+                        onSelect={handleSpanSelect}
+                    />
+                    {isLoadingMoreSpans && (
+                        <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
+                            Loading more spans...
+                        </div>
+                    )}
+                </>
             )}
           </div>
 
@@ -385,12 +476,12 @@ export default function TraceDetail() {
                   placeholder="Search spans..."
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  disabled={isSpansLoading || !!spansError}
+                  disabled={isSpansLoading && spans.length === 0}
                 />
                 <select
                     value={sortKey}
                     onChange={(event) => setSortKey(event.target.value)}
-                    disabled={isSpansLoading || !!spansError}
+                    disabled={isSpansLoading && spans.length === 0}
                 >
                   <option value="start_time">Start time</option>
                   <option value="duration">Duration</option>
@@ -399,16 +490,23 @@ export default function TraceDetail() {
               </div>
             </div>
 
-            {isSpansLoading && <div style={{ padding: "20px", color: "var(--muted)" }}>Loading...</div>}
+            {isSpansLoading && spans.length === 0 && <div style={{ padding: "20px", color: "var(--muted)" }}>Loading...</div>}
 
-            {!isSpansLoading && spansError && (
+            {!isSpansLoading && spansError && spans.length === 0 && (
                 <div style={{ padding: "20px", color: "var(--muted)" }}>
                     Span data unavailable.
                 </div>
             )}
 
-            {!isSpansLoading && !spansError && (
-                <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+            {spans.length > 0 && (
+                <>
+                    <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+                    {isLoadingMoreSpans && (
+                        <div style={{ padding: "12px", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
+                            Loading more spans...
+                        </div>
+                    )}
+                </>
             )}
           </div>
         </div>
