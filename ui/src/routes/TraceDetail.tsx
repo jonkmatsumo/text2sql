@@ -382,7 +382,11 @@ export default function TraceDetail() {
             <div className="trace-panel__header">
               <h3>Waterfall</h3>
               <span className="subtitle">
-                {isSpansLoading ? "Loading..." : isLoadingMoreSpans ? `${rows.length} spans (loading more...)` : `${rows.length} spans`}
+                {isSpansLoading
+                  ? "Loading..."
+                  : isLoadingMoreSpans
+                    ? `${spans.length}${trace?.span_count ? ` / ${trace.span_count}` : ""} spans (loading...)`
+                    : `${rows.length} spans`}
               </span>
             </div>
 
