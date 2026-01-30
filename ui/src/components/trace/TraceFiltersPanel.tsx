@@ -38,11 +38,10 @@ export function TraceFiltersPanel({ filters, onFiltersChange, onSearch, isLoadin
             <span className="filter-select__label">Service</span>
             <input
               type="text"
-              className="filter-select__dropdown"
+              className="filter-select__dropdown input-service"
               placeholder="All Services"
               value={filters.service}
               onChange={(e) => onFiltersChange({ ...filters, service: e.target.value })}
-              style={{ cursor: "text", minWidth: "160px" }}
             />
           </div>
 
@@ -51,11 +50,10 @@ export function TraceFiltersPanel({ filters, onFiltersChange, onSearch, isLoadin
             <span className="filter-select__label">Trace ID</span>
             <input
               type="text"
-              className="filter-select__dropdown"
+              className="filter-select__dropdown input-trace-id"
               placeholder="e.g. 523a..."
               value={filters.traceId}
               onChange={(e) => onFiltersChange({ ...filters, traceId: e.target.value })}
-              style={{ cursor: "text", minWidth: "220px", fontFamily: "monospace" }}
             />
           </div>
 
@@ -103,15 +101,7 @@ export function TraceFiltersPanel({ filters, onFiltersChange, onSearch, isLoadin
             <button
               type="submit"
               disabled={isLoading}
-              style={{
-                background: "var(--accent)",
-                color: "#fff",
-                border: "none",
-                padding: "10px 24px",
-                borderRadius: "8px",
-                fontWeight: 600,
-                cursor: isLoading ? "wait" : "pointer",
-              }}
+              className="btn-search"
             >
               {isLoading ? "Searching..." : "Search"}
             </button>

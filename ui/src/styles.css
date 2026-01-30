@@ -772,6 +772,32 @@ body {
   cursor: pointer;
 }
 
+.input-service {
+  min-width: 160px;
+  cursor: text;
+}
+
+.input-trace-id {
+  min-width: 220px;
+  cursor: text;
+  font-family: monospace;
+}
+
+.btn-search {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-search:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .trace-drawer__section {
   margin-bottom: 16px;
 }

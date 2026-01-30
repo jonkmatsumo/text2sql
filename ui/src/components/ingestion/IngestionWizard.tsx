@@ -540,7 +540,7 @@ export default function IngestionWizard({ onExit }: Props) {
       </div>
 
       {error && (
-        <div style={{ padding: "12px", backgroundColor: "#fee2e2", color: "#b91c1c", borderRadius: "8px", marginBottom: "16px" }}>
+        <div className="error-banner" style={{ marginBottom: "16px" }}>
           {error}
         </div>
       )}
@@ -863,7 +863,7 @@ export default function IngestionWizard({ onExit }: Props) {
 
         {step === "complete" && (
           <div style={{ textAlign: "center", padding: "40px" }}>
-            <h3 style={{ color: "#10b981" }}>Success!</h3>
+            <h3 style={{ color: "var(--success-text)" }}>Success!</h3>
             <p>Patterns committed and hydration job started.</p>
             <div style={{ margin: "24px 0", background: "var(--surface-muted)", padding: "16px", borderRadius: "8px", display: "inline-block", textAlign: "left" }}>
               <div style={{ marginBottom: "8px" }}>
