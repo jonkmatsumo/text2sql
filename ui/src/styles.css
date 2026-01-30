@@ -11,6 +11,23 @@
   --surface-muted: #f1ece4;
   --border: #e2ded5;
   --shadow: 0 20px 50px rgba(21, 21, 21, 0.12);
+
+  /* Semantic Status Tokens */
+  --success-bg: #ecfdf3;
+  --success-border: #d1fae5;
+  --success-text: #065f46;
+
+  --error-bg: #fef2f2;
+  --error-border: #fee2e2;
+  --error-text: #991b1b;
+
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-text: #92400e;
+
+  --info-bg: #eff6ff;
+  --info-border: #dbeafe;
+  --info-text: #1e40af;
 }
 
 * {
@@ -714,13 +731,15 @@ body {
 }
 
 .status-pill--STATUS_CODE_OK {
-  background: #ecfdf3;
-  color: #0f5132;
+  background: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-border);
 }
 
 .status-pill--STATUS_CODE_ERROR {
-  background: #fef3f2;
-  color: #b42318;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid var(--error-border);
 }
 
 .trace-drawer {
