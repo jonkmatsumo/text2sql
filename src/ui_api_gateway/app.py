@@ -278,6 +278,16 @@ class CommitResponse(BaseModel):
     hydration_job_id: UUID
 
 
+class IngestionMetrics(BaseModel):
+    """Aggregated metrics for ingestion runs."""
+
+    total_runs: int
+    total_patterns_generated: int
+    total_patterns_accepted: int
+    avg_acceptance_rate: float
+    runs_by_day: List[Dict[str, Any]]
+
+
 class IngestionRunSummary(BaseModel):
     """Summary of an ingestion run."""
 
@@ -760,6 +770,70 @@ async def delete_ingestion_template(template_id: UUID):
         if res == "DELETE 0":
             raise HTTPException(status_code=404, detail="Template not found")
         return {"success": True}
+
+
+@app.get(
+    "/ops/ingestion/metrics",
+    response_model=IngestionMetrics,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_ingestion_metrics(window: str = Query("7d")):
+    """Get aggregated metrics for ingestion runs over a time window."""
+    days = 7
+    if window.endswith("d"):
+        try:
+            days = int(window[:-1])
+        except ValueError:
+            pass
+
+    async with Database.get_connection(tenant_id=1) as conn:
+        # Aggregates
+        stats = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) as total_runs,
+                SUM(COALESCE((metrics->>'patterns_generated')::int, 0)) as total_gen,
+                SUM(COALESCE((metrics->>'patterns_accepted')::int, 0)) as total_acc
+            FROM nlp_pattern_runs
+            WHERE started_at > NOW() - (interval '1 day' * $1)
+            """,
+            days,
+        )
+
+        # Runs by day
+        by_day = await conn.fetch(
+            """
+            SELECT
+                date_trunc('day', started_at) as day,
+                COUNT(*) as count,
+                SUM(COALESCE((metrics->>'patterns_accepted')::int, 0)) as accepted
+            FROM nlp_pattern_runs
+            WHERE started_at > NOW() - (interval '1 day' * $1)
+            GROUP BY 1
+            ORDER BY 1
+            """,
+            days,
+        )
+
+        total_runs = stats["total_runs"] or 0
+        total_gen = stats["total_gen"] or 0
+        total_acc = stats["total_acc"] or 0
+        avg_rate = (total_acc / total_gen) if total_gen > 0 else 0.0
+
+        return IngestionMetrics(
+            total_runs=total_runs,
+            total_patterns_generated=total_gen,
+            total_patterns_accepted=total_acc,
+            avg_acceptance_rate=avg_rate,
+            runs_by_day=[
+                {
+                    "day": r["day"].isoformat() if r["day"] else None,
+                    "count": r["count"],
+                    "accepted": r["accepted"] or 0,
+                }
+                for r in by_day
+            ],
+        )
 
 
 @app.get(
