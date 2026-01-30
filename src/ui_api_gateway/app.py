@@ -210,10 +210,30 @@ app.add_middleware(
 # --- Ingestion Wizard Models ---
 
 
+class IngestionTemplateCreate(BaseModel):
+    """Payload for creating or updating an ingestion template."""
+
+    name: str
+    description: Optional[str] = None
+    config: Dict[str, Any]
+
+
+class IngestionTemplate(BaseModel):
+    """Detailed response for an ingestion template."""
+
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    config: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 class AnalyzeRequest(BaseModel):
     """Request payload for analyzing database for pattern candidates."""
 
     target_tables: Optional[List[str]] = None
+    template_id: Optional[UUID] = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -646,6 +666,103 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
 
 
 @app.get(
+    "/ops/ingestion/templates",
+    response_model=List[IngestionTemplate],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_ingestion_templates():
+    """List all ingestion configuration templates."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        rows = await conn.fetch("SELECT * FROM ingestion_templates ORDER BY name")
+        return [
+            IngestionTemplate(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                config=(
+                    json.loads(row["config"]) if isinstance(row["config"], str) else row["config"]
+                ),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+
+@app.post(
+    "/ops/ingestion/templates",
+    response_model=IngestionTemplate,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def create_ingestion_template(request: IngestionTemplateCreate):
+    """Create a new ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO ingestion_templates (name, description, config)
+            VALUES ($1, $2, $3)
+            RETURNING *
+            """,
+            request.name,
+            request.description,
+            json.dumps(request.config),
+        )
+        return IngestionTemplate(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            config=json.loads(row["config"]) if isinstance(row["config"], str) else row["config"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@app.put(
+    "/ops/ingestion/templates/{template_id}",
+    response_model=IngestionTemplate,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def update_ingestion_template(template_id: UUID, request: IngestionTemplateCreate):
+    """Update an existing ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE ingestion_templates
+            SET name = $1, description = $2, config = $3, updated_at = NOW()
+            WHERE id = $4
+            RETURNING *
+            """,
+            request.name,
+            request.description,
+            json.dumps(request.config),
+            template_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Template not found")
+        return IngestionTemplate(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            config=json.loads(row["config"]) if isinstance(row["config"], str) else row["config"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@app.delete(
+    "/ops/ingestion/templates/{template_id}",
+    dependencies=[Depends(check_internal_auth)],
+)
+async def delete_ingestion_template(template_id: UUID):
+    """Delete an ingestion configuration template."""
+    async with ControlPlaneDatabase.get_direct_connection() as conn:
+        res = await conn.execute("DELETE FROM ingestion_templates WHERE id = $1", template_id)
+        if res == "DELETE 0":
+            raise HTTPException(status_code=404, detail="Template not found")
+        return {"success": True}
+
+
+@app.get(
     "/ops/ingestion/runs",
     response_model=List[IngestionRunSummary],
     dependencies=[Depends(check_internal_auth)],
@@ -720,6 +837,22 @@ async def analyze_source(request: AnalyzeRequest):
     """Analyze database for pattern candidates."""
     run_id = uuid4()
 
+    target_tables = request.target_tables
+
+    if request.template_id:
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            template = await conn.fetchrow(
+                "SELECT config FROM ingestion_templates WHERE id = $1", request.template_id
+            )
+            if template:
+                config = (
+                    json.loads(template["config"])
+                    if isinstance(template["config"], str)
+                    else template["config"]
+                )
+                if not target_tables:
+                    target_tables = config.get("target_tables")
+
     # Init tools
     introspector = Database.get_schema_introspector()
     threshold = get_env_int("ENUM_CARDINALITY_THRESHOLD", 10)
@@ -738,7 +871,7 @@ async def analyze_source(request: AnalyzeRequest):
         # Database.get_connection() handles this
         async with Database.get_connection(tenant_id=1) as conn:
             result = await detect_candidates(
-                introspector, detector, target_tables=request.target_tables, conn=conn
+                introspector, detector, target_tables=target_tables, conn=conn
             )
     except Exception as e:
         logger.error(f"Detection failed: {e}")
