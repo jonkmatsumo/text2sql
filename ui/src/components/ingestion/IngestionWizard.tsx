@@ -1,8 +1,9 @@
 import React, { useReducer, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { IngestionService, IngestionCandidate, Suggestion, OpsService, IngestionRun, IngestionTemplate, getErrorMessage } from "../../api";
+import { IngestionService, IngestionCandidate, Suggestion, IngestionRun, IngestionTemplate, getErrorMessage } from "../../api";
 import { OpsJobResponse } from "../../types/admin";
 import { useToast } from "../../hooks/useToast";
+import { useJobPolling } from "../../hooks/useJobPolling";
 
 interface Props {
   onExit: () => void;
@@ -360,56 +361,56 @@ export default function IngestionWizard({ onExit }: Props) {
     }
   }, [setSearchParams, showToast]);
 
-  // Polling Effect for Hydration Job
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval>;
-    if (hydrationJobId && step === "complete") {
-      OpsService.getJobStatus(hydrationJobId)
-        .then((job) => dispatch({ type: "SET_ACTIVE_JOB", job }))
-        .catch(console.error);
+  // Hydration Job Polling
+  const handleHydrationComplete = useCallback((job: OpsJobResponse) => {
+    dispatch({ type: "SET_ACTIVE_JOB", job });
+  }, []);
 
-      timer = setInterval(async () => {
-        try {
-          const status = await OpsService.getJobStatus(hydrationJobId);
-          dispatch({ type: "SET_ACTIVE_JOB", job: status });
-          if (status.status === "COMPLETED" || status.status === "FAILED") {
-            clearInterval(timer);
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }, 2000);
-    }
-    return () => clearInterval(timer);
-  }, [hydrationJobId, step]);
+  const { job: hydrationJob } = useJobPolling({
+    jobId: hydrationJobId,
+    enabled: step === "complete",
+    onComplete: handleHydrationComplete,
+    onFailed: handleHydrationComplete,
+  });
 
-  // Polling Effect for Enrichment Job
+  // Sync hydration job to state
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval>;
-    if (enrichJobId && step === "enriching") {
-      timer = setInterval(async () => {
-        try {
-          const status = await OpsService.getJobStatus(enrichJobId);
-          dispatch({ type: "SET_ENRICH_JOB_STATUS", status });
-          if (status.status === "COMPLETED") {
-            clearInterval(timer);
-            if (runId) {
-              const run = await IngestionService.getRun(runId);
-              const initialSuggestions = run.config_snapshot?.draft_patterns || [];
-              dispatch({ type: "ENRICH_COMPLETE", suggestions: initialSuggestions });
-            }
-          } else if (status.status === "FAILED") {
-            clearInterval(timer);
-            dispatch({ type: "SET_ERROR", error: status.error_message || "Enrichment job failed" });
-            showToast("Enrichment failed", "error");
-          }
-        } catch (e) {
-          console.error(e);
-        }
-      }, 2000);
+    if (hydrationJob) {
+      dispatch({ type: "SET_ACTIVE_JOB", job: hydrationJob });
     }
-    return () => clearInterval(timer);
-  }, [enrichJobId, step, runId, showToast]);
+  }, [hydrationJob]);
+
+  // Enrichment Job Polling
+  const handleEnrichComplete = useCallback(async (job: OpsJobResponse) => {
+    if (runId) {
+      try {
+        const run = await IngestionService.getRun(runId);
+        const initialSuggestions = run.config_snapshot?.draft_patterns || [];
+        dispatch({ type: "ENRICH_COMPLETE", suggestions: initialSuggestions });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [runId]);
+
+  const handleEnrichFailed = useCallback((job: OpsJobResponse) => {
+    dispatch({ type: "SET_ERROR", error: job.error_message || "Enrichment job failed" });
+    showToast("Enrichment failed", "error");
+  }, [showToast]);
+
+  const { job: enrichJob } = useJobPolling({
+    jobId: enrichJobId,
+    enabled: step === "enriching",
+    onComplete: handleEnrichComplete,
+    onFailed: handleEnrichFailed,
+  });
+
+  // Sync enrich job status to state for progress display
+  useEffect(() => {
+    if (enrichJob) {
+      dispatch({ type: "SET_ENRICH_JOB_STATUS", status: enrichJob });
+    }
+  }, [enrichJob]);
 
   const handleAnalyze = async () => {
     dispatch({ type: "SET_STEP", step: "analyzing" });
