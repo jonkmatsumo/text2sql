@@ -5,6 +5,8 @@ import PinRuleForm from "../components/PinRuleForm";
 import { AdminService, OpsService } from "../api";
 import { PinRule, RecommendationResult } from "../types/admin";
 import { useToast } from "../hooks/useToast";
+import { useConfirmation } from "../hooks/useConfirmation";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
 const MAX_DISPLAYED_EXAMPLES = 20;
 
@@ -25,6 +27,7 @@ export default function Recommendations() {
     const [recoResult, setRecoResult] = useState<RecommendationResult | null>(null);
 
     const { show: showToast } = useToast();
+    const { confirm, dialogProps } = useConfirmation();
 
     const tabs = [
         { id: "pinned", label: "Pinned Rules" },
@@ -65,7 +68,14 @@ export default function Recommendations() {
     };
 
     const handleDeletePin = async (id: string) => {
-        if (!confirm("Are you sure you want to delete this rule?")) return;
+        const confirmed = await confirm({
+            title: "Delete Pin Rule",
+            description: "Are you sure you want to delete this rule? This action cannot be undone.",
+            confirmText: "Delete",
+            danger: true,
+        });
+        if (!confirmed) return;
+
         try {
             await AdminService.deletePin(id, tenantId);
             showToast("Rule deleted", "success");
@@ -359,6 +369,7 @@ export default function Recommendations() {
                     )}
                 </div>
             )}
+            <ConfirmationDialog {...dialogProps} />
         </>
     );
 }

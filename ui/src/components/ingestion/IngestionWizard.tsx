@@ -4,6 +4,8 @@ import { IngestionService, IngestionCandidate, Suggestion, IngestionRun, Ingesti
 import { OpsJobResponse } from "../../types/admin";
 import { useToast } from "../../hooks/useToast";
 import { useJobPolling } from "../../hooks/useJobPolling";
+import { useConfirmation } from "../../hooks/useConfirmation";
+import { ConfirmationDialog } from "../common/ConfirmationDialog";
 
 interface Props {
   onExit: () => void;
@@ -293,6 +295,7 @@ export default function IngestionWizard({ onExit }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, dispatch] = useReducer(wizardReducer, initialState);
   const { show: showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmation();
 
   const {
     step,
@@ -453,9 +456,13 @@ export default function IngestionWizard({ onExit }: Props) {
 
     const suspicious = approved.filter((s) => s.pattern.length > 50 || s.pattern.trim() === "");
     if (suspicious.length > 0) {
-      if (!window.confirm(`Warning: ${suspicious.length} patterns are unusually long or empty. Proceed anyway?`)) {
-        return;
-      }
+      const isConfirmed = await confirm({
+        title: "Suspicious Patterns Detected",
+        description: `Warning: ${suspicious.length} patterns are unusually long or empty. Proceed anyway?`,
+        confirmText: "Proceed",
+        danger: true
+      });
+      if (!isConfirmed) return;
     }
 
     if (saveAsTemplate && newTemplateName) {
@@ -876,6 +883,7 @@ export default function IngestionWizard({ onExit }: Props) {
           </div>
         )}
       </div>
+      <ConfirmationDialog {...dialogProps} />
     </div>
   );
 }

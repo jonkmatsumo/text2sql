@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { IngestionService } from "../../api";
 import { useToast } from "../../hooks/useToast";
+import { useConfirmation } from "../../hooks/useConfirmation";
+import { ConfirmationDialog } from "../common/ConfirmationDialog";
 
 interface Props {
   runId: string;
@@ -12,6 +14,7 @@ export default function IngestionRunDetail({ runId, onBack }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [isRollingBack, setIsRollingBack] = useState(false);
   const { show: showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmation();
 
   useEffect(() => {
     loadPatterns();
@@ -30,8 +33,13 @@ export default function IngestionRunDetail({ runId, onBack }: Props) {
   };
 
   const handleRollback = async () => {
-    const confirm = window.confirm(`Are you sure you want to roll back this run? All ${patterns.length} patterns created will be soft-deleted.`);
-    if (!confirm) return;
+    const isConfirmed = await confirm({
+      title: "Rollback Run",
+      description: `Are you sure you want to roll back this run? All ${patterns.length} patterns created will be soft-deleted.`,
+      confirmText: "Rollback",
+      danger: true
+    });
+    if (!isConfirmed) return;
 
     const typedId = window.prompt(`Please type the run ID to confirm: ${runId}`);
     if (typedId !== runId) {
@@ -106,6 +114,7 @@ export default function IngestionRunDetail({ runId, onBack }: Props) {
           </table>
         </div>
       </div>
+      <ConfirmationDialog {...dialogProps} />
     </div>
   );
 }
