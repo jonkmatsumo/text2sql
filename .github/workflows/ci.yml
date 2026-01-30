@@ -58,7 +58,24 @@ jobs:
 
       - name: Build MCP Server image
         run: |
-          docker build -t bi-agent-mcp:test -f config/docker/mcp-server.Dockerfile .
+          # Retry logic for transient Docker Hub failures (504 Gateway Timeout, etc.)
+          max_attempts=3
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Build attempt $attempt of $max_attempts..."
+            if docker build -t bi-agent-mcp:test -f config/docker/mcp-server.Dockerfile .; then
+              echo "✓ Build succeeded on attempt $attempt"
+              exit 0
+            fi
+            if [ $attempt -lt $max_attempts ]; then
+              wait_time=$((attempt * 30))
+              echo "Build failed, waiting ${wait_time}s before retry..."
+              sleep $wait_time
+            fi
+            attempt=$((attempt + 1))
+          done
+          echo "❌ Build failed after $max_attempts attempts"
+          exit 1
 
       - name: Validate docker-compose
         run: |
