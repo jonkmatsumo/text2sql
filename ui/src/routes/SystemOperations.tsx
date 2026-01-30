@@ -1,27 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import IngestionWizard from "../components/ingestion/IngestionWizard";
 import IngestionDashboard from "../components/ingestion/IngestionDashboard";
-import { OpsService, ApiError } from "../api";
+import { OpsService, getErrorMessage } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
+import { useJobPolling } from "../hooks/useJobPolling";
 import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
-
-/**
- * Extract user-friendly error message from error object.
- * Uses ApiError.displayMessage when available for better UX.
- */
-function getErrorMessage(err: unknown): string {
-    if (err instanceof ApiError) {
-        return err.displayMessage;
-    }
-    if (err instanceof Error) {
-        return err.message;
-    }
-    return "An unexpected error occurred";
-}
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
@@ -29,7 +16,7 @@ export default function SystemOperations() {
     const [isLoading, setIsLoading] = useState(false);
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
     const [traceId, setTraceId] = useState("");
-    const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [showWizard, setShowWizard] = useState(false);
 
     const { show: showToast } = useToast();
@@ -44,28 +31,21 @@ export default function SystemOperations() {
 
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
 
-    // Polling for active job
-    useEffect(() => {
-        let timer: any;
-        if (activeJob && (activeJob.status === "PENDING" || activeJob.status === "RUNNING")) {
-            timer = setInterval(async () => {
-                try {
-                    const status = await OpsService.getJobStatus(activeJob.id);
-                    setActiveJob(status);
-                    if (status.status === "COMPLETED") {
-                        showToast(`${status.job_type} completed successfully`, "success");
-                        clearInterval(timer);
-                    } else if (status.status === "FAILED") {
-                        showToast(`${status.job_type} failed: ${status.error_message}`, "error");
-                        clearInterval(timer);
-                    }
-                } catch (err) {
-                    console.error("Failed to poll job status", err);
-                }
-            }, 2000);
-        }
-        return () => clearInterval(timer);
-    }, [activeJob, showToast]);
+    // Job Polling
+    const handleJobComplete = useCallback((job: OpsJobResponse) => {
+        showToast(`${job.job_type} completed successfully`, "success");
+    }, [showToast]);
+
+    const handleJobFailed = useCallback((job: OpsJobResponse) => {
+        showToast(`${job.job_type} failed: ${job.error_message}`, "error");
+    }, [showToast]);
+
+    const { job: activeJob } = useJobPolling({
+        jobId: activeJobId,
+        enabled: true,
+        onComplete: handleJobComplete,
+        onFailed: handleJobFailed,
+    });
 
     const runPatternGen = async () => {
         setIsLoading(true);
@@ -95,7 +75,7 @@ export default function SystemOperations() {
         setIsLoading(true);
         try {
             const job = await OpsService.hydrateSchema();
-            setActiveJob(job);
+            setActiveJobId(job.id);
             showToast("Schema hydration started", "info");
         } catch (err: unknown) {
             showToast(getErrorMessage(err), "error");
@@ -108,7 +88,7 @@ export default function SystemOperations() {
         setIsLoading(true);
         try {
             const job = await OpsService.reindexCache();
-            setActiveJob(job);
+            setActiveJobId(job.id);
             showToast("Cache re-indexing started", "info");
         } catch (err: unknown) {
             showToast(getErrorMessage(err), "error");
