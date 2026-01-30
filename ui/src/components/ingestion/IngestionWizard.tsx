@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { IngestionService, IngestionCandidate, Suggestion } from "../../api";
+import React, { useState, useEffect } from "react";
+import { IngestionService, IngestionCandidate, Suggestion, OpsService } from "../../api";
+import { OpsJobResponse } from "../../types/admin";
 import { useToast } from "../../hooks/useToast";
 
 interface Props {
@@ -12,6 +13,7 @@ type WizardStep =
   | "review_candidates"
   | "enriching"
   | "review_suggestions"
+  | "confirmation"
   | "committing"
   | "complete";
 
@@ -21,6 +23,7 @@ export default function IngestionWizard({ onExit }: Props) {
   const [candidates, setCandidates] = useState<IngestionCandidate[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
+  const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Step 2 State
@@ -28,6 +31,26 @@ export default function IngestionWizard({ onExit }: Props) {
   const [newSynonymInputs, setNewSynonymInputs] = useState<Record<string, string>>({});
 
   const { show: showToast } = useToast();
+
+  // Polling Effect for Hydration Job
+  useEffect(() => {
+    let timer: any;
+    if (hydrationJobId && step === "complete") {
+        // Initial fetch
+        OpsService.getJobStatus(hydrationJobId).then(setActiveJob).catch(console.error);
+
+        timer = setInterval(async () => {
+            try {
+                const status = await OpsService.getJobStatus(hydrationJobId);
+                setActiveJob(status);
+                if (status.status === "COMPLETED" || status.status === "FAILED") {
+                    clearInterval(timer);
+                }
+            } catch (e) { console.error(e); }
+        }, 2000);
+    }
+    return () => clearInterval(timer);
+  }, [hydrationJobId, step]);
 
   const handleAnalyze = async () => {
     setStep("analyzing");
@@ -87,17 +110,6 @@ export default function IngestionWizard({ onExit }: Props) {
   };
 
   const toggleSuggestion = (suggIndex: number) => {
-      // Find the suggestion in the main list and toggle
-      // Wait, we need stable ID or index?
-      // Suggestions list might be filtered in view.
-      // Better to map suggestions by ref? Or just update by index in full list?
-      // If we use index from full list, we need to pass it.
-      // Or we can find by object equality if we don't have unique IDs for new items.
-      // Let's use index from render loop if we iterate over full list or subsets.
-      // Since we filter by candidate label/value in render, we need to be careful.
-      // Simplest: update by identity (reference) or add unique ID to suggestion state.
-      // Assuming index passed here is index in 'suggestions' array.
-
       const newSuggestions = [...suggestions];
       newSuggestions[suggIndex].accepted = !newSuggestions[suggIndex].accepted;
       setSuggestions(newSuggestions);
@@ -226,9 +238,6 @@ export default function IngestionWizard({ onExit }: Props) {
                     <h4 style={{ margin: "0 0 12px 0" }}>Candidates</h4>
                     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                         {candidates.filter(c => c.selected).map((c, i) => {
-                             // Determine index in filtered list or full list?
-                             // We need to match selection state.
-                             // Let's use the candidates.indexOf(c) if needed, but here just use map index for UI key
                              const isActive = i === activeCandidateIdx;
                              return (
                                 <button
@@ -267,10 +276,7 @@ export default function IngestionWizard({ onExit }: Props) {
 
                                <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
                                    {activeCandidate.values.map(val => {
-                                       // Find suggestions for this value (Canonical ID)
-                                       // Filter full suggestions list where id === val AND label === activeCandidate.label
                                        const relatedSuggestions = suggestions.map((s, idx) => ({ s, idx })).filter(item => item.s.id === val && item.s.label === activeCandidate.label);
-
                                        const inputKey = `${activeCandidate.label}:${val}`;
 
                                        return (
@@ -327,13 +333,37 @@ export default function IngestionWizard({ onExit }: Props) {
                    })()}
 
                     <div style={{ marginTop: "32px", borderTop: "1px solid var(--border)", paddingTop: "16px", display: "flex", gap: "12px" }}>
-                        <button onClick={handleCommit} style={{ background: "#10b981", color: "#fff", padding: "10px 20px", borderRadius: "6px", border: "none", cursor: "pointer" }}>
-                            Commit & Hydrate
+                        <button onClick={() => setStep("confirmation")} style={{ background: "var(--accent)", color: "#fff", padding: "10px 20px", borderRadius: "6px", border: "none", cursor: "pointer" }}>
+                            Next: Confirmation
                         </button>
                         <button onClick={() => setStep("review_candidates")} style={{ background: "transparent", border: "1px solid var(--border)", padding: "10px 20px", borderRadius: "6px", cursor: "pointer" }}>
                             Back
                         </button>
                     </div>
+                </div>
+            </div>
+        )}
+
+        {step === "confirmation" && (
+            <div style={{ maxWidth: "600px", margin: "0 auto", padding: "24px" }}>
+                <h3>Step 3: Confirmation</h3>
+                <p>Review summary before committing.</p>
+
+                <div style={{ background: "var(--surface-muted)", padding: "20px", borderRadius: "8px" }}>
+                    <ul style={{ margin: 0, paddingLeft: "20px" }}>
+                        <li>Candidates processed: <strong>{candidates.filter(c => c.selected).length}</strong></li>
+                        <li>Total Patterns to Insert: <strong>{suggestions.filter(s => s.accepted).length}</strong></li>
+                        <li>New Patterns: <strong>{suggestions.filter(s => s.accepted && s.is_new).length}</strong></li>
+                    </ul>
+                </div>
+
+                <div style={{ marginTop: "24px", display: "flex", gap: "12px" }}>
+                    <button onClick={handleCommit} style={{ background: "#10b981", color: "#fff", padding: "10px 20px", borderRadius: "6px", border: "none", cursor: "pointer" }}>
+                        Commit & Hydrate
+                    </button>
+                    <button onClick={() => setStep("review_suggestions")} style={{ background: "transparent", border: "1px solid var(--border)", padding: "10px 20px", borderRadius: "6px", cursor: "pointer" }}>
+                        Back
+                    </button>
                 </div>
             </div>
         )}
@@ -349,7 +379,11 @@ export default function IngestionWizard({ onExit }: Props) {
             <div style={{ textAlign: "center", padding: "40px" }}>
                 <h3 style={{ color: "#10b981" }}>Success!</h3>
                 <p>Patterns committed and hydration job started.</p>
-                <p>Job ID: {hydrationJobId}</p>
+                <div style={{ margin: "24px 0", background: "var(--surface-muted)", padding: "16px", borderRadius: "8px", display: "inline-block", textAlign: "left" }}>
+                    <div style={{ marginBottom: "8px" }}><strong>Hydration Job:</strong> {activeJob ? activeJob.status : "Loading..."}</div>
+                    <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>ID: {hydrationJobId}</div>
+                    {activeJob?.error_message && <div style={{ color: "red", marginTop: "8px" }}>Error: {activeJob.error_message}</div>}
+                </div>
                 <div style={{ marginTop: "24px" }}>
                     <button onClick={onExit} style={{ background: "var(--accent)", color: "#fff", padding: "10px 20px", borderRadius: "6px", border: "none", cursor: "pointer" }}>
                         Done
