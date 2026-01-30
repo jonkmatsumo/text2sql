@@ -251,7 +251,31 @@ class CommitResponse(BaseModel):
     hydration_job_id: UUID
 
 
+class IngestionRunSummary(BaseModel):
+    """Summary of an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+
+
+class IngestionRunResponse(BaseModel):
+    """Detailed response for an ingestion run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    target_table: Optional[str] = None
+    config_snapshot: Dict[str, Any]
+    metrics: Dict[str, Any]
+    error_message: Optional[str] = None
+
+
 class ApproveInteractionRequest(BaseModel):
+    # ... (lines below unchanged)
     """Request payload for approving an interaction."""
 
     corrected_sql: str
@@ -535,6 +559,72 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
 # --- Ingestion Wizard Endpoints ---
 
 
+@app.get(
+    "/ops/ingestion/runs",
+    response_model=List[IngestionRunSummary],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_ingestion_runs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List recent ingestion runs."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        query = "SELECT id, started_at, completed_at, status, target_table FROM nlp_pattern_runs"
+        params = []
+        if status:
+            query += " WHERE status = $1"
+            params.append(status)
+
+        query += f" ORDER BY started_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"
+        params.extend([limit, offset])
+
+        rows = await conn.fetch(query, *params)
+        return [
+            IngestionRunSummary(
+                id=row["id"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+                status=row["status"],
+                target_table=row["target_table"],
+            )
+            for row in rows
+        ]
+
+
+@app.get(
+    "/ops/ingestion/runs/{run_id}",
+    response_model=IngestionRunResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_ingestion_run(run_id: UUID):
+    """Get detailed information for a specific ingestion run."""
+    async with Database.get_connection(tenant_id=1) as conn:
+        row = await conn.fetchrow("SELECT * FROM nlp_pattern_runs WHERE id = $1", run_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Ingestion run not found")
+
+        config_snapshot = row["config_snapshot"]
+        if isinstance(config_snapshot, str):
+            config_snapshot = json.loads(config_snapshot)
+
+        metrics = row["metrics"]
+        if isinstance(metrics, str):
+            metrics = json.loads(metrics)
+
+        return IngestionRunResponse(
+            id=row["id"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            status=row["status"],
+            target_table=row["target_table"],
+            config_snapshot=config_snapshot,
+            metrics=metrics or {},
+            error_message=row["error_message"],
+        )
+
+
 @app.post(
     "/ops/ingestion/analyze",
     response_model=AnalyzeResponse,
@@ -572,7 +662,17 @@ async def analyze_source(request: AnalyzeRequest):
     trusted_patterns = result["trusted_patterns"]
 
     # 2. Store Run
-    snapshot = {"candidates": candidates, "trusted_patterns": trusted_patterns, "warnings": []}
+    ui_state = {
+        "current_step": "review_candidates",
+        "selected_candidates": [],
+        "last_updated_at": datetime.now().isoformat(),
+    }
+    snapshot = {
+        "candidates": candidates,
+        "trusted_patterns": trusted_patterns,
+        "warnings": [],
+        "ui_state": ui_state,
+    }
 
     async with Database.get_connection(tenant_id=1) as conn:
         await conn.execute(
@@ -627,6 +727,14 @@ async def enrich_candidates(request: EnrichRequest):
                 else row["config_snapshot"]
             )
             snapshot["draft_patterns"] = suggestions
+            snapshot["ui_state"] = {
+                "current_step": "review_suggestions",
+                "selected_candidates": [
+                    {"table": c["table"], "column": c["column"]}
+                    for c in request.selected_candidates
+                ],
+                "last_updated_at": datetime.now().isoformat(),
+            }
 
             await conn.execute(
                 "UPDATE nlp_pattern_runs SET config_snapshot = $2 WHERE id = $1",

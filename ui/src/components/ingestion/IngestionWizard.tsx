@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { IngestionService, IngestionCandidate, Suggestion, OpsService } from "../../api";
+import { useSearchParams } from "react-router-dom";
+import { IngestionService, IngestionCandidate, Suggestion, OpsService, IngestionRun } from "../../api";
 import { OpsJobResponse } from "../../types/admin";
 import { useToast } from "../../hooks/useToast";
 
@@ -18,6 +19,7 @@ type WizardStep =
   | "complete";
 
 export default function IngestionWizard({ onExit }: Props) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<WizardStep>("intro");
   const [runId, setRunId] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<IngestionCandidate[]>([]);
@@ -26,6 +28,8 @@ export default function IngestionWizard({ onExit }: Props) {
   const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [recentRuns, setRecentRuns] = useState<IngestionRun[]>([]);
 
   // Step 2 State
   const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
@@ -34,6 +38,48 @@ export default function IngestionWizard({ onExit }: Props) {
   const [modifiedCandidates, setModifiedCandidates] = useState<Set<number>>(new Set());
 
   const { show: showToast } = useToast();
+
+  const runIdFromUrl = searchParams.get("run_id");
+
+  useEffect(() => {
+    if (runIdFromUrl && !runId) {
+      loadRun(runIdFromUrl);
+    }
+  }, [runIdFromUrl]);
+
+  useEffect(() => {
+    if (step === "intro") {
+      IngestionService.listRuns("AWAITING_REVIEW").then(setRecentRuns).catch(console.error);
+    }
+  }, [step]);
+
+  const loadRun = async (id: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const run = await IngestionService.getRun(id);
+      setRunId(run.id);
+      const snapshot = run.config_snapshot || {};
+      setCandidates(snapshot.candidates || []);
+      setSuggestions(snapshot.draft_patterns || []);
+      setOriginalSuggestions(JSON.parse(JSON.stringify(snapshot.draft_patterns || [])));
+
+      const uiState = snapshot.ui_state || {};
+      if (uiState.current_step) {
+        setStep(uiState.current_step as WizardStep);
+      } else {
+        setStep("review_candidates");
+      }
+
+      // Update URL
+      setSearchParams({ run_id: id });
+    } catch (err: any) {
+      setError("Failed to load ingestion run");
+      showToast("Failed to load run", "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Polling Effect for Hydration Job
   useEffect(() => {
@@ -212,10 +258,29 @@ export default function IngestionWizard({ onExit }: Props) {
                 <button
                   onClick={handleAnalyze}
                   className="button"
+                  disabled={isLoading}
                   style={{ background: "var(--accent)", color: "#fff", padding: "12px 24px", borderRadius: "8px", border: "none", fontSize: "1rem", cursor: "pointer", marginTop: "16px" }}
                 >
-                    Start Analysis
+                    {isLoading ? "Loading..." : "Start Analysis"}
                 </button>
+
+                {recentRuns.length > 0 && (
+                  <div style={{ marginTop: "40px", borderTop: "1px solid var(--border)", paddingTop: "24px" }}>
+                    <h4 style={{ marginBottom: "12px" }}>Resume Previous Run</h4>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "400px", margin: "0 auto" }}>
+                      {recentRuns.map(run => (
+                        <button
+                          key={run.id}
+                          onClick={() => loadRun(run.id)}
+                          style={{ background: "var(--surface-muted)", border: "1px solid var(--border)", padding: "10px", borderRadius: "6px", cursor: "pointer", textAlign: "left", fontSize: "0.9rem" }}
+                        >
+                          <div style={{ fontWeight: 600 }}>ID: {run.id.slice(0, 8)}...</div>
+                          <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Started: {new Date(run.started_at).toLocaleString()}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
         )}
 

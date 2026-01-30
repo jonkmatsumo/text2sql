@@ -450,7 +450,36 @@ export interface CommitResponse {
   hydration_job_id: string;
 }
 
+export interface IngestionRun {
+  id: string;
+  started_at: string;
+  completed_at?: string;
+  status: string;
+  target_table?: string;
+  config_snapshot?: any;
+  metrics?: any;
+  error_message?: string;
+}
+
 export const IngestionService = {
+  async listRuns(status?: string): Promise<IngestionRun[]> {
+    const params = new URLSearchParams();
+    if (status) params.append("status", status);
+    const response = await fetch(`${uiApiBase}/ops/ingestion/runs?${params}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list ingestion runs");
+    return response.json();
+  },
+
+  async getRun(runId: string): Promise<IngestionRun> {
+    const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to get ingestion run");
+    return response.json();
+  },
+
   async analyze(targetTables?: string[]): Promise<AnalyzeResponse> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/analyze`, {
       method: "POST",
