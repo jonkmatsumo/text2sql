@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useReducer, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { IngestionService, IngestionCandidate, Suggestion, OpsService, IngestionRun, IngestionTemplate, getErrorMessage } from "../../api";
 import { OpsJobResponse } from "../../types/admin";
@@ -18,86 +18,360 @@ type WizardStep =
   | "committing"
   | "complete";
 
+// ---------------------------------------------------------------------------
+// Wizard State
+// ---------------------------------------------------------------------------
+
+interface WizardState {
+  step: WizardStep;
+  runId: string | null;
+  candidates: IngestionCandidate[];
+  suggestions: Suggestion[];
+  originalSuggestions: Suggestion[];
+  hydrationJobId: string | null;
+  activeJob: OpsJobResponse | null;
+  enrichJobId: string | null;
+  enrichJobStatus: OpsJobResponse | null;
+  error: string | null;
+  isLoading: boolean;
+  recentRuns: IngestionRun[];
+  templates: IngestionTemplate[];
+  selectedTemplateId: string;
+  saveAsTemplate: boolean;
+  newTemplateName: string;
+  activeCandidateIdx: number;
+  newSynonymInputs: Record<string, string>;
+  reviewedCandidates: number[];
+  modifiedCandidates: number[];
+}
+
+const initialState: WizardState = {
+  step: "intro",
+  runId: null,
+  candidates: [],
+  suggestions: [],
+  originalSuggestions: [],
+  hydrationJobId: null,
+  activeJob: null,
+  enrichJobId: null,
+  enrichJobStatus: null,
+  error: null,
+  isLoading: false,
+  recentRuns: [],
+  templates: [],
+  selectedTemplateId: "",
+  saveAsTemplate: false,
+  newTemplateName: "",
+  activeCandidateIdx: 0,
+  newSynonymInputs: {},
+  reviewedCandidates: [],
+  modifiedCandidates: [],
+};
+
+// ---------------------------------------------------------------------------
+// Wizard Actions
+// ---------------------------------------------------------------------------
+
+type WizardAction =
+  | { type: "SET_STEP"; step: WizardStep }
+  | { type: "SET_LOADING"; isLoading: boolean }
+  | { type: "SET_ERROR"; error: string | null }
+  | { type: "SET_RUN_ID"; runId: string | null }
+  | { type: "SET_RECENT_RUNS"; runs: IngestionRun[] }
+  | { type: "SET_TEMPLATES"; templates: IngestionTemplate[] }
+  | { type: "SET_SELECTED_TEMPLATE"; templateId: string }
+  | { type: "SET_SAVE_AS_TEMPLATE"; enabled: boolean }
+  | { type: "SET_NEW_TEMPLATE_NAME"; name: string }
+  | { type: "LOAD_RUN_SUCCESS"; runId: string; candidates: IngestionCandidate[]; suggestions: Suggestion[]; step: WizardStep }
+  | { type: "ANALYZE_SUCCESS"; runId: string; candidates: IngestionCandidate[] }
+  | { type: "SET_ENRICH_JOB"; jobId: string }
+  | { type: "SET_ENRICH_JOB_STATUS"; status: OpsJobResponse | null }
+  | { type: "ENRICH_COMPLETE"; suggestions: Suggestion[] }
+  | { type: "SET_HYDRATION_JOB"; jobId: string }
+  | { type: "SET_ACTIVE_JOB"; job: OpsJobResponse | null }
+  | { type: "TOGGLE_CANDIDATE"; index: number }
+  | { type: "SET_ACTIVE_CANDIDATE_IDX"; index: number }
+  | { type: "MARK_REVIEWED"; index: number }
+  | { type: "TOGGLE_SUGGESTION"; suggIndex: number }
+  | { type: "ADD_SYNONYM"; canonicalId: string; label: string; pattern: string }
+  | { type: "UPDATE_SYNONYM_INPUT"; key: string; value: string }
+  | { type: "BULK_ACCEPT"; label: string }
+  | { type: "BULK_REJECT"; label: string }
+  | { type: "BULK_RESET"; label: string };
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+function addToArray(arr: number[], value: number): number[] {
+  if (arr.includes(value)) return arr;
+  return [...arr, value];
+}
+
+function removeFromArray(arr: number[], value: number): number[] {
+  return arr.filter((v) => v !== value);
+}
+
+function wizardReducer(state: WizardState, action: WizardAction): WizardState {
+  switch (action.type) {
+    case "SET_STEP":
+      return { ...state, step: action.step };
+
+    case "SET_LOADING":
+      return { ...state, isLoading: action.isLoading };
+
+    case "SET_ERROR":
+      return { ...state, error: action.error };
+
+    case "SET_RUN_ID":
+      return { ...state, runId: action.runId };
+
+    case "SET_RECENT_RUNS":
+      return { ...state, recentRuns: action.runs };
+
+    case "SET_TEMPLATES":
+      return { ...state, templates: action.templates };
+
+    case "SET_SELECTED_TEMPLATE":
+      return { ...state, selectedTemplateId: action.templateId };
+
+    case "SET_SAVE_AS_TEMPLATE":
+      return { ...state, saveAsTemplate: action.enabled };
+
+    case "SET_NEW_TEMPLATE_NAME":
+      return { ...state, newTemplateName: action.name };
+
+    case "LOAD_RUN_SUCCESS": {
+      const clonedSuggestions = structuredClone(action.suggestions);
+      return {
+        ...state,
+        runId: action.runId,
+        candidates: action.candidates,
+        suggestions: action.suggestions,
+        originalSuggestions: clonedSuggestions,
+        step: action.step,
+        isLoading: false,
+        error: null,
+      };
+    }
+
+    case "ANALYZE_SUCCESS":
+      return {
+        ...state,
+        runId: action.runId,
+        candidates: action.candidates.map((c) => ({ ...c, selected: true })),
+        step: "review_candidates",
+        error: null,
+      };
+
+    case "SET_ENRICH_JOB":
+      return { ...state, enrichJobId: action.jobId };
+
+    case "SET_ENRICH_JOB_STATUS":
+      return { ...state, enrichJobStatus: action.status };
+
+    case "ENRICH_COMPLETE": {
+      const clonedSuggestions = structuredClone(action.suggestions);
+      return {
+        ...state,
+        suggestions: action.suggestions,
+        originalSuggestions: clonedSuggestions,
+        activeCandidateIdx: 0,
+        step: "review_suggestions",
+      };
+    }
+
+    case "SET_HYDRATION_JOB":
+      return { ...state, hydrationJobId: action.jobId };
+
+    case "SET_ACTIVE_JOB":
+      return { ...state, activeJob: action.job };
+
+    case "TOGGLE_CANDIDATE": {
+      const newCandidates = state.candidates.map((c, i) =>
+        i === action.index ? { ...c, selected: !c.selected } : c
+      );
+      return { ...state, candidates: newCandidates };
+    }
+
+    case "SET_ACTIVE_CANDIDATE_IDX":
+      return {
+        ...state,
+        activeCandidateIdx: action.index,
+        reviewedCandidates: addToArray(state.reviewedCandidates, action.index),
+      };
+
+    case "MARK_REVIEWED":
+      return {
+        ...state,
+        reviewedCandidates: addToArray(state.reviewedCandidates, action.index),
+      };
+
+    case "TOGGLE_SUGGESTION": {
+      const newSuggestions = state.suggestions.map((s, i) =>
+        i === action.suggIndex ? { ...s, accepted: !s.accepted } : s
+      );
+      return {
+        ...state,
+        suggestions: newSuggestions,
+        modifiedCandidates: addToArray(state.modifiedCandidates, state.activeCandidateIdx),
+        reviewedCandidates: addToArray(state.reviewedCandidates, state.activeCandidateIdx),
+      };
+    }
+
+    case "ADD_SYNONYM": {
+      const newSug: Suggestion = {
+        id: action.canonicalId,
+        label: action.label,
+        pattern: action.pattern.toLowerCase(),
+        accepted: true,
+        is_new: true,
+      };
+      const key = `${action.label}:${action.canonicalId}`;
+      return {
+        ...state,
+        suggestions: [...state.suggestions, newSug],
+        newSynonymInputs: { ...state.newSynonymInputs, [key]: "" },
+        modifiedCandidates: addToArray(state.modifiedCandidates, state.activeCandidateIdx),
+        reviewedCandidates: addToArray(state.reviewedCandidates, state.activeCandidateIdx),
+      };
+    }
+
+    case "UPDATE_SYNONYM_INPUT":
+      return {
+        ...state,
+        newSynonymInputs: { ...state.newSynonymInputs, [action.key]: action.value },
+      };
+
+    case "BULK_ACCEPT": {
+      const newSuggestions = state.suggestions.map((s) =>
+        s.label === action.label ? { ...s, accepted: true } : s
+      );
+      return {
+        ...state,
+        suggestions: newSuggestions,
+        modifiedCandidates: addToArray(state.modifiedCandidates, state.activeCandidateIdx),
+        reviewedCandidates: addToArray(state.reviewedCandidates, state.activeCandidateIdx),
+      };
+    }
+
+    case "BULK_REJECT": {
+      const newSuggestions = state.suggestions.map((s) =>
+        s.label === action.label ? { ...s, accepted: false } : s
+      );
+      return {
+        ...state,
+        suggestions: newSuggestions,
+        modifiedCandidates: addToArray(state.modifiedCandidates, state.activeCandidateIdx),
+        reviewedCandidates: addToArray(state.reviewedCandidates, state.activeCandidateIdx),
+      };
+    }
+
+    case "BULK_RESET": {
+      const resetSuggestions = state.originalSuggestions.filter((s) => s.label === action.label);
+      const otherSuggestions = state.suggestions.filter((s) => s.label !== action.label);
+      const clonedReset = structuredClone(resetSuggestions);
+      return {
+        ...state,
+        suggestions: [...otherSuggestions, ...clonedReset],
+        modifiedCandidates: removeFromArray(state.modifiedCandidates, state.activeCandidateIdx),
+        reviewedCandidates: addToArray(state.reviewedCandidates, state.activeCandidateIdx),
+      };
+    }
+
+    default:
+      return state;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function IngestionWizard({ onExit }: Props) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [step, setStep] = useState<WizardStep>("intro");
-  const [runId, setRunId] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<IngestionCandidate[]>([]);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [originalSuggestions, setOriginalSuggestions] = useState<Suggestion[]>([]);
-  const [hydrationJobId, setHydrationJobId] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<OpsJobResponse | null>(null);
-  const [enrichJobId, setEnrichJobId] = useState<string | null>(null);
-  const [enrichJobStatus, setEnrichJobStatus] = useState<OpsJobResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [recentRuns, setRecentRuns] = useState<IngestionRun[]>([]);
-  const [templates, setTemplates] = useState<IngestionTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState("");
-
-  // Step 2 State
-  const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
-  const [newSynonymInputs, setNewSynonymInputs] = useState<Record<string, string>>({});
-  const [reviewedCandidates, setReviewedCandidates] = useState<Set<number>>(new Set());
-  const [modifiedCandidates, setModifiedCandidates] = useState<Set<number>>(new Set());
-
+  const [state, dispatch] = useReducer(wizardReducer, initialState);
   const { show: showToast } = useToast();
+
+  const {
+    step,
+    runId,
+    candidates,
+    suggestions,
+    hydrationJobId,
+    activeJob,
+    enrichJobId,
+    enrichJobStatus,
+    error,
+    isLoading,
+    recentRuns,
+    templates,
+    selectedTemplateId,
+    saveAsTemplate,
+    newTemplateName,
+    activeCandidateIdx,
+    newSynonymInputs,
+    reviewedCandidates,
+    modifiedCandidates,
+  } = state;
 
   const runIdFromUrl = searchParams.get("run_id");
 
+  // Load run from URL if present
   useEffect(() => {
     if (runIdFromUrl && !runId) {
       loadRun(runIdFromUrl);
     }
-  }, [runIdFromUrl]);
+  }, [runIdFromUrl, runId]);
 
+  // Load recent runs and templates on intro step
   useEffect(() => {
     if (step === "intro") {
-      IngestionService.listRuns("AWAITING_REVIEW").then(setRecentRuns).catch(console.error);
-      IngestionService.listTemplates().then(setTemplates).catch(console.error);
+      IngestionService.listRuns("AWAITING_REVIEW")
+        .then((runs) => dispatch({ type: "SET_RECENT_RUNS", runs }))
+        .catch(console.error);
+      IngestionService.listTemplates()
+        .then((t) => dispatch({ type: "SET_TEMPLATES", templates: t }))
+        .catch(console.error);
     }
   }, [step]);
 
-  const loadRun = async (id: string) => {
-    setIsLoading(true);
-    setError(null);
+  const loadRun = useCallback(async (id: string) => {
+    dispatch({ type: "SET_LOADING", isLoading: true });
+    dispatch({ type: "SET_ERROR", error: null });
     try {
       const run = await IngestionService.getRun(id);
-      setRunId(run.id);
       const snapshot = run.config_snapshot || {};
-      setCandidates(snapshot.candidates || []);
-      setSuggestions(snapshot.draft_patterns || []);
-      setOriginalSuggestions(JSON.parse(JSON.stringify(snapshot.draft_patterns || [])));
-
       const uiState = snapshot.ui_state || {};
-      if (uiState.current_step) {
-        setStep(uiState.current_step as WizardStep);
-      } else {
-        setStep("review_candidates");
-      }
+      const targetStep = (uiState.current_step as WizardStep) || "review_candidates";
 
-      // Update URL
+      dispatch({
+        type: "LOAD_RUN_SUCCESS",
+        runId: run.id,
+        candidates: snapshot.candidates || [],
+        suggestions: snapshot.draft_patterns || [],
+        step: targetStep,
+      });
       setSearchParams({ run_id: id });
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
+      dispatch({ type: "SET_ERROR", error: getErrorMessage(err) });
+      dispatch({ type: "SET_LOADING", isLoading: false });
       showToast("Failed to load run", "error");
-    } finally {
-      setIsLoading(false);
     }
-  };
+  }, [setSearchParams, showToast]);
 
   // Polling Effect for Hydration Job
   useEffect(() => {
-    let timer: any;
+    let timer: ReturnType<typeof setInterval>;
     if (hydrationJobId && step === "complete") {
-      OpsService.getJobStatus(hydrationJobId).then(setActiveJob).catch(console.error);
+      OpsService.getJobStatus(hydrationJobId)
+        .then((job) => dispatch({ type: "SET_ACTIVE_JOB", job }))
+        .catch(console.error);
 
       timer = setInterval(async () => {
         try {
           const status = await OpsService.getJobStatus(hydrationJobId);
-          setActiveJob(status);
+          dispatch({ type: "SET_ACTIVE_JOB", job: status });
           if (status.status === "COMPLETED" || status.status === "FAILED") {
             clearInterval(timer);
           }
@@ -111,26 +385,22 @@ export default function IngestionWizard({ onExit }: Props) {
 
   // Polling Effect for Enrichment Job
   useEffect(() => {
-    let timer: any;
+    let timer: ReturnType<typeof setInterval>;
     if (enrichJobId && step === "enriching") {
       timer = setInterval(async () => {
         try {
           const status = await OpsService.getJobStatus(enrichJobId);
-          setEnrichJobStatus(status);
+          dispatch({ type: "SET_ENRICH_JOB_STATUS", status });
           if (status.status === "COMPLETED") {
             clearInterval(timer);
-            // Load results from run
             if (runId) {
               const run = await IngestionService.getRun(runId);
               const initialSuggestions = run.config_snapshot?.draft_patterns || [];
-              setSuggestions(initialSuggestions);
-              setOriginalSuggestions(JSON.parse(JSON.stringify(initialSuggestions)));
-              setActiveCandidateIdx(0);
-              setStep("review_suggestions");
+              dispatch({ type: "ENRICH_COMPLETE", suggestions: initialSuggestions });
             }
           } else if (status.status === "FAILED") {
             clearInterval(timer);
-            setError(status.error_message || "Enrichment job failed");
+            dispatch({ type: "SET_ERROR", error: status.error_message || "Enrichment job failed" });
             showToast("Enrichment failed", "error");
           }
         } catch (e) {
@@ -142,33 +412,31 @@ export default function IngestionWizard({ onExit }: Props) {
   }, [enrichJobId, step, runId, showToast]);
 
   const handleAnalyze = async () => {
-    setStep("analyzing");
-    setError(null);
+    dispatch({ type: "SET_STEP", step: "analyzing" });
+    dispatch({ type: "SET_ERROR", error: null });
     try {
       const res = await IngestionService.analyze(undefined, selectedTemplateId || undefined);
-      setRunId(res.run_id);
-      setCandidates(res.candidates.map((c) => ({ ...c, selected: true })));
-      setStep("review_candidates");
+      dispatch({ type: "ANALYZE_SUCCESS", runId: res.run_id, candidates: res.candidates });
       setSearchParams({ run_id: res.run_id });
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setStep("intro");
+      dispatch({ type: "SET_ERROR", error: getErrorMessage(err) });
+      dispatch({ type: "SET_STEP", step: "intro" });
       showToast("Analysis failed", "error");
     }
   };
 
   const handleEnrich = async () => {
     if (!runId) return;
-    setStep("enriching");
-    setError(null);
-    setEnrichJobStatus(null);
+    dispatch({ type: "SET_STEP", step: "enriching" });
+    dispatch({ type: "SET_ERROR", error: null });
+    dispatch({ type: "SET_ENRICH_JOB_STATUS", status: null });
     try {
       const selected = candidates.filter((c) => c.selected);
       const res = await IngestionService.enrich(runId, selected);
-      setEnrichJobId(res.job_id);
+      dispatch({ type: "SET_ENRICH_JOB", jobId: res.job_id });
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setStep("review_candidates");
+      dispatch({ type: "SET_ERROR", error: getErrorMessage(err) });
+      dispatch({ type: "SET_STEP", step: "review_candidates" });
       showToast("Enrichment failed", "error");
     }
   };
@@ -182,7 +450,6 @@ export default function IngestionWizard({ onExit }: Props) {
       return;
     }
 
-    // Warn on suspicious strings
     const suspicious = approved.filter((s) => s.pattern.length > 50 || s.pattern.trim() === "");
     if (suspicious.length > 0) {
       if (!window.confirm(`Warning: ${suspicious.length} patterns are unusually long or empty. Proceed anyway?`)) {
@@ -194,7 +461,7 @@ export default function IngestionWizard({ onExit }: Props) {
       try {
         await IngestionService.createTemplate({
           name: newTemplateName,
-          config: { target_tables: candidates.filter(c => c.selected).map(c => c.table) }
+          config: { target_tables: candidates.filter((c) => c.selected).map((c) => c.table) },
         });
         showToast("Template saved", "success");
       } catch (e) {
@@ -202,16 +469,16 @@ export default function IngestionWizard({ onExit }: Props) {
       }
     }
 
-    setStep("committing");
-    setError(null);
+    dispatch({ type: "SET_STEP", step: "committing" });
+    dispatch({ type: "SET_ERROR", error: null });
     try {
       const res = await IngestionService.commit(runId, approved);
-      setHydrationJobId(res.hydration_job_id);
-      setStep("complete");
+      dispatch({ type: "SET_HYDRATION_JOB", jobId: res.hydration_job_id });
+      dispatch({ type: "SET_STEP", step: "complete" });
       showToast("Ingestion committed successfully", "success");
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setStep("review_suggestions");
+      dispatch({ type: "SET_ERROR", error: getErrorMessage(err) });
+      dispatch({ type: "SET_STEP", step: "review_suggestions" });
       showToast("Commit failed", "error");
     }
   };
@@ -219,35 +486,18 @@ export default function IngestionWizard({ onExit }: Props) {
   // --- Handlers ---
 
   const toggleCandidate = (index: number) => {
-    const newCandidates = [...candidates];
-    newCandidates[index].selected = !newCandidates[index].selected;
-    setCandidates(newCandidates);
+    dispatch({ type: "TOGGLE_CANDIDATE", index });
   };
 
   const toggleSuggestion = (suggIndex: number) => {
-    const newSuggestions = [...suggestions];
-    newSuggestions[suggIndex].accepted = !newSuggestions[suggIndex].accepted;
-    setSuggestions(newSuggestions);
-    setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
-    setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
+    dispatch({ type: "TOGGLE_SUGGESTION", suggIndex });
   };
 
   const addSynonym = (canonicalId: string, label: string) => {
     const key = `${label}:${canonicalId}`;
     const pattern = newSynonymInputs[key]?.trim();
     if (!pattern) return;
-
-    const newSug: Suggestion = {
-      id: canonicalId,
-      label: label,
-      pattern: pattern.toLowerCase(),
-      accepted: true,
-      is_new: true,
-    };
-    setSuggestions([...suggestions, newSug]);
-    setNewSynonymInputs({ ...newSynonymInputs, [key]: "" });
-    setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
-    setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
+    dispatch({ type: "ADD_SYNONYM", canonicalId, label, pattern });
   };
 
   const bulkAction = (action: "accept" | "reject" | "reset") => {
@@ -255,28 +505,18 @@ export default function IngestionWizard({ onExit }: Props) {
     const activeCandidate = selectedCandidates[activeCandidateIdx];
     if (!activeCandidate) return;
 
-    const newSuggestions = [...suggestions];
-
-    if (action === "reset") {
-      const resetSuggestions = originalSuggestions.filter((s) => s.label === activeCandidate.label);
-      const otherSuggestions = suggestions.filter((s) => s.label !== activeCandidate.label);
-      setSuggestions([...otherSuggestions, ...JSON.parse(JSON.stringify(resetSuggestions))]);
-      setModifiedCandidates((prev) => {
-        const next = new Set(prev);
-        next.delete(activeCandidateIdx);
-        return next;
-      });
+    if (action === "accept") {
+      dispatch({ type: "BULK_ACCEPT", label: activeCandidate.label });
+    } else if (action === "reject") {
+      dispatch({ type: "BULK_REJECT", label: activeCandidate.label });
     } else {
-      newSuggestions.forEach((s) => {
-        if (s.label === activeCandidate.label) {
-          s.accepted = action === "accept";
-        }
-      });
-      setSuggestions(newSuggestions);
-      setModifiedCandidates(new Set(modifiedCandidates).add(activeCandidateIdx));
+      dispatch({ type: "BULK_RESET", label: activeCandidate.label });
     }
-    setReviewedCandidates(new Set(reviewedCandidates).add(activeCandidateIdx));
   };
+
+  // Convert arrays to Sets for quick lookup in render
+  const reviewedSet = new Set(reviewedCandidates);
+  const modifiedSet = new Set(modifiedCandidates);
 
   return (
     <div className="panel" style={{ minHeight: "600px", border: "1px solid var(--accent)", position: "relative" }}>
@@ -307,11 +547,11 @@ export default function IngestionWizard({ onExit }: Props) {
               <label style={{ display: "block", marginBottom: "8px", fontSize: "0.9rem", fontWeight: 600 }}>Use Template (Optional)</label>
               <select
                 value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                onChange={(e) => dispatch({ type: "SET_SELECTED_TEMPLATE", templateId: e.target.value })}
                 style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}
               >
                 <option value="">No Template (Default)</option>
-                {templates.map(t => (
+                {templates.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
@@ -435,16 +675,13 @@ export default function IngestionWizard({ onExit }: Props) {
                   .filter((c) => c.selected)
                   .map((c, i) => {
                     const isActive = i === activeCandidateIdx;
-                    const isModified = modifiedCandidates.has(i);
-                    const isReviewed = reviewedCandidates.has(i);
+                    const isModified = modifiedSet.has(i);
+                    const isReviewed = reviewedSet.has(i);
 
                     return (
                       <button
                         key={i}
-                        onClick={() => {
-                          setActiveCandidateIdx(i);
-                          setReviewedCandidates(new Set(reviewedCandidates).add(i));
-                        }}
+                        onClick={() => dispatch({ type: "SET_ACTIVE_CANDIDATE_IDX", index: i })}
                         style={{
                           textAlign: "left",
                           padding: "8px 12px",
@@ -525,7 +762,7 @@ export default function IngestionWizard({ onExit }: Props) {
                                 type="text"
                                 placeholder="Add synonym..."
                                 value={newSynonymInputs[inputKey] || ""}
-                                onChange={(e) => setNewSynonymInputs({ ...newSynonymInputs, [inputKey]: e.target.value })}
+                                onChange={(e) => dispatch({ type: "UPDATE_SYNONYM_INPUT", key: inputKey, value: e.target.value })}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter") {
                                     addSynonym(val, activeCandidate.label);
@@ -545,13 +782,13 @@ export default function IngestionWizard({ onExit }: Props) {
 
               <div style={{ marginTop: "32px", borderTop: "1px solid var(--border)", paddingTop: "16px", display: "flex", gap: "12px" }}>
                 <button
-                  onClick={() => setStep("confirmation")}
+                  onClick={() => dispatch({ type: "SET_STEP", step: "confirmation" })}
                   style={{ background: "var(--accent)", color: "#fff", padding: "10px 20px", borderRadius: "6px", border: "none", cursor: "pointer" }}
                 >
                   Next: Confirmation
                 </button>
                 <button
-                  onClick={() => setStep("review_candidates")}
+                  onClick={() => dispatch({ type: "SET_STEP", step: "review_candidates" })}
                   style={{ background: "transparent", border: "1px solid var(--border)", padding: "10px 20px", borderRadius: "6px", cursor: "pointer" }}
                 >
                   Back
@@ -576,7 +813,7 @@ export default function IngestionWizard({ onExit }: Props) {
 
             <div style={{ marginTop: "24px", border: "1px solid var(--border)", padding: "16px", borderRadius: "8px" }}>
               <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
-                <input type="checkbox" checked={saveAsTemplate} onChange={(e) => setSaveAsTemplate(e.target.checked)} />
+                <input type="checkbox" checked={saveAsTemplate} onChange={(e) => dispatch({ type: "SET_SAVE_AS_TEMPLATE", enabled: e.target.checked })} />
                 <span>Save this configuration as a template</span>
               </label>
               {saveAsTemplate && (
@@ -585,7 +822,7 @@ export default function IngestionWizard({ onExit }: Props) {
                     type="text"
                     placeholder="Template Name (e.g. Sales Schema Baseline)"
                     value={newTemplateName}
-                    onChange={(e) => setNewTemplateName(e.target.value)}
+                    onChange={(e) => dispatch({ type: "SET_NEW_TEMPLATE_NAME", name: e.target.value })}
                     style={{ width: "100%", padding: "8px", borderRadius: "4px", border: "1px solid var(--border)" }}
                   />
                 </div>
@@ -600,7 +837,7 @@ export default function IngestionWizard({ onExit }: Props) {
                 Commit & Hydrate
               </button>
               <button
-                onClick={() => setStep("review_suggestions")}
+                onClick={() => dispatch({ type: "SET_STEP", step: "review_suggestions" })}
                 style={{ background: "transparent", border: "1px solid var(--border)", padding: "10px 20px", borderRadius: "6px", cursor: "pointer" }}
               >
                 Back
