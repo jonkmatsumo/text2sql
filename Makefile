@@ -15,12 +15,23 @@ help:
 	@echo "  make eval-airflow-up    - Start the on-demand Airflow evaluation stack"
 	@echo "  make eval-airflow-down  - Stop the Airflow evaluation stack"
 	@echo "  make eval-airflow-logs  - Tail logs for Airflow services"
+	@echo "  make down               - Stop all containers (no data loss)"
+	@echo "  make reset              - Stop containers and remove volumes (preserves ./local-data)"
 
 # Unified startup (Infra + App + Observability)
 up:
 	@./scripts/dev/check_ports.sh
 	@docker network inspect text2sql_net >/dev/null 2>&1 || docker network create text2sql_net
 	docker compose $(COMPOSE_FILES) up --build -d
+
+# Stop all containers
+down:
+	docker compose $(COMPOSE_FILES) down --remove-orphans
+
+# Stop all containers and remove volumes (but keep local-data)
+reset:
+	docker compose $(COMPOSE_FILES) down --remove-orphans -v
+	@echo "Docker volumes removed. Persisted local data (./local-data) remains intact."
 
 # Legacy App stack (infra + app only)
 app-up:
