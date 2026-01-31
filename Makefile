@@ -6,18 +6,23 @@ COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-
 
 help:
 	@echo "Available targets:"
+	@echo "  make up                 - Start the full stack (Infrastructure + App + Observability)"
 	@echo "  make docker-clean       - Safe cleanup (stops containers, removes dangling images)"
 	@echo "  make docker-clean-deep  - Deep cleanup (reclaims disk: unused images, build cache)"
 	@echo "  make docker-nuke        - DESTRUCTIVE: Removes all volumes and local persistent data"
 	@echo "  make otel-migrate       - Run database migrations for the OTEL worker (manual)"
-	@echo "  make otel-up            - Bring up the observability stack (auto-migrates)"
 
 	@echo "  make eval-airflow-up    - Start the on-demand Airflow evaluation stack"
 	@echo "  make eval-airflow-down  - Stop the Airflow evaluation stack"
 	@echo "  make eval-airflow-logs  - Tail logs for Airflow services"
-	@echo "  make app-up             - Bring up infra + app stack (agent + UI API + Streamlit)"
 
-# App stack (infra + app)
+# Unified startup (Infra + App + Observability)
+up:
+	@./scripts/dev/check_ports.sh
+	@docker network inspect text2sql_net >/dev/null 2>&1 || docker network create text2sql_net
+	docker compose $(COMPOSE_FILES) up --build -d
+
+# Legacy App stack (infra + app only)
 app-up:
 	@./scripts/dev/check_ports.sh
 	@docker network inspect text2sql_net >/dev/null 2>&1 || docker network create text2sql_net
