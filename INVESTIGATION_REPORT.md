@@ -18,7 +18,7 @@
 | **agent-service** | Python/FastAPI | HTTP API for LangGraph agent | 8081 | mcp-server |
 | **ui-api-gateway** | Python/FastAPI | REST wrapper for MCP tools | 8082 | mcp-server |
 | **streamlit** | Python/Streamlit | Legacy admin UI | 8501 | mcp-server, agent-control-db |
-| **ui** | TypeScript/React | Modern React UI | 3005 | agent-service, ui-api-gateway, otel-worker |
+| **ui** | TypeScript/React | Modern React UI | 3333 | agent-service, ui-api-gateway, otel-worker |
 | **otel-collector** | OTEL Contrib | Trace collection and forwarding | 4317/4318 | - |
 | **otel-worker** | Python/FastAPI | Trace processor and dual-write sink | 4320 | PostgreSQL, MinIO |
 | **tempo** | Grafana Tempo | Trace backend (optional) | 3200 | - |

@@ -91,7 +91,7 @@ class TestMiddlewareStack:
 
     def test_cors_origins_configured(self):
         """CORS should have expected origins."""
-        assert "http://localhost:5173" in CORS_ORIGINS
+        assert "http://localhost:3333" in CORS_ORIGINS
         assert "http://localhost:3000" in CORS_ORIGINS
 
 

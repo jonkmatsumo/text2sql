@@ -194,7 +194,7 @@ services:
       VITE_UI_API_URL: ${VITE_UI_API_URL:-http://localhost:8082}
       VITE_INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
     ports:
-      - "${UI_PORT:-3005}:5173"
+      - "${UI_PORT:-3333}:3333"
     volumes:
       - ./ui:/app
       - /app/node_modules

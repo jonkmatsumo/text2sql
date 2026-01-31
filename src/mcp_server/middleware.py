@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 # CORS allowed origins for UI access
 CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://localhost:3333",
+    "http://127.0.0.1:3333",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8501",

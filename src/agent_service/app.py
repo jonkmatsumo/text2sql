@@ -16,8 +16,8 @@ app = FastAPI(title="Text2SQL Agent Service")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        "http://localhost:3333",
+        "http://127.0.0.1:3333",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8501",
