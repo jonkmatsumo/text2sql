@@ -1,6 +1,8 @@
 import React, { Suspense, useMemo, useRef, useState } from "react";
 import { runAgent, submitFeedback } from "../api";
 import TraceLink from "../components/common/TraceLink";
+import { useConfirmation } from "../hooks/useConfirmation";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
 const VegaChart = React.lazy(() => import("../components/common/VegaChart"));
 
@@ -93,6 +95,7 @@ export default function AgentChat() {
   const threadIdRef = useRef<string>(crypto.randomUUID());
 
   const availableModels = LLM_MODELS[llmProvider] || [];
+  const { confirm, dialogProps } = useConfirmation();
 
   const handleProviderChange = (provider: string) => {
     setLlmProvider(provider);
@@ -102,9 +105,16 @@ export default function AgentChat() {
     }
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     if (messages.length === 0) return;
-    if (!confirm("Clear all messages and start a new conversation?")) return;
+    const isConfirmed = await confirm({
+      title: "Clear History",
+      description: "Clear all messages and start a new conversation? This action cannot be undone.",
+      confirmText: "Clear History",
+      danger: true
+    });
+    if (!isConfirmed) return;
+
     setMessages([]);
     setFeedbackState({});
     setError(null);
@@ -392,6 +402,7 @@ export default function AgentChat() {
           </form>
         </main>
       </div>
+      <ConfirmationDialog {...dialogProps} />
     </>
   );
 }

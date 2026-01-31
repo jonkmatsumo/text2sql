@@ -1,0 +1,318 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { listTraces } from "../api";
+import { TraceSummary } from "../types";
+
+export type SortKey = "start_time" | "duration_ms" | "span_count" | "status";
+export type SortDirection = "asc" | "desc";
+
+/** Duration bucket definitions for client-side filtering */
+export type DurationBucket = "all" | "fast" | "medium" | "slow" | "very_slow";
+
+export const DURATION_BUCKETS: { value: DurationBucket; label: string; min: number; max: number }[] = [
+  { value: "all", label: "All durations", min: 0, max: Infinity },
+  { value: "fast", label: "< 100ms", min: 0, max: 100 },
+  { value: "medium", label: "100ms - 1s", min: 100, max: 1000 },
+  { value: "slow", label: "1s - 10s", min: 1000, max: 10000 },
+  { value: "very_slow", label: "> 10s", min: 10000, max: Infinity }
+];
+
+export const TIME_RANGES = [
+  { label: "15m", value: "15m", ms: 15 * 60 * 1000 },
+  { label: "1h", value: "1h", ms: 60 * 60 * 1000 },
+  { label: "6h", value: "6h", ms: 6 * 60 * 60 * 1000 },
+  { label: "24h", value: "24h", ms: 24 * 60 * 60 * 1000 }
+];
+
+export function getRangeValues(range: string): { start_gte: string; start_lte: string } | null {
+  const r = TIME_RANGES.find((tr) => tr.value === range);
+  if (!r) return null;
+  const now = new Date();
+  const start = new Date(now.getTime() - r.ms);
+
+  const toLocalISO = (d: Date) => {
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+  };
+
+  return {
+    start_gte: toLocalISO(start),
+    start_lte: toLocalISO(now)
+  };
+}
+
+export interface TraceFilters {
+  service: string;
+  traceId: string;
+  startTimeGte: string;
+  startTimeLte: string;
+  range?: string;
+}
+
+export interface FacetFilters {
+  status: string; // "all" or specific status
+  durationBucket: DurationBucket;
+  hasErrors: "all" | "yes" | "no";
+}
+
+export interface SortState {
+  key: SortKey;
+  direction: SortDirection;
+}
+
+const DEFAULT_LIMIT = 50;
+
+/** Parse URL search params into component state */
+function parseUrlParams(searchParams: URLSearchParams): {
+  filters: TraceFilters;
+  facets: FacetFilters;
+  sort: SortState;
+  page: number;
+} {
+  const range = searchParams.get("range");
+  let startTimeGte = searchParams.get("start_gte") || "";
+  let startTimeLte = searchParams.get("start_lte") || "";
+
+  if (range) {
+    const computed = getRangeValues(range);
+    if (computed) {
+      startTimeGte = computed.start_gte;
+      startTimeLte = computed.start_lte;
+    }
+  }
+
+  return {
+    filters: {
+      service: searchParams.get("service") || "",
+      traceId: searchParams.get("trace_id") || "",
+      startTimeGte,
+      startTimeLte,
+      range: range || undefined
+    },
+    facets: {
+      status: searchParams.get("status") || "all",
+      durationBucket: (searchParams.get("duration") as DurationBucket) || "all",
+      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all"
+    },
+    sort: {
+      key: (searchParams.get("sort") as SortKey) || "start_time",
+      direction: (searchParams.get("dir") as SortDirection) || "desc"
+    },
+    page: parseInt(searchParams.get("page") || "1", 10)
+  };
+}
+
+/** Build URL search params from component state */
+function buildUrlParams(
+  filters: TraceFilters,
+  facets: FacetFilters,
+  sort: SortState,
+  page: number
+): URLSearchParams {
+  const params = new URLSearchParams();
+
+  // Only add non-default values
+  if (filters.service) params.set("service", filters.service);
+  if (filters.traceId) params.set("trace_id", filters.traceId);
+
+  // If range is active, use that in URL and skip absolute times
+  // If no range, use absolute times if present
+  if (filters.range) {
+    params.set("range", filters.range);
+  } else {
+    if (filters.startTimeGte) params.set("start_gte", filters.startTimeGte);
+    if (filters.startTimeLte) params.set("start_lte", filters.startTimeLte);
+  }
+
+  if (facets.status !== "all") params.set("status", facets.status);
+  if (facets.durationBucket !== "all") params.set("duration", facets.durationBucket);
+  if (facets.hasErrors !== "all") params.set("errors", facets.hasErrors);
+
+  if (sort.key !== "start_time") params.set("sort", sort.key);
+  if (sort.direction !== "desc") params.set("dir", sort.direction);
+
+  if (page > 1) params.set("page", page.toString());
+
+  return params;
+}
+
+export function useTraceSearch() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Initialize state from URL
+  const initial = useMemo(() => parseUrlParams(searchParams), []); // only on mount? no, if URL changes we want to sync? usually unidirectional.
+  // Actually, usually we sync state -> URL.
+
+  const [filters, setFilters] = useState<TraceFilters>(initial.filters);
+  const [facets, setFacets] = useState<FacetFilters>(initial.facets);
+  const [sort, setSort] = useState<SortState>(initial.sort);
+  const [page, setPage] = useState<number>(initial.page);
+
+  const [traces, setTraces] = useState<TraceSummary[]>([]);
+  const [nextOffset, setNextOffset] = useState<number | null>(null); // For pagination if needed, or we just rely on client side? The original code had offset.
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Sync state to URL
+  useEffect(() => {
+    const params = buildUrlParams(filters, facets, sort, page);
+    setSearchParams(params, { replace: true });
+  }, [filters, facets, sort, page, setSearchParams]);
+
+  const loadTraces = useCallback(async (append = false) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // In a real app we might pass filters to the API
+      // Here we fetch list and filter client side? The original code seems to do some API filtering?
+      // Looking at original code: listTraces({ ...filters, offset, limit })
+      // Wait, original code usage of `listTraces` needs to be checked.
+      // Assuming listTraces accepts optional params.
+      const params: any = {
+        limit: DEFAULT_LIMIT,
+        offset: append && nextOffset ? nextOffset : 0,
+      };
+      // Simple mapping
+      if (filters.traceId) params.trace_id = filters.traceId;
+      if (filters.service) params.service_name = filters.service;
+      if (filters.startTimeGte) params.start_time_gte = filters.startTimeGte;
+      if (filters.startTimeLte) params.start_time_lte = filters.startTimeLte;
+
+      const data = await listTraces(params);
+
+      if (append) {
+        setTraces(prev => [...prev, ...data.items]);
+      } else {
+        setTraces(data.items);
+      }
+
+      setNextOffset(data.next_offset || null);
+
+    } catch (err: any) {
+      setError(err.message || "Failed to load traces");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [filters, nextOffset]);
+
+  // Initial load
+  useEffect(() => {
+    loadTraces(false);
+  }, [filters]); // When filters change, reload. Facets are client side?
+
+  // Derived state (Client-side filtering/sorting for facets)
+  const filteredTraces = useMemo(() => {
+    return traces.filter((t) => {
+      // Status facet
+      if (facets.status !== "all" && t.status.toLowerCase() !== facets.status.toLowerCase()) {
+        return false;
+      }
+      // Duration facet
+      if (facets.durationBucket !== "all") {
+        const bucket = DURATION_BUCKETS.find((b) => b.value === facets.durationBucket);
+        if (bucket) {
+          if (t.duration_ms < bucket.min || t.duration_ms >= bucket.max) return false;
+        }
+      }
+      // Error facet
+      if (facets.hasErrors !== "all") {
+         // Need to check if t has error. Original code checked status or error field?
+         // Original code:
+         // const hasErr = t.status.toLowerCase() === "error" || (t.error_count && t.error_count > 0);
+         // if (facets.hasErrors === "yes" && !hasErr) return false;
+         // if (facets.hasErrors === "no" && hasErr) return false;
+         const hasErr = t.status.toLowerCase() === "error" || ((t as any).error_count && (t as any).error_count > 0);
+         if (facets.hasErrors === "yes" && !hasErr) return false;
+         if (facets.hasErrors === "no" && hasErr) return false;
+      }
+      return true;
+    });
+  }, [traces, facets]);
+
+  const sortedTraces = useMemo(() => {
+    return [...filteredTraces].sort((a, b) => {
+      let valA: any = (a as any)[sort.key];
+      let valB: any = (b as any)[sort.key];
+
+      // Handle specific keys if needed
+      if (sort.key === "status") {
+        valA = a.status;
+        valB = b.status;
+      }
+
+      if (valA < valB) return sort.direction === "asc" ? -1 : 1;
+      if (valA > valB) return sort.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [filteredTraces, sort]);
+
+  // Facet counts
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    traces.forEach(t => {
+      const s = t.status.toLowerCase();
+      counts[s] = (counts[s] || 0) + 1;
+    });
+    return counts;
+  }, [traces]);
+
+  const availableStatuses = useMemo(() => Object.keys(statusCounts), [statusCounts]);
+
+  const durationBucketCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    DURATION_BUCKETS.forEach(b => counts[b.value] = 0);
+    traces.forEach(t => {
+       DURATION_BUCKETS.forEach(b => {
+         if (b.value === "all") return;
+         if (t.duration_ms >= b.min && t.duration_ms < b.max) {
+           counts[b.value]++;
+         }
+       });
+    });
+    // All
+    counts["all"] = traces.length;
+    return counts;
+  }, [traces]);
+
+  const activeFacetCount =
+    (facets.status !== "all" ? 1 : 0) +
+    (facets.durationBucket !== "all" ? 1 : 0) +
+    (facets.hasErrors !== "all" ? 1 : 0);
+
+  const handleClearFilters = useCallback(() => {
+     setFilters({
+       service: "",
+       traceId: "",
+       startTimeGte: "",
+       startTimeLte: "",
+       range: undefined
+     });
+     setFacets({
+       status: "all",
+       durationBucket: "all",
+       hasErrors: "all"
+     });
+  }, []);
+
+  return {
+    filters,
+    setFilters,
+    facets,
+    setFacets,
+    sort,
+    setSort,
+    page,
+    setPage,
+    traces,
+    loadTraces,
+    isLoading,
+    error,
+    filteredTraces,
+    sortedTraces,
+    statusCounts,
+    availableStatuses,
+    durationBucketCounts,
+    activeFacetCount,
+    handleClearFilters
+  };
+}
