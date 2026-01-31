@@ -50,8 +50,8 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9010:9000"
+      - "9011:9001"
     networks:
       - airflow-net
     command: server /data --console-address ":9001"

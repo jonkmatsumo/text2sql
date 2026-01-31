@@ -11,7 +11,7 @@ RUN npm ci
 # Development Stage
 FROM base AS development
 COPY ui/ ./
-EXPOSE 5173
+EXPOSE 3333
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # Build Stage

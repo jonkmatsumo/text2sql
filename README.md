@@ -107,24 +107,19 @@ cp .env.example .env
 # Bootstrap local data directories
 ./scripts/dev/bootstrap_local_data.sh
 
-# Start infrastructure (Postgres, MinIO, Memgraph)
-docker compose -f docker-compose.infra.yml up -d
-
-# Start application services
-docker compose -f docker-compose.infra.yml -f docker-compose.app.yml up -d --build
-
-# Optional: Start observability stack
-docker compose -f docker-compose.infra.yml -f docker-compose.observability.yml up -d
+# Start the full stack (Infrastructure + App + Observability)
+make up
 ```
 
 ### Access Points
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| React UI | `http://localhost:3000` | Primary interface |
+| React UI | `http://localhost:3333` | Primary interface |
 | Streamlit UI | `http://localhost:8501` | Legacy interface |
 | MCP Server | `http://localhost:8000/messages` | Tool server (SSE) |
 | OTEL Worker | `http://localhost:4320` | Trace API |
+| Grafana | `http://localhost:3001` | Observability dashboards |
 | Memgraph | `7687`, `7444`, `3000` | Graph database |
 
 ### React UI Environment
@@ -157,7 +152,7 @@ text2sql/
 
 ### Hot Reload
 Source code is bind-mounted for live updates:
-- **React UI**: `ui/src/` → port 3000
+- **React UI**: `ui/src/` → port 3333
 - **Streamlit**: `src/ui/`, `src/agent/` → port 8501
 - **MCP Server**: `src/mcp_server/`
 - **OTEL Worker**: `src/otel_worker/`
@@ -193,4 +188,4 @@ Optional overrides for storage backends:
 - `CACHE_STORE_PROVIDER` — defaults to Postgres
 
 ### Observability
-OTEL is the default telemetry backend (`TELEMETRY_BACKEND=otel`). The stack includes `otel-collector` and `otel-worker` for trace storage and querying.
+**OTEL is mandatory.** MLflow support has been deprecated. The observability stack (`otel-collector`, `otel-worker`, `grafana`) is required for trace storage, metrics, and debugging. It is automatically included in `make up`.
