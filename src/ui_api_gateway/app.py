@@ -440,7 +440,7 @@ async def _call_tool(tool_name: str, args: dict) -> Any:
         MCPUpstreamError: If the tool execution fails.
     """
     try:
-        client = _resolve_mcp_client()
+        client = await _resolve_mcp_client()
         async with client.connect() as mcp:
             result = await mcp.call_tool(tool_name, arguments=args)
         return unpack_mcp_result(result)

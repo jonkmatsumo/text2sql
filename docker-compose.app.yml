@@ -123,6 +123,16 @@ services:
       MCP_SERVER_URL: http://mcp-server:8000/messages
       MCP_TRANSPORT: sse
       INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN:-}
+      DB_HOST: postgres-db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-query_target}
+      DB_USER: text2sql_ro
+      DB_PASS: secure_agent_pass
+      CONTROL_DB_HOST: agent-control-db
+      CONTROL_DB_PORT: 5432
+      CONTROL_DB_NAME: agent_control
+      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
+      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
     ports:
       - "8082:8082"
     volumes:
