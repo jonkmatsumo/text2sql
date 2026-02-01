@@ -212,6 +212,35 @@ Limitations:
 - Identifier quoting uses backticks; case sensitivity depends on server configuration
 - Intended for dev/test only (not production)
 
+### Snowflake Query Target (Credential-Gated)
+Use Snowflake as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_BACKEND=snowflake
+SNOWFLAKE_ACCOUNT=your_account
+SNOWFLAKE_USER=your_user
+SNOWFLAKE_PASSWORD=your_password  # or SNOWFLAKE_AUTHENTICATOR
+SNOWFLAKE_WAREHOUSE=compute_wh
+SNOWFLAKE_DATABASE=ANALYTICS
+SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_ROLE=read_only_role
+SNOWFLAKE_QUERY_TIMEOUT_SECS=30
+SNOWFLAKE_POLL_INTERVAL_SECS=1
+SNOWFLAKE_MAX_ROWS=1000
+SNOWFLAKE_WARN_AFTER_SECS=10
+```
+
+Limitations:
+- Async/job-style execution with client-side polling
+- Results are capped by `SNOWFLAKE_MAX_ROWS`; add LIMIT clauses
+- Foreign key metadata is best-effort via INFORMATION_SCHEMA
+- Intended for dev/test only (not production)
+
+Integration tests (requires credentials):
+```bash
+uv run pytest tests/integration/dal/test_snowflake_query_target_e2e.py -v
+```
+
 ### Provider Selectors
 Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
