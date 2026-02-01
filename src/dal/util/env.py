@@ -42,6 +42,11 @@ PROVIDER_ALIASES: dict[str, str] = {
     # BigQuery aliases
     "bigquery": "bigquery",
     "bq": "bigquery",
+    # Athena aliases
+    "athena": "athena",
+    # Databricks aliases
+    "databricks": "databricks",
+    "databricks-sql": "databricks",
     # Memgraph aliases
     "memgraph": "memgraph",
 }
