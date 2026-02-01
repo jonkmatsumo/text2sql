@@ -374,6 +374,19 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = None
 
 
+class LLMModelOption(BaseModel):
+    """LLM model option payload."""
+
+    value: str
+    label: str
+
+
+class LLMModelsResponse(BaseModel):
+    """Response payload for available LLM models."""
+
+    models: List[LLMModelOption]
+
+
 async def _resolve_mcp_client() -> MCPClient:
     """Create an MCP client using environment configuration."""
     mcp_url = get_env_str("MCP_SERVER_URL", DEFAULT_MCP_URL)
@@ -1358,6 +1371,15 @@ async def run_recommendations(request: RecommendationRequest) -> Any:
             "enable_fallback": request.enable_fallback,
         },
     )
+
+
+@app.get("/llm/models", response_model=LLMModelsResponse)
+async def list_llm_models(provider: str = Query(...)) -> Any:
+    """List available LLM models for a provider."""
+    from agent.llm_client import get_available_models
+
+    models = get_available_models(provider)
+    return {"models": [{"value": model, "label": model} for model in models]}
 
 
 @app.post("/ops/patterns/generate")

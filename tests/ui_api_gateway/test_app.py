@@ -198,3 +198,21 @@ def test_submit_feedback(monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json() == "OK"
+
+
+def test_list_llm_models(monkeypatch):
+    """Return LLM models from shared agent config."""
+    monkeypatch.setattr(
+        "agent.llm_client.get_available_models",
+        lambda provider: ["model-a", "model-b"],
+    )
+
+    client = TestClient(gateway_app.app)
+    resp = client.get("/llm/models?provider=openai")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "models": [
+            {"value": "model-a", "label": "model-a"},
+            {"value": "model-b", "label": "model-b"},
+        ]
+    }

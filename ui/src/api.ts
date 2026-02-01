@@ -175,6 +175,26 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunRespon
   return response.json();
 }
 
+export interface LlmModelOption {
+  value: string;
+  label: string;
+}
+
+export async function fetchAvailableModels(provider: string): Promise<LlmModelOption[]> {
+  const params = new URLSearchParams({ provider });
+  const response = await fetch(`${uiApiBase}/llm/models?${params}`, {
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to fetch available models");
+  }
+  const data = await response.json();
+  if (data && Array.isArray(data.models)) {
+    return data.models;
+  }
+  return [];
+}
+
 export async function submitFeedback(request: FeedbackRequest): Promise<any> {
   const response = await fetch(`${uiApiBase}/feedback`, {
     method: "POST",
