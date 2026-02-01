@@ -116,7 +116,6 @@ make up
 | Service | URL | Description |
 |---------|-----|-------------|
 | React UI | `http://localhost:3333` | Primary interface |
-| Streamlit UI | `http://localhost:8501` | Legacy interface |
 | MCP Server | `http://localhost:8000/messages` | Tool server (SSE) |
 | OTEL Worker | `http://localhost:4320` | Trace API |
 | Grafana | `http://localhost:3001` | Observability dashboards |
@@ -153,7 +152,6 @@ text2sql/
 ### Hot Reload
 Source code is bind-mounted for live updates:
 - **React UI**: `ui/src/` → port 3333
-- **Streamlit**: `src/ui/`, `src/agent/` → port 8501
 - **MCP Server**: `src/mcp_server/`
 - **OTEL Worker**: `src/otel_worker/`
 
