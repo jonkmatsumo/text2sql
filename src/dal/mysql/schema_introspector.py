@@ -20,7 +20,7 @@ class MysqlSchemaIntrospector(SchemaIntrospector):
         """
         async with Database.get_connection() as conn:
             rows = await conn.fetch(query)
-        return [row["table_name"] for row in rows]
+        return [_get_row_value(row, "table_name") for row in rows]
 
     async def get_table_def(self, table_name: str, schema: str = "public") -> TableDef:
         """Get the full definition of a table (columns, FKs)."""
@@ -49,19 +49,22 @@ class MysqlSchemaIntrospector(SchemaIntrospector):
 
         columns = [
             ColumnDef(
-                name=row["column_name"],
-                data_type=_normalize_mysql_type(row["data_type"], row["column_type"]),
-                is_nullable=(row["is_nullable"] == "YES"),
-                is_primary_key=(row["column_key"] == "PRI"),
+                name=_get_row_value(row, "column_name"),
+                data_type=_normalize_mysql_type(
+                    _get_row_value(row, "data_type"),
+                    _get_row_value(row, "column_type"),
+                ),
+                is_nullable=(_get_row_value(row, "is_nullable") == "YES"),
+                is_primary_key=(_get_row_value(row, "column_key") == "PRI"),
             )
             for row in col_rows
         ]
 
         fks = [
             ForeignKeyDef(
-                column_name=row["column_name"],
-                foreign_table_name=row["foreign_table_name"],
-                foreign_column_name=row["foreign_column_name"],
+                column_name=_get_row_value(row, "column_name"),
+                foreign_table_name=_get_row_value(row, "foreign_table_name"),
+                foreign_column_name=_get_row_value(row, "foreign_column_name"),
             )
             for row in fk_rows
         ]
@@ -106,3 +109,15 @@ def _normalize_mysql_type(data_type: str, column_type: str) -> str:
     if base == "json":
         return "json"
     return base or "unknown"
+
+
+def _get_row_value(row: dict, key: str) -> str:
+    if key in row:
+        return row[key]
+    lower = key.lower()
+    if lower in row:
+        return row[lower]
+    upper = key.upper()
+    if upper in row:
+        return row[upper]
+    return row.get(key)
