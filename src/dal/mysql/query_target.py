@@ -69,8 +69,10 @@ class MysqlQueryTargetDatabase:
 
     @classmethod
     @asynccontextmanager
-    async def get_connection(cls, *_args, **_kwargs):
-        """Yield a MySQL connection wrapper."""
+    async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
+        """Yield a MySQL connection wrapper (tenant context is a no-op)."""
+        _ = tenant_id
+        _ = read_only
         if cls._pool is None:
             raise RuntimeError("MySQL pool not initialized. Call MysqlQueryTargetDatabase.init().")
 
