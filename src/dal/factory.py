@@ -281,6 +281,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.sqlite import SqliteSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["sqlite"] = SqliteSchemaIntrospector
+        if "mysql" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.mysql import MysqlSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["mysql"] = MysqlSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider
