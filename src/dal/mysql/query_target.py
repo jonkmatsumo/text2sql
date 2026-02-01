@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import aiomysql
 
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
+from dal.mysql.quoting import translate_double_quotes_to_backticks
 
 
 class MysqlQueryTargetDatabase:
@@ -86,12 +87,14 @@ class _MysqlConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         async with self._conn.cursor() as cursor:
+            sql = translate_double_quotes_to_backticks(sql)
             sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
             await cursor.execute(sql, bound_params)
             return _format_execute_status(sql, cursor.rowcount)
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         async with self._conn.cursor() as cursor:
+            sql = translate_double_quotes_to_backticks(sql)
             sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
             await cursor.execute(sql, bound_params)
             rows = await cursor.fetchall()
@@ -99,6 +102,7 @@ class _MysqlConnection:
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         async with self._conn.cursor() as cursor:
+            sql = translate_double_quotes_to_backticks(sql)
             sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
             await cursor.execute(sql, bound_params)
             row = await cursor.fetchone()
