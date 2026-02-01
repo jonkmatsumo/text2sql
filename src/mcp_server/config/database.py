@@ -31,11 +31,19 @@ class Database:
         from common.config.env import get_env_int, get_env_str
         from dal.util.env import get_provider_env
 
-        cls._query_target_provider = get_provider_env(
-            "QUERY_TARGET_PROVIDER",
-            default="postgres",
-            allowed={"postgres", "sqlite", "mysql"},
-        )
+        backend_override = get_env_str("QUERY_TARGET_BACKEND")
+        if backend_override:
+            cls._query_target_provider = get_provider_env(
+                "QUERY_TARGET_BACKEND",
+                default="postgres",
+                allowed={"postgres", "sqlite", "mysql"},
+            )
+        else:
+            cls._query_target_provider = get_provider_env(
+                "QUERY_TARGET_PROVIDER",
+                default="postgres",
+                allowed={"postgres", "sqlite", "mysql"},
+            )
 
         if cls._query_target_provider == "sqlite":
             from dal.sqlite import SqliteQueryTargetDatabase

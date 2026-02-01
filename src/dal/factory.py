@@ -297,7 +297,9 @@ def get_schema_introspector() -> SchemaIntrospector:
                 allowed=set(SCHEMA_INTROSPECTOR_PROVIDERS.keys()),
             )
         else:
-            query_target_provider = get_env_str("QUERY_TARGET_PROVIDER")
+            query_target_provider = get_env_str("QUERY_TARGET_BACKEND") or get_env_str(
+                "QUERY_TARGET_PROVIDER"
+            )
             normalized = (
                 normalize_provider(query_target_provider) if query_target_provider else "postgres"
             )

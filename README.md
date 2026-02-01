@@ -185,7 +185,7 @@ Use SQLite as the query-target database for local development or tests. The cont
 remains Postgres-only.
 
 ```bash
-QUERY_TARGET_PROVIDER=sqlite
+QUERY_TARGET_BACKEND=sqlite
 SQLITE_DB_PATH=./local-data/query-target.sqlite
 ```
 
@@ -198,7 +198,7 @@ Limitations:
 Use MySQL/MariaDB as the query-target database. The control plane remains Postgres-only.
 
 ```bash
-QUERY_TARGET_PROVIDER=mysql
+QUERY_TARGET_BACKEND=mysql
 DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=query_target
