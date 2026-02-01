@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_str
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,10 @@ class SnowflakeConfig:
     schema: str
     role: Optional[str]
     authenticator: Optional[str]
+    query_timeout_seconds: int
+    poll_interval_seconds: int
+    max_rows: int
+    warn_after_seconds: int
 
     @classmethod
     def from_env(cls) -> "SnowflakeConfig":
@@ -28,6 +32,10 @@ class SnowflakeConfig:
         schema = get_env_str("SNOWFLAKE_SCHEMA")
         role = get_env_str("SNOWFLAKE_ROLE")
         authenticator = get_env_str("SNOWFLAKE_AUTHENTICATOR")
+        query_timeout_seconds = get_env_int("SNOWFLAKE_QUERY_TIMEOUT_SECS", 30)
+        poll_interval_seconds = get_env_int("SNOWFLAKE_POLL_INTERVAL_SECS", 1)
+        max_rows = get_env_int("SNOWFLAKE_MAX_ROWS", 1000)
+        warn_after_seconds = get_env_int("SNOWFLAKE_WARN_AFTER_SECS", 10)
 
         missing = [
             name
@@ -57,4 +65,8 @@ class SnowflakeConfig:
             schema=schema,
             role=role,
             authenticator=authenticator,
+            query_timeout_seconds=query_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            max_rows=max_rows,
+            warn_after_seconds=warn_after_seconds,
         )

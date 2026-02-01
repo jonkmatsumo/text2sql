@@ -15,9 +15,10 @@ class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
         """Initialize the executor with a Snowflake connection."""
         self._conn = conn
 
-    async def submit(self, sql: str, params: Optional[list] = None) -> str:
+    async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
         """Submit a query for asynchronous execution."""
-        return await asyncio.to_thread(_submit, self._conn, sql, params or [])
+        bound_params = params if params is not None else []
+        return await asyncio.to_thread(_submit, self._conn, sql, bound_params)
 
     async def poll(self, job_id: str) -> NormalizedStatus:
         """Poll the status of a running query."""
@@ -33,7 +34,9 @@ class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
         await asyncio.to_thread(self._conn.cancel_query, job_id)
 
 
-def _submit(conn: snowflake.connector.SnowflakeConnection, sql: str, params: list) -> str:
+def _submit(
+    conn: snowflake.connector.SnowflakeConnection, sql: str, params: dict[str, Any] | list
+) -> str:
     with conn.cursor() as cursor:
         cursor.execute_async(sql, params)
         return cursor.sfqid

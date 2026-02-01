@@ -15,7 +15,7 @@ class QueryStatus(str, Enum):
 class AsyncQueryExecutor(Protocol):
     """Protocol for async/job-style query execution."""
 
-    async def submit(self, sql: str, params: Optional[list] = None) -> str:
+    async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
         """Submit a query for asynchronous execution and return a job ID."""
         ...
 
