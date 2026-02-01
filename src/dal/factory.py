@@ -289,6 +289,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.snowflake import SnowflakeSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["snowflake"] = SnowflakeSchemaIntrospector
+        if "redshift" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.redshift import RedshiftSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["redshift"] = RedshiftSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider
