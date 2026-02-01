@@ -36,13 +36,13 @@ class Database:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_BACKEND",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql"},
+                allowed={"postgres", "sqlite", "mysql", "snowflake"},
             )
         else:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_PROVIDER",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql"},
+                allowed={"postgres", "sqlite", "mysql", "snowflake"},
             )
 
         if cls._query_target_provider == "sqlite":
@@ -64,6 +64,19 @@ class Database:
                 db_name=db_name,
                 user=db_user,
                 password=db_pass,
+            )
+        elif cls._query_target_provider == "snowflake":
+            from dal.snowflake import SnowflakeQueryTargetDatabase
+
+            await SnowflakeQueryTargetDatabase.init(
+                account=get_env_str("SNOWFLAKE_ACCOUNT"),
+                user=get_env_str("SNOWFLAKE_USER"),
+                password=get_env_str("SNOWFLAKE_PASSWORD"),
+                warehouse=get_env_str("SNOWFLAKE_WAREHOUSE"),
+                database=get_env_str("SNOWFLAKE_DATABASE"),
+                schema=get_env_str("SNOWFLAKE_SCHEMA"),
+                role=get_env_str("SNOWFLAKE_ROLE"),
+                authenticator=get_env_str("SNOWFLAKE_AUTHENTICATOR"),
             )
         else:
             # Postgres Config
@@ -210,6 +223,10 @@ class Database:
             from dal.mysql import MysqlQueryTargetDatabase
 
             await MysqlQueryTargetDatabase.close()
+        if cls._query_target_provider == "snowflake":
+            from dal.snowflake import SnowflakeQueryTargetDatabase
+
+            await SnowflakeQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -299,6 +316,12 @@ class Database:
             from dal.mysql import MysqlQueryTargetDatabase
 
             async with MysqlQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "snowflake":
+            from dal.snowflake import SnowflakeQueryTargetDatabase
+
+            async with SnowflakeQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 

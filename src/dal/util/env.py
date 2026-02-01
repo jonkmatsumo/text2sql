@@ -34,6 +34,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     # MySQL aliases
     "mysql": "mysql",
     "mariadb": "mysql",
+    # Snowflake aliases
+    "snowflake": "snowflake",
+    "sf": "snowflake",
     # Memgraph aliases
     "memgraph": "memgraph",
 }
