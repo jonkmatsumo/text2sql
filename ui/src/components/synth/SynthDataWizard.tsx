@@ -102,8 +102,10 @@ export default function SynthDataWizard({ onExit }: Props) {
     }
   };
 
-  const progress = state.activeJob?.result?.percent || 0;
-  const currentTable = state.activeJob?.result?.current_table || "";
+  const rawPercent = state.activeJob?.result?.percent;
+  const progress = typeof rawPercent === "number" && Number.isFinite(rawPercent) ? rawPercent : 0;
+  const rawCurrentTable = state.activeJob?.result?.current_table;
+  const currentTable = typeof rawCurrentTable === "string" ? rawCurrentTable : "";
 
   return (
     <div className="wizard-container" style={{ maxWidth: "800px", margin: "0 auto", padding: "40px 0" }}>
