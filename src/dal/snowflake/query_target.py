@@ -6,6 +6,7 @@ import snowflake.connector
 
 from dal.snowflake.config import SnowflakeConfig
 from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
+from dal.snowflake.param_translation import translate_postgres_params_to_snowflake
 
 
 class SnowflakeQueryTargetDatabase:
@@ -64,10 +65,12 @@ class _SnowflakeConnection:
         return self._executor
 
     async def execute(self, sql: str, *params: Any) -> str:
-        return await asyncio.to_thread(_execute, self._conn, sql, params)
+        sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        return await asyncio.to_thread(_execute, self._conn, sql, bound_params)
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
-        return await asyncio.to_thread(_fetch, self._conn, sql, params)
+        sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        return await asyncio.to_thread(_fetch, self._conn, sql, bound_params)
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
@@ -93,18 +96,20 @@ def _connect(cls: type["SnowflakeQueryTargetDatabase"]) -> snowflake.connector.S
     )
 
 
-def _execute(conn: snowflake.connector.SnowflakeConnection, sql: str, params: Any) -> str:
+def _execute(
+    conn: snowflake.connector.SnowflakeConnection, sql: str, params: Dict[str, Any]
+) -> str:
     with conn.cursor() as cursor:
-        cursor.execute(sql, params)
+        cursor.execute(sql, params or None)
         rowcount = cursor.rowcount if cursor.rowcount is not None else -1
     return _format_execute_status(sql, rowcount)
 
 
 def _fetch(
-    conn: snowflake.connector.SnowflakeConnection, sql: str, params: Any
+    conn: snowflake.connector.SnowflakeConnection, sql: str, params: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     with conn.cursor(snowflake.connector.DictCursor) as cursor:
-        cursor.execute(sql, params)
+        cursor.execute(sql, params or None)
         rows = cursor.fetchall()
     return [dict(row) for row in rows]
 
