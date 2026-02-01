@@ -279,6 +279,25 @@ Notes:
 - Install `boto3` in your environment for Athena support
 - Output location is mandatory for Athena query execution
 
+### Databricks SQL Warehouse Query Target (Async, Unity Catalog)
+Use Databricks SQL Warehouses as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_BACKEND=databricks
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=your_token
+DATABRICKS_WAREHOUSE_ID=warehouse_id
+DATABRICKS_CATALOG=main
+DATABRICKS_SCHEMA=public
+DATABRICKS_QUERY_TIMEOUT_SECS=30
+DATABRICKS_POLL_INTERVAL_SECS=1
+DATABRICKS_MAX_ROWS=1000
+```
+
+Notes:
+- Unity Catalog is required for schema introspection (system.information_schema)
+- Uses the Statement Execution API (no legacy Hive metastore support)
+
 ### Redshift Query Target (Sync, Postgres-Compatible)
 Use Amazon Redshift as the query-target database. The control plane remains Postgres-only.
 
