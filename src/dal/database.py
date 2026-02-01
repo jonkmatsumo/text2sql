@@ -67,17 +67,9 @@ class Database:
             )
         elif cls._query_target_provider == "snowflake":
             from dal.snowflake import SnowflakeQueryTargetDatabase
+            from dal.snowflake.config import SnowflakeConfig
 
-            await SnowflakeQueryTargetDatabase.init(
-                account=get_env_str("SNOWFLAKE_ACCOUNT"),
-                user=get_env_str("SNOWFLAKE_USER"),
-                password=get_env_str("SNOWFLAKE_PASSWORD"),
-                warehouse=get_env_str("SNOWFLAKE_WAREHOUSE"),
-                database=get_env_str("SNOWFLAKE_DATABASE"),
-                schema=get_env_str("SNOWFLAKE_SCHEMA"),
-                role=get_env_str("SNOWFLAKE_ROLE"),
-                authenticator=get_env_str("SNOWFLAKE_AUTHENTICATOR"),
-            )
+            await SnowflakeQueryTargetDatabase.init(SnowflakeConfig.from_env())
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")

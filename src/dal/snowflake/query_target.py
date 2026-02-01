@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import snowflake.connector
 
+from dal.snowflake.config import SnowflakeConfig
 from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
 
 
@@ -20,45 +21,16 @@ class SnowflakeQueryTargetDatabase:
     _authenticator: Optional[str] = None
 
     @classmethod
-    async def init(
-        cls,
-        account: Optional[str],
-        user: Optional[str],
-        password: Optional[str],
-        warehouse: Optional[str],
-        database: Optional[str],
-        schema: Optional[str],
-        role: Optional[str],
-        authenticator: Optional[str],
-    ) -> None:
+    async def init(cls, config: SnowflakeConfig) -> None:
         """Initialize Snowflake query-target config."""
-        cls._account = account
-        cls._user = user
-        cls._password = password
-        cls._warehouse = warehouse
-        cls._database = database
-        cls._schema = schema
-        cls._role = role
-        cls._authenticator = authenticator
-
-        missing = [
-            name
-            for name, value in {
-                "SNOWFLAKE_ACCOUNT": account,
-                "SNOWFLAKE_USER": user,
-                "SNOWFLAKE_WAREHOUSE": warehouse,
-                "SNOWFLAKE_DATABASE": database,
-                "SNOWFLAKE_SCHEMA": schema,
-            }.items()
-            if not value
-        ]
-        if missing:
-            missing_list = ", ".join(missing)
-            raise ValueError(
-                f"Snowflake query target missing required config: {missing_list}. "
-                "Set SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_WAREHOUSE, "
-                "SNOWFLAKE_DATABASE, and SNOWFLAKE_SCHEMA."
-            )
+        cls._account = config.account
+        cls._user = config.user
+        cls._password = config.password
+        cls._warehouse = config.warehouse
+        cls._database = config.database
+        cls._schema = config.schema
+        cls._role = config.role
+        cls._authenticator = config.authenticator
 
     @classmethod
     async def close(cls) -> None:
