@@ -345,7 +345,12 @@ export default function Recommendations() {
                                     {displayedExamples.map((ex, idx) => (
                                         <div key={idx} className="bubble" style={{ padding: "16px", borderLeft: ex.metadata.pinned ? "4px solid var(--accent)" : "1px solid var(--border)" }}>
                                             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.8rem" }}>
-                                                <span style={{ color: "var(--muted)" }}>{ex.source.toUpperCase()} - {ex.metadata.status.toUpperCase()}</span>
+                                                <span style={{ color: "var(--muted)", display: "flex", gap: "8px", alignItems: "center" }}>
+                                                    <span>{ex.source.toUpperCase()} - {ex.metadata.status.toUpperCase()}</span>
+                                                    <code style={{ fontSize: "0.75rem", background: "var(--surface-muted)", padding: "2px 4px", borderRadius: "4px" }}>
+                                                        {ex.metadata.fingerprint ? ex.metadata.fingerprint.substring(0, 8) : "N/A"}
+                                                    </code>
+                                                </span>
                                                 {ex.metadata.pinned && <span style={{ color: "var(--accent)", fontWeight: 600 }}>PINNED</span>}
                                             </div>
                                             <div style={{ fontWeight: 500 }}>{ex.question}</div>
