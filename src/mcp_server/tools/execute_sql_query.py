@@ -57,6 +57,16 @@ async def handler(
                 "Read-only access only."
             )
 
+    if Database.get_query_target_provider() == "redshift":
+        from dal.redshift import validate_redshift_query
+
+        errors = validate_redshift_query(sql_query)
+        if errors:
+            return json.dumps(
+                {"error": "Redshift query validation failed.", "details": errors},
+                separators=(",", ":"),
+            )
+
     async with Database.get_connection(tenant_id, read_only=True) as conn:
         try:
             # Execution

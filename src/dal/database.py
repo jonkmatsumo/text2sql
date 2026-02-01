@@ -302,6 +302,11 @@ class Database:
         return cls._metadata_store
 
     @classmethod
+    def get_query_target_provider(cls) -> str:
+        """Return the active query-target provider."""
+        return cls._query_target_provider
+
+    @classmethod
     def get_query_target_capabilities(cls):
         """Get capability flags for the active query-target backend."""
         if cls._query_target_capabilities is None:
