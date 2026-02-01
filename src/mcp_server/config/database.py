@@ -36,13 +36,13 @@ class Database:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_BACKEND",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql", "snowflake"},
+                allowed={"postgres", "sqlite", "mysql", "snowflake", "redshift"},
             )
         else:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_PROVIDER",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql", "snowflake"},
+                allowed={"postgres", "sqlite", "mysql", "snowflake", "redshift"},
             )
 
         if cls._query_target_provider == "sqlite":
@@ -70,6 +70,21 @@ class Database:
             from dal.snowflake.config import SnowflakeConfig
 
             await SnowflakeQueryTargetDatabase.init(SnowflakeConfig.from_env())
+        elif cls._query_target_provider == "redshift":
+            from dal.redshift import RedshiftQueryTargetDatabase
+
+            db_host = get_env_str("DB_HOST")
+            db_port = get_env_int("DB_PORT", 5439)
+            db_name = get_env_str("DB_NAME")
+            db_user = get_env_str("DB_USER")
+            db_pass = get_env_str("DB_PASS")
+            await RedshiftQueryTargetDatabase.init(
+                host=db_host,
+                port=db_port,
+                db_name=db_name,
+                user=db_user,
+                password=db_pass,
+            )
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")
@@ -219,6 +234,10 @@ class Database:
             from dal.snowflake import SnowflakeQueryTargetDatabase
 
             await SnowflakeQueryTargetDatabase.close()
+        if cls._query_target_provider == "redshift":
+            from dal.redshift import RedshiftQueryTargetDatabase
+
+            await RedshiftQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -314,6 +333,12 @@ class Database:
             from dal.snowflake import SnowflakeQueryTargetDatabase
 
             async with SnowflakeQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "redshift":
+            from dal.redshift import RedshiftQueryTargetDatabase
+
+            async with RedshiftQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 
