@@ -31,6 +31,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     # SQLite aliases
     "sqlite": "sqlite",
     "sqlite3": "sqlite",
+    # MySQL aliases
+    "mysql": "mysql",
+    "mariadb": "mysql",
     # Memgraph aliases
     "memgraph": "memgraph",
 }

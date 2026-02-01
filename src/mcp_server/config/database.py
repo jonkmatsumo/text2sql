@@ -34,7 +34,7 @@ class Database:
         cls._query_target_provider = get_provider_env(
             "QUERY_TARGET_PROVIDER",
             default="postgres",
-            allowed={"postgres", "sqlite"},
+            allowed={"postgres", "sqlite", "mysql"},
         )
 
         if cls._query_target_provider == "sqlite":
@@ -42,6 +42,21 @@ class Database:
 
             sqlite_path = get_env_str("SQLITE_DB_PATH")
             await SqliteQueryTargetDatabase.init(sqlite_path)
+        elif cls._query_target_provider == "mysql":
+            from dal.mysql import MysqlQueryTargetDatabase
+
+            db_host = get_env_str("DB_HOST")
+            db_port = get_env_int("DB_PORT", 3306)
+            db_name = get_env_str("DB_NAME")
+            db_user = get_env_str("DB_USER")
+            db_pass = get_env_str("DB_PASS")
+            await MysqlQueryTargetDatabase.init(
+                host=db_host,
+                port=db_port,
+                db_name=db_name,
+                user=db_user,
+                password=db_pass,
+            )
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")
@@ -183,6 +198,10 @@ class Database:
             from dal.sqlite import SqliteQueryTargetDatabase
 
             await SqliteQueryTargetDatabase.close()
+        if cls._query_target_provider == "mysql":
+            from dal.mysql import MysqlQueryTargetDatabase
+
+            await MysqlQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -266,6 +285,12 @@ class Database:
             from dal.sqlite import SqliteQueryTargetDatabase
 
             async with SqliteQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "mysql":
+            from dal.mysql import MysqlQueryTargetDatabase
+
+            async with MysqlQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 
