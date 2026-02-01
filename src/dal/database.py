@@ -23,66 +23,80 @@ class Database:
     _schema_store: Optional[SchemaStore] = None
     _schema_introspector: Optional[SchemaIntrospector] = None
     _metadata_store: Optional[MetadataStore] = None
+    _query_target_provider: str = "postgres"
 
     @classmethod
     async def init(cls):
         """Initialize connection pools."""
         from common.config.env import get_env_int, get_env_str
+        from dal.util.env import get_provider_env
 
-        # Postgres Config
-        db_host = get_env_str("DB_HOST", "localhost")
-        db_port = get_env_int("DB_PORT", 5432)
-        from common.config.dataset import get_default_db_name
+        cls._query_target_provider = get_provider_env(
+            "QUERY_TARGET_PROVIDER",
+            default="postgres",
+            allowed={"postgres", "sqlite"},
+        )
 
-        db_name = get_env_str("DB_NAME", get_default_db_name())
-        db_user = get_env_str("DB_USER", "text2sql_ro")
-        db_pass = get_env_str("DB_PASS", "secure_agent_pass")
+        if cls._query_target_provider == "sqlite":
+            from dal.sqlite import SqliteQueryTargetDatabase
 
-        dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+            sqlite_path = get_env_str("SQLITE_DB_PATH")
+            await SqliteQueryTargetDatabase.init(sqlite_path)
+        else:
+            # Postgres Config
+            db_host = get_env_str("DB_HOST", "localhost")
+            db_port = get_env_int("DB_PORT", 5432)
+            from common.config.dataset import get_default_db_name
 
-        try:
-            # 1. Init Postgres
-            cls._pool = await asyncpg.create_pool(
-                dsn,
-                min_size=5,
-                max_size=20,
-                command_timeout=60,
-                server_settings={"application_name": "bi_agent_mcp"},
-            )
-            print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
+            db_name = get_env_str("DB_NAME", get_default_db_name())
+            db_user = get_env_str("DB_USER", "text2sql_ro")
+            db_pass = get_env_str("DB_PASS", "secure_agent_pass")
 
-            # 2. Init Stores via Factory
-            from dal.factory import (
-                get_cache_store,
-                get_example_store,
-                get_graph_store,
-                get_metadata_store,
-                get_schema_introspector,
-                get_schema_store,
-            )
+            dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
-            cls._graph_store = get_graph_store()
-            print("✓ Graph store connection established (via factory)")
+            try:
+                # 1. Init Postgres
+                cls._pool = await asyncpg.create_pool(
+                    dsn,
+                    min_size=5,
+                    max_size=20,
+                    command_timeout=60,
+                    server_settings={"application_name": "bi_agent_mcp"},
+                )
+                print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
+            except Exception as e:
+                await cls.close()  # Cleanup partials
+                raise ConnectionError(f"Failed to initialize databases: {e}")
 
-            # Ensure operational schema exists
+        # 2. Init Stores via Factory
+        from dal.factory import (
+            get_cache_store,
+            get_example_store,
+            get_graph_store,
+            get_metadata_store,
+            get_schema_introspector,
+            get_schema_store,
+        )
+
+        cls._graph_store = get_graph_store()
+        print("✓ Graph store connection established (via factory)")
+
+        # Ensure operational schema exists (Postgres-only)
+        if cls._query_target_provider == "postgres":
             await cls.ensure_schema()
 
-            cls._cache_store = get_cache_store()
-            cls._example_store = get_example_store()
-            cls._schema_store = get_schema_store()
-            cls._schema_introspector = get_schema_introspector()
-            cls._metadata_store = get_metadata_store()
+        cls._cache_store = get_cache_store()
+        cls._example_store = get_example_store()
+        cls._schema_store = get_schema_store()
+        cls._schema_introspector = get_schema_introspector()
+        cls._metadata_store = get_metadata_store()
 
-            print("✓ Stores initialized via DAL factory")
+        print("✓ Stores initialized via DAL factory")
 
-            # 4. Init Control-Plane Database (if enabled)
-            from dal.control_plane import ControlPlaneDatabase
+        # 4. Init Control-Plane Database (if enabled)
+        from dal.control_plane import ControlPlaneDatabase
 
-            await ControlPlaneDatabase.init()
-
-        except Exception as e:
-            await cls.close()  # Cleanup partials
-            raise ConnectionError(f"Failed to initialize databases: {e}")
+        await ControlPlaneDatabase.init()
 
     @classmethod
     async def ensure_schema(cls):
@@ -159,6 +173,11 @@ class Database:
                 pass
             cls._pool = None
 
+        if cls._query_target_provider == "sqlite":
+            from dal.sqlite import SqliteQueryTargetDatabase
+
+            await SqliteQueryTargetDatabase.close()
+
         if cls._graph_store:
             cls._graph_store.close()
             try:
@@ -225,8 +244,8 @@ class Database:
 
     @classmethod
     @asynccontextmanager
-    async def get_connection(cls, tenant_id: Optional[int] = None):
-        """Yield a Postgres connection with the tenant context securely set.
+    async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
+        """Yield a query-target connection with optional tenant context.
 
         Guarantees cleanup via transaction scoping.
 
@@ -236,13 +255,20 @@ class Database:
         Yields:
             asyncpg.Connection: A connection with tenant context set for the transaction.
         """
+        if cls._query_target_provider == "sqlite":
+            from dal.sqlite import SqliteQueryTargetDatabase
+
+            async with SqliteQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+
         if cls._pool is None:
             raise RuntimeError("Database pool not initialized. Call Database.init() first.")
 
         async with cls._pool.acquire() as conn:
             # Start a transaction block.
             # Everything inside here is atomic.
-            async with conn.transaction():
+            async with conn.transaction(readonly=read_only):
                 if tenant_id is not None:
                     # set_config with is_local=True scopes the setting to this transaction.
                     # It will be automatically unset when the transaction block exits.

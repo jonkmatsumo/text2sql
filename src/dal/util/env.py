@@ -28,6 +28,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     "postgresql": "postgres",
     "postgres": "postgres",
     "pg": "postgres",
+    # SQLite aliases
+    "sqlite": "sqlite",
+    "sqlite3": "sqlite",
     # Memgraph aliases
     "memgraph": "memgraph",
 }
