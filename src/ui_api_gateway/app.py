@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from enum import Enum
@@ -8,7 +9,7 @@ from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.mcp_client import MCPClient
@@ -372,6 +373,19 @@ class FeedbackRequest(BaseModel):
     interaction_id: str
     thumb: str
     comment: Optional[str] = None
+
+
+class LLMModelOption(BaseModel):
+    """LLM model option payload."""
+
+    value: str
+    label: str
+
+
+class LLMModelsResponse(BaseModel):
+    """Response payload for available LLM models."""
+
+    models: List[LLMModelOption]
 
 
 async def _resolve_mcp_client() -> MCPClient:
@@ -1360,10 +1374,66 @@ async def run_recommendations(request: RecommendationRequest) -> Any:
     )
 
 
+@app.get("/llm/models", response_model=LLMModelsResponse)
+async def list_llm_models(provider: str = Query(...)) -> Any:
+    """List available LLM models for a provider."""
+    from agent.llm_client import get_available_models
+
+    models = get_available_models(provider)
+    return {"models": [{"value": model, "label": model} for model in models]}
+
+
 @app.post("/ops/patterns/generate")
 async def generate_patterns(request: PatternGenerateRequest) -> Any:
     """Trigger pattern generation via MCP tool."""
     return await _call_tool("generate_patterns", {"dry_run": request.dry_run})
+
+
+@app.get("/ops/patterns/generate/stream")
+async def stream_generate_patterns(dry_run: bool = Query(False)) -> Any:
+    """Stream pattern generation logs as Server-Sent Events."""
+
+    async def event_stream():
+        run_id: Optional[str] = None
+        try:
+            from dal.factory import get_pattern_run_store
+            from mcp_server.services.ops.maintenance import MaintenanceService
+
+            async for log in MaintenanceService.generate_patterns(dry_run=dry_run):
+                if run_id is None and "Run ID:" in log:
+                    match = re.search(r"Run ID: ([a-f0-9\\-]+)", log)
+                    if match:
+                        run_id = match.group(1)
+                payload = json.dumps({"message": log})
+                yield f"data: {payload}\n\n"
+
+            result: Dict[str, Any] = {"success": True}
+            if run_id:
+                run_store = get_pattern_run_store()
+                run = await run_store.get_run(run_id)
+                if run:
+                    result = {
+                        "success": run.get("status") == "COMPLETED",
+                        "run_id": str(run_id),
+                        "status": run.get("status"),
+                        "metrics": run.get("metrics"),
+                        "error": run.get("error_message"),
+                    }
+
+            yield f"event: complete\ndata: {json.dumps(result)}\n\n"
+        except Exception as exc:
+            payload = json.dumps({"error": str(exc)})
+            yield f"event: error\ndata: {payload}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/ops/patterns/reload")

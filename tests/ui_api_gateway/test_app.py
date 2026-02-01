@@ -198,3 +198,51 @@ def test_submit_feedback(monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json() == "OK"
+
+
+def test_stream_pattern_generation(monkeypatch):
+    """Stream pattern generation logs as SSE."""
+
+    async def fake_generate_patterns(dry_run: bool = False):
+        yield "Starting pattern generation (Run ID: 11111111-1111-1111-1111-111111111111)..."
+        yield "Done."
+
+    class FakeRunStore:
+        async def get_run(self, run_id):
+            return {
+                "status": "COMPLETED",
+                "metrics": {"created_count": 1, "updated_count": 0},
+                "error_message": None,
+            }
+
+    monkeypatch.setattr(
+        "mcp_server.services.ops.maintenance.MaintenanceService.generate_patterns",
+        fake_generate_patterns,
+    )
+    monkeypatch.setattr("dal.factory.get_pattern_run_store", lambda: FakeRunStore())
+
+    client = TestClient(gateway_app.app)
+    with client.stream("GET", "/ops/patterns/generate/stream") as resp:
+        assert resp.status_code == 200
+        lines = [line for line in resp.iter_lines() if line]
+
+    assert any(line.startswith("data:") for line in lines)
+    assert any(line.startswith("event: complete") for line in lines)
+
+
+def test_list_llm_models(monkeypatch):
+    """Return LLM models from shared agent config."""
+    monkeypatch.setattr(
+        "agent.llm_client.get_available_models",
+        lambda provider: ["model-a", "model-b"],
+    )
+
+    client = TestClient(gateway_app.app)
+    resp = client.get("/llm/models?provider=openai")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "models": [
+            {"value": "model-a", "label": "model-a"},
+            {"value": "model-b", "label": "model-b"},
+        ]
+    }

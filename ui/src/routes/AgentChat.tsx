@@ -1,8 +1,9 @@
-import React, { Suspense, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { runAgent, submitFeedback } from "../api";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
+import { useAvailableModels } from "../hooks/useAvailableModels";
 
 const VegaChart = React.lazy(() => import("../components/common/VegaChart"));
 
@@ -14,6 +15,7 @@ interface Message {
   error?: string;
   interactionId?: string;
   fromCache?: boolean;
+  cacheSimilarity?: number;
   vizSpec?: any;
   traceId?: string;
 }
@@ -24,7 +26,7 @@ const LLM_PROVIDERS = [
   { value: "google", label: "Google" }
 ];
 
-const LLM_MODELS: Record<string, { value: string; label: string }[]> = {
+const FALLBACK_MODELS: Record<string, { value: string; label: string }[]> = {
   openai: [
     { value: "gpt-4o", label: "GPT-4o" },
     { value: "gpt-4o-mini", label: "GPT-4o Mini" },
@@ -46,6 +48,12 @@ function formatValue(value: any): string {
   if (value == null) return "\u2014";
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
+}
+
+function formatSimilarity(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  if (value > 1) return Math.round(value);
+  return Math.round(value * 100);
 }
 
 function ResultsTable({ rows }: { rows: any[] }) {
@@ -94,16 +102,22 @@ export default function AgentChat() {
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const threadIdRef = useRef<string>(crypto.randomUUID());
 
-  const availableModels = LLM_MODELS[llmProvider] || [];
+  const fallbackModels = FALLBACK_MODELS[llmProvider] || FALLBACK_MODELS.openai;
+  const { models: availableModels, isLoading: modelsLoading, error: modelsError } =
+    useAvailableModels(llmProvider, fallbackModels);
   const { confirm, dialogProps } = useConfirmation();
 
   const handleProviderChange = (provider: string) => {
     setLlmProvider(provider);
-    const models = LLM_MODELS[provider];
-    if (models && models.length > 0) {
-      setLlmModel(models[0].value);
-    }
   };
+
+  useEffect(() => {
+    if (!availableModels.length) return;
+    const isValid = availableModels.some((model) => model.value === llmModel);
+    if (!isValid) {
+      setLlmModel(availableModels[0].value);
+    }
+  }, [availableModels, llmModel]);
 
   const handleClearHistory = async () => {
     if (messages.length === 0) return;
@@ -139,7 +153,7 @@ export default function AgentChat() {
         question: prompt,
         tenant_id: tenantId,
         thread_id: threadIdRef.current
-      });
+      }) as (Awaited<ReturnType<typeof runAgent>> & { cache_similarity?: number });
 
       setMessages((prev) => [
         ...prev,
@@ -151,6 +165,7 @@ export default function AgentChat() {
           error: result.error ?? undefined,
           interactionId: result.interaction_id ?? undefined,
           fromCache: result.from_cache,
+          cacheSimilarity: result.cache_similarity,
           vizSpec: result.viz_spec,
           traceId: result.trace_id ?? undefined
         }
@@ -236,6 +251,7 @@ export default function AgentChat() {
               <select
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
+                disabled={modelsLoading}
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -252,6 +268,11 @@ export default function AgentChat() {
                 ))}
               </select>
             </label>
+            {modelsError && (
+              <div style={{ marginTop: "8px", fontSize: "0.8rem", color: "var(--muted)" }}>
+                Unable to refresh models. Using fallback list.
+              </div>
+            )}
           </div>
 
           <div className="panel" style={{ marginBottom: "16px" }}>
@@ -342,7 +363,13 @@ export default function AgentChat() {
                     </div>
                   )}
 
-                  {msg.fromCache && <div className="pill" style={{ marginTop: "8px" }}>From cache</div>}
+                  {msg.fromCache && (
+                    <div className="pill" style={{ marginTop: "8px" }}>
+                      {msg.cacheSimilarity != null
+                        ? `From cache (similarity ≥ ${formatSimilarity(msg.cacheSimilarity)}%)`
+                        : "From cache"}
+                    </div>
+                  )}
                 </div>
 
                 {msg.role === "assistant" && msg.interactionId && (

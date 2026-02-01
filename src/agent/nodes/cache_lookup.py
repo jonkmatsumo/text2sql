@@ -73,6 +73,8 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 "current_sql": cached_sql,
                 "from_cache": True,
                 "cached_sql": cached_sql,
+                "cache_metadata": cache_data.get("metadata"),
+                "cache_similarity": similarity,
             }
 
         except Exception as e:
