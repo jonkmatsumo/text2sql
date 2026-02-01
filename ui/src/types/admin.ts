@@ -79,3 +79,36 @@ export interface PatternReloadResult {
 
 export type OpsJobStatus = UIComponents["schemas"]["OpsJobStatus"];
 export type OpsJobResponse = UIComponents["schemas"]["OpsJobResponse"];
+
+export interface SynthRunSummary {
+    id: string;
+    started_at: string;
+    completed_at?: string;
+    status: string;
+    job_id?: string;
+}
+
+export interface SynthRun {
+    id: string;
+    started_at: string;
+    completed_at?: string;
+    status: string;
+    config_snapshot: Record<string, any>;
+    output_path?: string;
+    manifest?: any;
+    metrics: Record<string, any>;
+    error_message?: string;
+    job_id?: string;
+}
+
+export interface SynthGenerateRequest {
+    preset?: string;
+    config?: Record<string, any>;
+    output_path?: string;
+    only?: string[];
+}
+
+export interface SynthGenerateResponse {
+    run_id: string;
+    job_id: string;
+}
