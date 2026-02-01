@@ -241,6 +241,25 @@ Integration tests (requires credentials):
 uv run pytest tests/integration/dal/test_snowflake_query_target_e2e.py -v
 ```
 
+### BigQuery Query Target (Async)
+Use BigQuery as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_BACKEND=bigquery
+BIGQUERY_PROJECT=your-project
+BIGQUERY_DATASET=your_dataset
+BIGQUERY_LOCATION=us-central1
+BIGQUERY_QUERY_TIMEOUT_SECS=30
+BIGQUERY_POLL_INTERVAL_SECS=1
+BIGQUERY_MAX_ROWS=1000
+```
+
+Notes:
+- Requires Google Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS or default ADC)
+- Install `google-cloud-bigquery` in your environment for BigQuery support
+- Introspection is scoped to the configured dataset
+- Foreign keys are not enforced or surfaced
+
 ### Redshift Query Target (Sync, Postgres-Compatible)
 Use Amazon Redshift as the query-target database. The control plane remains Postgres-only.
 
