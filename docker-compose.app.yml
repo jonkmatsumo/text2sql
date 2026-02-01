@@ -142,54 +142,6 @@ services:
       - text2sql_net
     restart: unless-stopped
 
-  streamlit:
-    build:
-      context: .
-      dockerfile: config/docker/streamlit-app.Dockerfile
-    depends_on:
-      mcp-server:
-        condition: service_started
-
-      agent-control-db:
-        condition: service_started
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-      LLM_MODEL: ${LLM_MODEL:-gpt-5.2}
-      MCP_SERVER_URL: http://mcp-server:8000/messages
-      MCP_TRANSPORT: sse # Must match mcp-server transport setting
-      AGENT_SERVICE_URL: http://agent-service:8081
-      UI_API_URL: http://ui-api-gateway:8082
-      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-25}
-      DB_HOST: postgres-db
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-query_target}
-      DB_USER: text2sql_ro
-      DB_PASS: secure_agent_pass
-      CONTROL_DB_HOST: agent-control-db
-      CONTROL_DB_PORT: 5432
-      CONTROL_DB_NAME: agent_control
-      CONTROL_DB_USER: ${CONTROL_DB_USER:-postgres}
-      CONTROL_DB_PASS: ${CONTROL_DB_PASSWORD:-control_password}
-      DB_ISOLATION_ENABLED: "true"
-
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector-svc:4317
-      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-      OTEL_SERVICE_NAME: text2sql-agent
-    ports:
-      - "8501:8501"
-    volumes:
-      # Mount for development (hot reload)
-      - ./agent:/app/agent
-      - ./mcp-server:/app/mcp-server
-      - ./src:/app/src
-      - ./common/tests:/app/common/tests
-    networks:
-      - text2sql_net
-    restart: unless-stopped
-
   ui:
     build:
       context: .
