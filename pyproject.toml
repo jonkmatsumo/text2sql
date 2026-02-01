@@ -8,7 +8,6 @@ dependencies = [
     "schema",
     "text2sql-ingestion",
     "text2sql-mcp",
-    "text2sql-streamlit",
     "text2sql-agent",
     "otel-worker",
     "text2sql-synth",
@@ -22,7 +21,6 @@ members = [
     "pyproject/schema",
     "pyproject/ingestion",
     "pyproject/mcp-server",
-    "pyproject/streamlit-app",
     "pyproject/agent",
     "pyproject/agent-service",
     "pyproject/ui-api-gateway",
@@ -37,7 +35,6 @@ schema = { workspace = true }
 text2sql-dal = { workspace = true }
 text2sql-ingestion = { workspace = true }
 text2sql-mcp = { workspace = true }
-text2sql-streamlit = { workspace = true }
 text2sql-agent = { workspace = true }
 otel-worker = { workspace = true }
 text2sql-synth = { workspace = true }
@@ -58,7 +55,7 @@ line-length = 100
 profile = "black"
 line_length = 100
 known_first_party = ["ui", "agent", "common", "dal", "ingestion", "mcp_server", "observability", "schema", "evaluation", "synthetic_data_gen"]
-known_third_party = ["streamlit", "pandas", "nest_asyncio"]
+known_third_party = ["pandas", "nest_asyncio"]
 # Explicitly skip known virtualenv directories to speed up and avoid confusion
 skip = [".venv", "venv", ".git", "__pycache__", "build", "dist"]
 
@@ -70,7 +67,3 @@ constraint-dependencies = [
 [[tool.uv.dependency-metadata]]
 name = "opentelemetry-proto"
 requires-dist = ["protobuf>=3.19"]
-
-[[tool.uv.dependency-metadata]]
-name = "streamlit"
-requires-dist = ["protobuf>=3.20", "packaging>=20"]
