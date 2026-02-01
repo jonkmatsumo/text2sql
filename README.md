@@ -194,6 +194,24 @@ Limitations:
 - Limited concurrency (SQLite)
 - Intended for dev/test only (not production)
 
+### MySQL/MariaDB Query Target (Dev/Test Only)
+Use MySQL/MariaDB as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_PROVIDER=mysql
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=query_target
+DB_USER=root
+DB_PASS=secret
+```
+
+Limitations:
+- No pgvector / semantic cache support
+- No RLS or session-level tenant enforcement
+- Identifier quoting uses backticks; case sensitivity depends on server configuration
+- Intended for dev/test only (not production)
+
 ### Provider Selectors
 Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
