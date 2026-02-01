@@ -17,12 +17,12 @@ from agent.tools import unpack_mcp_result
 from common.config.env import get_env_int, get_env_list, get_env_str
 from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
+from dal.factory import get_synth_run_store
 from ingestion.patterns.enum_detector import EnumLikeColumnDetector
 from ingestion.patterns.generator import detect_candidates, generate_suggestions
 from synthetic_data_gen.config import SynthConfig
 from synthetic_data_gen.export import export_to_directory
 from synthetic_data_gen.orchestrator import generate_tables
-from ui_api_gateway.dal.synth_runs import SynthRunDAL
 from ui_api_gateway.ops_jobs import OpsJobsClient, use_legacy_dal
 
 logger = logging.getLogger(__name__)
@@ -757,7 +757,8 @@ async def _run_synth_job(
             "version": manifest.get("version", "unknown"),
         }
 
-        await SynthRunDAL.update_run(
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.update_run(
             run_id,
             status="COMPLETED",
             completed_at=datetime.now(),
@@ -779,7 +780,8 @@ async def _run_synth_job(
     except Exception as e:
         logger.exception(f"Synthetic generation job {job_id} failed: {e}")
         await _update_job_status_failed(job_id, str(e))
-        await SynthRunDAL.update_run(
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.update_run(
             run_id, status="FAILED", completed_at=datetime.now(), error_message=str(e)
         )
 
@@ -855,7 +857,8 @@ async def generate_synthetic_data(request: SynthGenerateRequest, background_task
         job_id = uuid4()
 
         # 1. Create Run Record
-        await SynthRunDAL.create_run(
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.create_run(
             config_snapshot=config.model_dump(),
             output_path=out_dir,
             status="PENDING",
@@ -885,7 +888,8 @@ async def list_synth_runs(
     limit: int = Query(20, ge=1, le=100),
 ):
     """List recent synthetic generation runs."""
-    rows = await SynthRunDAL.list_runs(limit=limit, status=status)
+    synth_run_store = get_synth_run_store()
+    rows = await synth_run_store.list_runs(limit=limit, status=status)
     return [
         SynthRunSummary(
             id=row["id"],
@@ -905,7 +909,8 @@ async def list_synth_runs(
 )
 async def get_synth_run(run_id: UUID):
     """Get detailed information for a specific synthetic generation run."""
-    run = await SynthRunDAL.get_run(run_id)
+    synth_run_store = get_synth_run_store()
+    run = await synth_run_store.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Synthetic run not found")
 

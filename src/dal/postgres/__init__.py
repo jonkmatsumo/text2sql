@@ -1,7 +1,4 @@
-"""PostgreSQL DAL Implementations.
-
-This package contains the concrete implementations of DAL interfaces for PostgreSQL.
-"""
+"""Postgres DAL implementations."""
 
 from .conversation_store import PostgresConversationStore
 from .evaluation_store import PostgresEvaluationStore
@@ -15,6 +12,7 @@ from .registry_store import PostgresRegistryStore
 from .schema_introspector import PostgresSchemaIntrospector
 from .schema_store import PostgresSchemaStore
 from .semantic_cache import PgSemanticCache
+from .synth_run_store import PostgresSynthRunStore
 
 __all__ = [
     "PostgresConversationStore",
@@ -29,4 +27,5 @@ __all__ = [
     "PostgresSchemaIntrospector",
     "PostgresSchemaStore",
     "PgSemanticCache",
+    "PostgresSynthRunStore",
 ]

@@ -3,22 +3,29 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from common.interfaces.synth_run_store import SynthRunStore
 from dal.control_plane import ControlPlaneDatabase
+from dal.database import Database
 
 
-class SynthRunDAL:
-    """DAL for synthetic data generation runs in the control-plane database."""
+class PostgresSynthRunStore(SynthRunStore):
+    """Postgres implementation of SynthRunStore."""
 
-    @classmethod
+    def _get_connection_context(self, tenant_id: Optional[int] = None):
+        """Get the appropriate connection context based on isolation settings."""
+        if ControlPlaneDatabase.is_enabled():
+            return ControlPlaneDatabase.get_connection(tenant_id)
+        return Database.get_connection(tenant_id)
+
     async def create_run(
-        cls,
+        self,
         config_snapshot: Dict[str, Any],
         output_path: Optional[str] = None,
         status: str = "PENDING",
         job_id: Optional[UUID] = None,
     ) -> UUID:
         """Create a new synthetic generation run record."""
-        async with ControlPlaneDatabase.get_direct_connection() as conn:
+        async with self._get_connection_context() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO synth_generation_runs (config_snapshot, output_path, status, job_id)
@@ -32,9 +39,8 @@ class SynthRunDAL:
             )
             return row["id"]
 
-    @classmethod
     async def update_run(
-        cls,
+        self,
         run_id: UUID,
         status: Optional[str] = None,
         completed_at: Optional[datetime] = None,
@@ -44,7 +50,7 @@ class SynthRunDAL:
         ui_state: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update an existing synthetic generation run record."""
-        async with ControlPlaneDatabase.get_direct_connection() as conn:
+        async with self._get_connection_context() as conn:
             updates = []
             params = [run_id]
             p_idx = 2
@@ -84,10 +90,9 @@ class SynthRunDAL:
             """
             await conn.execute(query, *params)
 
-    @classmethod
-    async def get_run(cls, run_id: UUID) -> Optional[Dict[str, Any]]:
+    async def get_run(self, run_id: UUID) -> Optional[Dict[str, Any]]:
         """Fetch a specific run record by ID."""
-        async with ControlPlaneDatabase.get_direct_connection() as conn:
+        async with self._get_connection_context() as conn:
             row = await conn.fetchrow("SELECT * FROM synth_generation_runs WHERE id = $1", run_id)
             if not row:
                 return None
@@ -102,10 +107,11 @@ class SynthRunDAL:
                         pass
             return data
 
-    @classmethod
-    async def list_runs(cls, limit: int = 20, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_runs(
+        self, limit: int = 20, status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """List recent synthetic generation runs."""
-        async with ControlPlaneDatabase.get_direct_connection() as conn:
+        async with self._get_connection_context() as conn:
             query = "SELECT * FROM synth_generation_runs"
             params = []
             if status:
