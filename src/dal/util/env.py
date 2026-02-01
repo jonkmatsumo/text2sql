@@ -39,6 +39,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     "sf": "snowflake",
     # Redshift aliases
     "redshift": "redshift",
+    # BigQuery aliases
+    "bigquery": "bigquery",
+    "bq": "bigquery",
     # Memgraph aliases
     "memgraph": "memgraph",
 }
