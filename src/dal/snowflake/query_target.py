@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 import snowflake.connector
 
+from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
+
 
 class SnowflakeQueryTargetDatabase:
     """Snowflake query-target database connection wrapper."""
@@ -82,6 +84,12 @@ class _SnowflakeConnection:
 
     def __init__(self, conn: snowflake.connector.SnowflakeConnection) -> None:
         self._conn = conn
+        self._executor = SnowflakeAsyncQueryExecutor(conn)
+
+    @property
+    def executor(self) -> SnowflakeAsyncQueryExecutor:
+        """Expose the async query executor for job-style operations."""
+        return self._executor
 
     async def execute(self, sql: str, *params: Any) -> str:
         return await asyncio.to_thread(_execute, self._conn, sql, params)
