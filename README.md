@@ -241,6 +241,28 @@ Integration tests (requires credentials):
 uv run pytest tests/integration/dal/test_snowflake_query_target_e2e.py -v
 ```
 
+### Redshift Query Target (Sync, Postgres-Compatible)
+Use Amazon Redshift as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_BACKEND=redshift
+DB_HOST=redshift-cluster.endpoint.amazonaws.com
+DB_PORT=5439
+DB_NAME=dev
+DB_USER=awsuser
+DB_PASS=your_password
+```
+
+Limitations:
+- Arrays and JSONB operators/functions are blocked by a pre-execution validator
+- Foreign keys are informational only in Redshift
+- Read-only semantics only; no tenant RLS hooks
+
+Manual smoke test:
+```bash
+uv run python scripts/dev/redshift_query_target_smoke.py
+```
+
 ### Provider Selectors
 Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
