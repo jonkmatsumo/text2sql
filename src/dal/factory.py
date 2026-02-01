@@ -301,6 +301,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.athena import AthenaSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["athena"] = AthenaSchemaIntrospector
+        if "databricks" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.databricks import DatabricksSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["databricks"] = DatabricksSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider

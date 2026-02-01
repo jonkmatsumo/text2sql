@@ -115,6 +115,10 @@ class Database:
             from dal.athena import AthenaConfig, AthenaQueryTargetDatabase
 
             await AthenaQueryTargetDatabase.init(AthenaConfig.from_env())
+        elif cls._query_target_provider == "databricks":
+            from dal.databricks import DatabricksConfig, DatabricksQueryTargetDatabase
+
+            await DatabricksQueryTargetDatabase.init(DatabricksConfig.from_env())
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")
@@ -276,6 +280,10 @@ class Database:
             from dal.athena import AthenaQueryTargetDatabase
 
             await AthenaQueryTargetDatabase.close()
+        if cls._query_target_provider == "databricks":
+            from dal.databricks import DatabricksQueryTargetDatabase
+
+            await DatabricksQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -403,6 +411,12 @@ class Database:
             from dal.athena import AthenaQueryTargetDatabase
 
             async with AthenaQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "databricks":
+            from dal.databricks import DatabricksQueryTargetDatabase
+
+            async with DatabricksQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 
