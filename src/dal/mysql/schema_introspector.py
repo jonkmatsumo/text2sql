@@ -27,7 +27,7 @@ class MysqlSchemaIntrospector(SchemaIntrospector):
         _ = schema
         async with Database.get_connection() as conn:
             cols_query = """
-                SELECT column_name, data_type, is_nullable, column_key
+                SELECT column_name, data_type, column_type, is_nullable, column_key
                 FROM information_schema.columns
                 WHERE table_schema = DATABASE()
                 AND table_name = %s
@@ -50,7 +50,7 @@ class MysqlSchemaIntrospector(SchemaIntrospector):
         columns = [
             ColumnDef(
                 name=row["column_name"],
-                data_type=row["data_type"],
+                data_type=_normalize_mysql_type(row["data_type"], row["column_type"]),
                 is_nullable=(row["is_nullable"] == "YES"),
                 is_primary_key=(row["column_key"] == "PRI"),
             )
@@ -78,3 +78,31 @@ class MysqlSchemaIntrospector(SchemaIntrospector):
         async with Database.get_connection() as conn:
             rows = await conn.fetch(query, limit)
         return rows
+
+
+def _normalize_mysql_type(data_type: str, column_type: str) -> str:
+    base = (data_type or "").lower()
+    column = (column_type or "").lower()
+
+    if base in {"tinyint"} and column.startswith("tinyint(1)"):
+        return "bool"
+
+    if base in {"bool", "boolean"}:
+        return "bool"
+    if base in {"int", "integer", "tinyint", "smallint", "mediumint", "bigint"}:
+        return "int"
+    if base in {"float", "double", "real"}:
+        return "float"
+    if base in {"decimal", "numeric"}:
+        return "decimal"
+    if base in {"varchar", "char", "text", "tinytext", "mediumtext", "longtext"}:
+        return "text"
+    if base in {"datetime", "timestamp"}:
+        return "datetime"
+    if base == "date":
+        return "date"
+    if base == "time":
+        return "time"
+    if base == "json":
+        return "json"
+    return base or "unknown"

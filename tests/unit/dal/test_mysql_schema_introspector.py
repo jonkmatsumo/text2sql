@@ -26,8 +26,20 @@ async def test_mysql_schema_introspector_table_defs(monkeypatch):
     """Validate MySQL introspector mapping to canonical models."""
     tables = [{"table_name": "orders"}, {"table_name": "users"}]
     columns = [
-        {"column_name": "id", "data_type": "int", "is_nullable": "NO", "column_key": "PRI"},
-        {"column_name": "user_id", "data_type": "int", "is_nullable": "NO", "column_key": ""},
+        {
+            "column_name": "id",
+            "data_type": "int",
+            "column_type": "int(11)",
+            "is_nullable": "NO",
+            "column_key": "PRI",
+        },
+        {
+            "column_name": "user_id",
+            "data_type": "tinyint",
+            "column_type": "tinyint(1)",
+            "is_nullable": "NO",
+            "column_key": "",
+        },
     ]
     fks = [
         {
@@ -50,4 +62,5 @@ async def test_mysql_schema_introspector_table_defs(monkeypatch):
 
     table_def = await introspector.get_table_def("orders")
     assert [col.name for col in table_def.columns] == ["id", "user_id"]
+    assert [col.data_type for col in table_def.columns] == ["int", "bool"]
     assert table_def.foreign_keys[0].foreign_table_name == "users"
