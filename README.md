@@ -260,6 +260,25 @@ Notes:
 - Introspection is scoped to the configured dataset
 - Foreign keys are not enforced or surfaced
 
+### Athena Query Target (Async)
+Use AWS Athena as the query-target database. The control plane remains Postgres-only.
+
+```bash
+QUERY_TARGET_BACKEND=athena
+AWS_REGION=us-east-1
+ATHENA_WORKGROUP=primary
+ATHENA_OUTPUT_LOCATION=s3://your-bucket/athena-results/
+ATHENA_DATABASE=default
+ATHENA_QUERY_TIMEOUT_SECS=30
+ATHENA_POLL_INTERVAL_SECS=1
+ATHENA_MAX_ROWS=1000
+```
+
+Notes:
+- Requires AWS credentials via the default AWS SDK chain
+- Install `boto3` in your environment for Athena support
+- Output location is mandatory for Athena query execution
+
 ### Redshift Query Target (Sync, Postgres-Compatible)
 Use Amazon Redshift as the query-target database. The control plane remains Postgres-only.
 
