@@ -277,12 +277,27 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.postgres import PostgresSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["postgres"] = PostgresSchemaIntrospector
+        if "sqlite" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.sqlite import SqliteSchemaIntrospector
 
-        provider = get_provider_env(
-            "SCHEMA_INTROSPECTOR_PROVIDER",
-            default="postgres",
-            allowed=set(SCHEMA_INTROSPECTOR_PROVIDERS.keys()),
-        )
+            SCHEMA_INTROSPECTOR_PROVIDERS["sqlite"] = SqliteSchemaIntrospector
+
+        from common.config.env import get_env_str
+        from dal.util.env import normalize_provider
+
+        explicit_provider = get_env_str("SCHEMA_INTROSPECTOR_PROVIDER")
+        if explicit_provider:
+            provider = get_provider_env(
+                "SCHEMA_INTROSPECTOR_PROVIDER",
+                default="postgres",
+                allowed=set(SCHEMA_INTROSPECTOR_PROVIDERS.keys()),
+            )
+        else:
+            query_target_provider = get_env_str("QUERY_TARGET_PROVIDER")
+            normalized = (
+                normalize_provider(query_target_provider) if query_target_provider else "postgres"
+            )
+            provider = normalized if normalized in SCHEMA_INTROSPECTOR_PROVIDERS else "postgres"
         logger.info(f"Initializing SchemaIntrospector with provider: {provider}")
 
         store_cls = SCHEMA_INTROSPECTOR_PROVIDERS[provider]
