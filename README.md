@@ -180,6 +180,20 @@ pytest tests/integration/
 ### Control-Plane Isolation
 Disabled by default. Enable with `DB_ISOLATION_ENABLED=true` and configure `CONTROL_DB_*` variables.
 
+### SQLite Query Target (Dev/Test Only)
+Use SQLite as the query-target database for local development or tests. The control plane
+remains Postgres-only.
+
+```bash
+QUERY_TARGET_PROVIDER=sqlite
+SQLITE_DB_PATH=./local-data/query-target.sqlite
+```
+
+Limitations:
+- No pgvector / semantic cache support
+- Limited concurrency (SQLite)
+- Intended for dev/test only (not production)
+
 ### Provider Selectors
 Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
