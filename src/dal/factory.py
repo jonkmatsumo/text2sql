@@ -293,6 +293,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.redshift import RedshiftSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["redshift"] = RedshiftSchemaIntrospector
+        if "bigquery" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.bigquery import BigQuerySchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["bigquery"] = BigQuerySchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider

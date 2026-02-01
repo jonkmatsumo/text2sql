@@ -38,13 +38,31 @@ class Database:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_BACKEND",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql", "snowflake", "redshift"},
+                allowed={
+                    "postgres",
+                    "sqlite",
+                    "mysql",
+                    "snowflake",
+                    "redshift",
+                    "bigquery",
+                    "athena",
+                    "databricks",
+                },
             )
         else:
             cls._query_target_provider = get_provider_env(
                 "QUERY_TARGET_PROVIDER",
                 default="postgres",
-                allowed={"postgres", "sqlite", "mysql", "snowflake", "redshift"},
+                allowed={
+                    "postgres",
+                    "sqlite",
+                    "mysql",
+                    "snowflake",
+                    "redshift",
+                    "bigquery",
+                    "athena",
+                    "databricks",
+                },
             )
 
         cls._query_target_capabilities = capabilities_for_provider(cls._query_target_provider)
@@ -89,6 +107,10 @@ class Database:
                 user=db_user,
                 password=db_pass,
             )
+        elif cls._query_target_provider == "bigquery":
+            from dal.bigquery import BigQueryConfig, BigQueryQueryTargetDatabase
+
+            await BigQueryQueryTargetDatabase.init(BigQueryConfig.from_env())
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")
@@ -236,6 +258,10 @@ class Database:
             from dal.redshift import RedshiftQueryTargetDatabase
 
             await RedshiftQueryTargetDatabase.close()
+        if cls._query_target_provider == "bigquery":
+            from dal.bigquery import BigQueryQueryTargetDatabase
+
+            await BigQueryQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -350,6 +376,12 @@ class Database:
             from dal.redshift import RedshiftQueryTargetDatabase
 
             async with RedshiftQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "bigquery":
+            from dal.bigquery import BigQueryQueryTargetDatabase
+
+            async with BigQueryQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 
