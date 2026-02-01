@@ -6,6 +6,7 @@ requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.0",
     "asyncpg>=0.29.0",
+    "aiosqlite>=0.20.0",
     "neo4j>=5.0.0",
     "opentelemetry-api",
     "python-dotenv>=1.0.0",
