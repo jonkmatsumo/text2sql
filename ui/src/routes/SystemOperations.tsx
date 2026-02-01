@@ -4,6 +4,9 @@ import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import IngestionWizard from "../components/ingestion/IngestionWizard";
 import IngestionDashboard from "../components/ingestion/IngestionDashboard";
+import SynthDashboard from "../components/synth/SynthDashboard";
+import SynthDataWizard from "../components/synth/SynthDataWizard";
+import SynthRunDetail from "../components/synth/SynthRunDetail";
 import { OpsService, getErrorMessage } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
@@ -18,6 +21,8 @@ export default function SystemOperations() {
     const [traceId, setTraceId] = useState("");
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [showWizard, setShowWizard] = useState(false);
+    const [showSynthWizard, setShowSynthWizard] = useState(false);
+    const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
     const streamRef = useRef<EventSource | null>(null);
     const logsRef = useRef<HTMLDivElement | null>(null);
 
@@ -26,6 +31,7 @@ export default function SystemOperations() {
     const tabs = [
         { id: "nlp", label: "NLP Patterns" },
         { id: "ingestion", label: "Ingestion Dash" },
+        { id: "synth", label: "Synthetic Data" },
         { id: "schema", label: "Schema" },
         { id: "cache", label: "Semantic Cache" },
         { id: "obs", label: "Observability" }
@@ -217,6 +223,36 @@ export default function SystemOperations() {
         );
     }
 
+    if (showSynthWizard) {
+        return (
+            <>
+                <header className="hero">
+                    <div>
+                        <p className="kicker">Maintenance & Ops</p>
+                        <h1>Synthetic Data Wizard</h1>
+                        <p className="subtitle">Configure and generate deterministic test data.</p>
+                    </div>
+                </header>
+                <SynthDataWizard onExit={() => setShowSynthWizard(false)} />
+            </>
+        );
+    }
+
+    if (selectedRunId) {
+        return (
+            <>
+                <header className="hero">
+                    <div>
+                        <p className="kicker">Maintenance & Ops</p>
+                        <h1>Synthetic Run Details</h1>
+                        <p className="subtitle">Inspection of generation artifacts and metrics.</p>
+                    </div>
+                </header>
+                <SynthRunDetail runId={selectedRunId} onBack={() => setSelectedRunId(null)} />
+            </>
+        );
+    }
+
     return (
         <>
             <header className="hero">
@@ -264,6 +300,13 @@ export default function SystemOperations() {
                 )}
 
                 {activeTab === "ingestion" && <IngestionDashboard />}
+
+                {activeTab === "synth" && (
+                    <SynthDashboard
+                        onStartWizard={() => setShowSynthWizard(true)}
+                        onViewRun={(id) => setSelectedRunId(id)}
+                    />
+                )}
 
                 {activeTab === "nlp" && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>

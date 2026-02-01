@@ -17,13 +17,20 @@ from agent.tools import unpack_mcp_result
 from common.config.env import get_env_int, get_env_list, get_env_str
 from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
+from dal.factory import get_synth_run_store
 from ingestion.patterns.enum_detector import EnumLikeColumnDetector
 from ingestion.patterns.generator import detect_candidates, generate_suggestions
+from synthetic_data_gen.config import SynthConfig
+from synthetic_data_gen.export import export_to_directory
+from synthetic_data_gen.orchestrator import generate_tables
 from ui_api_gateway.ops_jobs import OpsJobsClient, use_legacy_dal
 
 logger = logging.getLogger(__name__)
 
 MAX_ENRICH_BATCH_SIZE = 5
+
+SYNTH_OUTPUT_BASE_DIR = get_env_str("SYNTH_OUTPUT_BASE_DIR", "/tmp/text2sql-synth")
+
 
 # ---------------------------------------------------------------------------
 # Custom Exceptions for MCP/Tool Failures
@@ -197,8 +204,6 @@ app.add_middleware(
         "http://127.0.0.1:3333",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:8501",
-        "http://127.0.0.1:8501",
         "http://localhost:8080",
         "http://127.0.0.1:8080",
     ],
@@ -296,6 +301,50 @@ class EnrichAsyncResponse(BaseModel):
 
     run_id: UUID
     job_id: UUID
+
+
+# --- Synthetic Data Generation Models ---
+
+
+class SynthGenerateRequest(BaseModel):
+    """Request payload for starting a synthetic data generation job."""
+
+    preset: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    output_path: Optional[str] = None
+    only: Optional[List[str]] = None
+
+
+class SynthGenerateResponse(BaseModel):
+    """Response payload for synthetic data generation trigger."""
+
+    run_id: UUID
+    job_id: UUID
+
+
+class SynthRunSummary(BaseModel):
+    """Summary of a synthetic data generation run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    job_id: Optional[UUID] = None
+
+
+class SynthRunResponse(BaseModel):
+    """Detailed response for a synthetic data generation run."""
+
+    id: UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    config_snapshot: Dict[str, Any]
+    output_path: Optional[str] = None
+    manifest: Optional[Dict[str, Any]] = None
+    metrics: Dict[str, Any]
+    error_message: Optional[str] = None
+    job_id: Optional[UUID] = None
 
 
 class CommitRequest(BaseModel):
@@ -652,6 +701,89 @@ async def _run_ops_job(job_id: UUID, job_type: str, tool_name: str, tool_args: d
             pass
 
 
+async def _run_synth_job(
+    job_id: UUID, run_id: UUID, config: SynthConfig, out_dir: str, only: Optional[List[str]] = None
+):
+    """Background worker to execute synthetic data generation."""
+    logger.info(f"Starting synthetic generation job {job_id} for run {run_id}. Output: {out_dir}")
+    try:
+        await _update_job_status_running(job_id)
+
+        # Progress callback to update job progress
+        async def progress_callback(table_name: str, current: int, total: int):
+            logger.debug(f"Job {job_id} progress: {table_name} ({current}/{total})")
+            await _update_job_progress(
+                job_id,
+                {
+                    "current_table": table_name,
+                    "processed": current,
+                    "total": total,
+                    "percent": int((current / total) * 100) if total > 0 else 0,
+                },
+            )
+
+        # 1. Run generation
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        ctx, tables = await loop.run_in_executor(
+            None,
+            lambda: generate_tables(
+                config,
+                only=only,
+                progress_callback=lambda n, c, t: asyncio.run_coroutine_threadsafe(
+                    progress_callback(n, c, t), loop
+                ),
+            ),
+        )
+
+        # 2. Export results
+        logger.info(f"Exporting results for job {job_id} to {out_dir}")
+        manifest_path = await loop.run_in_executor(
+            None, lambda: export_to_directory(ctx, config, out_dir)
+        )
+
+        # 3. Read manifest for storage
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+
+        # 4. Update Run Record
+        metrics = {
+            "tables_generated": len(tables),
+            "total_rows": sum(len(df) for df in tables.values()),
+            "output_dir": str(out_dir),
+            "version": manifest.get("version", "unknown"),
+        }
+
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.update_run(
+            run_id,
+            status="COMPLETED",
+            completed_at=datetime.now(),
+            manifest=manifest,
+            metrics=metrics,
+        )
+
+        logger.info(f"Synthetic generation job {job_id} completed successfully. Run ID: {run_id}")
+        await _update_job_status_completed(
+            job_id,
+            {
+                "status": "SUCCESS",
+                "run_id": str(run_id),
+                "tables_generated": len(tables),
+                "total_rows": metrics["total_rows"],
+                "manifest_path": str(manifest_path),
+            },
+        )
+    except Exception as e:
+        logger.exception(f"Synthetic generation job {job_id} failed: {e}")
+        await _update_job_status_failed(job_id, str(e))
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.update_run(
+            run_id, status="FAILED", completed_at=datetime.now(), error_message=str(e)
+        )
+
+
 async def _create_job(job_id: UUID, job_type: str) -> None:
     """Create a new ops job using configured client."""
     if use_legacy_dal():
@@ -691,6 +823,107 @@ async def _get_job(job_id: UUID) -> Optional[dict]:
             }
     else:
         return await OpsJobsClient.get_job(job_id)
+
+
+# --- Synthetic Data Generation Endpoints ---
+
+
+@app.post(
+    "/ops/synth/generate",
+    response_model=SynthGenerateResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def generate_synthetic_data(request: SynthGenerateRequest, background_tasks: BackgroundTasks):
+    """Trigger synthetic data generation as a background job."""
+    try:
+        if request.preset:
+            config = SynthConfig.preset(request.preset)
+        elif request.config:
+            config = SynthConfig.model_validate(request.config)
+        else:
+            # Default to MVP preset if nothing specified
+            config = SynthConfig.preset("mvp")
+
+        # Use provided output path or default to a timestamped dir in base dir
+        if request.output_path:
+            out_dir = request.output_path
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_dir = f"{SYNTH_OUTPUT_BASE_DIR}/run_{timestamp}"
+
+        run_id = uuid4()
+        job_id = uuid4()
+
+        # 1. Create Run Record
+        synth_run_store = get_synth_run_store()
+        await synth_run_store.create_run(
+            config_snapshot=config.model_dump(),
+            output_path=out_dir,
+            status="PENDING",
+            job_id=job_id,
+        )
+
+        # 2. Create Job Record
+        await _create_job(job_id, "SYNTH_GENERATION")
+
+        # 3. Start Background Task
+        background_tasks.add_task(_run_synth_job, job_id, run_id, config, out_dir, request.only)
+
+        return SynthGenerateResponse(run_id=run_id, job_id=job_id)
+
+    except Exception as e:
+        logger.error(f"Failed to trigger synthetic generation: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get(
+    "/ops/synth/runs",
+    response_model=List[SynthRunSummary],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_synth_runs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """List recent synthetic generation runs."""
+    synth_run_store = get_synth_run_store()
+    rows = await synth_run_store.list_runs(limit=limit, status=status)
+    return [
+        SynthRunSummary(
+            id=row["id"],
+            started_at=row["started_at"],
+            completed_at=row.get("completed_at"),
+            status=row["status"],
+            job_id=row.get("job_id"),
+        )
+        for row in rows
+    ]
+
+
+@app.get(
+    "/ops/synth/runs/{run_id}",
+    response_model=SynthRunResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_synth_run(run_id: UUID):
+    """Get detailed information for a specific synthetic generation run."""
+    synth_run_store = get_synth_run_store()
+    run = await synth_run_store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Synthetic run not found")
+
+    return SynthRunResponse(
+        id=run["id"],
+        started_at=run["started_at"],
+        completed_at=run.get("completed_at"),
+        status=run["status"],
+        config_snapshot=run["config_snapshot"],
+        output_path=run.get("output_path"),
+        manifest=run.get("manifest"),
+        metrics=run.get("metrics") or {},
+        error_message=run.get("error_message"),
+        job_id=run.get("job_id"),
+    )
 
 
 # --- Ingestion Wizard Endpoints ---

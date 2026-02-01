@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -26,7 +27,9 @@ def generate_all(cfg: SynthConfig) -> tuple[GenerationContext, dict[str, pd.Data
 
 
 def generate_tables(
-    cfg: SynthConfig, only: list[str] | None = None
+    cfg: SynthConfig,
+    only: list[str] | None = None,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
 ) -> tuple[GenerationContext, dict[str, pd.DataFrame]]:
     """Generate specified tables and their dependencies in correct order.
 
@@ -34,6 +37,7 @@ def generate_tables(
         cfg: Configuration for generation.
         only: List of tables to generate. If None, generates all tables.
               Dependencies of requested tables will be automatically included.
+        progress_callback: Optional callback for progress updates (table_name, current, total).
 
     Returns:
         A tuple of (GenerationContext, dict of table_name -> DataFrame).
@@ -51,13 +55,22 @@ def generate_tables(
 
     # Determine which tables need to be generated
     tables_to_generate = _resolve_dependencies(only)
+    total_tables = len(tables_to_generate)
+    current_index = 0
 
-    logger.info(f"Starting synthetic data generation for {len(tables_to_generate)} tables...")
+    logger.info(f"Starting synthetic data generation for {total_tables} tables...")
 
     # Generate tables in the predefined order to satisfy dependencies
     for table_name in schema.GENERATION_ORDER:
         if table_name not in tables_to_generate:
             continue
+
+        current_index += 1
+        if progress_callback:
+            try:
+                progress_callback(table_name, current_index, total_tables)
+            except Exception as e:
+                logger.warning(f"Progress callback failed: {e}")
 
         generator_name = f"generate_{table_name}"
         generator_func = getattr(generators, generator_name, None)

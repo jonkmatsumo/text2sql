@@ -13,7 +13,8 @@ from .pattern_run_store import PatternRunStore
 from .registry_store import RegistryStore
 from .schema_introspector import SchemaIntrospector
 from .schema_store import SchemaStore
-from .vector_index import SearchResult, VectorIndex
+from .synth_run_store import SynthRunStore
+from .vector_index import VectorIndex
 
 __all__ = [
     "CacheStore",
@@ -29,6 +30,6 @@ __all__ = [
     "RegistryStore",
     "SchemaIntrospector",
     "SchemaStore",
-    "SearchResult",
+    "SynthRunStore",
     "VectorIndex",
 ]

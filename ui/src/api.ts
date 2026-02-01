@@ -15,7 +15,11 @@ import {
   PinRule,
   RecommendationResult,
   PatternGenerationResult,
-  PatternReloadResult
+  PatternReloadResult,
+  SynthGenerateRequest,
+  SynthGenerateResponse,
+  SynthRun,
+  SynthRunSummary
 } from "./types/admin";
 import {
   agentServiceBaseUrl,
@@ -610,6 +614,36 @@ export const IngestionService = {
       })
     });
     if (!response.ok) await throwApiError(response, "Commit failed");
+    return response.json();
+  }
+};
+
+export const SynthService = {
+  async generate(request: SynthGenerateRequest): Promise<SynthGenerateResponse> {
+    const response = await fetch(`${uiApiBase}/ops/synth/generate`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(request)
+    });
+    if (!response.ok) await throwApiError(response, "Failed to trigger generation");
+    return response.json();
+  },
+
+  async listRuns(status?: string): Promise<SynthRunSummary[]> {
+    const params = new URLSearchParams();
+    if (status) params.append("status", status);
+    const response = await fetch(`${uiApiBase}/ops/synth/runs?${params}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list synth runs");
+    return response.json();
+  },
+
+  async getRun(runId: string): Promise<SynthRun> {
+    const response = await fetch(`${uiApiBase}/ops/synth/runs/${runId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to get synth run");
     return response.json();
   }
 };

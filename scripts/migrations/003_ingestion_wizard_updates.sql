@@ -11,26 +11,30 @@ BEGIN
     -- Update nlp_pattern_runs status constraint
     -- Note: We assume the constraint name or use a more generic approach
     -- Find constraint name
-    DECLARE
-        con_name text;
-    BEGIN
-        SELECT conname INTO con_name
-        FROM pg_constraint
-        WHERE conrelid = 'nlp_pattern_runs'::regclass
-        AND contype = 'c'
-        AND pg_get_constraintdef(oid) LIKE '%status%';
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'nlp_pattern_runs') THEN
+        DECLARE
+            con_name text;
+        BEGIN
+            SELECT conname INTO con_name
+            FROM pg_constraint
+            WHERE conrelid = 'nlp_pattern_runs'::regclass
+            AND contype = 'c'
+            AND pg_get_constraintdef(oid) LIKE '%status%';
 
-        if con_name IS NOT NULL THEN
-            EXECUTE 'ALTER TABLE nlp_pattern_runs DROP CONSTRAINT ' || con_name;
-        END IF;
-    END;
+            if con_name IS NOT NULL THEN
+                EXECUTE 'ALTER TABLE nlp_pattern_runs DROP CONSTRAINT ' || con_name;
+            END IF;
+        END;
 
-    ALTER TABLE nlp_pattern_runs
-    ADD CONSTRAINT nlp_pattern_runs_status_check
-    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'AWAITING_REVIEW', 'ROLLED_BACK'));
+        ALTER TABLE nlp_pattern_runs
+        ADD CONSTRAINT nlp_pattern_runs_status_check
+        CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'AWAITING_REVIEW', 'ROLLED_BACK'));
+    END IF;
 
     -- Add deleted_at to nlp_patterns
-    ALTER TABLE nlp_patterns ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'nlp_patterns') THEN
+        ALTER TABLE nlp_patterns ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP;
+    END IF;
 
     -- Record migration
     INSERT INTO _migrations (name) VALUES ('003_ingestion_wizard_updates');

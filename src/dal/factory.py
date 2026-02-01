@@ -39,6 +39,7 @@ from common.interfaces import (
     RegistryStore,
     SchemaIntrospector,
     SchemaStore,
+    SynthRunStore,
 )
 from dal.util.env import get_provider_env
 
@@ -56,6 +57,7 @@ SCHEMA_INTROSPECTOR_PROVIDERS: "dict[str, type[SchemaIntrospector]]" = {}
 METADATA_STORE_PROVIDERS: "dict[str, type[MetadataStore]]" = {}
 PATTERN_RUN_STORE_PROVIDERS: "dict[str, type[PatternRunStore]]" = {}
 REGISTRY_STORE_PROVIDERS: "dict[str, type[RegistryStore]]" = {}
+SYNTH_RUN_STORE_PROVIDERS: "dict[str, type[SynthRunStore]]" = {}
 CONVERSATION_STORE_PROVIDERS: "dict[str, type[ConversationStore]]" = {}
 FEEDBACK_STORE_PROVIDERS: "dict[str, type[FeedbackStore]]" = {}
 INTERACTION_STORE_PROVIDERS: "dict[str, type[InteractionStore]]" = {}
@@ -78,6 +80,7 @@ _conversation_store: Optional[ConversationStore] = None
 _feedback_store: Optional[FeedbackStore] = None
 _interaction_store: Optional[InteractionStore] = None
 _pattern_run_store: Optional[PatternRunStore] = None
+_synth_run_store: Optional[SynthRunStore] = None
 
 
 # =============================================================================
@@ -349,6 +352,35 @@ def get_pattern_run_store() -> PatternRunStore:
     return _pattern_run_store
 
 
+def get_synth_run_store() -> SynthRunStore:
+    """Get or create the singleton SynthRunStore instance.
+
+    Provider is selected via SYNTH_RUN_STORE_PROVIDER env var.
+    Default: "postgres" (PostgresSynthRunStore)
+
+    Returns:
+        The singleton SynthRunStore instance.
+    """
+    global _synth_run_store, SYNTH_RUN_STORE_PROVIDERS
+    if _synth_run_store is None:
+        if "postgres" not in SYNTH_RUN_STORE_PROVIDERS:
+            from dal.postgres import PostgresSynthRunStore
+
+            SYNTH_RUN_STORE_PROVIDERS["postgres"] = PostgresSynthRunStore
+
+        provider = get_provider_env(
+            "SYNTH_RUN_STORE_PROVIDER",
+            default="postgres",
+            allowed=set(SYNTH_RUN_STORE_PROVIDERS.keys()),
+        )
+        logger.info(f"Initializing SynthRunStore with provider: {provider}")
+
+        store_cls = SYNTH_RUN_STORE_PROVIDERS[provider]
+        _synth_run_store = store_cls()
+
+    return _synth_run_store
+
+
 # =============================================================================
 # Testing Utilities
 # =============================================================================
@@ -363,7 +395,7 @@ def reset_singletons() -> None:
     global _graph_store, _cache_store, _example_store, _registry_store
     global _schema_store, _schema_introspector, _metadata_store
     global _conversation_store, _feedback_store, _interaction_store, _pattern_run_store
-    global _evaluation_store
+    global _evaluation_store, _synth_run_store
 
     _graph_store = None
     _cache_store = None
@@ -378,6 +410,7 @@ def reset_singletons() -> None:
     _interaction_store = None
     _pattern_run_store = None
     _evaluation_store = None
+    _synth_run_store = None
 
 
 def get_conversation_store() -> ConversationStore:

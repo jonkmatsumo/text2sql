@@ -35,7 +35,6 @@ env.bak/
 venv.bak/
 */.venv/
 mcp-server/.venv/
-streamlit_app/.venv/
 
 # Testing/Linting
 .pytest_cache/

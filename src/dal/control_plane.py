@@ -98,7 +98,12 @@ class ControlPlaneDatabase:
         if cls._pool is None:
             return
 
-        required_tables = ["ops_jobs", "pinned_recommendations"]
+        required_tables = [
+            "ops_jobs",
+            "pinned_recommendations",
+            "synth_generation_runs",
+            "synth_templates",
+        ]
         missing_tables = []
 
         async with cls._pool.acquire() as conn:

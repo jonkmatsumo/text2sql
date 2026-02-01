@@ -13,7 +13,7 @@ docker compose \
 
 echo "---------------------------------------------------"
 echo "Stack is running!"
-echo "Web UI:       http://localhost:8501"
+echo "Web UI:       http://localhost:3333"
 echo "OTEL Worker:  http://localhost:4320"
 echo "MinIO:        http://localhost:9001"
 echo "---------------------------------------------------"

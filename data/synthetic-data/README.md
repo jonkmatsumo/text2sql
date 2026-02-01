@@ -4,7 +4,7 @@ Deterministic synthetic data generation for text2sql testing and development.
 
 ## Overview
 
-This package provides tooling to generate reproducible synthetic datasets for testing text-to-SQL systems. It is designed to be **fully isolated** from other packages in this monorepo and does not share dependencies or code with `mcp-server/`, `agent/`, or `streamlit/`.
+This package provides tooling to generate reproducible synthetic datasets for testing text-to-SQL systems. It is designed to be **fully isolated** from other packages in this monorepo and does not share dependencies or code with `mcp-server/` or `agent/`.
 
 ## Key Goals
 
