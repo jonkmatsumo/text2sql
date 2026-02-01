@@ -285,6 +285,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.mysql import MysqlSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["mysql"] = MysqlSchemaIntrospector
+        if "snowflake" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.snowflake import SnowflakeSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["snowflake"] = SnowflakeSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider
