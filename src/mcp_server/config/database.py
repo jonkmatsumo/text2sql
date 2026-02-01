@@ -24,11 +24,13 @@ class Database:
     _schema_introspector: Optional[SchemaIntrospector] = None
     _metadata_store: Optional[MetadataStore] = None
     _query_target_provider: str = "postgres"
+    _query_target_capabilities = None
 
     @classmethod
     async def init(cls):
         """Initialize connection pools."""
         from common.config.env import get_env_int, get_env_str
+        from dal.capabilities import capabilities_for_provider
         from dal.util.env import get_provider_env
 
         backend_override = get_env_str("QUERY_TARGET_BACKEND")
@@ -44,6 +46,8 @@ class Database:
                 default="postgres",
                 allowed={"postgres", "sqlite", "mysql", "snowflake", "redshift"},
             )
+
+        cls._query_target_capabilities = capabilities_for_provider(cls._query_target_provider)
 
         if cls._query_target_provider == "sqlite":
             from dal.sqlite import SqliteQueryTargetDatabase
@@ -302,6 +306,15 @@ class Database:
         if cls._metadata_store is None:
             raise RuntimeError("Metadata store not initialized. Call Database.init() first.")
         return cls._metadata_store
+
+    @classmethod
+    def get_query_target_capabilities(cls):
+        """Get capability flags for the active query-target backend."""
+        if cls._query_target_capabilities is None:
+            raise RuntimeError(
+                "Query-target capabilities not initialized. Call Database.init() first."
+            )
+        return cls._query_target_capabilities
 
     @classmethod
     @asynccontextmanager
