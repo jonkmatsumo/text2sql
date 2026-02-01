@@ -111,6 +111,9 @@ class AgentState(TypedDict):
     # Metadata associated with the cached SQL (e.g. original user query)
     cache_metadata: Optional[dict]
 
+    # Similarity score from cache lookup (0-1 or 0-100 depending on backend)
+    cache_similarity: Optional[float]
+
     # Context about a rejected cache hit to guide generation (e.g. "similar query but wrong entity")
     # Structure: {"sql": str, "original_query": str, "reason": str}
     rejected_cache_context: Optional[dict]

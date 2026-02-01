@@ -45,6 +45,7 @@ class AgentRunResponse(BaseModel):
     response: Optional[str] = None
     error: Optional[str] = None
     from_cache: bool = False
+    cache_similarity: Optional[float] = None
     interaction_id: Optional[str] = None
     trace_id: Optional[str] = None
     viz_spec: Optional[dict] = None
@@ -81,6 +82,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             response=response_text,
             error=state.get("error"),
             from_cache=state.get("from_cache", False),
+            cache_similarity=state.get("cache_similarity"),
             interaction_id=state.get("interaction_id"),
             trace_id=trace_id,
             viz_spec=state.get("viz_spec"),

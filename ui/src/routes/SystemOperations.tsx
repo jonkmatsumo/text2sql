@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
@@ -8,7 +8,7 @@ import { OpsService, getErrorMessage } from "../api";
 import { PatternReloadResult, OpsJobResponse } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { useJobPolling } from "../hooks/useJobPolling";
-import { grafanaBaseUrl, isGrafanaConfigured } from "../config";
+import { grafanaBaseUrl, isGrafanaConfigured, uiApiBaseUrl } from "../config";
 
 export default function SystemOperations() {
     const [activeTab, setActiveTab] = useState("nlp");
@@ -18,6 +18,8 @@ export default function SystemOperations() {
     const [traceId, setTraceId] = useState("");
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
     const [showWizard, setShowWizard] = useState(false);
+    const streamRef = useRef<EventSource | null>(null);
+    const logsRef = useRef<HTMLDivElement | null>(null);
 
     const { show: showToast } = useToast();
 
@@ -30,6 +32,25 @@ export default function SystemOperations() {
     ];
 
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
+
+    useEffect(() => {
+        if (!logsRef.current) return;
+        if (typeof logsRef.current.scrollTo === "function") {
+            logsRef.current.scrollTo({
+                top: logsRef.current.scrollHeight,
+                behavior: "smooth"
+            });
+        }
+    }, [logs]);
+
+    useEffect(() => {
+        return () => {
+            if (streamRef.current) {
+                streamRef.current.close();
+                streamRef.current = null;
+            }
+        };
+    }, []);
 
     // Job Polling
     const handleJobComplete = useCallback((job: OpsJobResponse) => {
@@ -47,27 +68,94 @@ export default function SystemOperations() {
         onFailed: handleJobFailed,
     });
 
-    const runPatternGen = async () => {
+    const handlePatternResult = (result: any) => {
+        if (result?.success) {
+            addLog(`Generation complete (ID: ${result.run_id})`);
+            if (result.metrics) {
+                addLog(`Created: ${result.metrics.created_count}, Updated: ${result.metrics.updated_count}`);
+            }
+            showToast("Pattern generation completed successfully", "success");
+        } else {
+            addLog(`Generation failed: ${result?.error || "Unknown error"}`);
+            showToast("Pattern generation failed", "error");
+        }
+    };
+
+    const runPatternGenFallback = async () => {
         setIsLoading(true);
         setLogs(["Starting pattern generation..."]);
         try {
             const result = await OpsService.generatePatterns(false);
-            if (result.success) {
-                addLog(`Generation complete (ID: ${result.run_id})`);
-                if (result.metrics) {
-                    addLog(`Created: ${result.metrics.created_count}, Updated: ${result.metrics.updated_count}`);
-                }
-                showToast("Pattern generation completed successfully", "success");
-            } else {
-                addLog(`Generation failed: ${result.error}`);
-                showToast("Pattern generation failed", "error");
-            }
+            handlePatternResult(result);
         } catch (err: unknown) {
             const message = getErrorMessage(err);
             addLog(`Error: ${message}`);
             showToast(message, "error");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const startPatternStream = () => {
+        if (typeof EventSource === "undefined") {
+            return false;
+        }
+
+        const streamUrl = `${uiApiBaseUrl}/ops/patterns/generate/stream?dry_run=false`;
+        try {
+            const stream = new EventSource(streamUrl);
+            streamRef.current = stream;
+            let hasLogs = false;
+
+            stream.onmessage = (event) => {
+                hasLogs = true;
+                try {
+                    const payload = JSON.parse(event.data);
+                    if (payload?.message) {
+                        addLog(payload.message);
+                    }
+                } catch {
+                    addLog(event.data);
+                }
+            };
+
+            stream.addEventListener("complete", (event) => {
+                let payload: any = {};
+                try {
+                    payload = JSON.parse((event as MessageEvent).data);
+                } catch {
+                    payload = {};
+                }
+                stream.close();
+                streamRef.current = null;
+                setIsLoading(false);
+                handlePatternResult(payload);
+            });
+
+            stream.onerror = () => {
+                stream.close();
+                streamRef.current = null;
+                if (!hasLogs) {
+                    runPatternGenFallback();
+                } else {
+                    addLog("Log stream interrupted. Check job status for updates.");
+                    setIsLoading(false);
+                }
+            };
+
+            return true;
+        } catch {
+            return false;
+        }
+    };
+
+    const runPatternGen = async () => {
+        setIsLoading(true);
+        setLogs([]);
+        addLog("Streaming pattern generation logs...");
+        const started = startPatternStream();
+        if (!started) {
+            await runPatternGenFallback();
         }
     };
 
@@ -209,7 +297,10 @@ export default function SystemOperations() {
                                 Run Legacy Generation (Auto)
                             </button>
                             {logs.length > 0 && (
-                                <div style={{ marginTop: "20px", padding: "12px", backgroundColor: "#1e1e20", color: "#fefefe", borderRadius: "12px", fontSize: "0.85rem", fontFamily: "monospace", maxHeight: "200px", overflow: "auto" }}>
+                                <div
+                                    ref={logsRef}
+                                    style={{ marginTop: "20px", padding: "12px", backgroundColor: "#1e1e20", color: "#fefefe", borderRadius: "12px", fontSize: "0.85rem", fontFamily: "monospace", maxHeight: "200px", overflow: "auto" }}
+                                >
                                     {logs.map((log, i) => <div key={i}>{log}</div>)}
                                 </div>
                             )}
