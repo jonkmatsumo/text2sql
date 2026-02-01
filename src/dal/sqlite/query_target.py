@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
+from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
+
 
 class SqliteQueryTargetDatabase:
     """SQLite query-target database for local/dev use."""
@@ -45,11 +47,13 @@ class _SqliteConnection:
         self._conn = conn
 
     async def execute(self, sql: str, *params: Any) -> str:
-        cursor = await self._conn.execute(sql, params)
+        sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+        cursor = await self._conn.execute(sql, bound_params)
         return _format_execute_status(sql, cursor.rowcount)
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
-        cursor = await self._conn.execute(sql, params)
+        sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+        cursor = await self._conn.execute(sql, bound_params)
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
