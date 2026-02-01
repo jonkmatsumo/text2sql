@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_str
 
 
 @dataclass(frozen=True)
@@ -11,6 +11,9 @@ class AthenaConfig:
     workgroup: str
     output_location: str
     database: str
+    query_timeout_seconds: int
+    poll_interval_seconds: int
+    max_rows: int
 
     @classmethod
     def from_env(cls) -> "AthenaConfig":
@@ -19,6 +22,9 @@ class AthenaConfig:
         workgroup = get_env_str("ATHENA_WORKGROUP")
         output_location = get_env_str("ATHENA_OUTPUT_LOCATION")
         database = get_env_str("ATHENA_DATABASE")
+        query_timeout_seconds = get_env_int("ATHENA_QUERY_TIMEOUT_SECS", 30)
+        poll_interval_seconds = get_env_int("ATHENA_POLL_INTERVAL_SECS", 1)
+        max_rows = get_env_int("ATHENA_MAX_ROWS", 1000)
 
         missing = [
             name
@@ -42,4 +48,7 @@ class AthenaConfig:
             workgroup=workgroup,
             output_location=output_location,
             database=database,
+            query_timeout_seconds=query_timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            max_rows=max_rows,
         )

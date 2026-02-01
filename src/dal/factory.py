@@ -297,6 +297,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.bigquery import BigQuerySchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["bigquery"] = BigQuerySchemaIntrospector
+        if "athena" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.athena import AthenaSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["athena"] = AthenaSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider
