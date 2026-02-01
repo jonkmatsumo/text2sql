@@ -325,5 +325,12 @@ Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
 - `CACHE_STORE_PROVIDER` — defaults to Postgres
 
+### P2 Query Targets Summary
+| Provider | Execution Model | Namespace | Notes |
+|---------|-----------------|-----------|-------|
+| BigQuery | Async | project.dataset.table | Requires ADC; max rows/timeout guardrails |
+| Athena | Async | database.table | Requires S3 output location; max rows/timeout guardrails |
+| Databricks | Async | catalog.schema.table | Unity Catalog required for introspection |
+
 ### Observability
 **OTEL is mandatory.** MLflow support has been deprecated. The observability stack (`otel-collector`, `otel-worker`, `grafana`) is required for trace storage, metrics, and debugging. It is automatically included in `make up`.
