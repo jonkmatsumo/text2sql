@@ -28,6 +28,7 @@ class MysqlQueryTargetDatabase:
         db_name: Optional[str],
         user: Optional[str],
         password: Optional[str],
+        max_rows: Optional[int] = None,
     ) -> None:
         """Initialize MySQL query-target config."""
         cls._host = host
@@ -35,7 +36,7 @@ class MysqlQueryTargetDatabase:
         cls._db_name = db_name
         cls._user = user
         cls._password = password
-        cls._max_rows = get_sync_max_rows()
+        cls._max_rows = max_rows if max_rows is not None else get_sync_max_rows()
 
         missing = [
             name

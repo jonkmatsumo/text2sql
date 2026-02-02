@@ -16,10 +16,10 @@ class SqliteQueryTargetDatabase:
     _max_rows: int = 0
 
     @classmethod
-    async def init(cls, db_path: Optional[str]) -> None:
+    async def init(cls, db_path: Optional[str], max_rows: Optional[int] = None) -> None:
         """Initialize SQLite query-target config."""
         cls._db_path = db_path or ":memory:"
-        cls._max_rows = get_sync_max_rows()
+        cls._max_rows = max_rows if max_rows is not None else get_sync_max_rows()
 
     @classmethod
     async def close(cls) -> None:

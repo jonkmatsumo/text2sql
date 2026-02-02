@@ -15,6 +15,7 @@ class RedshiftQueryTargetDatabase:
     _user: Optional[str] = None
     _password: Optional[str] = None
     _pool: Optional[asyncpg.Pool] = None
+    _max_rows: int = 0
 
     @classmethod
     async def init(
@@ -24,6 +25,7 @@ class RedshiftQueryTargetDatabase:
         db_name: Optional[str],
         user: Optional[str],
         password: Optional[str],
+        max_rows: Optional[int] = None,
     ) -> None:
         """Initialize Redshift query-target config."""
         cls._host = host
@@ -31,6 +33,7 @@ class RedshiftQueryTargetDatabase:
         cls._db_name = db_name
         cls._user = user
         cls._password = password
+        cls._max_rows = max_rows or 0
 
         missing = [
             name
@@ -77,14 +80,15 @@ class RedshiftQueryTargetDatabase:
             )
 
         async with cls._pool.acquire() as conn:
-            yield _RedshiftConnection(conn)
+            yield _RedshiftConnection(conn, max_rows=cls._max_rows)
 
 
 class _RedshiftConnection:
     """Adapter providing asyncpg-like helpers over Redshift."""
 
-    def __init__(self, conn: asyncpg.Connection) -> None:
+    def __init__(self, conn: asyncpg.Connection, max_rows: int) -> None:
         self._conn = conn
+        self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
@@ -101,7 +105,9 @@ class _RedshiftConnection:
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         async def _run():
             rows = await self._conn.fetch(sql, *params)
-            return [dict(row) for row in rows]
+            from dal.util.row_limits import cap_rows
+
+            return cap_rows([dict(row) for row in rows], self._max_rows)
 
         return await trace_query_operation(
             "dal.query.execute",
