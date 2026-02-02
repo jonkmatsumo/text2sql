@@ -349,6 +349,9 @@ Notes:
 - Postgres cloud variants: Aurora/RDS/Azure/Cloud SQL (docs-only)
 - MySQL cloud variants: RDS/Aurora/Azure/Cloud SQL, MariaDB (docs-only)
 
+### YugabyteDB (YSQL)
+YugabyteDB runs via the Postgres query-target path using the `yugabyte`/`ysql` aliases.
+
 ### P2 Query Targets Summary
 | Provider | Execution Model | Namespace | Notes |
 |---------|-----------------|-----------|-------|
