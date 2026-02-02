@@ -25,7 +25,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=False,
             supports_fk_enforcement=False,
-            supports_schema_cache=True,
+            supports_schema_cache=False,
         )
     if normalized == "mysql":
         return BackendCapabilities(
@@ -88,7 +88,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=True,
             supports_transactions=False,
             supports_fk_enforcement=False,
-            supports_schema_cache=True,
+            supports_schema_cache=False,
         )
     if normalized == "duckdb":
         return BackendCapabilities(
