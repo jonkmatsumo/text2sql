@@ -352,6 +352,10 @@ Notes:
 ### YugabyteDB (YSQL)
 YugabyteDB runs via the Postgres query-target path using the `yugabyte`/`ysql` aliases.
 
+### CockroachDB
+CockroachDB runs via the Postgres query-target path using the `cockroachdb`/`cockroach`/`crdb`
+aliases. Transactions are disabled in the query-target wrapper to avoid retry loops.
+
 ### P2 Query Targets Summary
 | Provider | Execution Model | Namespace | Notes |
 |---------|-----------------|-----------|-------|

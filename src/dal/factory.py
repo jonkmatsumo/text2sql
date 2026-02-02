@@ -305,6 +305,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.databricks import DatabricksSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["databricks"] = DatabricksSchemaIntrospector
+        if "cockroachdb" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.postgres import PostgresSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["cockroachdb"] = PostgresSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider

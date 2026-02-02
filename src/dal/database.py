@@ -47,6 +47,7 @@ class Database:
                     "bigquery",
                     "athena",
                     "databricks",
+                    "cockroachdb",
                 },
             )
         else:
@@ -62,6 +63,7 @@ class Database:
                     "bigquery",
                     "athena",
                     "databricks",
+                    "cockroachdb",
                 },
             )
 
@@ -417,17 +419,25 @@ class Database:
             raise RuntimeError("Database pool not initialized. Call Database.init() first.")
 
         async with cls._pool.acquire() as conn:
-            # Start a transaction block.
-            # Everything inside here is atomic.
-            async with conn.transaction(readonly=read_only):
+            if cls.get_query_target_capabilities().supports_transactions:
+                # Start a transaction block.
+                # Everything inside here is atomic.
+                async with conn.transaction(readonly=read_only):
+                    if tenant_id is not None:
+                        # set_config with is_local=True scopes the setting to this transaction.
+                        # It will be automatically unset when the transaction block exits.
+                        await conn.execute(
+                            "SELECT set_config('app.current_tenant', $1, true)",
+                            str(tenant_id),
+                        )
+
+                    # Yield the configured connection to the caller
+                    yield conn
+                    # Transaction commits/rolls back automatically here
+                    # Connection is returned to pool, tenant context is cleared
+            else:
                 if tenant_id is not None:
-                    # set_config with is_local=True scopes the setting to this transaction.
-                    # It will be automatically unset when the transaction block exits.
                     await conn.execute(
                         "SELECT set_config('app.current_tenant', $1, true)", str(tenant_id)
                     )
-
-                # Yield the configured connection to the caller
                 yield conn
-                # Transaction commits/rolls back automatically here
-                # Connection is returned to pool, tenant context is cleared

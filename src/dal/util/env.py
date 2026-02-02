@@ -50,6 +50,10 @@ PROVIDER_ALIASES: dict[str, str] = {
     # Yugabyte aliases (YSQL)
     "yugabyte": "postgres",
     "ysql": "postgres",
+    # Cockroach aliases
+    "cockroachdb": "cockroachdb",
+    "cockroach": "cockroachdb",
+    "crdb": "cockroachdb",
     # Memgraph aliases
     "memgraph": "memgraph",
 }
