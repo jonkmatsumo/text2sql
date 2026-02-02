@@ -176,6 +176,15 @@ docker compose -f docker-compose.test.yml up -d
 pytest tests/integration/
 ```
 
+Quick DAL-only sweep:
+```bash
+make test-dal
+```
+`make test-dal` uses `.venv/bin/python` when available to avoid `uv` cache instability. If you hit a `uv` cache error, run via a local cache directory:
+```bash
+uv run --cache-dir ./.uv-cache pytest tests/unit/dal -v
+```
+
 ## Configuration
 
 The system uses environment variables for configuration. See `.env.example` for a complete list of available options.
