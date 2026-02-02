@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import pytest
@@ -283,3 +284,34 @@ async def test_athena_status_mapping(monkeypatch):
     assert _map_status("CANCELLED") == QueryStatus.CANCELLED
     assert _map_status("QUEUED") == QueryStatus.RUNNING
     assert _map_status("RUNNING") == QueryStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_athena_executor_fetch_timeout_calls_cancel(monkeypatch):
+    """Verify fetch timeout triggers stop_query_execution."""
+
+    class _SlowAthenaClient(_FakeAthenaClient):
+        def get_query_results(self, QueryExecutionId, MaxResults, NextToken=None):
+            _ = QueryExecutionId, MaxResults, NextToken
+            import time
+
+            time.sleep(0.05)
+            return super().get_query_results(QueryExecutionId, MaxResults, NextToken)
+
+    fake_client = _SlowAthenaClient()
+    fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", fake_boto3)
+
+    executor = AthenaAsyncQueryExecutor(
+        region="us-east-1",
+        workgroup="primary",
+        output_location="s3://bucket/out/",
+        database="db",
+        timeout_seconds=0.001,
+        max_rows=1000,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await executor.fetch("exec-1", max_rows=10)
+
+    assert fake_client._status == "CANCELLED"

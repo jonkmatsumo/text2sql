@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.async_utils import with_timeout
 from dal.tracing import trace_query_operation
 
 
@@ -60,12 +61,17 @@ class AthenaAsyncQueryExecutor(AsyncQueryExecutor):
     async def fetch(self, job_id: str, max_rows: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch results for a completed query."""
         limit = max_rows if max_rows is not None else self._max_rows
+        operation = with_timeout(
+            asyncio.to_thread(_fetch_results, self._client, job_id, limit),
+            timeout_seconds=self._timeout_seconds,
+            on_timeout=lambda: self.cancel(job_id),
+        )
         return await trace_query_operation(
             "dal.query.fetch",
             provider="athena",
             execution_model="async",
             sql=None,
-            operation=asyncio.to_thread(_fetch_results, self._client, job_id, limit),
+            operation=operation,
         )
 
     async def cancel(self, job_id: str) -> None:
