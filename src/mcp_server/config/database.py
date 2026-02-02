@@ -48,6 +48,7 @@ class Database:
                     "athena",
                     "databricks",
                     "cockroachdb",
+                    "duckdb",
                 },
             )
         else:
@@ -64,6 +65,7 @@ class Database:
                     "athena",
                     "databricks",
                     "cockroachdb",
+                    "duckdb",
                 },
             )
 
@@ -121,6 +123,10 @@ class Database:
             from dal.databricks import DatabricksConfig, DatabricksQueryTargetDatabase
 
             await DatabricksQueryTargetDatabase.init(DatabricksConfig.from_env())
+        elif cls._query_target_provider == "duckdb":
+            from dal.duckdb import DuckDBConfig, DuckDBQueryTargetDatabase
+
+            await DuckDBQueryTargetDatabase.init(DuckDBConfig.from_env())
         else:
             # Postgres Config
             db_host = get_env_str("DB_HOST", "localhost")
@@ -286,6 +292,10 @@ class Database:
             from dal.databricks import DatabricksQueryTargetDatabase
 
             await DatabricksQueryTargetDatabase.close()
+        if cls._query_target_provider == "duckdb":
+            from dal.duckdb import DuckDBQueryTargetDatabase
+
+            await DuckDBQueryTargetDatabase.close()
 
         if cls._graph_store:
             cls._graph_store.close()
@@ -419,6 +429,12 @@ class Database:
             from dal.databricks import DatabricksQueryTargetDatabase
 
             async with DatabricksQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+                yield conn
+            return
+        if cls._query_target_provider == "duckdb":
+            from dal.duckdb import DuckDBQueryTargetDatabase
+
+            async with DuckDBQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
                 yield conn
             return
 

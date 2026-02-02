@@ -309,6 +309,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.postgres import PostgresSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["cockroachdb"] = PostgresSchemaIntrospector
+        if "duckdb" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.duckdb import DuckDBSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["duckdb"] = DuckDBSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider

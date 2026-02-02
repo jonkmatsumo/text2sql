@@ -82,4 +82,12 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=False,
             supports_fk_enforcement=False,
         )
+    if normalized == "duckdb":
+        return BackendCapabilities(
+            execution_model="sync",
+            supports_arrays=True,
+            supports_json_ops=True,
+            supports_transactions=True,
+            supports_fk_enforcement=False,
+        )
     return BackendCapabilities()
