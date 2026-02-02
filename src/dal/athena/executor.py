@@ -100,9 +100,14 @@ def _fetch_results(client, job_id: str, max_rows: int) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     next_token = None
     column_names: Optional[List[str]] = None
+    header_skipped = False
 
     while True:
-        kwargs = {"QueryExecutionId": job_id, "MaxResults": max_rows}
+        remaining = max_rows - len(rows)
+        if remaining <= 0:
+            break
+        max_results = remaining + (0 if header_skipped else 1)
+        kwargs = {"QueryExecutionId": job_id, "MaxResults": max_results}
         if next_token:
             kwargs["NextToken"] = next_token
         response = client.get_query_results(**kwargs)
@@ -110,10 +115,13 @@ def _fetch_results(client, job_id: str, max_rows: int) -> List[Dict[str, Any]]:
         metadata = result_set["ResultSetMetadata"]["ColumnInfo"]
         if column_names is None:
             column_names = [col["Name"] for col in metadata]
-        for row in result_set["Rows"]:
+        page_rows = result_set["Rows"]
+        start_index = 0
+        if not header_skipped and page_rows:
+            start_index = 1
+            header_skipped = True
+        for row in page_rows[start_index:]:
             values = [datum.get("VarCharValue") for datum in row["Data"]]
-            if values == column_names:
-                continue
             rows.append(dict(zip(column_names, values)))
             if len(rows) >= max_rows:
                 return rows
