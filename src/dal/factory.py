@@ -277,12 +277,65 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.postgres import PostgresSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["postgres"] = PostgresSchemaIntrospector
+        if "sqlite" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.sqlite import SqliteSchemaIntrospector
 
-        provider = get_provider_env(
-            "SCHEMA_INTROSPECTOR_PROVIDER",
-            default="postgres",
-            allowed=set(SCHEMA_INTROSPECTOR_PROVIDERS.keys()),
-        )
+            SCHEMA_INTROSPECTOR_PROVIDERS["sqlite"] = SqliteSchemaIntrospector
+        if "mysql" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.mysql import MysqlSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["mysql"] = MysqlSchemaIntrospector
+        if "snowflake" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.snowflake import SnowflakeSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["snowflake"] = SnowflakeSchemaIntrospector
+        if "redshift" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.redshift import RedshiftSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["redshift"] = RedshiftSchemaIntrospector
+        if "bigquery" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.bigquery import BigQuerySchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["bigquery"] = BigQuerySchemaIntrospector
+        if "athena" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.athena import AthenaSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["athena"] = AthenaSchemaIntrospector
+        if "databricks" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.databricks import DatabricksSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["databricks"] = DatabricksSchemaIntrospector
+        if "cockroachdb" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.postgres import PostgresSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["cockroachdb"] = PostgresSchemaIntrospector
+        if "duckdb" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.duckdb import DuckDBSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["duckdb"] = DuckDBSchemaIntrospector
+        if "clickhouse" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.clickhouse import ClickHouseSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["clickhouse"] = ClickHouseSchemaIntrospector
+
+        from common.config.env import get_env_str
+        from dal.util.env import normalize_provider
+
+        explicit_provider = get_env_str("SCHEMA_INTROSPECTOR_PROVIDER")
+        if explicit_provider:
+            provider = get_provider_env(
+                "SCHEMA_INTROSPECTOR_PROVIDER",
+                default="postgres",
+                allowed=set(SCHEMA_INTROSPECTOR_PROVIDERS.keys()),
+            )
+        else:
+            query_target_provider = get_env_str("QUERY_TARGET_BACKEND") or get_env_str(
+                "QUERY_TARGET_PROVIDER"
+            )
+            normalized = (
+                normalize_provider(query_target_provider) if query_target_provider else "postgres"
+            )
+            provider = normalized if normalized in SCHEMA_INTROSPECTOR_PROVIDERS else "postgres"
         logger.info(f"Initializing SchemaIntrospector with provider: {provider}")
 
         store_cls = SCHEMA_INTROSPECTOR_PROVIDERS[provider]

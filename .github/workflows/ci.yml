@@ -33,7 +33,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run Unit Tests
-        run: uv run pytest -v tests/unit
+        run: uv run pytest -v tests/unit -m "not requires_db and not requires_mcp and not requires_control_db"
 
       - name: Run pre-commit hooks
         run: |

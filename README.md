@@ -9,6 +9,7 @@ A natural language to SQL system that converts plain English queries into execut
 - **Graph-Aware RAG** — Memgraph integration for FK traversal and relational context
 - **Multi-Tenant Security** — AST-based policy enforcement and RLS injection
 - **MCP Protocol** — Extensible tool interface for any MCP-compliant agent
+- **Multi-Platform Support** — Out-of-the-box support for Postgres, MySQL, Snowflake, BigQuery, Athena, Databricks, DuckDB, ClickHouse, and Redshift
 
 ## System Architecture
 
@@ -177,13 +178,16 @@ pytest tests/integration/
 
 ## Configuration
 
-### Control-Plane Isolation
-Disabled by default. Enable with `DB_ISOLATION_ENABLED=true` and configure `CONTROL_DB_*` variables.
+The system uses environment variables for configuration. See `.env.example` for a complete list of available options.
 
-### Provider Selectors
-Optional overrides for storage backends:
-- `GRAPH_STORE_PROVIDER` — defaults to Memgraph
-- `CACHE_STORE_PROVIDER` — defaults to Postgres
+### Control-Plane vs. Query-Target
+- **Control-Plane**: Always uses PostgreSQL to store query registries, embeddings, and metadata.
+- **Query-Target**: The database you want to query. You can toggle this via `QUERY_TARGET_BACKEND`.
+
+### Supported Backends
+Switch between supported databases by setting `QUERY_TARGET_BACKEND` (e.g., `postgres`, `mysql`, `snowflake`, `bigquery`, `athena`, `databricks`, `duckdb`, `clickhouse`, `redshift`, `sqlite`).
+
+Each backend requires specific environment variables for connection (e.g., `DB_HOST`, `SNOWFLAKE_ACCOUNT`, etc.). Refer to the Data Abstraction Layer (DAL) documentation or `.env.example` for specific credential requirements.
 
 ### Observability
-**OTEL is mandatory.** MLflow support has been deprecated. The observability stack (`otel-collector`, `otel-worker`, `grafana`) is required for trace storage, metrics, and debugging. It is automatically included in `make up`.
+OTEL-based observability is mandatory for trace storage and debugging. The stack is automatically initialized during `make up`.

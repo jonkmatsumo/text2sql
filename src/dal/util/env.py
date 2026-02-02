@@ -28,6 +28,37 @@ PROVIDER_ALIASES: dict[str, str] = {
     "postgresql": "postgres",
     "postgres": "postgres",
     "pg": "postgres",
+    # SQLite aliases
+    "sqlite": "sqlite",
+    "sqlite3": "sqlite",
+    # MySQL aliases
+    "mysql": "mysql",
+    "mariadb": "mysql",
+    # Snowflake aliases
+    "snowflake": "snowflake",
+    "sf": "snowflake",
+    # Redshift aliases
+    "redshift": "redshift",
+    # BigQuery aliases
+    "bigquery": "bigquery",
+    "bq": "bigquery",
+    # Athena aliases
+    "athena": "athena",
+    # Databricks aliases
+    "databricks": "databricks",
+    "databricks-sql": "databricks",
+    # Yugabyte aliases (YSQL)
+    "yugabyte": "postgres",
+    "ysql": "postgres",
+    # Cockroach aliases
+    "cockroachdb": "cockroachdb",
+    "cockroach": "cockroachdb",
+    "crdb": "cockroachdb",
+    # DuckDB aliases
+    "duckdb": "duckdb",
+    # ClickHouse aliases
+    "clickhouse": "clickhouse",
+    "ch": "clickhouse",
     # Memgraph aliases
     "memgraph": "memgraph",
 }

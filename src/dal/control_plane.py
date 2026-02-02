@@ -98,6 +98,11 @@ class ControlPlaneDatabase:
         if cls._pool is None:
             return
 
+        # Schema validation only works for Postgres (asyncpg pool)
+        if not isinstance(cls._pool, asyncpg.Pool):
+            logger.debug("Skipping control-plane schema validation for non-Postgres backend")
+            return
+
         required_tables = [
             "ops_jobs",
             "pinned_recommendations",
