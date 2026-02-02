@@ -291,12 +291,20 @@ async def test_athena_executor_fetch_timeout_calls_cancel(monkeypatch):
     """Verify fetch timeout triggers stop_query_execution."""
 
     class _SlowAthenaClient(_FakeAthenaClient):
+        def __init__(self):
+            super().__init__()
+            self._stopped_ids = []
+
         def get_query_results(self, QueryExecutionId, MaxResults, NextToken=None):
             _ = QueryExecutionId, MaxResults, NextToken
             import time
 
             time.sleep(0.05)
             return super().get_query_results(QueryExecutionId, MaxResults, NextToken)
+
+        def stop_query_execution(self, QueryExecutionId):
+            self._stopped_ids.append(QueryExecutionId)
+            super().stop_query_execution(QueryExecutionId)
 
     fake_client = _SlowAthenaClient()
     fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
@@ -315,3 +323,4 @@ async def test_athena_executor_fetch_timeout_calls_cancel(monkeypatch):
         await executor.fetch("exec-1", max_rows=10)
 
     assert fake_client._status == "CANCELLED"
+    assert fake_client._stopped_ids == ["exec-1"]
