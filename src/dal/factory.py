@@ -319,6 +319,7 @@ def get_schema_introspector() -> SchemaIntrospector:
             SCHEMA_INTROSPECTOR_PROVIDERS["clickhouse"] = ClickHouseSchemaIntrospector
 
         from common.config.env import get_env_str
+        from dal.feature_flags import experimental_features_enabled
         from dal.util.env import normalize_provider
 
         explicit_provider = get_env_str("SCHEMA_INTROSPECTOR_PROVIDER")
@@ -340,6 +341,16 @@ def get_schema_introspector() -> SchemaIntrospector:
 
         store_cls = SCHEMA_INTROSPECTOR_PROVIDERS[provider]
         _schema_introspector = store_cls()
+
+        if experimental_features_enabled():
+            from dal.database import Database
+            from dal.schema_cache import SCHEMA_CACHE, CachedSchemaIntrospector
+
+            caps = Database.get_query_target_capabilities()
+            if caps.supports_schema_cache:
+                _schema_introspector = CachedSchemaIntrospector(
+                    provider, _schema_introspector, SCHEMA_CACHE
+                )
 
     return _schema_introspector
 

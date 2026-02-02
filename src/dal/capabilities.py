@@ -12,6 +12,7 @@ class BackendCapabilities:
     supports_transactions: bool = True
     supports_fk_enforcement: bool = True
     supports_cost_estimation: bool = False
+    supports_schema_cache: bool = False
 
 
 def capabilities_for_provider(provider: str) -> BackendCapabilities:
@@ -24,6 +25,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            supports_schema_cache=True,
         )
     if normalized == "mysql":
         return BackendCapabilities(
@@ -32,6 +34,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=True,
             supports_fk_enforcement=False,
+            supports_schema_cache=True,
         )
     if normalized == "sqlite":
         return BackendCapabilities(
@@ -40,6 +43,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=True,
             supports_fk_enforcement=False,
+            supports_schema_cache=True,
         )
     if normalized == "snowflake":
         return BackendCapabilities(
@@ -57,6 +61,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=False,
             supports_fk_enforcement=False,
             supports_cost_estimation=True,
+            supports_schema_cache=False,
         )
     if normalized == "athena":
         return BackendCapabilities(
@@ -65,6 +70,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            supports_schema_cache=False,
         )
     if normalized == "databricks":
         return BackendCapabilities(
@@ -73,6 +79,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=True,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            supports_schema_cache=False,
         )
     if normalized == "cockroachdb":
         return BackendCapabilities(
@@ -81,6 +88,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=True,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            supports_schema_cache=True,
         )
     if normalized == "duckdb":
         return BackendCapabilities(
@@ -89,6 +97,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=True,
             supports_transactions=True,
             supports_fk_enforcement=False,
+            supports_schema_cache=True,
         )
     if normalized == "clickhouse":
         return BackendCapabilities(
@@ -97,5 +106,6 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            supports_schema_cache=False,
         )
     return BackendCapabilities()
