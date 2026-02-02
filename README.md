@@ -198,6 +198,10 @@ Switch between supported databases by setting `QUERY_TARGET_BACKEND` (e.g., `pos
 
 Each backend requires specific environment variables for connection (e.g., `DB_HOST`, `SNOWFLAKE_ACCOUNT`, etc.). Refer to the Data Abstraction Layer (DAL) documentation or `.env.example` for specific credential requirements.
 
+#### DuckDB Notes
+- Use `DUCKDB_PATH=:memory:` for an in-memory database.
+- Set `DUCKDB_READ_ONLY=true` to open a file-backed DuckDB database in read-only mode.
+
 ### DAL Feature Flags
 - `DAL_EXPERIMENTAL_FEATURES=true` enables opt-in features like schema cache, error classification metadata, and display-only type normalization.
 - `DAL_TRACE_QUERIES=true` emits DAL query spans with hashed SQL only (no raw SQL).

@@ -35,7 +35,7 @@ class DuckDBQueryTargetDatabase:
 
         import duckdb
 
-        conn = duckdb.connect(cls._config.path)
+        conn = duckdb.connect(cls._config.path, read_only=cls._config.read_only)
         sync_max_rows = get_sync_max_rows()
         wrapper = _DuckDBConnection(
             conn,
