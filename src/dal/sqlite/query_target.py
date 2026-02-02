@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import aiosqlite
 
 from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
+from dal.tracing import trace_query_operation
 
 
 class SqliteQueryTargetDatabase:
@@ -48,14 +49,34 @@ class _SqliteConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
-        cursor = await self._conn.execute(sql, bound_params)
-        return _format_execute_status(sql, cursor.rowcount)
+
+        async def _run():
+            cursor = await self._conn.execute(sql, bound_params)
+            return _format_execute_status(sql, cursor.rowcount)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="sqlite",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
-        cursor = await self._conn.execute(sql, bound_params)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+
+        async def _run():
+            cursor = await self._conn.execute(sql, bound_params)
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="sqlite",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)

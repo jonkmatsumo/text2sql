@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 from dal.duckdb.config import DuckDBConfig
+from dal.tracing import trace_query_operation
 
 
 class DuckDBQueryTargetDatabase:
@@ -54,14 +55,32 @@ class _DuckDBConnection:
         self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
-        await self._run_query(sql, list(params))
-        return "OK"
+        async def _run():
+            await self._run_query(sql, list(params))
+            return "OK"
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="duckdb",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
-        rows = await self._run_query(sql, list(params))
-        if self._max_rows and len(rows) > self._max_rows:
-            rows = rows[: self._max_rows]
-        return rows
+        async def _run():
+            rows = await self._run_query(sql, list(params))
+            if self._max_rows and len(rows) > self._max_rows:
+                rows = rows[: self._max_rows]
+            return rows
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="duckdb",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)

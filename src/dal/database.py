@@ -464,7 +464,16 @@ class Database:
                         )
 
                     # Yield the configured connection to the caller
-                    yield conn
+                    from dal.tracing import TracedAsyncpgConnection, trace_enabled
+
+                    if trace_enabled():
+                        yield TracedAsyncpgConnection(
+                            conn,
+                            provider=cls._query_target_provider,
+                            execution_model=cls.get_query_target_capabilities().execution_model,
+                        )
+                    else:
+                        yield conn
                     # Transaction commits/rolls back automatically here
                     # Connection is returned to pool, tenant context is cleared
             else:
@@ -472,4 +481,13 @@ class Database:
                     await conn.execute(
                         "SELECT set_config('app.current_tenant', $1, true)", str(tenant_id)
                     )
-                yield conn
+                from dal.tracing import TracedAsyncpgConnection, trace_enabled
+
+                if trace_enabled():
+                    yield TracedAsyncpgConnection(
+                        conn,
+                        provider=cls._query_target_provider,
+                        execution_model=cls.get_query_target_capabilities().execution_model,
+                    )
+                else:
+                    yield conn

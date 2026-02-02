@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.tracing import trace_query_operation
 
 
 class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
@@ -30,17 +31,29 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
         job_config = bigquery.QueryJobConfig()
         if params:
             job_config.query_parameters = params
-        return await asyncio.to_thread(
-            _submit,
-            self._client,
-            sql,
-            job_config,
-            self._location,
+        return await trace_query_operation(
+            "dal.query.submit",
+            provider="bigquery",
+            execution_model="async",
+            sql=sql,
+            operation=asyncio.to_thread(
+                _submit,
+                self._client,
+                sql,
+                job_config,
+                self._location,
+            ),
         )
 
     async def poll(self, job_id: str) -> NormalizedStatus:
         """Poll the status of a running query."""
-        job = await asyncio.to_thread(_get_job, self._client, job_id, self._location)
+        job = await trace_query_operation(
+            "dal.query.poll",
+            provider="bigquery",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(_get_job, self._client, job_id, self._location),
+        )
         if job.cancelled():
             return NormalizedStatus.CANCELLED
         if job.state == "DONE":
@@ -49,7 +62,13 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
 
     async def fetch(self, job_id: str, max_rows: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch results for a completed query."""
-        job = await asyncio.to_thread(_get_job, self._client, job_id, self._location)
+        job = await trace_query_operation(
+            "dal.query.fetch",
+            provider="bigquery",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(_get_job, self._client, job_id, self._location),
+        )
         limit = max_rows if max_rows is not None else self._max_rows
         rows = await asyncio.to_thread(
             _fetch_rows,

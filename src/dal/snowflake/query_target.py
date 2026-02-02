@@ -10,6 +10,7 @@ from dal.async_query_executor import QueryStatus
 from dal.snowflake.config import SnowflakeConfig
 from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
 from dal.snowflake.param_translation import translate_postgres_params_to_snowflake
+from dal.tracing import trace_query_operation
 
 
 class SnowflakeQueryTargetDatabase:
@@ -94,18 +95,34 @@ class _SnowflakeConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
-        return await asyncio.to_thread(_execute, self._conn, sql, bound_params)
+
+        async def _run():
+            return await asyncio.to_thread(_execute, self._conn, sql, bound_params)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="snowflake",
+            execution_model="async",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
-        return await _fetch_with_guardrails(
-            self._executor,
-            sql,
-            bound_params,
-            query_timeout_seconds=self._query_timeout_seconds,
-            poll_interval_seconds=self._poll_interval_seconds,
-            max_rows=self._max_rows,
-            warn_after_seconds=self._warn_after_seconds,
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="snowflake",
+            execution_model="async",
+            sql=sql,
+            operation=_fetch_with_guardrails(
+                self._executor,
+                sql,
+                bound_params,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+                max_rows=self._max_rows,
+                warn_after_seconds=self._warn_after_seconds,
+            ),
         )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:

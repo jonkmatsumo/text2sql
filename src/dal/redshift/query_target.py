@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import asyncpg
+
+from dal.tracing import trace_query_operation
 
 
 class RedshiftQueryTargetDatabase:
@@ -75,4 +77,46 @@ class RedshiftQueryTargetDatabase:
 
         async with cls._pool.acquire() as conn:
             async with conn.transaction(readonly=read_only):
-                yield conn
+                yield _RedshiftConnection(conn)
+
+
+class _RedshiftConnection:
+    """Adapter providing asyncpg-like helpers over Redshift."""
+
+    def __init__(self, conn: asyncpg.Connection) -> None:
+        self._conn = conn
+
+    async def execute(self, sql: str, *params: Any) -> str:
+        async def _run():
+            return await self._conn.execute(sql, *params)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="redshift",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
+    async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        async def _run():
+            rows = await self._conn.fetch(sql, *params)
+            return [dict(row) for row in rows]
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="redshift",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
+    async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
+        rows = await self.fetch(sql, *params)
+        return rows[0] if rows else None
+
+    async def fetchval(self, sql: str, *params: Any) -> Any:
+        row = await self.fetchrow(sql, *params)
+        if row is None:
+            return None
+        return next(iter(row.values()))

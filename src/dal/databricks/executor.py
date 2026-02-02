@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.tracing import trace_query_operation
 
 
 class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
@@ -39,23 +40,35 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
         }
         if params:
             payload["parameters"] = params
-        response = await asyncio.to_thread(
-            _request,
-            "POST",
-            f"{self._host}/api/2.0/sql/statements",
-            self._token,
-            payload,
+        response = await trace_query_operation(
+            "dal.query.submit",
+            provider="databricks",
+            execution_model="async",
+            sql=sql,
+            operation=asyncio.to_thread(
+                _request,
+                "POST",
+                f"{self._host}/api/2.0/sql/statements",
+                self._token,
+                payload,
+            ),
         )
         return response["statement_id"]
 
     async def poll(self, job_id: str) -> NormalizedStatus:
         """Poll the status of a running query."""
-        response = await asyncio.to_thread(
-            _request,
-            "GET",
-            f"{self._host}/api/2.0/sql/statements/{job_id}",
-            self._token,
-            None,
+        response = await trace_query_operation(
+            "dal.query.poll",
+            provider="databricks",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(
+                _request,
+                "GET",
+                f"{self._host}/api/2.0/sql/statements/{job_id}",
+                self._token,
+                None,
+            ),
         )
         state = response.get("status", {}).get("state") or response.get("state")
         return _map_status(state)
@@ -63,12 +76,18 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
     async def fetch(self, job_id: str, max_rows: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch results for a completed query."""
         limit = max_rows if max_rows is not None else self._max_rows
-        return await asyncio.to_thread(
-            _fetch_results,
-            self._host,
-            self._token,
-            job_id,
-            limit,
+        return await trace_query_operation(
+            "dal.query.fetch",
+            provider="databricks",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(
+                _fetch_results,
+                self._host,
+                self._token,
+                job_id,
+                limit,
+            ),
         )
 
     async def cancel(self, job_id: str) -> None:
