@@ -2,12 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   activateQueryTargetSettings,
   fetchQueryTargetSettings,
+  getErrorMessage,
   QueryTargetConfigPayload,
   QueryTargetConfigResponse,
   testQueryTargetSettings,
   upsertQueryTargetSettings
 } from "../api";
-import { getErrorMessage } from "../api";
 import { useToast } from "../hooks/useToast";
 
 const providerOptions = [
