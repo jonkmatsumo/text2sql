@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from common.config.env import get_env_bool
 
@@ -113,7 +113,7 @@ def validate_query_target_payload(
         )
 
     _validate_no_secrets(metadata, "metadata")
-    _validate_no_secrets(auth, "auth")
+    _validate_no_secrets(auth, "auth", allowlist=ALLOWED_AUTH_KEYS)
     _validate_allowed_keys(auth, ALLOWED_AUTH_KEYS, "auth")
 
     _validate_required_fields(metadata, PROVIDER_REQUIRED_FIELDS[normalized_provider])
@@ -142,8 +142,12 @@ def _validate_allowed_keys(
         raise QueryTargetValidationError(f"Unsupported {label} fields: {', '.join(sorted(extra))}")
 
 
-def _validate_no_secrets(payload: Dict[str, Any], label: str) -> None:
+def _validate_no_secrets(
+    payload: Dict[str, Any], label: str, allowlist: Optional[set[str]] = None
+) -> None:
     for key in payload.keys():
+        if allowlist and key in allowlist:
+            continue
         lower = key.lower()
         if any(keyword in lower for keyword in SECRET_KEYWORDS):
             raise QueryTargetValidationError(
