@@ -128,3 +128,75 @@ def test_test_query_target_settings_records_result(monkeypatch):
     assert response.json()["ok"] is False
     assert recorded["config_id"] == config_id
     assert recorded["status"] == "failed"
+
+
+def test_activate_query_target_settings_requires_test_passed(monkeypatch):
+    """Activation should fail when test-connection has not passed."""
+    client = TestClient(app)
+    record = QueryTargetConfigRecord(
+        id=uuid4(),
+        provider="postgres",
+        metadata={"host": "db", "db_name": "app", "user": "ro"},
+        auth={},
+        guardrails={},
+        status=QueryTargetConfigStatus.INACTIVE,
+        last_test_status="failed",
+    )
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
+
+    async def _get_by_id(_config_id):
+        return record
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.get_by_id", _get_by_id)
+
+    response = client.post(
+        "/settings/query-target/activate",
+        json={"config_id": str(record.id)},
+    )
+    assert response.status_code == 400
+
+
+def test_activate_query_target_settings_marks_pending(monkeypatch):
+    """Activation should mark the config as pending."""
+    client = TestClient(app)
+    record = QueryTargetConfigRecord(
+        id=uuid4(),
+        provider="postgres",
+        metadata={"host": "db", "db_name": "app", "user": "ro"},
+        auth={},
+        guardrails={},
+        status=QueryTargetConfigStatus.INACTIVE,
+        last_test_status="passed",
+    )
+    pending = QueryTargetConfigRecord(
+        id=record.id,
+        provider=record.provider,
+        metadata=record.metadata,
+        auth=record.auth,
+        guardrails=record.guardrails,
+        status=QueryTargetConfigStatus.PENDING,
+        last_test_status=record.last_test_status,
+    )
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
+
+    async def _get_by_id(_config_id):
+        return record
+
+    async def _set_pending(_config_id):
+        return None
+
+    async def _get_pending():
+        return pending
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.get_by_id", _get_by_id)
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.set_pending", _set_pending)
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.get_pending", _get_pending)
+
+    response = client.post(
+        "/settings/query-target/activate",
+        json={"config_id": str(record.id)},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"

@@ -134,6 +134,42 @@ class QueryTargetConfigStore:
         return _row_to_record(row) if row else None
 
     @classmethod
+    async def get_by_id(cls, config_id: UUID) -> Optional[QueryTargetConfigRecord]:
+        """Fetch a query-target config by id."""
+        async with cls.get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM query_target_configs WHERE id = $1",
+                config_id,
+            )
+        return _row_to_record(row) if row else None
+
+    @classmethod
+    async def set_pending(cls, config_id: UUID) -> None:
+        """Mark a config as pending and clear existing pending statuses."""
+        async with cls.get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE query_target_configs
+                SET status = $2,
+                    deactivated_at = NOW()
+                WHERE status = $3
+                  AND id <> $1
+                """,
+                config_id,
+                QueryTargetConfigStatus.INACTIVE.value,
+                QueryTargetConfigStatus.PENDING.value,
+            )
+            await conn.execute(
+                """
+                UPDATE query_target_configs
+                SET status = $2
+                WHERE id = $1
+                """,
+                config_id,
+                QueryTargetConfigStatus.PENDING.value,
+            )
+
+    @classmethod
     async def set_status(
         cls,
         config_id: UUID,

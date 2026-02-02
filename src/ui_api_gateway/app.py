@@ -215,6 +215,12 @@ class QueryTargetConfigPayload(BaseModel):
     config_id: Optional[UUID] = None
 
 
+class QueryTargetActivatePayload(BaseModel):
+    """Payload for activating a pending query-target config."""
+
+    config_id: UUID
+
+
 class QueryTargetConfigResponse(BaseModel):
     """Response for persisted query-target config."""
 
@@ -327,6 +333,39 @@ async def upsert_query_target_settings(
         guardrails=guardrails,
     )
     return _to_query_target_response(record)
+
+
+@app.post(
+    "/settings/query-target/activate",
+    response_model=QueryTargetConfigResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def activate_query_target_settings(
+    payload: QueryTargetActivatePayload,
+) -> QueryTargetConfigResponse:
+    """Mark a query-target config as pending activation."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+
+    record = await QueryTargetConfigStore.get_by_id(payload.config_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Query-target config not found",
+        )
+
+    if record.last_test_status != "passed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query-target config must pass test-connection before activation",
+        )
+
+    await QueryTargetConfigStore.set_pending(record.id)
+    pending = await QueryTargetConfigStore.get_pending()
+    return _to_query_target_response(pending or record)
 
 
 @app.post(
