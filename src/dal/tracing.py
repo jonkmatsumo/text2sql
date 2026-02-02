@@ -2,6 +2,7 @@ import hashlib
 from typing import Any, Awaitable, Dict, Optional
 
 from common.config.env import get_env_bool
+from dal.util.row_limits import cap_rows
 
 
 def trace_enabled() -> bool:
@@ -44,11 +45,12 @@ async def trace_query_operation(
 class TracedAsyncpgConnection:
     """Proxy for asyncpg connections that emits query tracing spans."""
 
-    def __init__(self, conn: Any, provider: str, execution_model: str) -> None:
+    def __init__(self, conn: Any, provider: str, execution_model: str, max_rows: int = 0) -> None:
         """Initialize the traced connection wrapper."""
         self._conn = conn
         self._provider = provider
         self._execution_model = execution_model
+        self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
         """Execute a statement with tracing when enabled."""
@@ -69,7 +71,7 @@ class TracedAsyncpgConnection:
 
         async def _run():
             rows = await self._conn.fetch(sql, *params)
-            return [dict(row) for row in rows]
+            return cap_rows([dict(row) for row in rows], self._max_rows)
 
         return await trace_query_operation(
             "dal.query.execute",

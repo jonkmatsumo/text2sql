@@ -6,6 +6,7 @@ import aiomysql
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
 from dal.mysql.quoting import translate_double_quotes_to_backticks
 from dal.tracing import trace_query_operation
+from dal.util.row_limits import cap_rows, get_sync_max_rows
 
 
 class MysqlQueryTargetDatabase:
@@ -17,6 +18,7 @@ class MysqlQueryTargetDatabase:
     _user: Optional[str] = None
     _password: Optional[str] = None
     _pool: Optional[aiomysql.Pool] = None
+    _max_rows: int = 0
 
     @classmethod
     async def init(
@@ -33,6 +35,7 @@ class MysqlQueryTargetDatabase:
         cls._db_name = db_name
         cls._user = user
         cls._password = password
+        cls._max_rows = get_sync_max_rows()
 
         missing = [
             name
@@ -78,15 +81,16 @@ class MysqlQueryTargetDatabase:
             raise RuntimeError("MySQL pool not initialized. Call MysqlQueryTargetDatabase.init().")
 
         async with cls._pool.acquire() as conn:
-            wrapper = _MysqlConnection(conn)
+            wrapper = _MysqlConnection(conn, max_rows=cls._max_rows)
             yield wrapper
 
 
 class _MysqlConnection:
     """Adapter providing asyncpg-like helpers over aiomysql."""
 
-    def __init__(self, conn: aiomysql.Connection) -> None:
+    def __init__(self, conn: aiomysql.Connection, max_rows: int) -> None:
         self._conn = conn
+        self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql = translate_double_quotes_to_backticks(sql)
@@ -113,7 +117,7 @@ class _MysqlConnection:
             async with self._conn.cursor() as cursor:
                 await cursor.execute(sql, bound_params)
                 rows = await cursor.fetchall()
-                return list(rows)
+                return cap_rows(list(rows), self._max_rows)
 
         return await trace_query_operation(
             "dal.query.execute",

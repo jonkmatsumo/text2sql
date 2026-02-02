@@ -6,17 +6,20 @@ import aiosqlite
 
 from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
 from dal.tracing import trace_query_operation
+from dal.util.row_limits import cap_rows, get_sync_max_rows
 
 
 class SqliteQueryTargetDatabase:
     """SQLite query-target database for local/dev use."""
 
     _db_path: Optional[str] = None
+    _max_rows: int = 0
 
     @classmethod
     async def init(cls, db_path: Optional[str]) -> None:
         """Initialize SQLite query-target config."""
         cls._db_path = db_path or ":memory:"
+        cls._max_rows = get_sync_max_rows()
 
     @classmethod
     async def close(cls) -> None:
@@ -34,7 +37,7 @@ class SqliteQueryTargetDatabase:
         db_path, uri = _resolve_sqlite_path(cls._db_path, read_only)
         conn = await aiosqlite.connect(db_path, uri=uri, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        wrapper = _SqliteConnection(conn)
+        wrapper = _SqliteConnection(conn, max_rows=cls._max_rows)
         try:
             yield wrapper
         finally:
@@ -44,8 +47,9 @@ class SqliteQueryTargetDatabase:
 class _SqliteConnection:
     """Adapter providing asyncpg-like helpers over aiosqlite."""
 
-    def __init__(self, conn: aiosqlite.Connection) -> None:
+    def __init__(self, conn: aiosqlite.Connection, max_rows: int) -> None:
         self._conn = conn
+        self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
@@ -68,7 +72,7 @@ class _SqliteConnection:
         async def _run():
             cursor = await self._conn.execute(sql, bound_params)
             rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+            return cap_rows([dict(row) for row in rows], self._max_rows)
 
         return await trace_query_operation(
             "dal.query.execute",

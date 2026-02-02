@@ -465,12 +465,15 @@ class Database:
 
                     # Yield the configured connection to the caller
                     from dal.tracing import TracedAsyncpgConnection, trace_enabled
+                    from dal.util.row_limits import get_sync_max_rows
 
-                    if trace_enabled():
+                    sync_max_rows = get_sync_max_rows()
+                    if trace_enabled() or sync_max_rows:
                         yield TracedAsyncpgConnection(
                             conn,
                             provider=cls._query_target_provider,
                             execution_model=cls.get_query_target_capabilities().execution_model,
+                            max_rows=sync_max_rows,
                         )
                     else:
                         yield conn
@@ -482,12 +485,15 @@ class Database:
                         "SELECT set_config('app.current_tenant', $1, true)", str(tenant_id)
                     )
                 from dal.tracing import TracedAsyncpgConnection, trace_enabled
+                from dal.util.row_limits import get_sync_max_rows
 
-                if trace_enabled():
+                sync_max_rows = get_sync_max_rows()
+                if trace_enabled() or sync_max_rows:
                     yield TracedAsyncpgConnection(
                         conn,
                         provider=cls._query_target_provider,
                         execution_model=cls.get_query_target_capabilities().execution_model,
+                        max_rows=sync_max_rows,
                     )
                 else:
                     yield conn

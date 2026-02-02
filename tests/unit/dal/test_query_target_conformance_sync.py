@@ -33,6 +33,23 @@ async def test_sqlite_query_target_conformance(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sqlite_query_target_max_rows_guardrail(tmp_path, monkeypatch):
+    """Ensure optional sync max-rows guardrail truncates SQLite results."""
+    monkeypatch.setenv("DAL_SYNC_MAX_ROWS", "1")
+
+    db_path = tmp_path / "sqlite-guardrail.db"
+    await SqliteQueryTargetDatabase.init(str(db_path))
+
+    async with SqliteQueryTargetDatabase.get_connection() as conn:
+        await conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+        await conn.execute("INSERT INTO items (name) VALUES ($1)", "alpha")
+        await conn.execute("INSERT INTO items (name) VALUES ($1)", "beta")
+
+        rows = await conn.fetch("SELECT id, name FROM items ORDER BY id")
+        assert rows == [{"id": 1, "name": "alpha"}]
+
+
+@pytest.mark.asyncio
 async def test_duckdb_query_target_conformance(tmp_path):
     """Validate DuckDB query-target fetch/execute invariants."""
     duckdb = pytest.importorskip("duckdb")
@@ -59,3 +76,27 @@ async def test_duckdb_query_target_conformance(tmp_path):
 
         value = await conn.fetchval("SELECT name FROM items WHERE id = $1", 1)
         assert value == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_duckdb_query_target_sync_max_rows(tmp_path, monkeypatch):
+    """Ensure optional sync max-rows guardrail truncates DuckDB results."""
+    duckdb = pytest.importorskip("duckdb")
+    _ = duckdb
+
+    monkeypatch.setenv("DAL_SYNC_MAX_ROWS", "1")
+
+    from dal.duckdb import DuckDBConfig, DuckDBQueryTargetDatabase
+
+    db_path = tmp_path / "duckdb-guardrail.duckdb"
+    await DuckDBQueryTargetDatabase.init(
+        DuckDBConfig(path=str(db_path), query_timeout_seconds=5, max_rows=3)
+    )
+
+    async with DuckDBQueryTargetDatabase.get_connection() as conn:
+        await conn.execute("CREATE TABLE items (id INTEGER, name TEXT)")
+        await conn.execute("INSERT INTO items VALUES ($1, $2)", 1, "alpha")
+        await conn.execute("INSERT INTO items VALUES ($1, $2)", 2, "beta")
+
+        rows = await conn.fetch("SELECT id, name FROM items ORDER BY id")
+        assert rows == [{"id": 1, "name": "alpha"}]

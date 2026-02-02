@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from dal.clickhouse.config import ClickHouseConfig
 from dal.clickhouse.param_translation import translate_postgres_params_to_clickhouse
 from dal.tracing import trace_query_operation
+from dal.util.row_limits import cap_rows, get_sync_max_rows
 
 
 class ClickHouseQueryTargetDatabase:
@@ -43,10 +44,12 @@ class ClickHouseQueryTargetDatabase:
             password=cls._config.password,
             secure=cls._config.secure,
         )
+        sync_max_rows = get_sync_max_rows()
         wrapper = _ClickHouseConnection(
             conn,
             query_timeout_seconds=cls._config.query_timeout_seconds,
             max_rows=cls._config.max_rows,
+            sync_max_rows=sync_max_rows,
         )
         try:
             yield wrapper
@@ -57,10 +60,11 @@ class ClickHouseQueryTargetDatabase:
 class _ClickHouseConnection:
     """Adapter providing asyncpg-like helpers over ClickHouse."""
 
-    def __init__(self, conn, query_timeout_seconds: int, max_rows: int) -> None:
+    def __init__(self, conn, query_timeout_seconds: int, max_rows: int, sync_max_rows: int) -> None:
         self._conn = conn
         self._query_timeout_seconds = query_timeout_seconds
         self._max_rows = max_rows
+        self._sync_max_rows = sync_max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
@@ -78,9 +82,10 @@ class _ClickHouseConnection:
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         async def _run():
             rows = await self._run_query(sql, list(params))
-            if self._max_rows and len(rows) > self._max_rows:
-                rows = rows[: self._max_rows]
-            return rows
+            limit = self._max_rows
+            if self._sync_max_rows:
+                limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
+            return cap_rows(rows, limit)
 
         return await trace_query_operation(
             "dal.query.execute",
