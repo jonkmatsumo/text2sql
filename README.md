@@ -325,6 +325,14 @@ Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
 - `CACHE_STORE_PROVIDER` — defaults to Postgres
 
+### Supported Query Targets (Backlog Additions)
+- YugabyteDB (YSQL): Postgres-compatible, uses postgres path
+- CockroachDB: Postgres-compatible, read-only query target
+- DuckDB: embedded analytics (local/dev)
+- ClickHouse: analytics-only query target
+- Postgres cloud variants: Aurora/RDS/Azure/Cloud SQL (docs-only)
+- MySQL cloud variants: RDS/Aurora/Azure/Cloud SQL, MariaDB (docs-only)
+
 ### P2 Query Targets Summary
 | Provider | Execution Model | Namespace | Notes |
 |---------|-----------------|-----------|-------|
