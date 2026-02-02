@@ -2,9 +2,53 @@ from uuid import uuid4
 
 import pytest
 
-from dal.query_target_config import QueryTargetConfigStatus
-from dal.query_target_config_source import QueryTargetRuntimeConfig, finalize_pending_config
+from dal.query_target_config import QueryTargetConfigRecord, QueryTargetConfigStatus
+from dal.query_target_config_source import (
+    QueryTargetRuntimeConfig,
+    finalize_pending_config,
+    load_query_target_config_selection,
+)
 from dal.query_target_config_store import QueryTargetConfigStore
+
+
+@pytest.mark.asyncio
+async def test_load_query_target_config_selection_prefers_pending(monkeypatch):
+    """Selection should return both pending and active configs when available."""
+    pending = QueryTargetConfigRecord(
+        id=uuid4(),
+        provider="postgres",
+        metadata={},
+        auth={},
+        guardrails={},
+        status=QueryTargetConfigStatus.PENDING,
+    )
+    active = QueryTargetConfigRecord(
+        id=uuid4(),
+        provider="postgres",
+        metadata={},
+        auth={},
+        guardrails={},
+        status=QueryTargetConfigStatus.ACTIVE,
+    )
+
+    async def _init():
+        return True
+
+    async def _get_pending():
+        return pending
+
+    async def _get_active():
+        return active
+
+    monkeypatch.setattr(QueryTargetConfigStore, "init", _init)
+    monkeypatch.setattr(QueryTargetConfigStore, "get_pending", _get_pending)
+    monkeypatch.setattr(QueryTargetConfigStore, "get_active", _get_active)
+
+    selection = await load_query_target_config_selection()
+    assert selection.pending is not None
+    assert selection.pending.id == pending.id
+    assert selection.active is not None
+    assert selection.active.id == active.id
 
 
 @pytest.mark.asyncio
