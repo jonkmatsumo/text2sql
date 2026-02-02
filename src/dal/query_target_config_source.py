@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from uuid import UUID
 
 from common.config.env import get_env_str
 from dal.query_target_config import QueryTargetConfigStatus
@@ -10,6 +11,7 @@ from dal.query_target_config_store import QueryTargetConfigStore
 class QueryTargetRuntimeConfig:
     """Normalized runtime config for a UI-selected query target."""
 
+    id: UUID
     provider: str
     metadata: Dict[str, Any]
     auth: Dict[str, Any]
@@ -17,21 +19,68 @@ class QueryTargetRuntimeConfig:
     status: QueryTargetConfigStatus
 
 
-async def load_query_target_runtime_config() -> Optional[QueryTargetRuntimeConfig]:
-    """Load pending/active query-target config from control-plane store."""
-    if not await QueryTargetConfigStore.init():
-        return None
+@dataclass(frozen=True)
+class QueryTargetConfigSelection:
+    """Pending/active query-target configs selected from control-plane."""
 
-    pending = await QueryTargetConfigStore.get_pending()
-    record = pending or await QueryTargetConfigStore.get_active()
-    if not record:
-        return None
+    pending: Optional[QueryTargetRuntimeConfig]
+    active: Optional[QueryTargetRuntimeConfig]
+
+
+async def load_query_target_config_selection() -> QueryTargetConfigSelection:
+    """Load pending/active query-target configs from control-plane store."""
+    if not await QueryTargetConfigStore.init():
+        return QueryTargetConfigSelection(pending=None, active=None)
+
+    pending_record = await QueryTargetConfigStore.get_pending()
+    active_record = await QueryTargetConfigStore.get_active()
+    return QueryTargetConfigSelection(
+        pending=_to_runtime_config(pending_record) if pending_record else None,
+        active=_to_runtime_config(active_record) if active_record else None,
+    )
+
+
+def _to_runtime_config(record) -> QueryTargetRuntimeConfig:
     return QueryTargetRuntimeConfig(
+        id=record.id,
         provider=record.provider,
         metadata=record.metadata,
         auth=record.auth,
         guardrails=record.guardrails,
         status=record.status,
+    )
+
+
+async def finalize_pending_config(
+    pending: QueryTargetRuntimeConfig,
+    active: Optional[QueryTargetRuntimeConfig],
+    *,
+    success: bool,
+    error_message: Optional[str] = None,
+) -> None:
+    """Finalize pending config status after init attempt."""
+    if not QueryTargetConfigStore.is_available():
+        return
+
+    if success:
+        await QueryTargetConfigStore.set_status(
+            pending.id,
+            QueryTargetConfigStatus.ACTIVE,
+            activated=True,
+        )
+        if active:
+            await QueryTargetConfigStore.set_status(
+                active.id,
+                QueryTargetConfigStatus.INACTIVE,
+                deactivated=True,
+            )
+        return
+
+    await QueryTargetConfigStore.set_status(
+        pending.id,
+        QueryTargetConfigStatus.UNHEALTHY,
+        error_code="init_failed",
+        error_message=error_message,
     )
 
 
