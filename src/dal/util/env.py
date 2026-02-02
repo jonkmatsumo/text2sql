@@ -47,6 +47,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     # Databricks aliases
     "databricks": "databricks",
     "databricks-sql": "databricks",
+    # Yugabyte aliases (YSQL)
+    "yugabyte": "postgres",
+    "ysql": "postgres",
     # Memgraph aliases
     "memgraph": "memgraph",
 }

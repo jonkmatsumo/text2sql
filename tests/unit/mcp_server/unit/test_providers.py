@@ -16,6 +16,8 @@ class TestNormalizeProvider:
         assert normalize_provider("postgresql") == "postgres"
         assert normalize_provider("postgres") == "postgres"
         assert normalize_provider("pg") == "postgres"
+        assert normalize_provider("yugabyte") == "postgres"
+        assert normalize_provider("ysql") == "postgres"
 
     def test_memgraph_alias(self):
         """Test Memgraph alias normalizes correctly."""
@@ -53,6 +55,8 @@ class TestNormalizeProvider:
         assert "postgresql" in PROVIDER_ALIASES
         assert "postgres" in PROVIDER_ALIASES
         assert "pg" in PROVIDER_ALIASES
+        assert "yugabyte" in PROVIDER_ALIASES
+        assert "ysql" in PROVIDER_ALIASES
         # Memgraph alias
         assert "memgraph" in PROVIDER_ALIASES
 
