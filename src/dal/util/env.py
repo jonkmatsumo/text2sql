@@ -56,6 +56,9 @@ PROVIDER_ALIASES: dict[str, str] = {
     "crdb": "cockroachdb",
     # DuckDB aliases
     "duckdb": "duckdb",
+    # ClickHouse aliases
+    "clickhouse": "clickhouse",
+    "ch": "clickhouse",
     # Memgraph aliases
     "memgraph": "memgraph",
 }

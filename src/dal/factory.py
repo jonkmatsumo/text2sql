@@ -313,6 +313,10 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.duckdb import DuckDBSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["duckdb"] = DuckDBSchemaIntrospector
+        if "clickhouse" not in SCHEMA_INTROSPECTOR_PROVIDERS:
+            from dal.clickhouse import ClickHouseSchemaIntrospector
+
+            SCHEMA_INTROSPECTOR_PROVIDERS["clickhouse"] = ClickHouseSchemaIntrospector
 
         from common.config.env import get_env_str
         from dal.util.env import normalize_provider

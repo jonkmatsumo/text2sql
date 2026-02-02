@@ -90,4 +90,12 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
         )
+    if normalized == "clickhouse":
+        return BackendCapabilities(
+            execution_model="sync",
+            supports_arrays=False,
+            supports_json_ops=False,
+            supports_transactions=False,
+            supports_fk_enforcement=False,
+        )
     return BackendCapabilities()
