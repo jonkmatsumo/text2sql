@@ -298,6 +298,20 @@ Notes:
 - Unity Catalog is required for schema introspection (system.information_schema)
 - Uses the Statement Execution API (no legacy Hive metastore support)
 
+### DuckDB Query Target (Embedded)
+Use DuckDB as an embedded query target for local/dev analytics.
+
+```bash
+QUERY_TARGET_BACKEND=duckdb
+DUCKDB_PATH=:memory:
+DUCKDB_QUERY_TIMEOUT_SECS=30
+DUCKDB_MAX_ROWS=1000
+```
+
+Notes:
+- Install `duckdb` in your environment for DuckDB support
+- Intended for local/dev usage (no shared server)
+
 ### Redshift Query Target (Sync, Postgres-Compatible)
 Use Amazon Redshift as the query-target database. The control plane remains Postgres-only.
 
