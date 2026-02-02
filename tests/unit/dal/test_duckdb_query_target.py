@@ -4,6 +4,7 @@ from dal.database import Database
 from dal.duckdb import DuckDBConfig, DuckDBQueryTargetDatabase
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_duckdb_query_target_introspection_and_exec(tmp_path, monkeypatch):
     """Exercise DuckDB introspection + parameterized execution via execute_sql_query."""

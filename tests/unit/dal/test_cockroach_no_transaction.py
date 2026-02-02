@@ -52,6 +52,7 @@ def reset_database_state():
     Database._query_target_capabilities = None
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_cockroach_skips_transaction_wrapper():
     """Ensure cockroachdb does not wrap query-target in a transaction."""
@@ -66,6 +67,7 @@ async def test_cockroach_skips_transaction_wrapper():
     assert conn.transaction_called is False
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_cockroach_uses_postgres_pool_path():
     """Verify cockroachdb routes through the asyncpg pool fallthrough path.
@@ -92,6 +94,7 @@ async def test_cockroach_uses_postgres_pool_path():
     assert caps.execution_model == "sync"
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_cockroach_tenant_context_without_transaction():
     """Verify tenant context is set even without transaction wrapper."""

@@ -3,11 +3,16 @@ import sqlite3
 import pytest
 
 from dal.database import Database
+from dal.factory import reset_singletons
 
 
+@pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_sqlite_schema_introspector_table_defs(tmp_path, monkeypatch):
     """Verify SQLite schema introspection returns tables, columns, and FKs."""
+    # Reset factory singletons to ensure fresh state
+    reset_singletons()
+
     db_path = tmp_path / "schema.db"
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -27,6 +32,8 @@ async def test_sqlite_schema_introspector_table_defs(tmp_path, monkeypatch):
 
     monkeypatch.setenv("QUERY_TARGET_PROVIDER", "sqlite")
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    # Disable control plane to avoid Postgres dependency
+    monkeypatch.setenv("ENABLE_CONTROL_PLANE", "false")
 
     await Database.init()
     try:

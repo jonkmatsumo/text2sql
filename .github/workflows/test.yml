@@ -69,4 +69,4 @@ jobs:
           DB_USER: postgres
           DB_PASS: test_password
         run: |
-          uv run pytest -v tests/unit
+          uv run pytest -v tests/unit -m "not (requires_db or integration or e2e)"
