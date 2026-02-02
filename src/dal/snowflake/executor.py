@@ -67,10 +67,17 @@ def _fetch(
     max_rows: Optional[int],
 ) -> List[Dict[str, Any]]:
     cursor = conn.get_results_from_sfqid(job_id)
-    rows = cursor.fetchall()
-    if max_rows is not None:
-        rows = rows[:max_rows]
     columns = [desc[0] for desc in cursor.description] if cursor.description else []
+    batch_size = min(1000, max_rows) if max_rows else 1000
+    rows: List[tuple] = []
+    while True:
+        batch = cursor.fetchmany(batch_size)
+        if not batch:
+            break
+        rows.extend(batch)
+        if max_rows is not None and len(rows) >= max_rows:
+            rows = rows[:max_rows]
+            break
     return [dict(zip(columns, row)) for row in rows]
 
 
