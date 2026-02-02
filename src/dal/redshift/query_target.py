@@ -70,14 +70,14 @@ class RedshiftQueryTargetDatabase:
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
         """Yield a Redshift connection wrapper (tenant context is a no-op)."""
         _ = tenant_id
+        _ = read_only
         if cls._pool is None:
             raise RuntimeError(
                 "Redshift pool not initialized. Call RedshiftQueryTargetDatabase.init()."
             )
 
         async with cls._pool.acquire() as conn:
-            async with conn.transaction(readonly=read_only):
-                yield _RedshiftConnection(conn)
+            yield _RedshiftConnection(conn)
 
 
 class _RedshiftConnection:

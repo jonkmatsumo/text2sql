@@ -90,9 +90,6 @@ class TestRedshiftQueryTargetDatabase:
 
         # Setup mock pool and connection
         mock_conn = AsyncMock()
-        mock_conn.transaction = MagicMock(
-            return_value=AsyncMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())
-        )
 
         mock_pool = AsyncMock()
         mock_pool.acquire = MagicMock(
@@ -105,8 +102,33 @@ class TestRedshiftQueryTargetDatabase:
 
         async with RedshiftQueryTargetDatabase.get_connection() as conn:
             assert conn is not None
+            assert conn._conn is mock_conn
 
         # Cleanup
+        RedshiftQueryTargetDatabase._pool = None
+
+    @pytest.mark.asyncio
+    async def test_get_connection_does_not_start_transaction(self):
+        """Verify Redshift connection does not enter an explicit transaction."""
+        from dal.redshift.query_target import RedshiftQueryTargetDatabase
+
+        mock_conn = AsyncMock()
+        mock_conn.transaction = MagicMock()
+
+        mock_pool = AsyncMock()
+        mock_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock()
+            )
+        )
+
+        RedshiftQueryTargetDatabase._pool = mock_pool
+
+        async with RedshiftQueryTargetDatabase.get_connection():
+            pass
+
+        mock_conn.transaction.assert_not_called()
+
         RedshiftQueryTargetDatabase._pool = None
 
     @pytest.mark.asyncio
