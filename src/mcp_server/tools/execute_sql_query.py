@@ -7,6 +7,7 @@ from typing import Optional
 import asyncpg
 
 from dal.database import Database
+from dal.error_classification import maybe_classify_error
 
 TOOL_NAME = "execute_sql_query"
 
@@ -95,6 +96,16 @@ async def handler(
             return json.dumps(result, default=str, separators=(",", ":"))
 
         except asyncpg.PostgresError as e:
-            return json.dumps({"error": f"Database Error: {str(e)}"})
+            error_message = f"Database Error: {str(e)}"
+            payload = {"error": error_message}
+            category = maybe_classify_error(Database.get_query_target_provider(), e)
+            if category:
+                payload["error_category"] = category
+            return json.dumps(payload)
         except Exception as e:
-            return json.dumps({"error": f"Execution Error: {str(e)}"})
+            error_message = f"Execution Error: {str(e)}"
+            payload = {"error": error_message}
+            category = maybe_classify_error(Database.get_query_target_provider(), e)
+            if category:
+                payload["error_category"] = category
+            return json.dumps(payload)
