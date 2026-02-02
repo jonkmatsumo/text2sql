@@ -333,6 +333,14 @@ Notes:
 - Ensure SSL is enabled (`DB_SSLMODE=require` if your deployment wiring supports it).
 - Provide root certs via deployment tooling (not handled by the DAL).
 
+### MySQL Cloud Variants + MariaDB (Docs-Only)
+RDS MySQL / Aurora MySQL / Azure MySQL / Cloud SQL for MySQL (and MariaDB) work via the
+standard mysql query-target path (MariaDB uses the mysql alias).
+
+Notes:
+- Managed MySQL typically requires SSL; set the SSL mode in deployment tooling.
+- Server settings like `sql_mode` and `lower_case_table_names` can affect case sensitivity.
+
 ### Supported Query Targets (Backlog Additions)
 - YugabyteDB (YSQL): Postgres-compatible, uses postgres path
 - CockroachDB: Postgres-compatible, read-only query target
