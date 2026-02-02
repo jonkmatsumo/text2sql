@@ -17,6 +17,20 @@ KNOWN_PROVIDERS = {
     "clickhouse",
 }
 
+QUERY_TARGET_ALLOWED = {
+    "postgres",
+    "sqlite",
+    "mysql",
+    "snowflake",
+    "redshift",
+    "bigquery",
+    "athena",
+    "databricks",
+    "cockroachdb",
+    "duckdb",
+    "clickhouse",
+}
+
 # Async warehouse providers (execution_model == "async")
 ASYNC_PROVIDERS = {"snowflake", "bigquery", "athena", "databricks"}
 
@@ -42,6 +56,10 @@ class TestCapabilitiesCompleteness:
             assert isinstance(
                 caps, BackendCapabilities
             ), f"{provider} did not return BackendCapabilities"
+
+    def test_known_providers_match_query_target_allowlist(self):
+        """Known provider set should match query-target allowlist."""
+        assert KNOWN_PROVIDERS == QUERY_TARGET_ALLOWED
 
     def test_unknown_provider_returns_defaults(self):
         """Unknown providers should return the default (Postgres-like) capabilities."""
