@@ -212,5 +212,8 @@ Async warehouses (Snowflake, BigQuery, Athena, Databricks) enforce timeouts and 
 ### Redshift Notes
 Redshift query targets avoid explicit transaction wrappers; compatibility guardrails still apply.
 
+### Postgres Cloud Notes
+Managed Postgres variants (Aurora, RDS, Azure Database for PostgreSQL, Cloud SQL for PostgreSQL) work via `QUERY_TARGET_BACKEND=postgres`. Configure connectivity/TLS at the deployment layer; the DAL does not abstract vendor-specific SSL configuration.
+
 ### Observability
 OTEL-based observability is mandatory for trace storage and debugging. The stack is automatically initialized during `make up`.
