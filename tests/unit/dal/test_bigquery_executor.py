@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import pytest
@@ -69,3 +70,41 @@ async def test_bigquery_executor_submit_poll_fetch(monkeypatch):
 
     rows = await executor.fetch(job_id, max_rows=10)
     assert rows == [{"ok": 1}]
+
+
+@pytest.mark.asyncio
+async def test_bigquery_executor_fetch_timeout_calls_cancel(monkeypatch):
+    """Verify fetch timeout triggers job cancel."""
+
+    class _SlowJob(_FakeJob):
+        def result(self, max_results=None, timeout=None):
+            _ = max_results, timeout
+            import time
+
+            time.sleep(0.05)
+            return [{"ok": 1}]
+
+    class _SlowClient(_FakeClient):
+        def __init__(self, project=None):
+            super().__init__(project=project)
+            self._job = _SlowJob("job-123")
+
+    fake_bigquery = types.SimpleNamespace(Client=_SlowClient, QueryJobConfig=_FakeQueryJobConfig)
+    fake_cloud = types.SimpleNamespace(bigquery=fake_bigquery)
+    monkeypatch.setitem(
+        __import__("sys").modules, "google", types.SimpleNamespace(cloud=fake_cloud)
+    )
+    monkeypatch.setitem(__import__("sys").modules, "google.cloud", fake_cloud)
+    monkeypatch.setitem(__import__("sys").modules, "google.cloud.bigquery", fake_bigquery)
+
+    executor = BigQueryAsyncQueryExecutor(
+        project="proj",
+        location=None,
+        timeout_seconds=0.001,
+        max_rows=1000,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await executor.fetch("job-123", max_rows=10)
+
+    assert executor._client._job._cancelled is True

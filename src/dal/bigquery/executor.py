@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.async_utils import with_timeout
 from dal.tracing import trace_query_operation
 
 
@@ -70,13 +71,16 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
             operation=asyncio.to_thread(_get_job, self._client, job_id, self._location),
         )
         limit = max_rows if max_rows is not None else self._max_rows
-        rows = await asyncio.to_thread(
-            _fetch_rows,
-            job,
-            limit,
-            self._timeout_seconds,
+        return await with_timeout(
+            asyncio.to_thread(
+                _fetch_rows,
+                job,
+                limit,
+                self._timeout_seconds,
+            ),
+            timeout_seconds=self._timeout_seconds,
+            on_timeout=lambda: self.cancel(job_id),
         )
-        return rows
 
     async def cancel(self, job_id: str) -> None:
         """Cancel a running query."""
