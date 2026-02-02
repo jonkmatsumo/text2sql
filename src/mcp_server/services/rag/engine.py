@@ -7,6 +7,8 @@ import numpy as np
 from fastembed import TextEmbedding
 
 from common.interfaces.vector_index import VectorIndex
+from dal.feature_flags import experimental_features_enabled
+from dal.type_normalization import normalize_type_for_display
 from ingestion.vector_indexes.factory import create_vector_index
 
 from .schema_loader import SchemaLoader
@@ -119,6 +121,8 @@ def generate_schema_document(
     for col in columns:
         col_name = col["column_name"]
         col_type = col["data_type"]
+        if experimental_features_enabled():
+            col_type = normalize_type_for_display(str(col_type))
         nullable = "nullable" if col["is_nullable"] == "YES" else "required"
 
         # Add semantic hints based on column name patterns
