@@ -325,6 +325,14 @@ Optional overrides for storage backends:
 - `GRAPH_STORE_PROVIDER` — defaults to Memgraph
 - `CACHE_STORE_PROVIDER` — defaults to Postgres
 
+### Postgres Cloud Variants (Docs-Only)
+Aurora PostgreSQL / RDS PostgreSQL / Azure Database for PostgreSQL / Cloud SQL for Postgres
+work via the standard postgres query-target path.
+
+Notes:
+- Ensure SSL is enabled (`DB_SSLMODE=require` if your deployment wiring supports it).
+- Provide root certs via deployment tooling (not handled by the DAL).
+
 ### Supported Query Targets (Backlog Additions)
 - YugabyteDB (YSQL): Postgres-compatible, uses postgres path
 - CockroachDB: Postgres-compatible, read-only query target
