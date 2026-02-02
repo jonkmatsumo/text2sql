@@ -189,5 +189,15 @@ Switch between supported databases by setting `QUERY_TARGET_BACKEND` (e.g., `pos
 
 Each backend requires specific environment variables for connection (e.g., `DB_HOST`, `SNOWFLAKE_ACCOUNT`, etc.). Refer to the Data Abstraction Layer (DAL) documentation or `.env.example` for specific credential requirements.
 
+### DAL Feature Flags
+- `DAL_EXPERIMENTAL_FEATURES=true` enables opt-in features like schema cache, error classification metadata, and display-only type normalization.
+- `DAL_TRACE_QUERIES=true` emits DAL query spans with hashed SQL only (no raw SQL).
+
+### Async Provider Guardrails
+Async warehouses (Snowflake, BigQuery, Athena, Databricks) enforce timeouts and attempt cancellation on deadline. Configure provider-specific `*_QUERY_TIMEOUT_SECS` and `*_MAX_ROWS` in `.env.example`.
+
+### Redshift Notes
+Redshift query targets avoid explicit transaction wrappers; compatibility guardrails still apply.
+
 ### Observability
 OTEL-based observability is mandatory for trace storage and debugging. The stack is automatically initialized during `make up`.
