@@ -171,6 +171,31 @@ async def test_athena_executor_pagination_respects_max_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_athena_executor_pagination_fetches_remaining(monkeypatch):
+    """Verify pagination fetches only remaining rows on later pages."""
+    fake_client = _FakePaginatedAthenaClient()
+    fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", fake_boto3)
+
+    executor = AthenaAsyncQueryExecutor(
+        region="us-east-1",
+        workgroup="primary",
+        output_location="s3://bucket/out/",
+        database="db",
+        timeout_seconds=5,
+        max_rows=3,
+    )
+
+    rows = await executor.fetch("paginated-exec-1", max_rows=3)
+
+    assert len(rows) == 3
+    assert rows[0] == {"id": "1", "name": "Alice"}
+    assert rows[2] == {"id": "3", "name": "Charlie"}
+    assert fake_client._call_count == 2
+    assert fake_client._max_results_calls == [4, 1]
+
+
+@pytest.mark.asyncio
 async def test_athena_executor_skips_header_row(monkeypatch):
     """Verify header row (matching column names) is correctly skipped."""
     fake_client = _FakeAthenaClient()
