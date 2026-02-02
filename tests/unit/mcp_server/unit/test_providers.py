@@ -60,6 +60,12 @@ class TestNormalizeProvider:
         # Memgraph alias
         assert "memgraph" in PROVIDER_ALIASES
 
+    def test_all_aliases_resolve_to_canonical(self):
+        """Ensure every alias resolves to its canonical provider."""
+        for alias, canonical in PROVIDER_ALIASES.items():
+            assert normalize_provider(alias) == canonical
+            assert normalize_provider(canonical) == canonical
+
 
 class TestGetProviderEnv:
     """Tests for get_provider_env function."""
