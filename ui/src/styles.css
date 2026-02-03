@@ -1209,6 +1209,34 @@ body {
   gap: 16px;
 }
 
+.trace-compare__delta-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.trace-compare__control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.trace-compare__control-group select,
+.trace-compare__control-group input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
 .trace-compare__summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -36,6 +36,9 @@ export default function TraceCompare() {
   const [rightError, setRightError] = useState<string | null>(null);
   const [focusedStage, setFocusedStage] = useState<string | null>(null);
   const isLoading = leftLoading || rightLoading;
+  const [showOnlyDeltas, setShowOnlyDeltas] = useState(false);
+  const [deltaThreshold, setDeltaThreshold] = useState(0);
+  const [deltaSort, setDeltaSort] = useState<"delta" | "left" | "right">("delta");
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -109,6 +112,32 @@ export default function TraceCompare() {
     const rightStages = buildStageRollups(rightSpans);
     return alignStages(leftStages, rightStages);
   }, [leftSpans, rightSpans]);
+
+  const filteredStages = useMemo(() => {
+    return alignedStages.filter((stage) => {
+      if (!showOnlyDeltas) return true;
+      const leftDuration = stage.left?.totalDurationMs ?? 0;
+      const rightDuration = stage.right?.totalDurationMs ?? 0;
+      const delta = Math.abs(leftDuration - rightDuration);
+      return delta >= deltaThreshold;
+    });
+  }, [alignedStages, showOnlyDeltas, deltaThreshold]);
+
+  const sortedStages = useMemo(() => {
+    const list = [...filteredStages];
+    list.sort((a, b) => {
+      const leftDelta = Math.abs((a.left?.totalDurationMs ?? 0) - (a.right?.totalDurationMs ?? 0));
+      const rightDelta = Math.abs((b.left?.totalDurationMs ?? 0) - (b.right?.totalDurationMs ?? 0));
+      if (deltaSort === "delta") {
+        return rightDelta - leftDelta;
+      }
+      if (deltaSort === "left") {
+        return (b.left?.totalDurationMs ?? 0) - (a.left?.totalDurationMs ?? 0);
+      }
+      return (b.right?.totalDurationMs ?? 0) - (a.right?.totalDurationMs ?? 0);
+    });
+    return list;
+  }, [filteredStages, deltaSort]);
 
   const renderPane = (
     sideLabel: "Left" | "Right",
@@ -262,6 +291,33 @@ export default function TraceCompare() {
             </div>
           </div>
 
+          <div className="trace-compare__delta-controls">
+            <div className="trace-compare__control-group">
+              <span>Sort by</span>
+              <select value={deltaSort} onChange={(event) => setDeltaSort(event.target.value as "delta" | "left" | "right")}>
+                <option value="delta">Delta</option>
+                <option value="left">Left duration</option>
+                <option value="right">Right duration</option>
+              </select>
+            </div>
+            <label className="trace-compare__control-group">
+              <input
+                type="checkbox"
+                checked={showOnlyDeltas}
+                onChange={(event) => setShowOnlyDeltas(event.target.checked)}
+              />
+              Show only deltas
+            </label>
+            <label className="trace-compare__control-group">
+              <span>Threshold (ms)</span>
+              <input
+                type="number"
+                min={0}
+                value={deltaThreshold}
+                onChange={(event) => setDeltaThreshold(Math.max(0, Number(event.target.value) || 0))}
+              />
+            </label>
+          </div>
           <div className="trace-compare__stages">
             <div className="trace-compare__stages-header">
               <span>Stage</span>
@@ -269,7 +325,7 @@ export default function TraceCompare() {
               <span>Right</span>
               <span>Delta</span>
             </div>
-            {alignedStages.map((stage) => {
+            {sortedStages.map((stage) => {
               const isFocused = focusedStage === stage.key;
               return (
                 <button
