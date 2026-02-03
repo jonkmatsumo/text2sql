@@ -1070,6 +1070,63 @@ body {
   border-radius: 8px;
 }
 
+.tool-inspector {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.tool-inspector__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.tool-inspector__header h4 {
+  margin: 0 0 4px 0;
+}
+
+.tool-inspector__meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.tool-inspector__header button {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-inspector__tabs {
+  margin-bottom: 10px;
+}
+
+.tool-inspector__payload {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.tool-inspector__payload-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tool-inspector__payload pre {
+  margin: 8px 0 0 0;
+  font-size: 0.78rem;
+  overflow: auto;
+}
+
 .trace-waterfall__load-more {
   display: flex;
   align-items: center;

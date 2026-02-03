@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { SpanDetail } from "../../types";
 import { ArtifactPanel } from "../artifacts/ArtifactPanel";
+import { ToolCallInspector } from "../artifacts/ToolCallInspector";
 
 interface PromptViewerProps {
   span: SpanDetail | null;
@@ -32,6 +33,9 @@ export default function PromptViewer({ span }: PromptViewerProps) {
   });
 
   const attr = span.span_attributes || {};
+  const toolInputs = payloadMap.get("telemetry.inputs_json") ?? attr["telemetry.inputs_json"];
+  const toolOutputs = payloadMap.get("telemetry.outputs_json") ?? attr["telemetry.outputs_json"];
+  const toolErrors = payloadMap.get("telemetry.error_json") ?? attr["telemetry.error_json"];
 
   const getArtifact = (type: string, attrKey: string, title: string) => {
     const content = payloadMap.get(type) ?? attr[attrKey];
@@ -69,10 +73,18 @@ export default function PromptViewer({ span }: PromptViewerProps) {
           </>
         );
       case "tool":
-        return (
+        return toolInputs || toolOutputs || toolErrors ? (
+          <ToolCallInspector
+            span={span}
+            inputs={toolInputs}
+            outputs={toolOutputs}
+            error={toolErrors}
+          />
+        ) : (
           <>
             {getArtifact("telemetry.inputs_json", "telemetry.inputs_json", "Tool Inputs")}
             {getArtifact("telemetry.outputs_json", "telemetry.outputs_json", "Tool Outputs")}
+            {getArtifact("telemetry.error_json", "telemetry.error_json", "Errors")}
           </>
         );
       case "metadata":
