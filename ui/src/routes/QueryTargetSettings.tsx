@@ -11,6 +11,7 @@ import {
   testQueryTargetSettings,
   upsertQueryTargetSettings
 } from "../api";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { useToast } from "../hooks/useToast";
 
 const providerOptions = [
@@ -161,17 +162,24 @@ export default function QueryTargetSettings() {
   const [settings, setSettings] = useState<{ active?: QueryTargetConfigResponse | null; pending?: QueryTargetConfigResponse | null }>({});
   const [form, setForm] = useState<QueryTargetConfigPayload>(defaultPayload("postgres"));
   const [configId, setConfigId] = useState<string | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [actionInFlight, setActionInFlight] = useState<"save" | "test" | "activate" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [lastTestResult, setLastTestResult] = useState<QueryTargetTestResponse | null>(null);
   const [history, setHistory] = useState<QueryTargetConfigHistoryEntry[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isActivateConfirmOpen, setIsActivateConfirmOpen] = useState(false);
+  const [isProviderConfirmOpen, setIsProviderConfirmOpen] = useState(false);
+  const [pendingProvider, setPendingProvider] = useState<string | null>(null);
+
+  const isBusy = isLoadingSettings || actionInFlight !== null;
 
   const currentProvider = form.provider;
   const metadataConfig = metadataFields[currentProvider] || [];
   const guardrailConfig = guardrailFields[currentProvider] || [];
 
   const loadSettings = useCallback(async () => {
-    setIsLoading(true);
+    setIsLoadingSettings(true);
     try {
       const data = await fetchQueryTargetSettings();
       setSettings(data);
@@ -189,7 +197,7 @@ export default function QueryTargetSettings() {
     } catch (err) {
       showToast(getErrorMessage(err), "error");
     } finally {
-      setIsLoading(false);
+      setIsLoadingSettings(false);
     }
   }, [showToast]);
 
@@ -231,14 +239,34 @@ export default function QueryTargetSettings() {
     }));
   };
 
-  const onProviderChange = (value: string) => {
+  const hasFormData = useMemo(() => {
+    const hasValues = (values: Record<string, unknown>) =>
+      Object.values(values).some((value) => value !== undefined && value !== null && value !== "");
+    return Boolean(configId) || hasValues(form.metadata) || hasValues(form.auth) || hasValues(form.guardrails);
+  }, [configId, form]);
+
+  const applyProviderChange = (value: string) => {
     setForm(defaultPayload(value));
     setConfigId(undefined);
     setLastTestResult(null);
+    setActionError(null);
+  };
+
+  const onProviderChange = (value: string) => {
+    if (value === currentProvider) {
+      return;
+    }
+    if (hasFormData) {
+      setPendingProvider(value);
+      setIsProviderConfirmOpen(true);
+      return;
+    }
+    applyProviderChange(value);
   };
 
   const handleSave = async () => {
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("save");
     try {
       const payload = {
         ...form,
@@ -255,14 +283,17 @@ export default function QueryTargetSettings() {
       showToast("Query-target settings saved", "success");
       await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
   };
 
   const handleTest = async () => {
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("test");
     try {
       const payload = {
         ...form,
@@ -278,9 +309,11 @@ export default function QueryTargetSettings() {
       await loadSettings();
       await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
   };
 
@@ -289,7 +322,8 @@ export default function QueryTargetSettings() {
       showToast("Save settings before activating", "error");
       return;
     }
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("activate");
     try {
       const record = await activateQueryTargetSettings(configId);
       setSettings((prev) => ({
@@ -300,10 +334,38 @@ export default function QueryTargetSettings() {
       showToast("Activation queued. Restart required.", "info");
       await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
+  };
+
+  const requestActivate = () => {
+    if (!configId) {
+      showToast("Save settings before activating", "error");
+      return;
+    }
+    setIsActivateConfirmOpen(true);
+  };
+
+  const confirmActivate = async () => {
+    setIsActivateConfirmOpen(false);
+    await handleActivate();
+  };
+
+  const confirmProviderChange = () => {
+    if (pendingProvider) {
+      applyProviderChange(pendingProvider);
+    }
+    setPendingProvider(null);
+    setIsProviderConfirmOpen(false);
+  };
+
+  const cancelProviderChange = () => {
+    setPendingProvider(null);
+    setIsProviderConfirmOpen(false);
   };
 
   const authFields = useMemo(() => {
@@ -378,6 +440,7 @@ export default function QueryTargetSettings() {
             <select
               value={currentProvider}
               onChange={(event) => onProviderChange(event.target.value)}
+              disabled={isBusy}
               style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border)", width: "100%" }}
             >
               {providerOptions.map((option) => (
@@ -386,6 +449,7 @@ export default function QueryTargetSettings() {
                 </option>
               ))}
             </select>
+            {isLoadingSettings && <div className="loading" style={{ marginTop: "8px" }}>Loading settings...</div>}
           </div>
 
           <div style={{ display: "grid", gap: "16px" }}>
@@ -478,16 +542,21 @@ export default function QueryTargetSettings() {
           </div>
 
           <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
-            <button className="btn" onClick={handleSave} disabled={isLoading}>
-              Save Settings
+            <button className="btn" onClick={handleSave} disabled={isBusy}>
+              {actionInFlight === "save" ? "Saving..." : "Save Settings"}
             </button>
-            <button className="btn secondary" onClick={handleTest} disabled={isLoading}>
-              Test Connection
+            <button className="btn secondary" onClick={handleTest} disabled={isBusy}>
+              {actionInFlight === "test" ? "Testing..." : "Test Connection"}
             </button>
-            <button className="btn ghost" onClick={handleActivate} disabled={isLoading}>
-              Activate (Restart Required)
+            <button className="btn ghost" onClick={requestActivate} disabled={isBusy}>
+              {actionInFlight === "activate" ? "Activating..." : "Activate (Restart Required)"}
             </button>
           </div>
+          {actionError && (
+            <div className="error-banner" style={{ marginTop: "16px" }}>
+              {actionError}
+            </div>
+          )}
           {latestError && (
             <div className="error-banner" style={{ marginTop: "16px" }}>
               <div style={{ fontWeight: 600, marginBottom: "4px" }}>Connection error</div>
@@ -545,6 +614,23 @@ export default function QueryTargetSettings() {
           </div>
         </details>
       </section>
+
+      <ConfirmationDialog
+        isOpen={isActivateConfirmOpen}
+        onClose={() => setIsActivateConfirmOpen(false)}
+        onConfirm={confirmActivate}
+        title="Activate query target?"
+        description="Activation will mark this configuration as pending and requires a backend restart."
+        confirmText="Activate"
+      />
+      <ConfirmationDialog
+        isOpen={isProviderConfirmOpen}
+        onClose={cancelProviderChange}
+        onConfirm={confirmProviderChange}
+        title="Switch provider?"
+        description="Switching providers will clear the current configuration form values."
+        confirmText="Switch Provider"
+      />
     </>
   );
 }
