@@ -1278,6 +1278,78 @@ body {
   overflow: auto;
 }
 
+.trace-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trace-links-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trace-links-row__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.trace-links-row__id {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.trace-links-row__attrs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  font-size: 0.75rem;
+}
+
+.trace-links-row__attr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.trace-links-row__attr strong {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.78rem;
+  word-break: break-word;
+}
+
+.trace-links-row__attr--empty {
+  grid-column: span 2;
+}
+
+.trace-links-row__details summary,
+.trace-links-list__raw summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.trace-links-row__details pre,
+.trace-links-list__raw pre {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.72rem;
+  overflow: auto;
+}
+
 @media (max-width: 960px) {
   .trace-detail__layout {
     grid-template-columns: 1fr;

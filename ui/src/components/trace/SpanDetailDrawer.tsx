@@ -2,6 +2,7 @@ import React from "react";
 import { SpanDetail } from "../../types";
 import { ArtifactPanel } from "../artifacts/ArtifactPanel";
 import { SpanEventList } from "./SpanEventList";
+import { SpanLinksList } from "./SpanLinksList";
 
 interface SpanDetailDrawerProps {
   span: SpanDetail | null;
@@ -84,12 +85,8 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
 
       {span.links && span.links.length > 0 && (
         <div className="trace-drawer__section">
-          <ArtifactPanel
-            title="Links"
-            content={span.links}
-            payloadType="span.links"
-            size={span.links.length}
-          />
+          <h4 style={{ marginBottom: "8px" }}>Links</h4>
+          <SpanLinksList links={span.links} />
         </div>
       )}
     </aside>
