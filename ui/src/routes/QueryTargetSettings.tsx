@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   activateQueryTargetSettings,
+  fetchQueryTargetHistory,
   fetchQueryTargetSettings,
   getErrorMessage,
   QueryTargetConfigPayload,
   QueryTargetConfigResponse,
+  QueryTargetConfigHistoryEntry,
   QueryTargetTestResponse,
   testQueryTargetSettings,
   upsertQueryTargetSettings
@@ -161,6 +163,8 @@ export default function QueryTargetSettings() {
   const [configId, setConfigId] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [lastTestResult, setLastTestResult] = useState<QueryTargetTestResponse | null>(null);
+  const [history, setHistory] = useState<QueryTargetConfigHistoryEntry[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   const currentProvider = form.provider;
   const metadataConfig = metadataFields[currentProvider] || [];
@@ -189,9 +193,22 @@ export default function QueryTargetSettings() {
     }
   }, [showToast]);
 
+  const loadHistory = useCallback(async () => {
+    setIsHistoryLoading(true);
+    try {
+      const data = await fetchQueryTargetHistory(20);
+      setHistory(data);
+    } catch (err) {
+      showToast(getErrorMessage(err), "error");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, [showToast]);
+
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    loadHistory();
+  }, [loadSettings, loadHistory]);
 
   const updateMetadata = (key: string, value: unknown) => {
     setForm((prev) => ({
@@ -236,6 +253,7 @@ export default function QueryTargetSettings() {
         active: record.status === "active" ? record : prev.active
       }));
       showToast("Query-target settings saved", "success");
+      await loadHistory();
     } catch (err) {
       showToast(getErrorMessage(err), "error");
     } finally {
@@ -258,6 +276,7 @@ export default function QueryTargetSettings() {
         showToast(result.error_message || "Connection test failed", "error");
       }
       await loadSettings();
+      await loadHistory();
     } catch (err) {
       showToast(getErrorMessage(err), "error");
     } finally {
@@ -279,6 +298,7 @@ export default function QueryTargetSettings() {
         active: prev.active
       }));
       showToast("Activation queued. Restart required.", "info");
+      await loadHistory();
     } catch (err) {
       showToast(getErrorMessage(err), "error");
     } finally {
@@ -481,6 +501,49 @@ export default function QueryTargetSettings() {
             </div>
           )}
         </div>
+      </section>
+
+      <section style={{ display: "grid", gap: "16px", marginTop: "24px" }}>
+        <details
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: "16px",
+            padding: "16px",
+            background: "var(--surface)"
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Recent Configuration History</summary>
+          <div style={{ marginTop: "12px", display: "grid", gap: "12px" }}>
+            {isHistoryLoading && <div className="loading">Loading history...</div>}
+            {!isHistoryLoading && history.length === 0 && (
+              <div style={{ color: "var(--muted)" }}>No history entries yet.</div>
+            )}
+            {!isHistoryLoading &&
+              history.map((entry) => {
+                const provider =
+                  typeof entry.snapshot?.provider === "string" ? entry.snapshot.provider : "Unknown";
+                const timestamp = entry.created_at
+                  ? new Date(entry.created_at).toLocaleString()
+                  : "Unknown time";
+                const eventLabel = entry.event_type.replace(/_/g, " ");
+                return (
+                  <div
+                    key={entry.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "160px 120px 1fr",
+                      gap: "12px",
+                      alignItems: "center"
+                    }}
+                  >
+                    <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>{timestamp}</div>
+                    <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{eventLabel}</div>
+                    <div>{provider}</div>
+                  </div>
+                );
+              })}
+          </div>
+        </details>
       </section>
     </>
   );

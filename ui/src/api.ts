@@ -683,6 +683,14 @@ export interface QueryTargetTestResponse {
   error_category?: string | null;
 }
 
+export interface QueryTargetConfigHistoryEntry {
+  id: string;
+  config_id: string;
+  event_type: string;
+  snapshot: Record<string, unknown>;
+  created_at?: string | null;
+}
+
 export async function fetchQueryTargetSettings(): Promise<QueryTargetSettingsResponse> {
   const response = await fetch(`${uiApiBase}/settings/query-target`, {
     headers: getAuthHeaders()
@@ -731,6 +739,18 @@ export async function activateQueryTargetSettings(
   });
   if (!response.ok) {
     await throwApiError(response, "Failed to activate query-target settings");
+  }
+  return response.json();
+}
+
+export async function fetchQueryTargetHistory(
+  limit: number = 20
+): Promise<QueryTargetConfigHistoryEntry[]> {
+  const response = await fetch(`${uiApiBase}/settings/query-target/history?limit=${limit}`, {
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to fetch query-target history");
   }
   return response.json();
 }
