@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -22,7 +23,10 @@ def test_get_query_target_settings(monkeypatch):
     """Return active and pending configs via settings endpoint."""
     client = TestClient(app)
     active = _record(QueryTargetConfigStatus.ACTIVE)
-    pending = _record(QueryTargetConfigStatus.PENDING)
+    pending = replace(
+        _record(QueryTargetConfigStatus.PENDING),
+        last_error_code="unsupported_provider",
+    )
 
     monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
 
@@ -40,6 +44,7 @@ def test_get_query_target_settings(monkeypatch):
     data = response.json()
     assert data["active"]["status"] == "active"
     assert data["pending"]["status"] == "pending"
+    assert data["pending"]["last_error_category"] == "unsupported"
 
 
 def test_upsert_query_target_settings_validation_error(monkeypatch):
@@ -126,6 +131,7 @@ def test_test_query_target_settings_records_result(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["ok"] is False
+    assert response.json()["error_category"] == "auth"
     assert recorded["config_id"] == config_id
     assert recorded["status"] == "failed"
 

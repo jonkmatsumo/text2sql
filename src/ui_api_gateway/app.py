@@ -119,9 +119,38 @@ app = FastAPI(title="Text2SQL UI API Gateway", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 
 
+ERROR_CATEGORIES = {
+    "auth",
+    "connectivity",
+    "timeout",
+    "resource_exhausted",
+    "syntax",
+    "unsupported",
+    "transient",
+    "unknown",
+}
+
+ERROR_CATEGORY_BY_CODE = {
+    "missing_secret": "auth",
+    "connection_error": "connectivity",
+    "unsupported_provider": "unsupported",
+    "athena_start_failed": "transient",
+    "databricks_submit_failed": "transient",
+}
+
+
+def _derive_error_category(error_code: Optional[str]) -> Optional[str]:
+    if not error_code:
+        return None
+    if error_code in ERROR_CATEGORIES:
+        return error_code
+    return ERROR_CATEGORY_BY_CODE.get(error_code)
+
+
 def _build_error_response(exc: MCPError, request_id: str = None) -> dict:
     """Build a standardized error response payload."""
-    return {
+    error_category = exc.details.get("error_category") if exc.details else None
+    payload = {
         "error": {
             "message": exc.message,
             "code": exc.code,
@@ -129,6 +158,9 @@ def _build_error_response(exc: MCPError, request_id: str = None) -> dict:
             "request_id": request_id,
         }
     }
+    if error_category:
+        payload["error"]["error_category"] = error_category
+    return payload
 
 
 @app.exception_handler(MCPTimeoutError)
@@ -234,6 +266,7 @@ class QueryTargetConfigResponse(BaseModel):
     last_test_status: Optional[str] = None
     last_error_code: Optional[str] = None
     last_error_message: Optional[str] = None
+    last_error_category: Optional[str] = None
 
 
 class QueryTargetSettingsResponse(BaseModel):
@@ -249,6 +282,7 @@ class QueryTargetTestResponse(BaseModel):
     ok: bool
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    error_category: Optional[str] = None
 
 
 def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetConfigResponse:
@@ -263,6 +297,7 @@ def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetCon
         last_test_status=record.last_test_status,
         last_error_code=record.last_error_code,
         last_error_message=record.last_error_message,
+        last_error_category=_derive_error_category(record.last_error_code),
     )
 
 
@@ -398,6 +433,7 @@ async def test_query_target_settings(payload: QueryTargetConfigPayload) -> Query
         ok=result.ok,
         error_code=result.error_code,
         error_message=result.error_message,
+        error_category=_derive_error_category(result.error_code),
     )
 
 
