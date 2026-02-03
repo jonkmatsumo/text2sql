@@ -631,6 +631,76 @@ def get_trace(trace_id: str, include_attributes: bool = False):
         return data
 
 
+def _to_ms(value: datetime) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return int(value.timestamp() * 1000)
+    try:
+        return int(datetime.fromisoformat(value).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _compute_self_time_map(spans: list[dict]) -> dict[str, int]:
+    by_id = {span["span_id"]: span for span in spans if span.get("span_id")}
+    child_intervals: dict[str, list[tuple[int, int]]] = {}
+
+    for span in spans:
+        parent_id = span.get("parent_span_id")
+        if not parent_id or parent_id not in by_id:
+            continue
+        start_ms = _to_ms(span.get("start_time"))
+        end_ms = _to_ms(span.get("end_time"))
+        if start_ms is None or end_ms is None or end_ms <= start_ms:
+            continue
+        child_intervals.setdefault(parent_id, []).append((start_ms, end_ms))
+
+    self_time = {}
+    for span_id, span in by_id.items():
+        duration = span.get("duration_ms")
+        if duration is None:
+            self_time[span_id] = None
+            continue
+        intervals = child_intervals.get(span_id, [])
+        if not intervals:
+            self_time[span_id] = int(duration)
+            continue
+        intervals.sort(key=lambda item: item[0])
+        merged = []
+        current_start, current_end = intervals[0]
+        for start, end in intervals[1:]:
+            if start <= current_end:
+                current_end = max(current_end, end)
+            else:
+                merged.append((current_start, current_end))
+                current_start, current_end = start, end
+        merged.append((current_start, current_end))
+        child_total = sum(end - start for start, end in merged)
+        self_time[span_id] = max(0, int(duration) - int(child_total))
+
+    return self_time
+
+
+def _load_self_time_map(conn, trace_id: str, max_spans: int = 5000) -> dict[str, int]:
+    spans_table = get_table_name("spans")
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT span_id, parent_span_id, start_time, end_time, duration_ms
+            FROM {spans_table}
+            WHERE trace_id = :trace_id
+            ORDER BY start_time ASC
+            """
+        ),
+        {"trace_id": trace_id},
+    ).fetchall()
+    spans = [dict(row._mapping) for row in rows]
+    if len(spans) > max_spans:
+        return {}
+    return _compute_self_time_map(spans)
+
+
 def list_spans_for_trace(
     trace_id: str, limit: int = 200, offset: int = 0, include_attributes: bool = False
 ):
@@ -647,6 +717,7 @@ def list_spans_for_trace(
     params = {"trace_id": trace_id, "limit": limit, "offset": offset}
 
     with engine.connect() as conn:
+        self_time_map = _load_self_time_map(conn, trace_id)
         result = conn.execute(text(query), params)
         spans = []
         for row in result:
@@ -664,6 +735,7 @@ def list_spans_for_trace(
             if not include_attributes:
                 data.pop("span_attributes", None)
                 data.pop("events", None)
+            data["self_time_ms"] = self_time_map.get(data["span_id"])
             spans.append(data)
         return spans
 
@@ -691,6 +763,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
     payloads_table = get_table_name("span_payloads")
 
     with engine.connect() as conn:
+        self_time_map = _load_self_time_map(conn, trace_id)
         row = conn.execute(
             text(
                 f"""
@@ -715,6 +788,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
                     data[key] = json.loads(val)
                 except Exception:
                     pass
+        data["self_time_ms"] = self_time_map.get(data["span_id"])
 
         data["links"] = []
         data["payloads"] = []
