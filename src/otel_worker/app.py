@@ -127,6 +127,8 @@ async def api_list_traces(
     start_time_lte: Optional[datetime] = Query(
         None, description="Start time less than or equal to"
     ),
+    duration_min_ms: Optional[int] = Query(None, ge=0, description="Minimum duration in ms"),
+    duration_max_ms: Optional[int] = Query(None, ge=0, description="Maximum duration in ms"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     order: str = Query("desc", regex="^(asc|desc)$"),
@@ -138,6 +140,8 @@ async def api_list_traces(
             trace_id=trace_id,
             start_time_gte=start_time_gte,
             start_time_lte=start_time_lte,
+            duration_min_ms=duration_min_ms,
+            duration_max_ms=duration_max_ms,
             limit=limit,
             offset=offset,
             order=order,

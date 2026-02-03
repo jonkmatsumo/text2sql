@@ -383,6 +383,8 @@ def list_traces(
     trace_id: str = None,
     start_time_gte: datetime = None,
     start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
     limit: int = 50,
     offset: int = 0,
     order: str = "desc",
@@ -409,6 +411,12 @@ def list_traces(
     if start_time_lte:
         query += " AND start_time <= :start_time_lte"
         params["start_time_lte"] = start_time_lte
+    if duration_min_ms is not None:
+        query += " AND duration_ms >= :duration_min_ms"
+        params["duration_min_ms"] = duration_min_ms
+    if duration_max_ms is not None:
+        query += " AND duration_ms <= :duration_max_ms"
+        params["duration_max_ms"] = duration_max_ms
 
     query += f" ORDER BY start_time {order.upper()}"
     query += " LIMIT :limit OFFSET :offset"
