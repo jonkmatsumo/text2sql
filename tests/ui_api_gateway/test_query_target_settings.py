@@ -3,7 +3,11 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from dal.query_target_config import QueryTargetConfigRecord, QueryTargetConfigStatus
+from dal.query_target_config import (
+    QueryTargetConfigHistoryRecord,
+    QueryTargetConfigRecord,
+    QueryTargetConfigStatus,
+)
 from dal.query_target_test import QueryTargetTestResult
 from ui_api_gateway.app import app
 
@@ -206,3 +210,37 @@ def test_activate_query_target_settings_marks_pending(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "pending"
+
+
+def test_get_query_target_history_orders_by_recent(monkeypatch):
+    """Return history entries ordered by most recent first."""
+    client = TestClient(app)
+    entry_old = QueryTargetConfigHistoryRecord(
+        id=uuid4(),
+        config_id=uuid4(),
+        event_type="tested",
+        snapshot={"provider": "postgres"},
+        created_at="2025-01-01T10:00:00+00:00",
+    )
+    entry_new = QueryTargetConfigHistoryRecord(
+        id=uuid4(),
+        config_id=uuid4(),
+        event_type="activated",
+        snapshot={"provider": "postgres"},
+        created_at="2025-01-02T10:00:00+00:00",
+    )
+    captured = {}
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
+
+    async def _list_history(limit: int = 50):
+        captured["limit"] = limit
+        return [entry_old, entry_new]
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.list_history", _list_history)
+
+    response = client.get("/settings/query-target/history?limit=2")
+    assert response.status_code == 200
+    data = response.json()
+    assert captured["limit"] == 2
+    assert [item["id"] for item in data] == [str(entry_new.id), str(entry_old.id)]

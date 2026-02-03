@@ -8,7 +8,11 @@ from uuid import UUID
 import asyncpg
 
 from common.config.env import get_env_int, get_env_str
-from dal.query_target_config import QueryTargetConfigRecord, QueryTargetConfigStatus
+from dal.query_target_config import (
+    QueryTargetConfigHistoryRecord,
+    QueryTargetConfigRecord,
+    QueryTargetConfigStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +248,21 @@ class QueryTargetConfigStore:
             if row:
                 await _record_history(conn, config_id, "tested", _row_to_snapshot(row))
 
+    @classmethod
+    async def list_history(cls, limit: int = 50) -> list[QueryTargetConfigHistoryRecord]:
+        """List recent query-target configuration history entries."""
+        async with cls.get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT *
+                FROM query_target_config_history
+                ORDER BY created_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+        return [_history_row_to_record(row) for row in rows]
+
 
 def _row_to_record(row: asyncpg.Record) -> QueryTargetConfigRecord:
     return QueryTargetConfigRecord(
@@ -257,6 +276,17 @@ def _row_to_record(row: asyncpg.Record) -> QueryTargetConfigRecord:
         last_test_status=row["last_test_status"],
         last_error_code=row["last_error_code"],
         last_error_message=row["last_error_message"],
+    )
+
+
+def _history_row_to_record(row: asyncpg.Record) -> QueryTargetConfigHistoryRecord:
+    created_at = row["created_at"].isoformat() if row["created_at"] else None
+    return QueryTargetConfigHistoryRecord(
+        id=row["id"],
+        config_id=row["config_id"],
+        event_type=row["event_type"],
+        snapshot=row["snapshot_json"] or {},
+        created_at=created_at,
     )
 
 

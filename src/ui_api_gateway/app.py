@@ -285,6 +285,16 @@ class QueryTargetTestResponse(BaseModel):
     error_category: Optional[str] = None
 
 
+class QueryTargetConfigHistoryEntry(BaseModel):
+    """History entry for query-target configuration events."""
+
+    id: UUID
+    config_id: UUID
+    event_type: str
+    snapshot: Dict[str, Any]
+    created_at: Optional[str] = None
+
+
 def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetConfigResponse:
     return QueryTargetConfigResponse(
         id=record.id,
@@ -338,6 +348,36 @@ async def get_query_target_settings() -> QueryTargetSettingsResponse:
         active=_to_query_target_response(active) if active else None,
         pending=_to_query_target_response(pending) if pending else None,
     )
+
+
+@app.get(
+    "/settings/query-target/history",
+    response_model=List[QueryTargetConfigHistoryEntry],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_query_target_history(
+    limit: int = Query(50, ge=1, le=200),
+) -> List[QueryTargetConfigHistoryEntry]:
+    """Return recent query-target configuration history."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+
+    records = await QueryTargetConfigStore.list_history(limit=limit)
+    entries = [
+        QueryTargetConfigHistoryEntry(
+            id=record.id,
+            config_id=record.config_id,
+            event_type=record.event_type,
+            snapshot=record.snapshot,
+            created_at=record.created_at,
+        )
+        for record in records
+    ]
+    entries.sort(key=lambda entry: entry.created_at or "", reverse=True)
+    return entries
 
 
 @app.post(
