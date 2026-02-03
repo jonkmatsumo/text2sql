@@ -882,6 +882,16 @@ body {
   text-decoration: none;
 }
 
+.trace-facets__disclaimer {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .trace-waterfall__load-more {
   display: flex;
   align-items: center;

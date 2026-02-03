@@ -309,6 +309,8 @@ export function useTraceSearch() {
     error,
     filteredTraces,
     sortedTraces,
+    facetSource: "client" as const,
+    facetSampleCount: traces.length,
     statusCounts,
     availableStatuses,
     durationBucketCounts,

@@ -19,6 +19,8 @@ export default function TraceSearch() {
     error,
     filteredTraces,
     sortedTraces,
+    facetSource,
+    facetSampleCount,
     statusCounts,
     availableStatuses,
     durationBucketCounts,
@@ -91,6 +93,11 @@ export default function TraceSearch() {
           statusCounts={statusCounts}
           durationBucketCounts={durationBucketCounts}
           totalCount={traces.length}
+          facetDisclaimer={
+            facetSource === "client"
+              ? `Facet counts reflect only the currently loaded results (${facetSampleCount}), not the full dataset.`
+              : undefined
+          }
         />
 
         <TraceResultsTable

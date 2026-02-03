@@ -9,6 +9,7 @@ interface Props {
   statusCounts: Record<string, number>;
   durationBucketCounts: Record<string, number>;
   totalCount: number;
+  facetDisclaimer?: string;
   hasErrorCountField?: boolean; // Assume true for now or pass it
 }
 
@@ -67,6 +68,7 @@ export function TraceFacetsPanel({
   statusCounts,
   durationBucketCounts,
   totalCount,
+  facetDisclaimer,
   hasErrorCountField = true
 }: Props) {
 
@@ -101,6 +103,11 @@ export function TraceFacetsPanel({
           </button>
         )}
       </div>
+      {facetDisclaimer && (
+        <div className="trace-facets__disclaimer">
+          {facetDisclaimer}
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         {/* Status facet */}
