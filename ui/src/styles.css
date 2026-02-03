@@ -88,6 +88,68 @@ body {
   box-shadow: var(--shadow);
 }
 
+.chart-frame {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-frame__title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.chart-frame__description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.chart-frame__body {
+  min-height: 220px;
+  display: flex;
+  align-items: stretch;
+}
+
+.chart-frame__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.chart-frame__meta-items {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chart-frame__meta-item {
+  display: flex;
+  gap: 6px;
+}
+
+.chart-frame__meta-item span:first-child {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+}
+
+.chart-frame__badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .panel label {
   display: flex;
   flex-direction: column;
