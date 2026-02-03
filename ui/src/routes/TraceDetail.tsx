@@ -4,7 +4,7 @@ import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans, getErrorMessage } f
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
-import { buildWaterfallRows } from "../components/trace/waterfall/waterfall_model";
+import { buildWaterfallRows, computeCriticalPath } from "../components/trace/waterfall/waterfall_model";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
@@ -29,6 +29,7 @@ export default function TraceDetail() {
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
+  const [showCriticalPath, setShowCriticalPath] = useState(false);
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -163,6 +164,8 @@ export default function TraceDetail() {
   }, [spans, search]);
 
   const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
+
+  const criticalPath = useMemo(() => computeCriticalPath(spans), [spans]);
 
   const sortedTableSpans = useMemo(() => {
     const data = [...filteredSpans];
@@ -418,11 +421,23 @@ export default function TraceDetail() {
                             </button>
                         </div>
                     )}
+                    <div className="trace-waterfall__controls">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={showCriticalPath}
+                                onChange={(e) => setShowCriticalPath(e.target.checked)}
+                            />
+                            Show Critical Path
+                        </label>
+                    </div>
                     <WaterfallView
                         rows={rows}
                         traceStart={traceStart}
                         traceDurationMs={traceDuration}
                         onSelect={handleSpanSelect}
+                        criticalPath={criticalPath}
+                        showCriticalPath={showCriticalPath}
                     />
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
