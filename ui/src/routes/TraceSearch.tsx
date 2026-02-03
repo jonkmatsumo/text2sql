@@ -5,7 +5,9 @@ import { TraceFiltersPanel } from "../components/trace/TraceFiltersPanel";
 import { TraceFacetsPanel } from "../components/trace/TraceFacetsPanel";
 import { TraceResultsTable } from "../components/trace/TraceResultsTable";
 import { DurationHistogram } from "../components/trace/search/DurationHistogram";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { DataTrustRow } from "../components/common/DataTrustRow";
+import { CopyButton } from "../components/artifacts/CopyButton";
 
 export default function TraceSearch() {
   const {
@@ -36,6 +38,8 @@ export default function TraceSearch() {
     handleClearFilters
   } = useTraceSearch();
   const navigate = useNavigate();
+  const [compareSearchParams] = useSearchParams();
+  const searchUrl = typeof window !== "undefined" ? window.location.href : "";
   const [compareTarget, setCompareTarget] = useState<"left" | "right">("right");
 
   const { health } = useOtelHealth();
@@ -47,7 +51,7 @@ export default function TraceSearch() {
   };
 
   const handleCompareSelection = (traceId: string) => {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams(compareSearchParams);
     params.set(compareTarget, traceId);
     navigate(`/admin/traces/compare?${params.toString()}`);
   };
@@ -64,27 +68,29 @@ export default function TraceSearch() {
             </p>
           </div>
 
-          {/* Health Indicator */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                backgroundColor: isHealthLoading
-                  ? "var(--muted)"
+          <div className="trace-search__hero-actions">
+            <CopyButton text={searchUrl} label="Copy search link" />
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  backgroundColor: isHealthLoading
+                    ? "var(--muted)"
+                    : isHealthy
+                    ? "var(--accent)"
+                    : "#ef4444"
+                }}
+              />
+              <span style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                {isHealthLoading
+                  ? "Checking Telemetry..."
                   : isHealthy
-                  ? "var(--accent)"
-                  : "#ef4444"
-              }}
-            />
-            <span style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
-              {isHealthLoading
-                ? "Checking Telemetry..."
-                : isHealthy
-                ? "Telemetry System Online"
-                : "Telemetry System Unreachable"}
-            </span>
+                  ? "Telemetry System Online"
+                  : "Telemetry System Unreachable"}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -99,6 +105,24 @@ export default function TraceSearch() {
           onFiltersChange={setFilters}
           onSearch={() => loadTraces(false)}
           isLoading={isLoading}
+        />
+
+        <DataTrustRow
+          scopeLabel={
+            facetSource === "server"
+              ? facetMeta?.isSampled || facetMeta?.isTruncated
+                ? "Dataset sample (server)"
+                : "Dataset-wide (server)"
+              : `Loaded subset (${facetSampleCount} traces)`
+          }
+          totalCount={facetTotalCount}
+          filteredCount={filteredTraces.length}
+          isSampled={facetMeta?.isSampled ?? null}
+          sampleRate={facetMeta?.sampleRate ?? null}
+          isTruncated={facetMeta?.isTruncated ?? null}
+          asOf={aggregationAsOf}
+          windowStart={aggregationWindow?.start ?? null}
+          windowEnd={aggregationWindow?.end ?? null}
         />
 
         <div className="trace-search__compare-target">
@@ -138,22 +162,6 @@ export default function TraceSearch() {
           }}
           onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
         />
-
-        {facetSource === "server" && (
-          <div className="trace-search__trust">
-            <span>Total: {facetTotalCount.toLocaleString()} traces</span>
-            {facetMeta?.isSampled && (
-              <span>Sampled ({facetMeta.sampleRate ? `${Math.round(facetMeta.sampleRate * 100)}%` : "rate unknown"})</span>
-            )}
-            {facetMeta?.isTruncated && <span>Truncated results</span>}
-            {aggregationAsOf && <span>As of {new Date(aggregationAsOf).toLocaleString()}</span>}
-            {aggregationWindow?.start && aggregationWindow?.end && (
-              <span>
-                Window: {new Date(aggregationWindow.start).toLocaleString()} → {new Date(aggregationWindow.end).toLocaleString()}
-              </span>
-            )}
-          </div>
-        )}
 
         <TraceFacetsPanel
           facets={facets}

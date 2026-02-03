@@ -157,6 +157,13 @@ body {
   font-weight: 600;
 }
 
+.trace-search__hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .panel input {
   padding: 10px 12px;
   border-radius: 10px;
@@ -1171,6 +1178,38 @@ body {
 .trace-search__compare-buttons button.active {
   background: var(--accent);
   color: #fff;
+}
+
+.data-trust-row {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.data-trust-row__scope {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.data-trust-row__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.data-trust-row__label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }
 
 .trace-compare__form {
