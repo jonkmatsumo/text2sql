@@ -1,6 +1,7 @@
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
 
@@ -103,7 +104,7 @@ class QueryTargetConfigStore:
                     auth = EXCLUDED.auth,
                     guardrails = EXCLUDED.guardrails,
                     status = EXCLUDED.status
-                RETURNING *
+                RETURNING *, (xmax = 0) AS inserted
                 """,
                 payload["provider"],
                 payload["metadata"],
@@ -111,6 +112,13 @@ class QueryTargetConfigStore:
                 payload["guardrails"],
                 payload["status"],
             )
+            if row:
+                try:
+                    inserted = row["inserted"]
+                except Exception:
+                    inserted = False
+                event_type = "created" if inserted else "updated"
+                await _record_history(conn, row["id"], event_type, _row_to_snapshot(row))
         return _row_to_record(row)
 
     @classmethod
@@ -181,7 +189,7 @@ class QueryTargetConfigStore:
     ) -> None:
         """Update status fields for a config."""
         async with cls.get_connection() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 """
                 UPDATE query_target_configs
                 SET status = $2,
@@ -198,6 +206,15 @@ class QueryTargetConfigStore:
                 activated,
                 deactivated,
             )
+            if not row:
+                return
+            snapshot = _row_to_snapshot(row)
+            if status == QueryTargetConfigStatus.UNHEALTHY:
+                await _record_history(conn, config_id, "unhealthy", snapshot)
+            if activated:
+                await _record_history(conn, config_id, "activated", snapshot)
+            if deactivated:
+                await _record_history(conn, config_id, "deactivated", snapshot)
 
     @classmethod
     async def record_test_result(
@@ -209,7 +226,7 @@ class QueryTargetConfigStore:
     ) -> None:
         """Record last test-connection result."""
         async with cls.get_connection() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 """
                 UPDATE query_target_configs
                 SET last_tested_at = NOW(),
@@ -217,12 +234,15 @@ class QueryTargetConfigStore:
                     last_error_code = $3,
                     last_error_message = $4
                 WHERE id = $1
+                RETURNING *
                 """,
                 config_id,
                 status,
                 error_code,
                 error_message,
             )
+            if row:
+                await _record_history(conn, config_id, "tested", _row_to_snapshot(row))
 
 
 def _row_to_record(row: asyncpg.Record) -> QueryTargetConfigRecord:
@@ -238,3 +258,49 @@ def _row_to_record(row: asyncpg.Record) -> QueryTargetConfigRecord:
         last_error_code=row["last_error_code"],
         last_error_message=row["last_error_message"],
     )
+
+
+async def _record_history(
+    conn: asyncpg.Connection,
+    config_id: UUID,
+    event_type: str,
+    snapshot: Dict[str, Any],
+) -> None:
+    payload = json.dumps(snapshot)
+    await conn.execute(
+        """
+        INSERT INTO query_target_config_history (config_id, event_type, snapshot_json)
+        VALUES ($1, $2, $3::jsonb)
+        """,
+        config_id,
+        event_type,
+        payload,
+    )
+
+
+def _row_to_snapshot(row: asyncpg.Record) -> Dict[str, Any]:
+    def _safe_get(field: str):
+        try:
+            return row[field]
+        except Exception:
+            return None
+
+    def _format_ts(value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+    return {
+        "id": str(_safe_get("id")),
+        "provider": _safe_get("provider"),
+        "metadata": _safe_get("metadata") or {},
+        "auth": _safe_get("auth") or {},
+        "guardrails": _safe_get("guardrails") or {},
+        "status": _safe_get("status"),
+        "last_tested_at": _format_ts(_safe_get("last_tested_at")),
+        "last_test_status": _safe_get("last_test_status"),
+        "last_error_code": _safe_get("last_error_code"),
+        "last_error_message": _safe_get("last_error_message"),
+        "created_at": _format_ts(_safe_get("created_at")),
+        "updated_at": _format_ts(_safe_get("updated_at")),
+        "activated_at": _format_ts(_safe_get("activated_at")),
+        "deactivated_at": _format_ts(_safe_get("deactivated_at")),
+    }
