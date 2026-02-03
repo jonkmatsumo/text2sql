@@ -1173,6 +1173,69 @@ body {
   cursor: pointer;
 }
 
+.trace-compare__grid {
+  display: grid;
+  gap: 16px;
+}
+
+.trace-compare__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.trace-compare__card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.trace-compare__card h4 {
+  margin: 0 0 8px 0;
+}
+
+.trace-compare__card-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.trace-compare__stages {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.trace-compare__stages-header {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.trace-compare__stage-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+  text-align: left;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.trace-compare__stage-row.is-focused {
+  background: #eef2ff;
+}
+
 .tool-inspector {
   border: 1px solid var(--border);
   border-radius: 12px;
