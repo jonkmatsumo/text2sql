@@ -16,6 +16,11 @@ is **introspection-only** and **does not mutate** provider state.
 - Default: 300 seconds
 - No background refresh (read-through only)
 
+## Size Limits / LRU
+- Configurable max entries via `DAL_SCHEMA_CACHE_MAX_ENTRIES`
+- Default: 1000 entries
+- LRU eviction runs after inserts (expired entries are pruned first)
+
 ## Manual Invalidation
 - Clear all
 - Clear by provider
