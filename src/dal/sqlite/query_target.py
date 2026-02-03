@@ -6,7 +6,7 @@ import aiosqlite
 
 from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
 from dal.tracing import trace_query_operation
-from dal.util.row_limits import cap_rows, get_sync_max_rows
+from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
 class SqliteQueryTargetDatabase:
@@ -50,6 +50,12 @@ class _SqliteConnection:
     def __init__(self, conn: aiosqlite.Connection, max_rows: int) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._last_truncated = False
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
@@ -72,7 +78,11 @@ class _SqliteConnection:
         async def _run():
             cursor = await self._conn.execute(sql, bound_params)
             rows = await cursor.fetchall()
-            return cap_rows([dict(row) for row in rows], self._max_rows)
+            capped_rows, truncated = cap_rows_with_metadata(
+                [dict(row) for row in rows], self._max_rows
+            )
+            self._last_truncated = truncated
+            return capped_rows
 
         return await trace_query_operation(
             "dal.query.execute",

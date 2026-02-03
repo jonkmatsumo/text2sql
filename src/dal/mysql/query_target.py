@@ -6,7 +6,7 @@ import aiomysql
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
 from dal.mysql.quoting import translate_double_quotes_to_backticks
 from dal.tracing import trace_query_operation
-from dal.util.row_limits import cap_rows, get_sync_max_rows
+from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
 class MysqlQueryTargetDatabase:
@@ -92,6 +92,12 @@ class _MysqlConnection:
     def __init__(self, conn: aiomysql.Connection, max_rows: int) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._last_truncated = False
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql = translate_double_quotes_to_backticks(sql)
@@ -118,7 +124,9 @@ class _MysqlConnection:
             async with self._conn.cursor() as cursor:
                 await cursor.execute(sql, bound_params)
                 rows = await cursor.fetchall()
-                return cap_rows(list(rows), self._max_rows)
+                capped_rows, truncated = cap_rows_with_metadata(list(rows), self._max_rows)
+                self._last_truncated = truncated
+                return capped_rows
 
         return await trace_query_operation(
             "dal.query.execute",
@@ -135,6 +143,7 @@ class _MysqlConnection:
         async def _run():
             async with self._conn.cursor() as cursor:
                 await cursor.execute(sql, bound_params)
+                self._last_truncated = False
                 return await cursor.fetchone()
 
         return await trace_query_operation(

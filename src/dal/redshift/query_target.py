@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from dal.tracing import trace_query_operation
+from dal.util.row_limits import cap_rows_with_metadata
 
 
 class RedshiftQueryTargetDatabase:
@@ -89,6 +90,12 @@ class _RedshiftConnection:
     def __init__(self, conn: asyncpg.Connection, max_rows: int) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._last_truncated = False
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
@@ -105,9 +112,11 @@ class _RedshiftConnection:
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         async def _run():
             rows = await self._conn.fetch(sql, *params)
-            from dal.util.row_limits import cap_rows
-
-            return cap_rows([dict(row) for row in rows], self._max_rows)
+            capped_rows, truncated = cap_rows_with_metadata(
+                [dict(row) for row in rows], self._max_rows
+            )
+            self._last_truncated = truncated
+            return capped_rows
 
         return await trace_query_operation(
             "dal.query.execute",
