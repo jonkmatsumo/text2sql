@@ -43,6 +43,7 @@ class SpanSummary(BaseModel):
     start_time: datetime
     end_time: datetime
     duration_ms: int
+    self_time_ms: Optional[int] = None
     span_attributes: Optional[Dict[str, Any]] = None
     events: Optional[List[Dict[str, Any]]] = None
 
@@ -52,6 +53,58 @@ class SpanDetail(SpanSummary):
 
     links: Optional[List[Dict[str, Any]]] = None
     payloads: Optional[List[Dict[str, Any]]] = None
+
+
+class DurationHistogramBin(BaseModel):
+    """Histogram bin for duration distribution."""
+
+    start_ms: int
+    end_ms: int
+    count: int
+
+
+class TraceAggregationFacets(BaseModel):
+    """Facet counts returned from trace aggregations."""
+
+    service: Dict[str, int]
+    status: Dict[str, int]
+    error: Dict[str, int]
+
+
+class TraceAggregationPercentiles(BaseModel):
+    """Duration percentiles for traces."""
+
+    p50_ms: Optional[float] = None
+    p95_ms: Optional[float] = None
+    p99_ms: Optional[float] = None
+
+
+class TraceAggregationSampling(BaseModel):
+    """Sampling metadata for aggregations."""
+
+    is_sampled: bool = False
+    sample_rate: Optional[float] = None
+
+
+class TraceAggregationTruncation(BaseModel):
+    """Truncation metadata for aggregations."""
+
+    is_truncated: bool = False
+    limit: Optional[int] = None
+
+
+class TraceAggregationsResponse(BaseModel):
+    """Aggregated trace search metadata."""
+
+    total_count: int
+    facet_counts: TraceAggregationFacets
+    duration_histogram: List[DurationHistogramBin]
+    percentiles: TraceAggregationPercentiles
+    sampling: TraceAggregationSampling
+    truncation: TraceAggregationTruncation
+    as_of: datetime
+    window_start: Optional[datetime] = None
+    window_end: Optional[datetime] = None
 
 
 class PaginatedTracesResponse(BaseModel):

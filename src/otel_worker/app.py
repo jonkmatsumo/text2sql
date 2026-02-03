@@ -19,6 +19,7 @@ from otel_worker.models.api import (
     PaginatedSpansResponse,
     PaginatedTracesResponse,
     SpanDetail,
+    TraceAggregationsResponse,
     TraceDetail,
 )
 from otel_worker.otlp.parser import (
@@ -28,6 +29,7 @@ from otel_worker.otlp.parser import (
 )
 from otel_worker.storage.minio import get_blob_by_url, get_trace_blob, init_minio
 from otel_worker.storage.postgres import (
+    compute_trace_aggregations,
     enqueue_ingestion,
     get_metrics_preview,
     get_span_detail,
@@ -150,6 +152,46 @@ async def api_list_traces(
     except Exception as e:
         logger.error(f"Error listing traces: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch traces")
+
+
+@app.get("/api/v1/traces/aggregations", response_model=TraceAggregationsResponse)
+async def api_trace_aggregations(
+    service: Optional[str] = Query(None, description="Filter by service name"),
+    trace_id: Optional[str] = Query(None, description="Exact trace ID lookup"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    has_errors: Optional[str] = Query(
+        None, regex="^(yes|no)$", description="Filter by error presence"
+    ),
+    start_time_gte: Optional[datetime] = Query(
+        None, description="Start time greater than or equal to"
+    ),
+    start_time_lte: Optional[datetime] = Query(
+        None, description="Start time less than or equal to"
+    ),
+    duration_min_ms: Optional[int] = Query(None, ge=0, description="Minimum duration in ms"),
+    duration_max_ms: Optional[int] = Query(None, ge=0, description="Maximum duration in ms"),
+):
+    """Return aggregated trace counts and histogram metadata."""
+    try:
+        data = compute_trace_aggregations(
+            service=service,
+            trace_id=trace_id,
+            status=status,
+            has_errors=has_errors,
+            start_time_gte=start_time_gte,
+            start_time_lte=start_time_lte,
+            duration_min_ms=duration_min_ms,
+            duration_max_ms=duration_max_ms,
+        )
+        return TraceAggregationsResponse(
+            **data,
+            as_of=datetime.utcnow(),
+            window_start=start_time_gte,
+            window_end=start_time_lte,
+        )
+    except Exception as e:
+        logger.error(f"Error computing trace aggregations: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute aggregations")
 
 
 @app.get("/api/v1/traces/{trace_id}", response_model=TraceDetail)

@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import threading
 from collections import deque
@@ -415,6 +416,187 @@ def list_traces(
     with engine.connect() as conn:
         result = conn.execute(text(query), params)
         return [dict(row._mapping) for row in result]
+
+
+def _build_trace_filter_clause(
+    service: str = None,
+    trace_id: str = None,
+    status: str = None,
+    has_errors: str = None,
+    start_time_gte: datetime = None,
+    start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
+):
+    clauses = []
+    params = {}
+
+    if service:
+        clauses.append("service_name = :service")
+        params["service"] = service
+    if trace_id:
+        clauses.append("trace_id = :trace_id")
+        params["trace_id"] = trace_id
+    if status:
+        clauses.append("status = :status")
+        params["status"] = status
+    if has_errors == "yes":
+        clauses.append("error_count > 0")
+    elif has_errors == "no":
+        clauses.append("error_count = 0")
+    if start_time_gte:
+        clauses.append("start_time >= :start_time_gte")
+        params["start_time_gte"] = start_time_gte
+    if start_time_lte:
+        clauses.append("start_time <= :start_time_lte")
+        params["start_time_lte"] = start_time_lte
+    if duration_min_ms is not None:
+        clauses.append("duration_ms >= :duration_min_ms")
+        params["duration_min_ms"] = duration_min_ms
+    if duration_max_ms is not None:
+        clauses.append("duration_ms <= :duration_max_ms")
+        params["duration_max_ms"] = duration_max_ms
+
+    where = " AND ".join(clauses) if clauses else "1=1"
+    return where, params
+
+
+def _compute_histogram_bins(values: list[int], bin_count: int = 20):
+    if not values:
+        return []
+    min_val = min(values)
+    max_val = max(values)
+    span = max(1, max_val - min_val)
+    width = max(1, math.ceil(span / bin_count))
+    bins = [
+        {"start_ms": min_val + i * width, "end_ms": min_val + (i + 1) * width, "count": 0}
+        for i in range(bin_count)
+    ]
+    for value in values:
+        idx = min(bin_count - 1, max(0, (value - min_val) // width))
+        bins[int(idx)]["count"] += 1
+    return bins
+
+
+def _compute_percentiles(values: list[int]):
+    if not values:
+        return {"p50_ms": None, "p95_ms": None, "p99_ms": None}
+    sorted_vals = sorted(values)
+
+    def pick(pct: float) -> int:
+        idx = max(0, min(len(sorted_vals) - 1, math.ceil((pct / 100) * len(sorted_vals)) - 1))
+        return int(sorted_vals[idx])
+
+    return {"p50_ms": pick(50), "p95_ms": pick(95), "p99_ms": pick(99)}
+
+
+def compute_trace_aggregations(
+    service: str = None,
+    trace_id: str = None,
+    status: str = None,
+    has_errors: str = None,
+    start_time_gte: datetime = None,
+    start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
+    bin_count: int = 20,
+):
+    """Compute trace aggregation data for search facets and histograms."""
+    traces_table = get_table_name("traces")
+    where, params = _build_trace_filter_clause(
+        service=service,
+        trace_id=trace_id,
+        status=status,
+        has_errors=has_errors,
+        start_time_gte=start_time_gte,
+        start_time_lte=start_time_lte,
+        duration_min_ms=duration_min_ms,
+        duration_max_ms=duration_max_ms,
+    )
+
+    with engine.connect() as conn:
+        total_row = conn.execute(
+            text(
+                f"""
+                SELECT COUNT(*) as total_count
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchone()
+        total_count = int(total_row[0]) if total_row else 0
+
+        service_rows = conn.execute(
+            text(
+                f"""
+                SELECT service_name, COUNT(*) as count
+                FROM {traces_table}
+                WHERE {where}
+                GROUP BY service_name
+                """
+            ),
+            params,
+        ).fetchall()
+        service_counts = {row[0]: int(row[1]) for row in service_rows if row[0] is not None}
+
+        status_rows = conn.execute(
+            text(
+                f"""
+                SELECT status, COUNT(*) as count
+                FROM {traces_table}
+                WHERE {where}
+                GROUP BY status
+                """
+            ),
+            params,
+        ).fetchall()
+        status_counts = {row[0].lower(): int(row[1]) for row in status_rows if row[0] is not None}
+
+        error_rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                    SUM(CASE WHEN error_count > 0 THEN 1 ELSE 0 END) as has_errors,
+                    SUM(CASE WHEN error_count = 0 THEN 1 ELSE 0 END) as no_errors
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchone()
+        error_counts = {
+            "has_errors": int(error_rows[0] or 0),
+            "no_errors": int(error_rows[1] or 0),
+        }
+
+        duration_rows = conn.execute(
+            text(
+                f"""
+                SELECT duration_ms
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchall()
+        durations = [int(row[0]) for row in duration_rows if row[0] is not None]
+
+    histogram = _compute_histogram_bins(durations, bin_count=bin_count)
+    percentiles = _compute_percentiles(durations)
+
+    return {
+        "total_count": total_count,
+        "facet_counts": {
+            "service": service_counts,
+            "status": status_counts,
+            "error": error_counts,
+        },
+        "duration_histogram": histogram,
+        "percentiles": percentiles,
+        "sampling": {"is_sampled": False, "sample_rate": 1.0},
+        "truncation": {"is_truncated": False, "limit": None},
+    }
 
 
 def get_trace(trace_id: str, include_attributes: bool = False):
