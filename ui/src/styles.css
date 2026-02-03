@@ -862,6 +862,29 @@ body {
   font-weight: 500;
 }
 
+.trace-waterfall__controls-toggle {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.trace-waterfall__controls-toggle button {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.trace-waterfall__controls-toggle button.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
 .trace-waterfall__limit-banner {
   margin: 8px 12px 12px;
   padding: 10px 12px;

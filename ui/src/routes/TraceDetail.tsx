@@ -10,6 +10,7 @@ import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 import { computeSpanCoverage } from "../components/trace/trace_coverage";
+import { TraceGraphView } from "../components/trace/graph/TraceGraphView";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 const SPAN_PAGE_LIMIT = 500;
@@ -37,6 +38,7 @@ export default function TraceDetail() {
   const [sortKey, setSortKey] = useState("start_time");
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showEvents, setShowEvents] = useState(true);
+  const [traceView, setTraceView] = useState<"waterfall" | "graph">("waterfall");
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -345,7 +347,7 @@ export default function TraceDetail() {
         <div className="trace-detail__left">
           <div className="trace-panel">
             <div className="trace-panel__header">
-              <h3>Waterfall</h3>
+              <h3>Trace View</h3>
               <span className="subtitle">
                 {isSpansLoading
                   ? "Loading..."
@@ -423,25 +425,44 @@ export default function TraceDetail() {
                     )}
                     <div className="trace-waterfall__controls">
                         <div className="trace-waterfall__controls-group">
-                            <span className="trace-waterfall__controls-label">Grouped</span>
-                            <span className="trace-waterfall__controls-pill">Event type</span>
+                            <span className="trace-waterfall__controls-label">View</span>
+                            <div className="trace-waterfall__controls-toggle">
+                              <button
+                                type="button"
+                                className={traceView === "waterfall" ? "is-active" : ""}
+                                onClick={() => setTraceView("waterfall")}
+                              >
+                                Waterfall
+                              </button>
+                              <button
+                                type="button"
+                                className={traceView === "graph" ? "is-active" : ""}
+                                onClick={() => setTraceView("graph")}
+                              >
+                                Graph
+                              </button>
+                            </div>
                         </div>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={showEvents}
-                                onChange={(e) => setShowEvents(e.target.checked)}
-                            />
-                            Show Events
-                        </label>
-                        <label>
-                            <input
-                                type="checkbox"
-                                checked={showCriticalPath}
-                                onChange={(e) => setShowCriticalPath(e.target.checked)}
-                            />
-                            Show Critical Path
-                        </label>
+                        {traceView === "waterfall" && (
+                          <>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={showEvents}
+                                    onChange={(e) => setShowEvents(e.target.checked)}
+                                />
+                                Show Events
+                            </label>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={showCriticalPath}
+                                    onChange={(e) => setShowCriticalPath(e.target.checked)}
+                                />
+                                Show Critical Path
+                            </label>
+                          </>
+                        )}
                     </div>
                     {reachedMaxLimit && (totalSpanCount == null || loadedSpanCount < totalSpanCount) && (
                       <div className="trace-waterfall__limit-banner">
@@ -454,16 +475,24 @@ export default function TraceDetail() {
                         </Link>
                       </div>
                     )}
-                    <WaterfallView
-                        rows={rows}
-                        traceStart={traceStart}
-                        traceDurationMs={traceDuration}
+                    {traceView === "waterfall" ? (
+                      <WaterfallView
+                          rows={rows}
+                          traceStart={traceStart}
+                          traceDurationMs={traceDuration}
+                          onSelect={handleSpanSelect}
+                          criticalPath={criticalPath}
+                          showCriticalPath={showCriticalPath}
+                          showEvents={showEvents}
+                          selectedSpanId={selectedSpanId}
+                      />
+                    ) : (
+                      <TraceGraphView
+                        spans={filteredSpans}
                         onSelect={handleSpanSelect}
-                        criticalPath={criticalPath}
-                        showCriticalPath={showCriticalPath}
-                        showEvents={showEvents}
                         selectedSpanId={selectedSpanId}
-                    />
+                      />
+                    )}
                     {(hasMoreSpans || reachedMaxLimit) && (
                       <div className="trace-waterfall__load-more">
                         <button
