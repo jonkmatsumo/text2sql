@@ -31,6 +31,7 @@ export default function TraceDetail() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
   const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const [showEvents, setShowEvents] = useState(true);
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -431,6 +432,14 @@ export default function TraceDetail() {
                         <label>
                             <input
                                 type="checkbox"
+                                checked={showEvents}
+                                onChange={(e) => setShowEvents(e.target.checked)}
+                            />
+                            Show Events
+                        </label>
+                        <label>
+                            <input
+                                type="checkbox"
                                 checked={showCriticalPath}
                                 onChange={(e) => setShowCriticalPath(e.target.checked)}
                             />
@@ -444,6 +453,7 @@ export default function TraceDetail() {
                         onSelect={handleSpanSelect}
                         criticalPath={criticalPath}
                         showCriticalPath={showCriticalPath}
+                        showEvents={showEvents}
                         selectedSpanId={selectedSpanId}
                     />
                     {isLoadingMoreSpans && (
