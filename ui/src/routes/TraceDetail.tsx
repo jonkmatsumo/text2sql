@@ -239,6 +239,12 @@ export default function TraceDetail() {
       });
   };
 
+  const handleRevealSpan = (spanId: string) => {
+    setTraceView("waterfall");
+    handleSpanSelect(spanId);
+    waterfallViewRef.current?.scrollToSpanId(spanId);
+  };
+
   const interactionId = searchParams.get("interactionId");
 
   useEffect(() => {
@@ -679,7 +685,7 @@ export default function TraceDetail() {
         </div>
 
         <div className="trace-detail__right">
-          <PromptViewer span={selectedSpan} />
+          <PromptViewer span={selectedSpan} onRevealSpan={handleRevealSpan} />
           <ApiLinksPanel traceId={trace.trace_id} />
           <div className="trace-panel">
             <h3>Trace Attributes</h3>
@@ -698,6 +704,7 @@ export default function TraceDetail() {
           setSelectedSpan(null);
           setSelectedSpanId(null);
         }}
+        onRevealSpan={handleRevealSpan}
       />
     </div>
   );

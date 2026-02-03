@@ -1596,6 +1596,15 @@ body {
   gap: 8px;
 }
 
+.trace-event-row[role="button"] {
+  cursor: pointer;
+}
+
+.trace-event-row[role="button"]:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2);
+}
+
 .trace-event-row__header {
   display: flex;
   justify-content: space-between;

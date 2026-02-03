@@ -7,9 +7,10 @@ import { SpanLinksList } from "./SpanLinksList";
 interface SpanDetailDrawerProps {
   span: SpanDetail | null;
   onClose: () => void;
+  onRevealSpan?: (spanId: string) => void;
 }
 
-export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProps) {
+export default function SpanDetailDrawer({ span, onClose, onRevealSpan }: SpanDetailDrawerProps) {
   if (!span) return null;
 
   const attrs = span.span_attributes || {};
@@ -79,7 +80,12 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
       {span.events && span.events.length > 0 && (
         <div className="trace-drawer__section">
           <h4 style={{ marginBottom: "8px" }}>Events</h4>
-          <SpanEventList events={span.events} spanStartTime={span.start_time} />
+          <SpanEventList
+            events={span.events}
+            spanStartTime={span.start_time}
+            spanId={span.span_id}
+            onRevealSpan={onRevealSpan}
+          />
         </div>
       )}
 

@@ -5,11 +5,12 @@ import { ToolCallInspector } from "../artifacts/ToolCallInspector";
 
 interface PromptViewerProps {
   span: SpanDetail | null;
+  onRevealSpan?: (spanId: string) => void;
 }
 
 type TabType = "prompt" | "response" | "tool" | "metadata";
 
-export default function PromptViewer({ span }: PromptViewerProps) {
+export default function PromptViewer({ span, onRevealSpan }: PromptViewerProps) {
   const [activeTab, setActiveTab] = useState<TabType>("prompt");
 
   if (!span) {
@@ -79,6 +80,7 @@ export default function PromptViewer({ span }: PromptViewerProps) {
             inputs={toolInputs}
             outputs={toolOutputs}
             error={toolErrors}
+            onReveal={onRevealSpan ? () => onRevealSpan(span.span_id) : undefined}
           />
         ) : (
           <>

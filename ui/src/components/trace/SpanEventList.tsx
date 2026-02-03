@@ -3,6 +3,8 @@ import React from "react";
 interface SpanEventListProps {
   events: any[];
   spanStartTime?: string;
+  spanId?: string;
+  onRevealSpan?: (spanId: string) => void;
 }
 
 function formatDurationMs(value: number) {
@@ -30,7 +32,12 @@ function getEventTimestampMs(event: any) {
   return parsed / 1_000_000;
 }
 
-export const SpanEventList: React.FC<SpanEventListProps> = ({ events, spanStartTime }) => {
+export const SpanEventList: React.FC<SpanEventListProps> = ({
+  events,
+  spanStartTime,
+  spanId,
+  onRevealSpan
+}) => {
   const spanStartMs = spanStartTime ? new Date(spanStartTime).getTime() : null;
 
   return (
@@ -44,7 +51,12 @@ export const SpanEventList: React.FC<SpanEventListProps> = ({ events, spanStartT
         const previewEntries = entries.slice(0, 3);
 
         return (
-          <div className="trace-event-row" key={`${event?.name || "event"}-${index}`}>
+          <div
+            className="trace-event-row"
+            key={`${event?.name || "event"}-${index}`}
+            onClick={() => spanId && onRevealSpan?.(spanId)}
+            role={onRevealSpan ? "button" : undefined}
+          >
             <div className="trace-event-row__header">
               <div className="trace-event-row__title">
                 <strong>{event?.name || "event"}</strong>
