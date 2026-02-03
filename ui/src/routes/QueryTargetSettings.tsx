@@ -158,6 +158,7 @@ const errorGuidanceByCategory: Record<string, string> = {
 };
 
 export default function QueryTargetSettings() {
+  // TODO(e2e): Add workflow coverage once a UI E2E harness is available.
   const { show: showToast } = useToast();
   const [settings, setSettings] = useState<{ active?: QueryTargetConfigResponse | null; pending?: QueryTargetConfigResponse | null }>({});
   const [form, setForm] = useState<QueryTargetConfigPayload>(defaultPayload("postgres"));
