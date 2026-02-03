@@ -27,6 +27,7 @@ export default function TraceDetail() {
   const [hasPartialData, setHasPartialData] = useState(false);
 
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
   const [showCriticalPath, setShowCriticalPath] = useState(false);
@@ -191,6 +192,7 @@ export default function TraceDetail() {
 
   const handleSpanSelect = (spanId: string) => {
     if (!traceId) return;
+    setSelectedSpanId(spanId);
     fetchSpanDetail(traceId, spanId)
       .then((detail) => setSelectedSpan(detail))
       .catch((err) => {
@@ -422,6 +424,10 @@ export default function TraceDetail() {
                         </div>
                     )}
                     <div className="trace-waterfall__controls">
+                        <div className="trace-waterfall__controls-group">
+                            <span className="trace-waterfall__controls-label">Grouped</span>
+                            <span className="trace-waterfall__controls-pill">Event type</span>
+                        </div>
                         <label>
                             <input
                                 type="checkbox"
@@ -438,6 +444,7 @@ export default function TraceDetail() {
                         onSelect={handleSpanSelect}
                         criticalPath={criticalPath}
                         showCriticalPath={showCriticalPath}
+                        selectedSpanId={selectedSpanId}
                     />
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
@@ -481,7 +488,11 @@ export default function TraceDetail() {
 
             {spans.length > 0 && (
                 <>
-                    <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+                    <SpanTable
+                      spans={sortedTableSpans}
+                      onSelect={handleSpanSelect}
+                      selectedSpanId={selectedSpanId}
+                    />
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "12px", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
                             Loading more spans...
@@ -506,7 +517,13 @@ export default function TraceDetail() {
         </div>
       </div>
 
-      <SpanDetailDrawer span={selectedSpan} onClose={() => setSelectedSpan(null)} />
+      <SpanDetailDrawer
+        span={selectedSpan}
+        onClose={() => {
+          setSelectedSpan(null);
+          setSelectedSpanId(null);
+        }}
+      />
     </div>
   );
 }

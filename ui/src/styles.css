@@ -811,6 +811,11 @@ body {
   background: #fff5f5;
 }
 
+.trace-waterfall__row--selected {
+  background: #eef2ff;
+  border-left: 3px solid #6366f1;
+}
+
 .trace-waterfall__bar--critical {
   background: #ef4444 !important;
 }
@@ -824,6 +829,29 @@ body {
   border-radius: 8px;
   margin-bottom: 12px;
   font-size: 0.85rem;
+}
+
+.trace-waterfall__controls-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.trace-waterfall__controls-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.trace-waterfall__controls-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
 }
 
 .trace-waterfall__controls label {
@@ -1043,6 +1071,12 @@ body {
   background: none;
   padding: 6px 0;
   cursor: pointer;
+}
+
+.trace-span-table__row--selected {
+  background: #eef2ff;
+  border-left: 3px solid #6366f1;
+  padding-left: 8px;
 }
 
 .trace-span-table__row:hover {

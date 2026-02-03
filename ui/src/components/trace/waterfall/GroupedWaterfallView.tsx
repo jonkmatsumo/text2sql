@@ -11,6 +11,7 @@ interface GroupedWaterfallViewProps {
   onSelect: (spanId: string) => void;
   criticalPath?: Set<string>;
   showCriticalPath?: boolean;
+  selectedSpanId?: string | null;
 }
 
 type RenderableItem =
@@ -23,7 +24,8 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
   traceDurationMs,
   onSelect,
   criticalPath,
-  showCriticalPath
+  showCriticalPath,
+  selectedSpanId
 }) => {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -91,6 +93,7 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
                 totalDuration={totalDuration}
                 onSelect={onSelect}
                 isCriticalPath={isCritical}
+                isSelected={selectedSpanId === item.row.span.span_id}
               />
             );
           }

@@ -1,5 +1,5 @@
 import React from "react";
-import { WaterfallRow } from "./waterfall_model";
+import { WaterfallRow } from "./waterfall/waterfall_model";
 import { GroupedWaterfallView } from "./waterfall/GroupedWaterfallView";
 
 export { type WaterfallRow };
@@ -11,6 +11,7 @@ interface WaterfallViewProps {
   onSelect: (spanId: string) => void;
   criticalPath?: Set<string>;
   showCriticalPath?: boolean;
+  selectedSpanId?: string | null;
 }
 
 export default function WaterfallView(props: WaterfallViewProps) {

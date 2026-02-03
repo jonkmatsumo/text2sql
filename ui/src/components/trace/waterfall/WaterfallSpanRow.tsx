@@ -7,6 +7,7 @@ interface WaterfallSpanRowProps {
   totalDuration: number;
   onSelect: (spanId: string) => void;
   isCriticalPath?: boolean;
+  isSelected?: boolean;
 }
 
 function formatMs(value: number) {
@@ -19,7 +20,8 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   traceStart,
   totalDuration,
   onSelect,
-  isCriticalPath
+  isCriticalPath,
+  isSelected
 }) => {
   const startMs = new Date(row.span.start_time).getTime();
   const offsetPct = ((startMs - traceStart) / totalDuration) * 100;
@@ -28,7 +30,7 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   return (
     <button
       type="button"
-      className={`trace-waterfall__row ${isCriticalPath ? "trace-waterfall__row--critical" : ""}`}
+      className={`trace-waterfall__row${isCriticalPath ? " trace-waterfall__row--critical" : ""}${isSelected ? " trace-waterfall__row--selected" : ""}`}
       onClick={() => onSelect(row.span.span_id)}
     >
       <div className="trace-waterfall__label" style={{ paddingLeft: row.depth * 14 }}>

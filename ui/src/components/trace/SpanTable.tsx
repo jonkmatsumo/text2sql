@@ -5,6 +5,7 @@ import VirtualList from "../common/VirtualList";
 interface SpanTableProps {
   spans: SpanSummary[];
   onSelect: (spanId: string) => void;
+  selectedSpanId?: string | null;
 }
 
 function formatMs(value: number) {
@@ -12,7 +13,7 @@ function formatMs(value: number) {
   return `${(value / 1000).toFixed(2)} s`;
 }
 
-export default function SpanTable({ spans, onSelect }: SpanTableProps) {
+export default function SpanTable({ spans, onSelect, selectedSpanId }: SpanTableProps) {
   const height = Math.min(420, Math.max(220, spans.length * 36));
 
   return (
@@ -30,7 +31,7 @@ export default function SpanTable({ spans, onSelect }: SpanTableProps) {
         renderRow={(span) => (
           <button
             type="button"
-            className="trace-span-table__row"
+            className={`trace-span-table__row${selectedSpanId === span.span_id ? " trace-span-table__row--selected" : ""}`}
             onClick={() => onSelect(span.span_id)}
           >
             <span className="trace-span-table__name">{span.name}</span>
