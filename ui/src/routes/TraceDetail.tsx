@@ -11,6 +11,7 @@ import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
+const SPAN_MAX_LIMIT = 5000;
 
 export default function TraceDetail() {
   const { traceId } = useParams();
@@ -190,6 +191,13 @@ export default function TraceDetail() {
   }, [trace, spans]);
 
   const traceDuration = trace?.duration_ms ?? 0;
+  const loadedSpanCount = spans.length;
+  const totalSpanCount = trace?.span_count;
+  const totalSpanKnown = totalSpanCount != null && totalSpanCount > 0;
+  const coveragePct = totalSpanKnown
+    ? Math.min(100, Math.round((loadedSpanCount / totalSpanCount) * 100))
+    : null;
+  const reachedMaxLimit = loadedSpanCount >= SPAN_MAX_LIMIT;
 
   const handleSpanSelect = (spanId: string) => {
     if (!traceId) return;
@@ -352,9 +360,9 @@ export default function TraceDetail() {
               <span className="subtitle">
                 {isSpansLoading
                   ? "Loading..."
-                  : isLoadingMoreSpans
-                    ? `${spans.length}${trace?.span_count ? ` / ${trace.span_count}` : ""} spans (loading...)`
-                    : `${rows.length} spans`}
+                  : totalSpanKnown
+                    ? `Loaded ${loadedSpanCount} / ${totalSpanCount} spans (${coveragePct ?? 0}%)`
+                    : `Loaded ${loadedSpanCount} spans (total unknown)`}
               </span>
             </div>
 
@@ -446,6 +454,17 @@ export default function TraceDetail() {
                             Show Critical Path
                         </label>
                     </div>
+                    {reachedMaxLimit && (totalSpanCount == null || loadedSpanCount < totalSpanCount) && (
+                      <div className="trace-waterfall__limit-banner">
+                        <span>
+                          Showing first {SPAN_MAX_LIMIT.toLocaleString()} spans (UI limit).
+                          {totalSpanKnown ? ` Total spans: ${totalSpanCount}.` : " Total span count unknown."}
+                        </span>
+                        <Link to={`/admin/traces/search?trace_id=${trace.trace_id}`}>
+                          Open in Trace Search
+                        </Link>
+                      </div>
+                    )}
                     <WaterfallView
                         rows={rows}
                         traceStart={traceStart}
