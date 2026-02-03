@@ -188,14 +188,14 @@ export default function TraceDetail() {
     return matches;
   }, [spans, waterfallSearch]);
 
+  const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
+
   const waterfallMatchList = useMemo(() => {
     if (waterfallMatches.size === 0) return [];
     return rows
       .filter((row) => waterfallMatches.has(row.span.span_id))
       .map((row) => row.span.span_id);
   }, [rows, waterfallMatches]);
-
-  const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
 
   const criticalPath = useMemo(() => computeCriticalPath(spans), [spans]);
 

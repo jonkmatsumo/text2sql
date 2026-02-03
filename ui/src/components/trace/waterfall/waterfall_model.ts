@@ -18,7 +18,7 @@ export function extractSpanEventMarkers(
   if (!span.events || !Array.isArray(span.events)) return [];
 
   return span.events
-    .map((event: any) => {
+    .map((event: any): SpanEventMarker | null => {
       // OTLP uses time_unix_nano or timeUnixNano.
       // Our backend parses it as time_unix_nano (based on _parse_events in parser.py)
       // but let's be safe.
@@ -29,7 +29,7 @@ export function extractSpanEventMarkers(
       return {
         ts: eventMs - traceStartMs,
         name: event.name || "event",
-        attributes: event.attributes,
+        attributes: event.attributes as Record<string, any> | undefined,
       };
     })
     .filter((m): m is SpanEventMarker => m !== null)

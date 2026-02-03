@@ -14,13 +14,13 @@ interface ToolCallInspectorProps {
 
 function detectToolName(span: SpanDetail) {
   const attrs = span.span_attributes || {};
-  return (
+  const name =
     attrs["tool.name"] ||
     attrs["tool_name"] ||
     attrs["telemetry.tool_name"] ||
     attrs["llm.tool.name"] ||
-    span.name
-  );
+    span.name;
+  return String(name);
 }
 
 function formatPayload(payload: any) {
