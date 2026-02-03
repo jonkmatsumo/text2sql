@@ -18,6 +18,8 @@ interface Props {
   totalCount: number;
   filteredCount: number;
   onClearFilters: () => void;
+  compareTarget?: "left" | "right";
+  onSelectForCompare?: (traceId: string) => void;
 }
 
 // Helpers
@@ -108,7 +110,9 @@ export function TraceResultsTable({
   onLoadMore,
   totalCount,
   filteredCount,
-  onClearFilters
+  onClearFilters,
+  compareTarget,
+  onSelectForCompare
 }: Props) {
 
   // Logic to show/hide different states
@@ -213,6 +217,9 @@ export function TraceResultsTable({
                 currentSort={sort}
                 onSort={onSort}
               />
+              {onSelectForCompare && (
+                <th style={{ padding: "12px 8px", fontWeight: 600 }}>Compare</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -256,6 +263,24 @@ export function TraceResultsTable({
                     {trace.status}
                   </span>
                 </td>
+                {onSelectForCompare && (
+                  <td style={{ padding: "12px 8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectForCompare(trace.trace_id)}
+                      style={{
+                        padding: "4px 8px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "#fff",
+                        fontSize: "0.75rem",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Compare as {compareTarget ?? "right"}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

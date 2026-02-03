@@ -1142,6 +1142,37 @@ body {
   margin-bottom: 16px;
 }
 
+.trace-search__compare-target {
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.trace-search__compare-buttons {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.trace-search__compare-buttons button {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: inherit;
+}
+
+.trace-search__compare-buttons button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 .trace-compare__form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

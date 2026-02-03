@@ -1,10 +1,11 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 import { useTraceSearch } from "../hooks/useTraceSearch";
 import { TraceFiltersPanel } from "../components/trace/TraceFiltersPanel";
 import { TraceFacetsPanel } from "../components/trace/TraceFacetsPanel";
 import { TraceResultsTable } from "../components/trace/TraceResultsTable";
 import { DurationHistogram } from "../components/trace/search/DurationHistogram";
+import { useNavigate } from "react-router-dom";
 
 export default function TraceSearch() {
   const {
@@ -34,6 +35,8 @@ export default function TraceSearch() {
     activeFacetCount,
     handleClearFilters
   } = useTraceSearch();
+  const navigate = useNavigate();
+  const [compareTarget, setCompareTarget] = useState<"left" | "right">("right");
 
   const { health } = useOtelHealth();
   const { isHealthy, lastError: healthError } = health;
@@ -41,6 +44,12 @@ export default function TraceSearch() {
 
   const handleLoadMore = () => {
     loadTraces(true);
+  };
+
+  const handleCompareSelection = (traceId: string) => {
+    const params = new URLSearchParams();
+    params.set(compareTarget, traceId);
+    navigate(`/admin/traces/compare?${params.toString()}`);
   };
 
   return (
@@ -91,6 +100,26 @@ export default function TraceSearch() {
           onSearch={() => loadTraces(false)}
           isLoading={isLoading}
         />
+
+        <div className="trace-search__compare-target">
+          <span>Compare target</span>
+          <div className="trace-search__compare-buttons">
+            <button
+              type="button"
+              className={compareTarget === "left" ? "active" : ""}
+              onClick={() => setCompareTarget("left")}
+            >
+              Left
+            </button>
+            <button
+              type="button"
+              className={compareTarget === "right" ? "active" : ""}
+              onClick={() => setCompareTarget("right")}
+            >
+              Right
+            </button>
+          </div>
+        </div>
 
         <DurationHistogram
           traces={traces}
@@ -155,6 +184,8 @@ export default function TraceSearch() {
            totalCount={facetTotalCount}
            filteredCount={filteredTraces.length}
            onClearFilters={handleClearFilters}
+           compareTarget={compareTarget}
+           onSelectForCompare={handleCompareSelection}
         />
     </div>
   );
