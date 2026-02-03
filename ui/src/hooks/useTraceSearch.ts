@@ -31,16 +31,23 @@ interface ServerFacetPayload {
 export function useTraceSearchFacets({
   traces,
   serverFacets,
-  serverTotalCount
+  serverTotalCount,
+  serverFacetMeta
 }: {
   traces: TraceSummary[];
   serverFacets: ServerFacetPayload | null;
   serverTotalCount: number | null;
+  serverFacetMeta: { isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null;
 }) {
   const serverStatusCounts =
     serverFacets?.status || serverFacets?.status_counts || serverFacets?.statusCounts || null;
   const serverDurationCounts =
     serverFacets?.duration || serverFacets?.duration_buckets || serverFacets?.durationBuckets || null;
+  const serverHistogram =
+    serverFacets?.duration_histogram ||
+    serverFacets?.durationHistogram ||
+    serverFacets?.histograms?.duration ||
+    null;
 
   const statusCounts = useMemo(() => {
     if (serverStatusCounts && typeof serverStatusCounts === "object") {
@@ -87,6 +94,19 @@ export function useTraceSearchFacets({
     return counts;
   }, [serverDurationCounts, traces]);
 
+  const durationHistogram = useMemo(() => {
+    if (!Array.isArray(serverHistogram)) return null;
+    return serverHistogram
+      .map((bin: any) => {
+        const start = bin.start_ms ?? bin.startMs;
+        const end = bin.end_ms ?? bin.endMs;
+        const count = bin.count;
+        if (typeof start !== "number" || typeof end !== "number" || typeof count !== "number") return null;
+        return { start_ms: start, end_ms: end, count };
+      })
+      .filter(Boolean) as Array<{ start_ms: number; end_ms: number; count: number }>;
+  }, [serverHistogram]);
+
   const availableStatuses = useMemo(() => Object.keys(statusCounts), [statusCounts]);
   const facetSource = serverStatusCounts || serverDurationCounts ? "server" : "client";
   const facetSampleCount = traces.length;
@@ -95,10 +115,16 @@ export function useTraceSearchFacets({
   return {
     statusCounts,
     durationBucketCounts,
+    durationHistogram,
     availableStatuses,
     facetSource,
     facetSampleCount,
-    facetTotalCount
+    facetTotalCount,
+    facetMeta: {
+      isSampled: serverFacetMeta?.isSampled,
+      sampleRate: serverFacetMeta?.sampleRate,
+      isTruncated: serverFacetMeta?.isTruncated
+    }
   };
 }
 
@@ -232,6 +258,7 @@ export function useTraceSearch() {
   const [error, setError] = useState<string | null>(null);
   const [serverFacets, setServerFacets] = useState<ServerFacetPayload | null>(null);
   const [serverTotalCount, setServerTotalCount] = useState<number | null>(null);
+  const [serverFacetMeta, setServerFacetMeta] = useState<{ isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -245,6 +272,7 @@ export function useTraceSearch() {
     if (!append) {
       setServerFacets(null);
       setServerTotalCount(null);
+      setServerFacetMeta(null);
     }
     try {
       // In a real app we might pass filters to the API
@@ -280,6 +308,19 @@ export function useTraceSearch() {
         (data as any).total_count ?? (data as any).totalCount ?? null;
       if (typeof totalCount === "number") {
         setServerTotalCount(totalCount);
+      }
+      const isSampled =
+        (data as any).is_sampled ?? (data as any).isSampled ?? undefined;
+      const sampleRate =
+        (data as any).sample_rate ?? (data as any).sampleRate ?? undefined;
+      const isTruncated =
+        (data as any).is_truncated ?? (data as any).isTruncated ?? undefined;
+      if (isSampled !== undefined || sampleRate !== undefined || isTruncated !== undefined) {
+        setServerFacetMeta({
+          isSampled: typeof isSampled === "boolean" ? isSampled : undefined,
+          sampleRate: typeof sampleRate === "number" ? sampleRate : undefined,
+          isTruncated: typeof isTruncated === "boolean" ? isTruncated : undefined
+        });
       }
 
     } catch (err: any) {
@@ -343,14 +384,17 @@ export function useTraceSearch() {
   const {
     statusCounts,
     durationBucketCounts,
+    durationHistogram,
     availableStatuses,
     facetSource,
     facetSampleCount,
-    facetTotalCount
+    facetTotalCount,
+    facetMeta
   } = useTraceSearchFacets({
     traces,
     serverFacets,
-    serverTotalCount
+    serverTotalCount,
+    serverFacetMeta
   });
 
   const activeFacetCount =
@@ -391,9 +435,11 @@ export function useTraceSearch() {
     facetSource,
     facetSampleCount,
     facetTotalCount,
+    facetMeta,
     statusCounts,
     availableStatuses,
     durationBucketCounts,
+    durationHistogram,
     activeFacetCount,
     handleClearFilters
   };
