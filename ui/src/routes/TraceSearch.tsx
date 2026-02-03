@@ -21,6 +21,7 @@ export default function TraceSearch() {
     sortedTraces,
     facetSource,
     facetSampleCount,
+    facetTotalCount,
     statusCounts,
     availableStatuses,
     durationBucketCounts,
@@ -92,7 +93,7 @@ export default function TraceSearch() {
           availableStatuses={availableStatuses}
           statusCounts={statusCounts}
           durationBucketCounts={durationBucketCounts}
-          totalCount={traces.length}
+          totalCount={facetTotalCount}
           facetDisclaimer={
             facetSource === "client"
               ? `Facet counts reflect only the currently loaded results (${facetSampleCount}), not the full dataset.`
@@ -111,7 +112,7 @@ export default function TraceSearch() {
                direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
            }))}
            onLoadMore={handleLoadMore}
-           totalCount={traces.length}
+           totalCount={facetTotalCount}
            filteredCount={filteredTraces.length}
            onClearFilters={handleClearFilters}
         />
