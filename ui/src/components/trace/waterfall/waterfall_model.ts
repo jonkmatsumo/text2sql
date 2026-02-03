@@ -5,6 +5,37 @@ export interface WaterfallRow {
   depth: number;
 }
 
+export interface SpanEventMarker {
+  ts: number; // relative to trace start in ms
+  name: string;
+  attributes?: Record<string, any>;
+}
+
+export function extractSpanEventMarkers(
+  span: SpanSummary,
+  traceStartMs: number
+): SpanEventMarker[] {
+  if (!span.events || !Array.isArray(span.events)) return [];
+
+  return span.events
+    .map((event: any) => {
+      // OTLP uses time_unix_nano or timeUnixNano.
+      // Our backend parses it as time_unix_nano (based on _parse_events in parser.py)
+      // but let's be safe.
+      const rawTs = event.time_unix_nano || event.timeUnixNano;
+      if (!rawTs) return null;
+
+      const eventMs = Number(rawTs) / 1_000_000;
+      return {
+        ts: eventMs - traceStartMs,
+        name: event.name || "event",
+        attributes: event.attributes,
+      };
+    })
+    .filter((m): m is SpanEventMarker => m !== null)
+    .sort((a, b) => a.ts - b.ts);
+}
+
 export interface WaterfallGroup {
   id: string;
   label: string;
