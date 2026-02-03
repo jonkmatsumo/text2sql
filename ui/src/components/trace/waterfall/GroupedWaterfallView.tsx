@@ -125,6 +125,7 @@ export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, Gro
                 label={item.group.label}
                 spanCount={item.group.rows.length}
                 totalDurationMs={item.group.totalDurationMs}
+                totalSelfTimeMs={item.group.totalSelfTimeMs}
                 isExpanded={!collapsedGroups.has(item.group.id)}
                 onToggle={() => toggleGroup(item.group.id)}
                 criticalPathSpanCount={criticalPathSpanCount}

@@ -963,6 +963,11 @@ body {
   color: #fff;
 }
 
+.trace-waterfall__legend {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 .trace-waterfall__limit-banner {
   margin: 8px 12px 12px;
   padding: 10px 12px;

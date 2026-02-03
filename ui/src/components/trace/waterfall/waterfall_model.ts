@@ -42,6 +42,7 @@ export interface WaterfallGroup {
   rows: WaterfallRow[];
   isExpanded: boolean;
   totalDurationMs: number;
+  totalSelfTimeMs: number;
 }
 
 export function buildWaterfallRows(spans: SpanSummary[]): WaterfallRow[] {
@@ -123,12 +124,14 @@ export function groupWaterfallRows(
         rows: [],
         isExpanded: true,
         totalDurationMs: 0,
+        totalSelfTimeMs: 0,
       });
       groupOrder.push(key);
     }
     const group = groupsMap.get(key)!;
     group.rows.push(row);
     group.totalDurationMs += row.span.duration_ms;
+    group.totalSelfTimeMs += Number((row.span as any).self_time_ms ?? 0);
   });
 
   return groupOrder.map((key) => groupsMap.get(key)!);

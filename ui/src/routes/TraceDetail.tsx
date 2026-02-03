@@ -558,6 +558,9 @@ export default function TraceDetail() {
                                 />
                                 Show Critical Path
                             </label>
+                            <span className="trace-waterfall__legend">
+                              Self time excludes child spans
+                            </span>
                           </>
                         )}
                     </div>
