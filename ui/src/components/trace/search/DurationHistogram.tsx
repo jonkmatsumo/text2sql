@@ -58,7 +58,7 @@ export const DurationHistogram: React.FC<DurationHistogramProps> = ({
       <div className="trace-histogram__header">
         <div>
           <h3>Duration Distribution</h3>
-          <p className="subtitle">{scopeLabel}</p>
+          <span className="trace-histogram__scope">{scopeLabel}</span>
         </div>
         <div className="trace-histogram__inputs">
           <label>

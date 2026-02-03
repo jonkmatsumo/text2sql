@@ -1013,6 +1013,16 @@ body {
   margin: 0 0 4px 0;
 }
 
+.trace-histogram__scope {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
 .trace-histogram__inputs {
   display: flex;
   gap: 10px;
