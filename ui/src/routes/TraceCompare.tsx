@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { fetchTraceDetail, fetchTraceSpans } from "../api";
 import { SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import { alignStages, buildStageRollups } from "../components/trace/compare/trace_compare_model";
+import { DataTrustRow } from "../components/common/DataTrustRow";
+import { CopyButton } from "../components/artifacts/CopyButton";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 
@@ -39,6 +41,7 @@ export default function TraceCompare() {
   const [showOnlyDeltas, setShowOnlyDeltas] = useState(false);
   const [deltaThreshold, setDeltaThreshold] = useState(0);
   const [deltaSort, setDeltaSort] = useState<"delta" | "left" | "right">("delta");
+  const compareUrl = typeof window !== "undefined" ? window.location.href : "";
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -139,6 +142,21 @@ export default function TraceCompare() {
     return list;
   }, [filteredStages, deltaSort]);
 
+  const leftTruncated = leftSpans.length >= 2000;
+  const rightTruncated = rightSpans.length >= 2000;
+  const leftCoveragePct = leftTrace?.span_count ? leftSpans.length / leftTrace.span_count : null;
+  const rightCoveragePct = rightTrace?.span_count ? rightSpans.length / rightTrace.span_count : null;
+  const mismatchReasons: string[] = [];
+  if (leftTruncated !== rightTruncated) {
+    mismatchReasons.push("Span fetch limits differ between sides");
+  }
+  if (leftCoveragePct != null && rightCoveragePct != null) {
+    const deltaPct = Math.abs(leftCoveragePct - rightCoveragePct);
+    if (deltaPct >= 0.1) {
+      mismatchReasons.push(`Coverage differs by ${Math.round(deltaPct * 100)}%`);
+    }
+  }
+
   const renderPane = (
     sideLabel: "Left" | "Right",
     trace: TraceDetailModel | null,
@@ -152,6 +170,7 @@ export default function TraceCompare() {
     const coverageText = total
       ? `Loaded ${loaded} / ${total} spans`
       : `Loaded ${loaded} spans (total unknown)`;
+    const asOf = trace?.end_time ?? trace?.start_time ?? null;
 
     return (
       <div className="trace-compare__pane">
@@ -169,18 +188,31 @@ export default function TraceCompare() {
         {sideError ? (
           <div className="trace-compare__error">{sideError}</div>
         ) : trace ? (
-          <div className="trace-compare__pane-summary">
-            <div>Duration: {formatMs(trace.duration_ms)}</div>
-            <div>Status: {trace.status}</div>
-            <div>Stage coverage: {trace.span_count ? `${trace.span_count} spans` : "unknown"}</div>
-          </div>
+          <>
+            <div className="trace-compare__pane-summary">
+              <div>Duration: {formatMs(trace.duration_ms)}</div>
+              <div>Status: {trace.status}</div>
+              <div>Stage coverage: {trace.span_count ? `${trace.span_count} spans` : "unknown"}</div>
+              <div className="trace-compare__coverage-text">{coverageText}</div>
+              {truncated && (
+                <div className="trace-compare__coverage-note">Truncated at fetch limit</div>
+              )}
+            </div>
+            <DataTrustRow
+              scopeLabel={`${sideLabel} trace span coverage`}
+              totalCount={total ?? null}
+              filteredCount={loaded}
+              isSampled={null}
+              sampleRate={null}
+              isTruncated={truncated}
+              asOf={asOf}
+              windowStart={trace.start_time ?? null}
+              windowEnd={trace.end_time ?? null}
+            />
+          </>
         ) : (
           <div className="trace-compare__empty">No trace metadata</div>
         )}
-        <div className="trace-compare__coverage">
-          <span>{coverageText}</span>
-          {truncated && <span className="trace-compare__coverage-note">truncated at fetch limit</span>}
-        </div>
       </div>
     );
   };
@@ -192,6 +224,9 @@ export default function TraceCompare() {
           <p className="kicker">Observability</p>
           <h1>Trace Comparison</h1>
           <p className="subtitle">Compare two traces side-by-side with aligned stages.</p>
+        </div>
+        <div className="trace-compare__header-actions">
+          <CopyButton text={compareUrl} label="Copy compare link" />
         </div>
       </header>
 
@@ -234,6 +269,12 @@ export default function TraceCompare() {
             </button>
           </div>
           {renderPane("Right", rightTrace, rightSpans, rightError, rightLoading)}
+        </div>
+      )}
+
+      {mismatchReasons.length > 0 && (
+        <div className="trace-compare__mismatch">
+          <strong>Data mismatch:</strong> {mismatchReasons.join(" · ")}
         </div>
       )}
 

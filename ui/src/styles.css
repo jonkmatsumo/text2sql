@@ -1375,6 +1375,27 @@ body {
   font-size: 0.85rem;
 }
 
+.trace-compare__coverage-text {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.trace-compare__header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.trace-compare__mismatch {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  font-size: 0.85rem;
+}
+
 .trace-compare__coverage {
   display: flex;
   gap: 6px;
