@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import SystemOperations from "./SystemOperations";
 import { OpsService } from "../api";
@@ -62,16 +62,20 @@ describe("SystemOperations", () => {
     const stream = MockEventSource.instances[0];
     expect(stream).toBeTruthy();
 
-    stream.emitMessage({ message: "log line 1" });
+    act(() => {
+      stream.emitMessage({ message: "log line 1" });
+    });
 
     await waitFor(() => {
       expect(screen.getByText(/log line 1/i)).toBeInTheDocument();
     });
 
-    stream.emitEvent("complete", {
-      success: true,
-      run_id: "run-1",
-      metrics: { created_count: 1, updated_count: 2 },
+    act(() => {
+      stream.emitEvent("complete", {
+        success: true,
+        run_id: "run-1",
+        metrics: { created_count: 1, updated_count: 2 },
+      });
     });
 
     await waitFor(() => {
