@@ -5,6 +5,7 @@ import {
   getErrorMessage,
   QueryTargetConfigPayload,
   QueryTargetConfigResponse,
+  QueryTargetTestResponse,
   testQueryTargetSettings,
   upsertQueryTargetSettings
 } from "../api";
@@ -142,12 +143,24 @@ const pillStyle = (status?: string) => ({
   color: status === "active" ? "#10b981" : status === "pending" ? "#f59e0b" : "#94a3b8"
 });
 
+const errorGuidanceByCategory: Record<string, string> = {
+  auth: "Verify the secret reference resolves to valid credentials for this provider.",
+  connectivity: "Check network access, host, and port from the backend environment.",
+  timeout: "The provider timed out. Try again or reduce the scope of the test.",
+  resource_exhausted: "The provider reported resource limits. Try again later or adjust capacity.",
+  syntax: "Review any SQL or identifiers for syntax issues.",
+  unsupported: "This provider or capability is not supported in this environment.",
+  transient: "The provider appears unavailable. Retry once the service is healthy.",
+  unknown: "Review provider logs or connection details for more context."
+};
+
 export default function QueryTargetSettings() {
   const { show: showToast } = useToast();
   const [settings, setSettings] = useState<{ active?: QueryTargetConfigResponse | null; pending?: QueryTargetConfigResponse | null }>({});
   const [form, setForm] = useState<QueryTargetConfigPayload>(defaultPayload("postgres"));
   const [configId, setConfigId] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
+  const [lastTestResult, setLastTestResult] = useState<QueryTargetTestResponse | null>(null);
 
   const currentProvider = form.provider;
   const metadataConfig = metadataFields[currentProvider] || [];
@@ -204,6 +217,7 @@ export default function QueryTargetSettings() {
   const onProviderChange = (value: string) => {
     setForm(defaultPayload(value));
     setConfigId(undefined);
+    setLastTestResult(null);
   };
 
   const handleSave = async () => {
@@ -215,6 +229,7 @@ export default function QueryTargetSettings() {
       };
       const record = await upsertQueryTargetSettings(payload);
       setConfigId(record.id);
+      setLastTestResult(null);
       setSettings((prev) => ({
         ...prev,
         pending: record.status === "pending" ? record : prev.pending,
@@ -236,6 +251,7 @@ export default function QueryTargetSettings() {
         config_id: configId
       };
       const result = await testQueryTargetSettings(payload);
+      setLastTestResult(result.ok ? null : result);
       if (result.ok) {
         showToast("Connection test passed", "success");
       } else {
@@ -276,6 +292,30 @@ export default function QueryTargetSettings() {
       { key: "identity_profile", label: "Identity Profile", placeholder: "aws-profile" }
     ];
   }, []);
+
+  const latestError = useMemo(() => {
+    if (lastTestResult && !lastTestResult.ok) {
+      return {
+        message: lastTestResult.error_message,
+        code: lastTestResult.error_code,
+        category: lastTestResult.error_category
+      };
+    }
+    const record = settings.pending || settings.active;
+    if (!record) return null;
+    if (!record.last_error_message && !record.last_error_code) {
+      return null;
+    }
+    return {
+      message: record.last_error_message,
+      code: record.last_error_code,
+      category: record.last_error_category
+    };
+  }, [lastTestResult, settings]);
+
+  const errorGuidance = latestError?.category
+    ? errorGuidanceByCategory[latestError.category] || null
+    : null;
 
   return (
     <>
@@ -428,6 +468,18 @@ export default function QueryTargetSettings() {
               Activate (Restart Required)
             </button>
           </div>
+          {latestError && (
+            <div className="error-banner" style={{ marginTop: "16px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Connection error</div>
+              <div>{latestError.message || "Connection test failed."}</div>
+              {latestError.code && (
+                <div style={{ marginTop: "4px", color: "var(--muted)" }}>Code: {latestError.code}</div>
+              )}
+              {errorGuidance && (
+                <div style={{ marginTop: "6px", color: "var(--muted)" }}>Guidance: {errorGuidance}</div>
+              )}
+            </div>
+          )}
         </div>
       </section>
     </>

@@ -45,6 +45,7 @@ export interface ApiErrorDetails {
   code: string;
   details?: Record<string, unknown>;
   request_id?: string;
+  error_category?: string;
 }
 
 /**
@@ -667,6 +668,7 @@ export interface QueryTargetConfigResponse {
   last_test_status?: string | null;
   last_error_code?: string | null;
   last_error_message?: string | null;
+  last_error_category?: string | null;
 }
 
 export interface QueryTargetSettingsResponse {
@@ -678,6 +680,7 @@ export interface QueryTargetTestResponse {
   ok: boolean;
   error_code?: string | null;
   error_message?: string | null;
+  error_category?: string | null;
 }
 
 export async function fetchQueryTargetSettings(): Promise<QueryTargetSettingsResponse> {
