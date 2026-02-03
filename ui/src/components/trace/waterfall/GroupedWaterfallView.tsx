@@ -1,7 +1,8 @@
 import React, { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import VirtualList, { VirtualListHandle } from "../../common/VirtualList";
-import { WaterfallRow, WaterfallGroup, groupWaterfallRows } from "./waterfall_model";
+import { WaterfallRow, WaterfallGroup, StageGroup, groupStageRows, groupWaterfallRows } from "./waterfall_model";
 import { GroupHeaderRow } from "./GroupHeaderRow";
+import { StageHeaderRow } from "./StageHeaderRow";
 import { WaterfallSpanRow } from "./WaterfallSpanRow";
 
 interface GroupedWaterfallViewProps {
@@ -21,8 +22,9 @@ export interface GroupedWaterfallHandle {
 }
 
 type RenderableItem =
-  | { type: "group"; group: WaterfallGroup }
-  | { type: "span"; row: WaterfallRow; groupKey: string };
+  | { type: "stage"; stage: StageGroup }
+  | { type: "group"; group: WaterfallGroup; stageId: string }
+  | { type: "span"; row: WaterfallRow; groupKey: string; stageId: string };
 
 export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, GroupedWaterfallViewProps>(({
   rows,
@@ -36,10 +38,11 @@ export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, Gro
   matchIds
 }, ref) => {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedStages, setCollapsedStages] = useState<Set<string>>(new Set());
   const [pendingScrollSpanId, setPendingScrollSpanId] = useState<string | null>(null);
   const listRef = useRef<VirtualListHandle | null>(null);
 
-  const groups = useMemo(() => groupWaterfallRows(rows), [rows]);
+  const stageGroups = useMemo(() => groupStageRows(rows), [rows]);
 
   const toggleGroup = (groupId: string) => {
     setCollapsedGroups(prev => {
@@ -53,30 +56,67 @@ export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, Gro
     });
   };
 
+  const toggleStage = (stageId: string) => {
+    setCollapsedStages((prev) => {
+      const next = new Set(prev);
+      if (next.has(stageId)) {
+        next.delete(stageId);
+      } else {
+        next.add(stageId);
+      }
+      return next;
+    });
+  };
+
+  const groupsByStage = useMemo(() => {
+    return stageGroups.map((stage) => ({
+      stage,
+      groups: groupWaterfallRows(stage.rows),
+    }));
+  }, [stageGroups]);
+
   const flattenedItems = useMemo(() => {
     const items: RenderableItem[] = [];
-    groups.forEach(group => {
-      items.push({ type: "group", group });
-      if (!collapsedGroups.has(group.id)) {
-        group.rows.forEach(row => {
-          items.push({ type: "span", row, groupKey: group.id });
-        });
+    groupsByStage.forEach(({ stage, groups }) => {
+      items.push({ type: "stage", stage });
+      if (collapsedStages.has(stage.id)) {
+        return;
       }
+      groups.forEach((group) => {
+        const groupKey = `${stage.id}::${group.id}`;
+        items.push({ type: "group", group, stageId: stage.id });
+        if (!collapsedGroups.has(groupKey)) {
+          group.rows.forEach((row) => {
+            items.push({ type: "span", row, groupKey, stageId: stage.id });
+          });
+        }
+      });
     });
     return items;
-  }, [groups, collapsedGroups]);
+  }, [groupsByStage, collapsedGroups, collapsedStages]);
 
   const spanToGroup = useMemo(() => {
     const mapping = new Map<string, string>();
-    groups.forEach(group => {
-      group.rows.forEach(row => mapping.set(row.span.span_id, group.id));
+    groupsByStage.forEach(({ stage, groups }) => {
+      groups.forEach((group) => {
+        const groupKey = `${stage.id}::${group.id}`;
+        group.rows.forEach((row) => mapping.set(row.span.span_id, groupKey));
+      });
     });
     return mapping;
-  }, [groups]);
+  }, [groupsByStage]);
 
   useImperativeHandle(ref, () => ({
     scrollToSpanId(spanId: string) {
       const groupId = spanToGroup.get(spanId);
+      const stageId = groupId ? groupId.split("::")[0] : null;
+      if (stageId && collapsedStages.has(stageId)) {
+        setCollapsedStages((prev) => {
+          const next = new Set(prev);
+          next.delete(stageId);
+          return next;
+        });
+      }
       if (groupId && collapsedGroups.has(groupId)) {
         setCollapsedGroups(prev => {
           const next = new Set(prev);
@@ -88,7 +128,7 @@ export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, Gro
       }
       setPendingScrollSpanId(spanId);
     }
-  }), [collapsedGroups, spanToGroup]);
+  }), [collapsedGroups, collapsedStages, spanToGroup]);
 
   useEffect(() => {
     if (!pendingScrollSpanId) return;
@@ -116,18 +156,30 @@ export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, Gro
         height={height}
         ref={listRef}
         renderRow={(item) => {
-          if (item.type === "group") {
+          if (item.type === "stage") {
+            return (
+              <StageHeaderRow
+                label={item.stage.label}
+                spanCount={item.stage.rows.length}
+                totalDurationMs={item.stage.totalDurationMs}
+                totalSelfTimeMs={item.stage.totalSelfTimeMs}
+                isExpanded={!collapsedStages.has(item.stage.id)}
+                onToggle={() => toggleStage(item.stage.id)}
+              />
+            );
+          } else if (item.type === "group") {
             const criticalPathSpanCount = showCriticalPath && criticalPath
               ? item.group.rows.filter(r => criticalPath.has(r.span.span_id)).length
               : 0;
+            const groupKey = `${item.stageId}::${item.group.id}`;
             return (
               <GroupHeaderRow
                 label={item.group.label}
                 spanCount={item.group.rows.length}
                 totalDurationMs={item.group.totalDurationMs}
                 totalSelfTimeMs={item.group.totalSelfTimeMs}
-                isExpanded={!collapsedGroups.has(item.group.id)}
-                onToggle={() => toggleGroup(item.group.id)}
+                isExpanded={!collapsedGroups.has(groupKey)}
+                onToggle={() => toggleGroup(groupKey)}
                 criticalPathSpanCount={criticalPathSpanCount}
               />
             );

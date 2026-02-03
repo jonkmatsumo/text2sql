@@ -796,6 +796,50 @@ body {
   font-family: monospace;
 }
 
+.trace-waterfall__stage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.trace-waterfall__stage-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.trace-waterfall__stage-toggle {
+  display: inline-block;
+  transform: rotate(0deg);
+  transition: transform 0.1s;
+}
+
+.trace-waterfall__stage-toggle.is-expanded {
+  transform: rotate(90deg);
+}
+
+.trace-waterfall__stage-title {
+  font-weight: 600;
+}
+
+.trace-waterfall__stage-count {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.trace-waterfall__stage-duration {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
 .trace-waterfall__group-critical-badge {
   background: #fef2f2;
   color: #991b1b;
