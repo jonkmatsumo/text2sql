@@ -13,6 +13,7 @@ interface WaterfallViewProps {
   showCriticalPath?: boolean;
   selectedSpanId?: string | null;
   showEvents?: boolean;
+  matchIds?: Set<string>;
 }
 
 export default function WaterfallView(props: WaterfallViewProps) {

@@ -9,6 +9,7 @@ interface WaterfallSpanRowProps {
   isCriticalPath?: boolean;
   isSelected?: boolean;
   showEvents?: boolean;
+  isMatch?: boolean;
 }
 
 function formatMs(value: number) {
@@ -23,7 +24,8 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   onSelect,
   isCriticalPath,
   isSelected,
-  showEvents = true
+  showEvents = true,
+  isMatch = false
 }) => {
   const startMs = new Date(row.span.start_time).getTime();
   const offsetPct = ((startMs - traceStart) / totalDuration) * 100;
@@ -41,13 +43,14 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   return (
     <button
       type="button"
-      className={`trace-waterfall__row${isCriticalPath ? " trace-waterfall__row--critical" : ""}${isSelected ? " trace-waterfall__row--selected" : ""}`}
+      className={`trace-waterfall__row${isCriticalPath ? " trace-waterfall__row--critical" : ""}${isSelected ? " trace-waterfall__row--selected" : ""}${isMatch ? " trace-waterfall__row--match" : ""}`}
       onClick={() => onSelect(row.span.span_id)}
     >
       <div className="trace-waterfall__label" style={{ paddingLeft: row.depth * 14 }}>
         <span className={`status-pill status-pill--${row.span.status_code}`}>
           {row.span.status_code.replace("STATUS_CODE_", "")}
         </span>
+        {isMatch && <span className="trace-waterfall__match-pill">Match</span>}
         <span style={{ fontWeight: isCriticalPath ? 600 : 400 }}>{row.span.name}</span>
       </div>
       <div className="trace-waterfall__bar-wrap">

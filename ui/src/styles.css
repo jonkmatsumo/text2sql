@@ -862,6 +862,41 @@ body {
   font-weight: 500;
 }
 
+.trace-waterfall__search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.trace-waterfall__search input {
+  border: none;
+  outline: none;
+  font-size: 0.8rem;
+  background: transparent;
+}
+
+.trace-waterfall__search-count {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.trace-waterfall__row--match {
+  background: #fef9c3;
+}
+
+.trace-waterfall__match-pill {
+  background: #f59e0b;
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
 .trace-waterfall__controls-toggle {
   display: inline-flex;
   border-radius: 999px;

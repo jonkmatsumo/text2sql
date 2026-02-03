@@ -39,6 +39,7 @@ export default function TraceDetail() {
   const [showCriticalPath, setShowCriticalPath] = useState(false);
   const [showEvents, setShowEvents] = useState(true);
   const [traceView, setTraceView] = useState<"waterfall" | "graph">("waterfall");
+  const [waterfallSearch, setWaterfallSearch] = useState("");
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -156,6 +157,33 @@ export default function TraceDetail() {
       return Object.keys(attrs).some((key) => key.toLowerCase().includes(q));
     });
   }, [spans, search]);
+
+  const waterfallMatches = useMemo(() => {
+    const q = waterfallSearch.trim().toLowerCase();
+    if (!q) return new Set<string>();
+    const matches = new Set<string>();
+    spans.forEach((span) => {
+      if (span.name.toLowerCase().includes(q)) {
+        matches.add(span.span_id);
+        return;
+      }
+      const attrs = span.span_attributes || {};
+      if (
+        Object.entries(attrs).some(([key, value]) => {
+          if (String(key).toLowerCase().includes(q)) return true;
+          return String(value).toLowerCase().includes(q);
+        })
+      ) {
+        matches.add(span.span_id);
+        return;
+      }
+      const serviceName = attrs["service.name"] || attrs["service_name"];
+      if (serviceName && String(serviceName).toLowerCase().includes(q)) {
+        matches.add(span.span_id);
+      }
+    });
+    return matches;
+  }, [spans, waterfallSearch]);
 
   const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
 
@@ -444,6 +472,21 @@ export default function TraceDetail() {
                             </div>
                         </div>
                         {traceView === "waterfall" && (
+                          <div className="trace-waterfall__search">
+                            <input
+                              type="text"
+                              placeholder="Search spans..."
+                              value={waterfallSearch}
+                              onChange={(event) => setWaterfallSearch(event.target.value)}
+                            />
+                            {waterfallSearch.trim() && (
+                              <span className="trace-waterfall__search-count">
+                                {waterfallMatches.size} match{waterfallMatches.size === 1 ? "" : "es"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {traceView === "waterfall" && (
                           <>
                             <label>
                                 <input
@@ -485,6 +528,7 @@ export default function TraceDetail() {
                           showCriticalPath={showCriticalPath}
                           showEvents={showEvents}
                           selectedSpanId={selectedSpanId}
+                          matchIds={waterfallMatches}
                       />
                     ) : (
                       <TraceGraphView
