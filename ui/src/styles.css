@@ -929,6 +929,38 @@ body {
   padding: 8px 0;
 }
 
+/* Segmented Control */
+.segmented-control {
+  display: flex;
+  background: var(--surface-muted);
+  padding: 4px;
+  border-radius: 10px;
+  gap: 4px;
+}
+
+.segmented-control button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.segmented-control button:hover {
+  color: var(--ink);
+}
+
+.segmented-control button.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
 .trace-span-table__header,
 .trace-span-table__row {
   display: grid;
