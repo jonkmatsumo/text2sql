@@ -1,18 +1,16 @@
 import React from "react";
 import { SpanDetail } from "../../types";
+import { ArtifactPanel } from "../artifacts/ArtifactPanel";
+import { SpanEventList } from "./SpanEventList";
+import { SpanLinksList } from "./SpanLinksList";
 
 interface SpanDetailDrawerProps {
   span: SpanDetail | null;
   onClose: () => void;
+  onRevealSpan?: (spanId: string) => void;
 }
 
-function renderJson(value: any) {
-  if (value == null) return "—";
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2);
-}
-
-export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProps) {
+export default function SpanDetailDrawer({ span, onClose, onRevealSpan }: SpanDetailDrawerProps) {
   if (!span) return null;
 
   const attrs = span.span_attributes || {};
@@ -33,14 +31,14 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
       </div>
 
       <div className="trace-drawer__section">
-        <h4>Status</h4>
+        <h4 style={{ marginBottom: "8px" }}>Status</h4>
         <span className={`status-pill status-pill--${span.status_code}`}>
           {span.status_code.replace("STATUS_CODE_", "")}
         </span>
       </div>
 
       <div className="trace-drawer__section">
-        <h4>Timing</h4>
+        <h4 style={{ marginBottom: "8px" }}>Timing</h4>
         <div className="trace-drawer__grid">
           <div>
             <span>Start</span>
@@ -54,7 +52,7 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
       </div>
 
       <div className="trace-drawer__section">
-        <h4>Token Usage</h4>
+        <h4 style={{ marginBottom: "8px" }}>Token Usage</h4>
         <div className="trace-drawer__grid">
           <div>
             <span>Prompt</span>
@@ -72,19 +70,31 @@ export default function SpanDetailDrawer({ span, onClose }: SpanDetailDrawerProp
       </div>
 
       <div className="trace-drawer__section">
-        <h4>Attributes</h4>
-        <pre>{renderJson(attrs)}</pre>
+        <ArtifactPanel
+          title="Attributes"
+          content={attrs}
+          payloadType="span.attributes"
+        />
       </div>
 
-      <div className="trace-drawer__section">
-        <h4>Events</h4>
-        <pre>{renderJson(span.events)}</pre>
-      </div>
+      {span.events && span.events.length > 0 && (
+        <div className="trace-drawer__section">
+          <h4 style={{ marginBottom: "8px" }}>Events</h4>
+          <SpanEventList
+            events={span.events}
+            spanStartTime={span.start_time}
+            spanId={span.span_id}
+            onRevealSpan={onRevealSpan}
+          />
+        </div>
+      )}
 
-      <div className="trace-drawer__section">
-        <h4>Links</h4>
-        <pre>{renderJson(span.links)}</pre>
-      </div>
+      {span.links && span.links.length > 0 && (
+        <div className="trace-drawer__section">
+          <h4 style={{ marginBottom: "8px" }}>Links</h4>
+          <SpanLinksList links={span.links} />
+        </div>
+      )}
     </aside>
   );
 }

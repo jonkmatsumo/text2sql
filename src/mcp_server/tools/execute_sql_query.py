@@ -7,7 +7,7 @@ from typing import Optional
 import asyncpg
 
 from dal.database import Database
-from dal.error_classification import maybe_classify_error
+from dal.error_classification import emit_classified_error, maybe_classify_error
 
 TOOL_NAME = "execute_sql_query"
 
@@ -98,14 +98,18 @@ async def handler(
         except asyncpg.PostgresError as e:
             error_message = f"Database Error: {str(e)}"
             payload = {"error": error_message}
-            category = maybe_classify_error(Database.get_query_target_provider(), e)
+            provider = Database.get_query_target_provider()
+            category = maybe_classify_error(provider, e)
             if category:
                 payload["error_category"] = category
+                emit_classified_error(provider, "execute_sql_query", category, e)
             return json.dumps(payload)
         except Exception as e:
             error_message = f"Execution Error: {str(e)}"
             payload = {"error": error_message}
-            category = maybe_classify_error(Database.get_query_target_provider(), e)
+            provider = Database.get_query_target_provider()
+            category = maybe_classify_error(provider, e)
             if category:
                 payload["error_category"] = category
+                emit_classified_error(provider, "execute_sql_query", category, e)
             return json.dumps(payload)

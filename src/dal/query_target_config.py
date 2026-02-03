@@ -27,3 +27,14 @@ class QueryTargetConfigRecord:
     last_test_status: Optional[str] = None
     last_error_code: Optional[str] = None
     last_error_message: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class QueryTargetConfigHistoryRecord:
+    """Persisted history entry for query-target configuration events."""
+
+    id: UUID
+    config_id: UUID
+    event_type: str
+    snapshot: Dict[str, Any]
+    created_at: Optional[str] = None

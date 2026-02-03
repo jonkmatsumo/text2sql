@@ -45,6 +45,7 @@ export interface ApiErrorDetails {
   code: string;
   details?: Record<string, unknown>;
   request_id?: string;
+  error_category?: string;
 }
 
 /**
@@ -254,6 +255,18 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
   }
   const data = await response.json();
   return data.trace_id;
+}
+
+export async function fetchBlobContent(blobUrl: string): Promise<any> {
+  const response = await fetch(blobUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch blob content: ${response.statusText}`);
+  }
+  const contentType = response.headers.get("Content-Type");
+  if (contentType?.includes("application/json")) {
+    return response.json();
+  }
+  return response.text();
 }
 
 export async function listTraces(
@@ -667,6 +680,7 @@ export interface QueryTargetConfigResponse {
   last_test_status?: string | null;
   last_error_code?: string | null;
   last_error_message?: string | null;
+  last_error_category?: string | null;
 }
 
 export interface QueryTargetSettingsResponse {
@@ -678,6 +692,15 @@ export interface QueryTargetTestResponse {
   ok: boolean;
   error_code?: string | null;
   error_message?: string | null;
+  error_category?: string | null;
+}
+
+export interface QueryTargetConfigHistoryEntry {
+  id: string;
+  config_id: string;
+  event_type: string;
+  snapshot: Record<string, unknown>;
+  created_at?: string | null;
 }
 
 export async function fetchQueryTargetSettings(): Promise<QueryTargetSettingsResponse> {
@@ -728,6 +751,18 @@ export async function activateQueryTargetSettings(
   });
   if (!response.ok) {
     await throwApiError(response, "Failed to activate query-target settings");
+  }
+  return response.json();
+}
+
+export async function fetchQueryTargetHistory(
+  limit: number = 20
+): Promise<QueryTargetConfigHistoryEntry[]> {
+  const response = await fetch(`${uiApiBase}/settings/query-target/history?limit=${limit}`, {
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to fetch query-target history");
   }
   return response.json();
 }

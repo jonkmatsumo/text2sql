@@ -24,6 +24,110 @@ export const TIME_RANGES = [
   { label: "24h", value: "24h", ms: 24 * 60 * 60 * 1000 }
 ];
 
+interface ServerFacetPayload {
+  [key: string]: any;
+}
+
+export function useTraceSearchFacets({
+  traces,
+  serverFacets,
+  serverTotalCount,
+  serverFacetMeta
+}: {
+  traces: TraceSummary[];
+  serverFacets: ServerFacetPayload | null;
+  serverTotalCount: number | null;
+  serverFacetMeta: { isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null;
+}) {
+  const serverStatusCounts =
+    serverFacets?.status || serverFacets?.status_counts || serverFacets?.statusCounts || null;
+  const serverDurationCounts =
+    serverFacets?.duration || serverFacets?.duration_buckets || serverFacets?.durationBuckets || null;
+  const serverHistogram =
+    serverFacets?.duration_histogram ||
+    serverFacets?.durationHistogram ||
+    serverFacets?.histograms?.duration ||
+    null;
+
+  const statusCounts = useMemo(() => {
+    if (serverStatusCounts && typeof serverStatusCounts === "object") {
+      const counts: Record<string, number> = {};
+      Object.entries(serverStatusCounts).forEach(([key, value]) => {
+        if (typeof value === "number") counts[key.toLowerCase()] = value;
+      });
+      return counts;
+    }
+    const counts: Record<string, number> = {};
+    traces.forEach(t => {
+      const s = t.status.toLowerCase();
+      counts[s] = (counts[s] || 0) + 1;
+    });
+    return counts;
+  }, [serverStatusCounts, traces]);
+
+  const durationBucketCounts = useMemo(() => {
+    if (serverDurationCounts && typeof serverDurationCounts === "object") {
+      const counts: Record<string, number> = {};
+      Object.entries(serverDurationCounts).forEach(([key, value]) => {
+        if (typeof value === "number") counts[key] = value;
+      });
+      DURATION_BUCKETS.forEach(b => {
+        if (counts[b.value] == null) counts[b.value] = 0;
+      });
+      if (counts["all"] == null) {
+        counts["all"] = DURATION_BUCKETS.filter(b => b.value !== "all")
+          .reduce((sum, b) => sum + (counts[b.value] || 0), 0);
+      }
+      return counts;
+    }
+    const counts: Record<string, number> = {};
+    DURATION_BUCKETS.forEach(b => counts[b.value] = 0);
+    traces.forEach(t => {
+      DURATION_BUCKETS.forEach(b => {
+        if (b.value === "all") return;
+        if (t.duration_ms >= b.min && t.duration_ms < b.max) {
+          counts[b.value]++;
+        }
+      });
+    });
+    counts["all"] = traces.length;
+    return counts;
+  }, [serverDurationCounts, traces]);
+
+  const durationHistogram = useMemo(() => {
+    if (!Array.isArray(serverHistogram)) return null;
+    return serverHistogram
+      .map((bin: any) => {
+        const start = bin.start_ms ?? bin.startMs;
+        const end = bin.end_ms ?? bin.endMs;
+        const count = bin.count;
+        if (typeof start !== "number" || typeof end !== "number" || typeof count !== "number") return null;
+        return { start_ms: start, end_ms: end, count };
+      })
+      .filter(Boolean) as Array<{ start_ms: number; end_ms: number; count: number }>;
+  }, [serverHistogram]);
+
+  const availableStatuses = useMemo(() => Object.keys(statusCounts), [statusCounts]);
+  const facetSource = serverStatusCounts || serverDurationCounts ? "server" : "client";
+  const facetSampleCount = traces.length;
+  const facetTotalCount = serverTotalCount ?? traces.length;
+
+  return {
+    statusCounts,
+    durationBucketCounts,
+    durationHistogram,
+    availableStatuses,
+    facetSource,
+    facetSampleCount,
+    facetTotalCount,
+    facetMeta: {
+      isSampled: serverFacetMeta?.isSampled,
+      sampleRate: serverFacetMeta?.sampleRate,
+      isTruncated: serverFacetMeta?.isTruncated
+    }
+  };
+}
+
 export function getRangeValues(range: string): { start_gte: string; start_lte: string } | null {
   const r = TIME_RANGES.find((tr) => tr.value === range);
   if (!r) return null;
@@ -53,6 +157,8 @@ export interface FacetFilters {
   status: string; // "all" or specific status
   durationBucket: DurationBucket;
   hasErrors: "all" | "yes" | "no";
+  durationMinMs?: number | null;
+  durationMaxMs?: number | null;
 }
 
 export interface SortState {
@@ -92,7 +198,13 @@ function parseUrlParams(searchParams: URLSearchParams): {
     facets: {
       status: searchParams.get("status") || "all",
       durationBucket: (searchParams.get("duration") as DurationBucket) || "all",
-      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all"
+      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all",
+      durationMinMs: searchParams.get("duration_min_ms")
+        ? parseInt(searchParams.get("duration_min_ms") || "0", 10)
+        : null,
+      durationMaxMs: searchParams.get("duration_max_ms")
+        ? parseInt(searchParams.get("duration_max_ms") || "0", 10)
+        : null
     },
     sort: {
       key: (searchParams.get("sort") as SortKey) || "start_time",
@@ -127,6 +239,8 @@ function buildUrlParams(
   if (facets.status !== "all") params.set("status", facets.status);
   if (facets.durationBucket !== "all") params.set("duration", facets.durationBucket);
   if (facets.hasErrors !== "all") params.set("errors", facets.hasErrors);
+  if (facets.durationMinMs != null) params.set("duration_min_ms", facets.durationMinMs.toString());
+  if (facets.durationMaxMs != null) params.set("duration_max_ms", facets.durationMaxMs.toString());
 
   if (sort.key !== "start_time") params.set("sort", sort.key);
   if (sort.direction !== "desc") params.set("dir", sort.direction);
@@ -152,6 +266,9 @@ export function useTraceSearch() {
   const [nextOffset, setNextOffset] = useState<number | null>(null); // For pagination if needed, or we just rely on client side? The original code had offset.
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverFacets, setServerFacets] = useState<ServerFacetPayload | null>(null);
+  const [serverTotalCount, setServerTotalCount] = useState<number | null>(null);
+  const [serverFacetMeta, setServerFacetMeta] = useState<{ isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -162,6 +279,11 @@ export function useTraceSearch() {
   const loadTraces = useCallback(async (append = false) => {
     setIsLoading(true);
     setError(null);
+    if (!append) {
+      setServerFacets(null);
+      setServerTotalCount(null);
+      setServerFacetMeta(null);
+    }
     try {
       // In a real app we might pass filters to the API
       // Here we fetch list and filter client side? The original code seems to do some API filtering?
@@ -187,6 +309,29 @@ export function useTraceSearch() {
       }
 
       setNextOffset(data.next_offset || null);
+      const facetPayload =
+        (data as any).facets || (data as any).facet_counts || (data as any).facetCounts || null;
+      if (facetPayload) {
+        setServerFacets(facetPayload);
+      }
+      const totalCount =
+        (data as any).total_count ?? (data as any).totalCount ?? null;
+      if (typeof totalCount === "number") {
+        setServerTotalCount(totalCount);
+      }
+      const isSampled =
+        (data as any).is_sampled ?? (data as any).isSampled ?? undefined;
+      const sampleRate =
+        (data as any).sample_rate ?? (data as any).sampleRate ?? undefined;
+      const isTruncated =
+        (data as any).is_truncated ?? (data as any).isTruncated ?? undefined;
+      if (isSampled !== undefined || sampleRate !== undefined || isTruncated !== undefined) {
+        setServerFacetMeta({
+          isSampled: typeof isSampled === "boolean" ? isSampled : undefined,
+          sampleRate: typeof sampleRate === "number" ? sampleRate : undefined,
+          isTruncated: typeof isTruncated === "boolean" ? isTruncated : undefined
+        });
+      }
 
     } catch (err: any) {
       setError(err.message || "Failed to load traces");
@@ -225,6 +370,8 @@ export function useTraceSearch() {
          if (facets.hasErrors === "yes" && !hasErr) return false;
          if (facets.hasErrors === "no" && hasErr) return false;
       }
+      if (facets.durationMinMs != null && t.duration_ms < facets.durationMinMs) return false;
+      if (facets.durationMaxMs != null && t.duration_ms > facets.durationMaxMs) return false;
       return true;
     });
   }, [traces, facets]);
@@ -246,38 +393,27 @@ export function useTraceSearch() {
     });
   }, [filteredTraces, sort]);
 
-  // Facet counts
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    traces.forEach(t => {
-      const s = t.status.toLowerCase();
-      counts[s] = (counts[s] || 0) + 1;
-    });
-    return counts;
-  }, [traces]);
-
-  const availableStatuses = useMemo(() => Object.keys(statusCounts), [statusCounts]);
-
-  const durationBucketCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    DURATION_BUCKETS.forEach(b => counts[b.value] = 0);
-    traces.forEach(t => {
-       DURATION_BUCKETS.forEach(b => {
-         if (b.value === "all") return;
-         if (t.duration_ms >= b.min && t.duration_ms < b.max) {
-           counts[b.value]++;
-         }
-       });
-    });
-    // All
-    counts["all"] = traces.length;
-    return counts;
-  }, [traces]);
+  const {
+    statusCounts,
+    durationBucketCounts,
+    durationHistogram,
+    availableStatuses,
+    facetSource,
+    facetSampleCount,
+    facetTotalCount,
+    facetMeta
+  } = useTraceSearchFacets({
+    traces,
+    serverFacets,
+    serverTotalCount,
+    serverFacetMeta
+  });
 
   const activeFacetCount =
     (facets.status !== "all" ? 1 : 0) +
     (facets.durationBucket !== "all" ? 1 : 0) +
-    (facets.hasErrors !== "all" ? 1 : 0);
+    (facets.hasErrors !== "all" ? 1 : 0) +
+    (facets.durationMinMs != null || facets.durationMaxMs != null ? 1 : 0);
 
   const handleClearFilters = useCallback(() => {
      setFilters({
@@ -290,7 +426,9 @@ export function useTraceSearch() {
      setFacets({
        status: "all",
        durationBucket: "all",
-       hasErrors: "all"
+       hasErrors: "all",
+       durationMinMs: null,
+       durationMaxMs: null
      });
   }, []);
 
@@ -309,9 +447,14 @@ export function useTraceSearch() {
     error,
     filteredTraces,
     sortedTraces,
+    facetSource,
+    facetSampleCount,
+    facetTotalCount,
+    facetMeta,
     statusCounts,
     availableStatuses,
     durationBucketCounts,
+    durationHistogram,
     activeFacetCount,
     handleClearFilters
   };

@@ -1,54 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans, getErrorMessage } from "../api";
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
-import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
+import WaterfallView, { WaterfallRow, WaterfallViewHandle } from "../components/trace/WaterfallView";
+import { buildWaterfallRows, computeCriticalPath } from "../components/trace/waterfall/waterfall_model";
+import { WaterfallMiniMap } from "../components/trace/waterfall/WaterfallMiniMap";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
+import { computeSpanCoverage } from "../components/trace/trace_coverage";
+import { TraceGraphView } from "../components/trace/graph/TraceGraphView";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
-
-function buildSpanRows(spans: SpanSummary[]): WaterfallRow[] {
-  const byId = new Map<string, SpanSummary>();
-  const children = new Map<string | null, SpanSummary[]>();
-
-  spans.forEach((span) => {
-    byId.set(span.span_id, span);
-  });
-
-  spans.forEach((span) => {
-    const parent = span.parent_span_id || null;
-    if (!children.has(parent)) children.set(parent, []);
-    children.get(parent)!.push(span);
-  });
-
-  const sortSpans = (a: SpanSummary, b: SpanSummary) => {
-    const at = new Date(a.start_time).getTime();
-    const bt = new Date(b.start_time).getTime();
-    if (at !== bt) return at - bt;
-    const aSeq = Number(a.span_attributes?.["event.seq"] ?? 0);
-    const bSeq = Number(b.span_attributes?.["event.seq"] ?? 0);
-    return aSeq - bSeq;
-  };
-
-  const roots = spans.filter(
-    (span) => !span.parent_span_id || !byId.has(span.parent_span_id)
-  );
-  roots.sort(sortSpans);
-
-  const rows: WaterfallRow[] = [];
-  const walk = (span: SpanSummary, depth: number) => {
-    rows.push({ span, depth });
-    const kids = (children.get(span.span_id) || []).sort(sortSpans);
-    kids.forEach((child) => walk(child, depth + 1));
-  };
-
-  roots.forEach((root) => walk(root, 0));
-  return rows;
-}
+const SPAN_PAGE_LIMIT = 500;
+const SPAN_MAX_LIMIT = 5000;
 
 export default function TraceDetail() {
   const { traceId } = useParams();
@@ -63,10 +30,19 @@ export default function TraceDetail() {
   const [isSpansLoading, setIsSpansLoading] = useState(true);
   const [isLoadingMoreSpans, setIsLoadingMoreSpans] = useState(false);
   const [hasPartialData, setHasPartialData] = useState(false);
+  const [spanOffset, setSpanOffset] = useState(0);
+  const [hasMoreSpans, setHasMoreSpans] = useState(false);
 
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("start_time");
+  const [showCriticalPath, setShowCriticalPath] = useState(false);
+  const [showEvents, setShowEvents] = useState(true);
+  const [traceView, setTraceView] = useState<"waterfall" | "graph">("waterfall");
+  const [waterfallSearch, setWaterfallSearch] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const waterfallViewRef = useRef<WaterfallViewHandle | null>(null);
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -104,50 +80,31 @@ export default function TraceDetail() {
       setSpansError(null);
       setHasPartialData(false);
       setSpans([]);
+      setSpanOffset(0);
+      setHasMoreSpans(false);
     } else {
       setIsLoadingMoreSpans(true);
       setSpansError(null);
     }
 
-    const limit = 500;
-    const maxSpans = 5000;
-    let offset = resumeFromOffset ?? 0;
-    let pageNumber = isResume ? Math.floor(offset / limit) + 1 : 1;
-
     try {
-      while (true) {
-        const page = await fetchTraceSpans(traceId, limit, offset);
+      const offset = resumeFromOffset ?? 0;
+      const page = await fetchTraceSpans(traceId, SPAN_PAGE_LIMIT, offset);
 
-        // Append page results incrementally
-        setSpans((prev) => {
-          const existingIds = new Set(prev.map((s) => s.span_id));
-          const newSpans = page.filter((s) => !existingIds.has(s.span_id));
-          return [...prev, ...newSpans];
-        });
+      setSpans((prev) => {
+        const existingIds = new Set(prev.map((s) => s.span_id));
+        const newSpans = page.filter((s) => !existingIds.has(s.span_id));
+        return [...prev, ...newSpans];
+      });
 
-        // First page arrived - mark initial loading complete
-        if (pageNumber === 1) {
-          setIsSpansLoading(false);
-          if (page.length === limit) {
-            setIsLoadingMoreSpans(true);
-          }
-        }
-
-        // Check if we're done
-        if (page.length < limit) {
-          // Last page
-          setIsLoadingMoreSpans(false);
-          break;
-        }
-
-        offset += limit;
-        pageNumber++;
-
-        if (offset >= maxSpans) {
-          setIsLoadingMoreSpans(false);
-          break;
-        }
-      }
+      const nextOffset = offset + page.length;
+      setSpanOffset(nextOffset);
+      const totalSpans = trace?.span_count;
+      const hasMoreFromServer =
+        page.length === SPAN_PAGE_LIMIT &&
+        nextOffset < SPAN_MAX_LIMIT &&
+        (totalSpans == null || nextOffset < totalSpans);
+      setHasMoreSpans(hasMoreFromServer);
     } catch (err: unknown) {
       const errorMessage = getErrorMessage(err);
       setSpansError(errorMessage);
@@ -167,7 +124,7 @@ export default function TraceDetail() {
       setIsSpansLoading(false);
       setIsLoadingMoreSpans(false);
     }
-  }, [traceId]);
+  }, [traceId, trace?.span_count]);
 
   useEffect(() => {
     if (traceId) {
@@ -187,7 +144,11 @@ export default function TraceDetail() {
 
   const handleRetryRemainingSpans = () => {
     // Resume from where we left off
-    loadSpansData(spans.length);
+    loadSpansData(spanOffset);
+  };
+
+  const handleLoadMoreSpans = () => {
+    loadSpansData(spanOffset);
   };
 
   const filteredSpans = useMemo(() => {
@@ -200,7 +161,43 @@ export default function TraceDetail() {
     });
   }, [spans, search]);
 
-  const rows = useMemo(() => buildSpanRows(filteredSpans), [filteredSpans]);
+  const waterfallMatches = useMemo(() => {
+    const q = waterfallSearch.trim().toLowerCase();
+    if (!q) return new Set<string>();
+    const matches = new Set<string>();
+    spans.forEach((span) => {
+      if (span.name.toLowerCase().includes(q)) {
+        matches.add(span.span_id);
+        return;
+      }
+      const attrs = span.span_attributes || {};
+      if (
+        Object.entries(attrs).some(([key, value]) => {
+          if (String(key).toLowerCase().includes(q)) return true;
+          return String(value).toLowerCase().includes(q);
+        })
+      ) {
+        matches.add(span.span_id);
+        return;
+      }
+      const serviceName = attrs["service.name"] || attrs["service_name"];
+      if (serviceName && String(serviceName).toLowerCase().includes(q)) {
+        matches.add(span.span_id);
+      }
+    });
+    return matches;
+  }, [spans, waterfallSearch]);
+
+  const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
+
+  const waterfallMatchList = useMemo(() => {
+    if (waterfallMatches.size === 0) return [];
+    return rows
+      .filter((row) => waterfallMatches.has(row.span.span_id))
+      .map((row) => row.span.span_id);
+  }, [rows, waterfallMatches]);
+
+  const criticalPath = useMemo(() => computeCriticalPath(spans), [spans]);
 
   const sortedTableSpans = useMemo(() => {
     const data = [...filteredSpans];
@@ -223,9 +220,17 @@ export default function TraceDetail() {
   }, [trace, spans]);
 
   const traceDuration = trace?.duration_ms ?? 0;
+  const {
+    loadedCount: loadedSpanCount,
+    totalCount: totalSpanCount,
+    totalKnown: totalSpanKnown,
+    coveragePct,
+    reachedMaxLimit
+  } = computeSpanCoverage(spans.length, trace?.span_count ?? null, SPAN_MAX_LIMIT);
 
   const handleSpanSelect = (spanId: string) => {
     if (!traceId) return;
+    setSelectedSpanId(spanId);
     fetchSpanDetail(traceId, spanId)
       .then((detail) => setSelectedSpan(detail))
       .catch((err) => {
@@ -234,7 +239,35 @@ export default function TraceDetail() {
       });
   };
 
+  const handleRevealSpan = (spanId: string) => {
+    setTraceView("waterfall");
+    handleSpanSelect(spanId);
+    waterfallViewRef.current?.scrollToSpanId(spanId);
+  };
+
   const interactionId = searchParams.get("interactionId");
+
+  useEffect(() => {
+    if (!waterfallSearch.trim()) {
+      setActiveMatchIndex(0);
+      return;
+    }
+    if (waterfallMatchList.length > 0) {
+      setActiveMatchIndex(0);
+      const first = waterfallMatchList[0];
+      waterfallViewRef.current?.scrollToSpanId(first);
+    }
+  }, [waterfallSearch, waterfallMatchList]);
+
+  const handleJumpMatch = (direction: 1 | -1) => {
+    if (waterfallMatchList.length === 0) return;
+    const nextIndex =
+      (activeMatchIndex + direction + waterfallMatchList.length) % waterfallMatchList.length;
+    const spanId = waterfallMatchList[nextIndex];
+    setActiveMatchIndex(nextIndex);
+    waterfallViewRef.current?.scrollToSpanId(spanId);
+    handleSpanSelect(spanId);
+  };
 
   if (isTraceLoading) {
     return (
@@ -380,13 +413,13 @@ export default function TraceDetail() {
         <div className="trace-detail__left">
           <div className="trace-panel">
             <div className="trace-panel__header">
-              <h3>Waterfall</h3>
+              <h3>Trace View</h3>
               <span className="subtitle">
                 {isSpansLoading
                   ? "Loading..."
-                  : isLoadingMoreSpans
-                    ? `${spans.length}${trace?.span_count ? ` / ${trace.span_count}` : ""} spans (loading...)`
-                    : `${rows.length} spans`}
+                  : totalSpanKnown
+                    ? `Loaded ${loadedSpanCount} / ${totalSpanCount} spans (${coveragePct ?? 0}%)`
+                    : `Loaded ${loadedSpanCount} spans (total unknown)`}
               </span>
             </div>
 
@@ -456,12 +489,128 @@ export default function TraceDetail() {
                             </button>
                         </div>
                     )}
-                    <WaterfallView
-                        rows={rows}
-                        traceStart={traceStart}
-                        traceDurationMs={traceDuration}
+                    <div className="trace-waterfall__controls">
+                        <div className="trace-waterfall__controls-group">
+                            <span className="trace-waterfall__controls-label">View</span>
+                            <div className="trace-waterfall__controls-toggle">
+                              <button
+                                type="button"
+                                className={traceView === "waterfall" ? "is-active" : ""}
+                                onClick={() => setTraceView("waterfall")}
+                              >
+                                Waterfall
+                              </button>
+                              <button
+                                type="button"
+                                className={traceView === "graph" ? "is-active" : ""}
+                                onClick={() => setTraceView("graph")}
+                              >
+                                Graph
+                              </button>
+                            </div>
+                        </div>
+                        {traceView === "waterfall" && (
+                          <div className="trace-waterfall__search">
+                            <input
+                              type="text"
+                              placeholder="Search spans..."
+                              value={waterfallSearch}
+                              onChange={(event) => setWaterfallSearch(event.target.value)}
+                            />
+                            {waterfallSearch.trim() && (
+                              <span className="trace-waterfall__search-count">
+                                {waterfallMatches.size} match{waterfallMatches.size === 1 ? "" : "es"}
+                              </span>
+                            )}
+                            <div className="trace-waterfall__search-nav">
+                              <button
+                                type="button"
+                                onClick={() => handleJumpMatch(-1)}
+                                disabled={waterfallMatchList.length === 0}
+                              >
+                                Prev
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleJumpMatch(1)}
+                                disabled={waterfallMatchList.length === 0}
+                              >
+                                Next
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {traceView === "waterfall" && (
+                          <>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={showEvents}
+                                    onChange={(e) => setShowEvents(e.target.checked)}
+                                />
+                                Show Events
+                            </label>
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={showCriticalPath}
+                                    onChange={(e) => setShowCriticalPath(e.target.checked)}
+                                />
+                                Show Critical Path
+                            </label>
+                          </>
+                        )}
+                    </div>
+                    {reachedMaxLimit && (totalSpanCount == null || loadedSpanCount < totalSpanCount) && (
+                      <div className="trace-waterfall__limit-banner">
+                        <span>
+                          Showing first {SPAN_MAX_LIMIT.toLocaleString()} spans (UI limit).
+                          {totalSpanKnown ? ` Total spans: ${totalSpanCount}.` : " Total span count unknown."}
+                        </span>
+                        <Link to={`/admin/traces/search?trace_id=${trace.trace_id}`}>
+                          Open in Trace Search
+                        </Link>
+                      </div>
+                    )}
+                    {traceView === "waterfall" ? (
+                      <>
+                        <WaterfallView
+                            rows={rows}
+                            traceStart={traceStart}
+                            traceDurationMs={traceDuration}
+                            onSelect={handleSpanSelect}
+                            criticalPath={criticalPath}
+                            showCriticalPath={showCriticalPath}
+                            showEvents={showEvents}
+                            selectedSpanId={selectedSpanId}
+                            matchIds={waterfallMatches}
+                            ref={waterfallViewRef}
+                        />
+                        <WaterfallMiniMap />
+                      </>
+                    ) : (
+                      <TraceGraphView
+                        spans={filteredSpans}
                         onSelect={handleSpanSelect}
-                    />
+                        selectedSpanId={selectedSpanId}
+                      />
+                    )}
+                    {(hasMoreSpans || reachedMaxLimit) && (
+                      <div className="trace-waterfall__load-more">
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreSpans}
+                          disabled={!hasMoreSpans || isLoadingMoreSpans || reachedMaxLimit}
+                        >
+                          {reachedMaxLimit ? "UI limit reached" : isLoadingMoreSpans ? "Loading..." : "Load more spans"}
+                        </button>
+                        <span className="trace-waterfall__load-more-note">
+                          {totalSpanKnown
+                            ? `${loadedSpanCount} of ${totalSpanCount} spans loaded`
+                            : `${loadedSpanCount} spans loaded`}
+                        </span>
+                      </div>
+                    )}
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
                             Loading more spans...
@@ -504,7 +653,27 @@ export default function TraceDetail() {
 
             {spans.length > 0 && (
                 <>
-                    <SpanTable spans={sortedTableSpans} onSelect={handleSpanSelect} />
+                    <SpanTable
+                      spans={sortedTableSpans}
+                      onSelect={handleSpanSelect}
+                      selectedSpanId={selectedSpanId}
+                    />
+                    {(hasMoreSpans || reachedMaxLimit) && (
+                      <div className="trace-waterfall__load-more trace-waterfall__load-more--table">
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreSpans}
+                          disabled={!hasMoreSpans || isLoadingMoreSpans || reachedMaxLimit}
+                        >
+                          {reachedMaxLimit ? "UI limit reached" : isLoadingMoreSpans ? "Loading..." : "Load more spans"}
+                        </button>
+                        <span className="trace-waterfall__load-more-note">
+                          {totalSpanKnown
+                            ? `${loadedSpanCount} of ${totalSpanCount} spans loaded`
+                            : `${loadedSpanCount} spans loaded`}
+                        </span>
+                      </div>
+                    )}
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "12px", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
                             Loading more spans...
@@ -516,7 +685,7 @@ export default function TraceDetail() {
         </div>
 
         <div className="trace-detail__right">
-          <PromptViewer span={selectedSpan} />
+          <PromptViewer span={selectedSpan} onRevealSpan={handleRevealSpan} />
           <ApiLinksPanel traceId={trace.trace_id} />
           <div className="trace-panel">
             <h3>Trace Attributes</h3>
@@ -529,7 +698,14 @@ export default function TraceDetail() {
         </div>
       </div>
 
-      <SpanDetailDrawer span={selectedSpan} onClose={() => setSelectedSpan(null)} />
+      <SpanDetailDrawer
+        span={selectedSpan}
+        onClose={() => {
+          setSelectedSpan(null);
+          setSelectedSpanId(null);
+        }}
+        onRevealSpan={handleRevealSpan}
+      />
     </div>
   );
 }

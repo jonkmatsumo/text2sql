@@ -1,8 +1,13 @@
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from dal.query_target_config import QueryTargetConfigRecord, QueryTargetConfigStatus
+from dal.query_target_config import (
+    QueryTargetConfigHistoryRecord,
+    QueryTargetConfigRecord,
+    QueryTargetConfigStatus,
+)
 from dal.query_target_test import QueryTargetTestResult
 from ui_api_gateway.app import app
 
@@ -22,7 +27,10 @@ def test_get_query_target_settings(monkeypatch):
     """Return active and pending configs via settings endpoint."""
     client = TestClient(app)
     active = _record(QueryTargetConfigStatus.ACTIVE)
-    pending = _record(QueryTargetConfigStatus.PENDING)
+    pending = replace(
+        _record(QueryTargetConfigStatus.PENDING),
+        last_error_code="unsupported_provider",
+    )
 
     monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
 
@@ -40,6 +48,7 @@ def test_get_query_target_settings(monkeypatch):
     data = response.json()
     assert data["active"]["status"] == "active"
     assert data["pending"]["status"] == "pending"
+    assert data["pending"]["last_error_category"] == "unsupported"
 
 
 def test_upsert_query_target_settings_validation_error(monkeypatch):
@@ -126,6 +135,7 @@ def test_test_query_target_settings_records_result(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["ok"] is False
+    assert response.json()["error_category"] == "auth"
     assert recorded["config_id"] == config_id
     assert recorded["status"] == "failed"
 
@@ -200,3 +210,37 @@ def test_activate_query_target_settings_marks_pending(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "pending"
+
+
+def test_get_query_target_history_orders_by_recent(monkeypatch):
+    """Return history entries ordered by most recent first."""
+    client = TestClient(app)
+    entry_old = QueryTargetConfigHistoryRecord(
+        id=uuid4(),
+        config_id=uuid4(),
+        event_type="tested",
+        snapshot={"provider": "postgres"},
+        created_at="2025-01-01T10:00:00+00:00",
+    )
+    entry_new = QueryTargetConfigHistoryRecord(
+        id=uuid4(),
+        config_id=uuid4(),
+        event_type="activated",
+        snapshot={"provider": "postgres"},
+        created_at="2025-01-02T10:00:00+00:00",
+    )
+    captured = {}
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.is_available", lambda: True)
+
+    async def _list_history(limit: int = 50):
+        captured["limit"] = limit
+        return [entry_old, entry_new]
+
+    monkeypatch.setattr("ui_api_gateway.app.QueryTargetConfigStore.list_history", _list_history)
+
+    response = client.get("/settings/query-target/history?limit=2")
+    assert response.status_code == 200
+    data = response.json()
+    assert captured["limit"] == 2
+    assert [item["id"] for item in data] == [str(entry_new.id), str(entry_old.id)]

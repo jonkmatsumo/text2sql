@@ -72,3 +72,43 @@ def test_schema_cache_manual_invalidation():
 
     cache.clear_schema("postgres", "public")
     assert cache.get(key_a) is None
+
+
+def test_schema_cache_invalidate_scopes():
+    """Invalidate clears entries based on scope."""
+    cache = SchemaCache(ttl_seconds=60)
+    key_a = ("postgres", "schema", "public", None, "list_table_names")
+    key_b = ("postgres", "schema", "public", "users", "get_table_def")
+    key_c = ("mysql", "schema", "public", None, "list_table_names")
+    cache.set(key_a, ["users"])
+    cache.set(key_b, {"name": "users"})
+    cache.set(key_c, ["widgets"])
+
+    cache.invalidate(provider="postgres", schema="public", table="users")
+    assert cache.get(key_b) is None
+    assert cache.get(key_a) == ["users"]
+
+    cache.invalidate(provider="postgres")
+    assert cache.get(key_a) is None
+    assert cache.get(key_c) == ["widgets"]
+
+    cache.invalidate()
+    assert cache.get(key_c) is None
+
+
+def test_schema_cache_lru_eviction():
+    """Cache evicts least-recently-used entries when at capacity."""
+    cache = SchemaCache(ttl_seconds=60, max_entries=2)
+    key_a = ("postgres", "schema", "public", None, "list_table_names")
+    key_b = ("postgres", "schema", "public", "users", "get_table_def")
+    key_c = ("postgres", "schema", "public", "orders", "get_table_def")
+
+    cache.set(key_a, ["users"])
+    cache.set(key_b, {"name": "users"})
+    assert cache.get(key_a) == ["users"]
+
+    cache.set(key_c, {"name": "orders"})
+
+    assert cache.get(key_b) is None
+    assert cache.get(key_a) == ["users"]
+    assert cache.get(key_c) == {"name": "orders"}

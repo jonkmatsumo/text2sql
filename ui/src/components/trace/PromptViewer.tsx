@@ -1,17 +1,18 @@
-import React from "react";
+import React, { useState } from "react";
 import { SpanDetail } from "../../types";
+import { ArtifactPanel } from "../artifacts/ArtifactPanel";
+import { ToolCallInspector } from "../artifacts/ToolCallInspector";
 
 interface PromptViewerProps {
   span: SpanDetail | null;
+  onRevealSpan?: (spanId: string) => void;
 }
 
-function renderPayload(value: any) {
-  if (value == null) return "—";
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2);
-}
+type TabType = "prompt" | "response" | "tool" | "metadata";
 
-export default function PromptViewer({ span }: PromptViewerProps) {
+export default function PromptViewer({ span, onRevealSpan }: PromptViewerProps) {
+  const [activeTab, setActiveTab] = useState<TabType>("prompt");
+
   if (!span) {
     return (
       <div className="trace-panel">
@@ -22,49 +23,126 @@ export default function PromptViewer({ span }: PromptViewerProps) {
   }
 
   const payloadMap = new Map<string, any>();
+  const payloadMetadataMap = new Map<string, any>();
+
   (span.payloads || []).forEach((payload) => {
     if (payload.payload_type) {
-      payloadMap.set(payload.payload_type as string, payload.payload_json ?? payload.blob_url);
+      const type = payload.payload_type as string;
+      payloadMap.set(type, payload.payload_json ?? payload.payload_text);
+      payloadMetadataMap.set(type, payload);
     }
   });
 
   const attr = span.span_attributes || {};
-  const systemPrompt = payloadMap.get("llm.prompt.system") ?? attr["llm.prompt.system"];
-  const userPrompt = payloadMap.get("llm.prompt.user") ?? attr["llm.prompt.user"];
-  const responseText = payloadMap.get("llm.response.text") ?? attr["llm.response.text"];
   const toolInputs = payloadMap.get("telemetry.inputs_json") ?? attr["telemetry.inputs_json"];
   const toolOutputs = payloadMap.get("telemetry.outputs_json") ?? attr["telemetry.outputs_json"];
-  const errorPayload = payloadMap.get("telemetry.error_json") ?? attr["telemetry.error_json"];
+  const toolErrors = payloadMap.get("telemetry.error_json") ?? attr["telemetry.error_json"];
+
+  const getArtifact = (type: string, attrKey: string, title: string) => {
+    const content = payloadMap.get(type) ?? attr[attrKey];
+    if (content == null && !["llm.prompt.user", "llm.response.text"].includes(type)) return null;
+
+    const meta = payloadMetadataMap.get(type);
+    return (
+      <ArtifactPanel
+        key={type}
+        title={title}
+        content={content}
+        payloadType={meta?.payload_type}
+        hash={meta?.payload_hash}
+        size={meta?.payload_size}
+        blobUrl={meta?.blob_url}
+        isRedacted={meta?.is_redacted}
+      />
+    );
+  };
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case "prompt":
+        return (
+          <>
+            {getArtifact("llm.prompt.system", "llm.prompt.system", "System Prompt")}
+            {getArtifact("llm.prompt.user", "llm.prompt.user", "User Prompt")}
+          </>
+        );
+      case "response":
+        return (
+          <>
+            {getArtifact("llm.response.text", "llm.response.text", "Model Response")}
+            {getArtifact("telemetry.error_json", "telemetry.error_json", "Errors")}
+          </>
+        );
+      case "tool":
+        return toolInputs || toolOutputs || toolErrors ? (
+          <ToolCallInspector
+            span={span}
+            inputs={toolInputs}
+            outputs={toolOutputs}
+            error={toolErrors}
+            onReveal={onRevealSpan ? () => onRevealSpan(span.span_id) : undefined}
+          />
+        ) : (
+          <>
+            {getArtifact("telemetry.inputs_json", "telemetry.inputs_json", "Tool Inputs")}
+            {getArtifact("telemetry.outputs_json", "telemetry.outputs_json", "Tool Outputs")}
+            {getArtifact("telemetry.error_json", "telemetry.error_json", "Errors")}
+          </>
+        );
+      case "metadata":
+        return (
+          <div className="artifact-panel">
+            <div className="artifact-panel__header">
+              <h4 className="artifact-panel__title">Span Attributes</h4>
+            </div>
+            <div className="artifact-panel__content">
+              <pre className="artifact-panel__pre">
+                <code>{JSON.stringify(attr, null, 2)}</code>
+              </pre>
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="trace-panel">
-      <h3>Prompt Inspection</h3>
-      <div className="trace-panel__section">
-        <h4>System Prompt</h4>
-        <pre>{renderPayload(systemPrompt)}</pre>
+      <div className="trace-panel__header" style={{ marginBottom: "16px" }}>
+        <h3>Prompt Inspection</h3>
       </div>
-      <div className="trace-panel__section">
-        <h4>User Prompt</h4>
-        <pre>{renderPayload(userPrompt)}</pre>
+
+      <div className="segmented-control" style={{ marginBottom: "16px" }}>
+        <button
+          className={activeTab === "prompt" ? "active" : ""}
+          onClick={() => setActiveTab("prompt")}
+        >
+          Prompt
+        </button>
+        <button
+          className={activeTab === "response" ? "active" : ""}
+          onClick={() => setActiveTab("response")}
+        >
+          Response
+        </button>
+        <button
+          className={activeTab === "tool" ? "active" : ""}
+          onClick={() => setActiveTab("tool")}
+        >
+          Tool I/O
+        </button>
+        <button
+          className={activeTab === "metadata" ? "active" : ""}
+          onClick={() => setActiveTab("metadata")}
+        >
+          Metadata
+        </button>
       </div>
-      <div className="trace-panel__section">
-        <h4>Model Response</h4>
-        <pre>{renderPayload(responseText)}</pre>
+
+      <div className="prompt-viewer__content">
+        {renderTabContent()}
       </div>
-      <div className="trace-panel__section">
-        <h4>Tool Inputs</h4>
-        <pre>{renderPayload(toolInputs)}</pre>
-      </div>
-      <div className="trace-panel__section">
-        <h4>Tool Outputs</h4>
-        <pre>{renderPayload(toolOutputs)}</pre>
-      </div>
-      {errorPayload && (
-        <div className="trace-panel__section">
-          <h4>Errors</h4>
-          <pre>{renderPayload(errorPayload)}</pre>
-        </div>
-      )}
     </div>
   );
 }

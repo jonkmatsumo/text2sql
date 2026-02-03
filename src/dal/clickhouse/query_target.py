@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from dal.clickhouse.config import ClickHouseConfig
 from dal.clickhouse.param_translation import translate_postgres_params_to_clickhouse
 from dal.tracing import trace_query_operation
-from dal.util.row_limits import cap_rows, get_sync_max_rows
+from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
 class ClickHouseQueryTargetDatabase:
@@ -65,6 +65,12 @@ class _ClickHouseConnection:
         self._query_timeout_seconds = query_timeout_seconds
         self._max_rows = max_rows
         self._sync_max_rows = sync_max_rows
+        self._last_truncated = False
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
@@ -85,7 +91,9 @@ class _ClickHouseConnection:
             limit = self._max_rows
             if self._sync_max_rows:
                 limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
-            return cap_rows(rows, limit)
+            capped_rows, truncated = cap_rows_with_metadata(rows, limit)
+            self._last_truncated = truncated
+            return capped_rows
 
         return await trace_query_operation(
             "dal.query.execute",

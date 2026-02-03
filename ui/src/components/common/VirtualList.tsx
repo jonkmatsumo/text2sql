@@ -1,4 +1,8 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useImperativeHandle, useMemo, useRef, useState } from "react";
+
+export interface VirtualListHandle {
+  scrollToIndex: (index: number) => void;
+}
 
 interface VirtualListProps<T> {
   items: T[];
@@ -8,13 +12,13 @@ interface VirtualListProps<T> {
   renderRow: (item: T, index: number) => React.ReactNode;
 }
 
-export default function VirtualList<T>({
+function VirtualListInner<T>({
   items,
   rowHeight,
   height,
   overscan = 6,
   renderRow
-}: VirtualListProps<T>) {
+}: VirtualListProps<T>, ref: React.Ref<VirtualListHandle>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
 
@@ -29,6 +33,16 @@ export default function VirtualList<T>({
     () => items.slice(startIndex, endIndex),
     [items, startIndex, endIndex]
   );
+
+  useImperativeHandle(ref, () => ({
+    scrollToIndex(index: number) {
+      const next = Math.max(0, Math.min(index, items.length - 1));
+      if (containerRef.current) {
+        containerRef.current.scrollTop = next * rowHeight;
+        setScrollTop(containerRef.current.scrollTop);
+      }
+    }
+  }), [items.length, rowHeight]);
 
   return (
     <div
@@ -58,3 +72,9 @@ export default function VirtualList<T>({
     </div>
   );
 }
+
+const VirtualList = React.forwardRef(VirtualListInner) as <T>(
+  props: VirtualListProps<T> & { ref?: React.Ref<VirtualListHandle> }
+) => React.ReactElement;
+
+export default VirtualList;

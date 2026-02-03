@@ -11,6 +11,12 @@ def get_sync_max_rows() -> int:
 
 def cap_rows(rows: list, max_rows: int) -> list:
     """Return rows capped to max_rows (no-op when disabled)."""
+    capped, _ = cap_rows_with_metadata(rows, max_rows)
+    return capped
+
+
+def cap_rows_with_metadata(rows: list, max_rows: int) -> tuple[list, bool]:
+    """Return capped rows along with a truncation flag."""
     if max_rows and len(rows) > max_rows:
-        return rows[:max_rows]
-    return rows
+        return rows[:max_rows], True
+    return rows, False

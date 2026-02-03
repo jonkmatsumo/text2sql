@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
+from common.config.env import get_env_bool
 from dal.feature_flags import experimental_features_enabled
+
+logger = logging.getLogger(__name__)
 
 
 def maybe_classify_error(provider: str, exc: Exception) -> Optional[str]:
@@ -64,6 +68,22 @@ def classify_error(provider: str, exc: Exception) -> str:
         return "connectivity"
 
     return "unknown"
+
+
+def emit_classified_error(provider: str, operation: str, category: str, exc: Exception) -> None:
+    """Emit structured telemetry for classified errors when enabled."""
+    if not get_env_bool("DAL_CLASSIFIED_ERROR_TELEMETRY", False):
+        return
+    logger.error(
+        "dal_error_classified",
+        extra={
+            "event": "dal_error_classified",
+            "provider": provider,
+            "operation": operation,
+            "error_category": category,
+            "error_type": exc.__class__.__name__,
+        },
+    )
 
 
 def _matches_any(text: str, fragments: tuple[str, ...]) -> bool:

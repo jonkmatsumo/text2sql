@@ -1,13 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   activateQueryTargetSettings,
+  fetchQueryTargetHistory,
   fetchQueryTargetSettings,
   getErrorMessage,
   QueryTargetConfigPayload,
   QueryTargetConfigResponse,
+  QueryTargetConfigHistoryEntry,
+  QueryTargetTestResponse,
   testQueryTargetSettings,
   upsertQueryTargetSettings
 } from "../api";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { useToast } from "../hooks/useToast";
 
 const providerOptions = [
@@ -142,19 +146,41 @@ const pillStyle = (status?: string) => ({
   color: status === "active" ? "#10b981" : status === "pending" ? "#f59e0b" : "#94a3b8"
 });
 
+const errorGuidanceByCategory: Record<string, string> = {
+  auth: "Verify the secret reference resolves to valid credentials for this provider.",
+  connectivity: "Check network access, host, and port from the backend environment.",
+  timeout: "The provider timed out. Try again or reduce the scope of the test.",
+  resource_exhausted: "The provider reported resource limits. Try again later or adjust capacity.",
+  syntax: "Review any SQL or identifiers for syntax issues.",
+  unsupported: "This provider or capability is not supported in this environment.",
+  transient: "The provider appears unavailable. Retry once the service is healthy.",
+  unknown: "Review provider logs or connection details for more context."
+};
+
 export default function QueryTargetSettings() {
+  // TODO(e2e): Add workflow coverage once a UI E2E harness is available.
   const { show: showToast } = useToast();
   const [settings, setSettings] = useState<{ active?: QueryTargetConfigResponse | null; pending?: QueryTargetConfigResponse | null }>({});
   const [form, setForm] = useState<QueryTargetConfigPayload>(defaultPayload("postgres"));
   const [configId, setConfigId] = useState<string | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [actionInFlight, setActionInFlight] = useState<"save" | "test" | "activate" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [lastTestResult, setLastTestResult] = useState<QueryTargetTestResponse | null>(null);
+  const [history, setHistory] = useState<QueryTargetConfigHistoryEntry[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isActivateConfirmOpen, setIsActivateConfirmOpen] = useState(false);
+  const [isProviderConfirmOpen, setIsProviderConfirmOpen] = useState(false);
+  const [pendingProvider, setPendingProvider] = useState<string | null>(null);
+
+  const isBusy = isLoadingSettings || actionInFlight !== null;
 
   const currentProvider = form.provider;
   const metadataConfig = metadataFields[currentProvider] || [];
   const guardrailConfig = guardrailFields[currentProvider] || [];
 
   const loadSettings = useCallback(async () => {
-    setIsLoading(true);
+    setIsLoadingSettings(true);
     try {
       const data = await fetchQueryTargetSettings();
       setSettings(data);
@@ -172,13 +198,26 @@ export default function QueryTargetSettings() {
     } catch (err) {
       showToast(getErrorMessage(err), "error");
     } finally {
-      setIsLoading(false);
+      setIsLoadingSettings(false);
+    }
+  }, [showToast]);
+
+  const loadHistory = useCallback(async () => {
+    setIsHistoryLoading(true);
+    try {
+      const data = await fetchQueryTargetHistory(20);
+      setHistory(data);
+    } catch (err) {
+      showToast(getErrorMessage(err), "error");
+    } finally {
+      setIsHistoryLoading(false);
     }
   }, [showToast]);
 
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    loadHistory();
+  }, [loadSettings, loadHistory]);
 
   const updateMetadata = (key: string, value: unknown) => {
     setForm((prev) => ({
@@ -201,13 +240,34 @@ export default function QueryTargetSettings() {
     }));
   };
 
-  const onProviderChange = (value: string) => {
+  const hasFormData = useMemo(() => {
+    const hasValues = (values: Record<string, unknown>) =>
+      Object.values(values).some((value) => value !== undefined && value !== null && value !== "");
+    return Boolean(configId) || hasValues(form.metadata) || hasValues(form.auth) || hasValues(form.guardrails);
+  }, [configId, form]);
+
+  const applyProviderChange = (value: string) => {
     setForm(defaultPayload(value));
     setConfigId(undefined);
+    setLastTestResult(null);
+    setActionError(null);
+  };
+
+  const onProviderChange = (value: string) => {
+    if (value === currentProvider) {
+      return;
+    }
+    if (hasFormData) {
+      setPendingProvider(value);
+      setIsProviderConfirmOpen(true);
+      return;
+    }
+    applyProviderChange(value);
   };
 
   const handleSave = async () => {
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("save");
     try {
       const payload = {
         ...form,
@@ -215,37 +275,46 @@ export default function QueryTargetSettings() {
       };
       const record = await upsertQueryTargetSettings(payload);
       setConfigId(record.id);
+      setLastTestResult(null);
       setSettings((prev) => ({
         ...prev,
         pending: record.status === "pending" ? record : prev.pending,
         active: record.status === "active" ? record : prev.active
       }));
       showToast("Query-target settings saved", "success");
+      await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
   };
 
   const handleTest = async () => {
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("test");
     try {
       const payload = {
         ...form,
         config_id: configId
       };
       const result = await testQueryTargetSettings(payload);
+      setLastTestResult(result.ok ? null : result);
       if (result.ok) {
         showToast("Connection test passed", "success");
       } else {
         showToast(result.error_message || "Connection test failed", "error");
       }
       await loadSettings();
+      await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
   };
 
@@ -254,7 +323,8 @@ export default function QueryTargetSettings() {
       showToast("Save settings before activating", "error");
       return;
     }
-    setIsLoading(true);
+    setActionError(null);
+    setActionInFlight("activate");
     try {
       const record = await activateQueryTargetSettings(configId);
       setSettings((prev) => ({
@@ -263,11 +333,40 @@ export default function QueryTargetSettings() {
         active: prev.active
       }));
       showToast("Activation queued. Restart required.", "info");
+      await loadHistory();
     } catch (err) {
-      showToast(getErrorMessage(err), "error");
+      const message = getErrorMessage(err);
+      setActionError(message);
+      showToast(message, "error");
     } finally {
-      setIsLoading(false);
+      setActionInFlight(null);
     }
+  };
+
+  const requestActivate = () => {
+    if (!configId) {
+      showToast("Save settings before activating", "error");
+      return;
+    }
+    setIsActivateConfirmOpen(true);
+  };
+
+  const confirmActivate = async () => {
+    setIsActivateConfirmOpen(false);
+    await handleActivate();
+  };
+
+  const confirmProviderChange = () => {
+    if (pendingProvider) {
+      applyProviderChange(pendingProvider);
+    }
+    setPendingProvider(null);
+    setIsProviderConfirmOpen(false);
+  };
+
+  const cancelProviderChange = () => {
+    setPendingProvider(null);
+    setIsProviderConfirmOpen(false);
   };
 
   const authFields = useMemo(() => {
@@ -276,6 +375,30 @@ export default function QueryTargetSettings() {
       { key: "identity_profile", label: "Identity Profile", placeholder: "aws-profile" }
     ];
   }, []);
+
+  const latestError = useMemo(() => {
+    if (lastTestResult && !lastTestResult.ok) {
+      return {
+        message: lastTestResult.error_message,
+        code: lastTestResult.error_code,
+        category: lastTestResult.error_category
+      };
+    }
+    const record = settings.pending || settings.active;
+    if (!record) return null;
+    if (!record.last_error_message && !record.last_error_code) {
+      return null;
+    }
+    return {
+      message: record.last_error_message,
+      code: record.last_error_code,
+      category: record.last_error_category
+    };
+  }, [lastTestResult, settings]);
+
+  const errorGuidance = latestError?.category
+    ? errorGuidanceByCategory[latestError.category] || null
+    : null;
 
   return (
     <>
@@ -318,6 +441,7 @@ export default function QueryTargetSettings() {
             <select
               value={currentProvider}
               onChange={(event) => onProviderChange(event.target.value)}
+              disabled={isBusy}
               style={{ marginTop: "8px", padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border)", width: "100%" }}
             >
               {providerOptions.map((option) => (
@@ -326,6 +450,7 @@ export default function QueryTargetSettings() {
                 </option>
               ))}
             </select>
+            {isLoadingSettings && <div className="loading" style={{ marginTop: "8px" }}>Loading settings...</div>}
           </div>
 
           <div style={{ display: "grid", gap: "16px" }}>
@@ -418,18 +543,95 @@ export default function QueryTargetSettings() {
           </div>
 
           <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
-            <button className="btn" onClick={handleSave} disabled={isLoading}>
-              Save Settings
+            <button className="btn" onClick={handleSave} disabled={isBusy}>
+              {actionInFlight === "save" ? "Saving..." : "Save Settings"}
             </button>
-            <button className="btn secondary" onClick={handleTest} disabled={isLoading}>
-              Test Connection
+            <button className="btn secondary" onClick={handleTest} disabled={isBusy}>
+              {actionInFlight === "test" ? "Testing..." : "Test Connection"}
             </button>
-            <button className="btn ghost" onClick={handleActivate} disabled={isLoading}>
-              Activate (Restart Required)
+            <button className="btn ghost" onClick={requestActivate} disabled={isBusy}>
+              {actionInFlight === "activate" ? "Activating..." : "Activate (Restart Required)"}
             </button>
           </div>
+          {actionError && (
+            <div className="error-banner" style={{ marginTop: "16px" }}>
+              {actionError}
+            </div>
+          )}
+          {latestError && (
+            <div className="error-banner" style={{ marginTop: "16px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Connection error</div>
+              <div>{latestError.message || "Connection test failed."}</div>
+              {latestError.code && (
+                <div style={{ marginTop: "4px", color: "var(--muted)" }}>Code: {latestError.code}</div>
+              )}
+              {errorGuidance && (
+                <div style={{ marginTop: "6px", color: "var(--muted)" }}>Guidance: {errorGuidance}</div>
+              )}
+            </div>
+          )}
         </div>
       </section>
+
+      <section style={{ display: "grid", gap: "16px", marginTop: "24px" }}>
+        <details
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: "16px",
+            padding: "16px",
+            background: "var(--surface)"
+          }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Recent Configuration History</summary>
+          <div style={{ marginTop: "12px", display: "grid", gap: "12px" }}>
+            {isHistoryLoading && <div className="loading">Loading history...</div>}
+            {!isHistoryLoading && history.length === 0 && (
+              <div style={{ color: "var(--muted)" }}>No history entries yet.</div>
+            )}
+            {!isHistoryLoading &&
+              history.map((entry) => {
+                const provider =
+                  typeof entry.snapshot?.provider === "string" ? entry.snapshot.provider : "Unknown";
+                const timestamp = entry.created_at
+                  ? new Date(entry.created_at).toLocaleString()
+                  : "Unknown time";
+                const eventLabel = entry.event_type.replace(/_/g, " ");
+                return (
+                  <div
+                    key={entry.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "160px 120px 1fr",
+                      gap: "12px",
+                      alignItems: "center"
+                    }}
+                  >
+                    <div style={{ fontSize: "0.85rem", color: "var(--muted)" }}>{timestamp}</div>
+                    <div style={{ fontWeight: 600, textTransform: "capitalize" }}>{eventLabel}</div>
+                    <div>{provider}</div>
+                  </div>
+                );
+              })}
+          </div>
+        </details>
+      </section>
+
+      <ConfirmationDialog
+        isOpen={isActivateConfirmOpen}
+        onClose={() => setIsActivateConfirmOpen(false)}
+        onConfirm={confirmActivate}
+        title="Activate query target?"
+        description="Activation will mark this configuration as pending and requires a backend restart."
+        confirmText="Activate"
+      />
+      <ConfirmationDialog
+        isOpen={isProviderConfirmOpen}
+        onClose={cancelProviderChange}
+        onConfirm={confirmProviderChange}
+        title="Switch provider?"
+        description="Switching providers will clear the current configuration form values."
+        confirmText="Switch Provider"
+      />
     </>
   );
 }

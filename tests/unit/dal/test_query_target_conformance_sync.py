@@ -47,6 +47,7 @@ async def test_sqlite_query_target_max_rows_guardrail(tmp_path, monkeypatch):
 
         rows = await conn.fetch("SELECT id, name FROM items ORDER BY id")
         assert rows == [{"id": 1, "name": "alpha"}]
+        assert conn.last_truncated is True
 
 
 @pytest.mark.asyncio
@@ -100,3 +101,4 @@ async def test_duckdb_query_target_sync_max_rows(tmp_path, monkeypatch):
 
         rows = await conn.fetch("SELECT id, name FROM items ORDER BY id")
         assert rows == [{"id": 1, "name": "alpha"}]
+        assert conn.last_truncated is True

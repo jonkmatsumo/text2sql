@@ -2,7 +2,7 @@ import hashlib
 from typing import Any, Awaitable, Dict, Optional
 
 from common.config.env import get_env_bool
-from dal.util.row_limits import cap_rows
+from dal.util.row_limits import cap_rows_with_metadata
 
 
 def trace_enabled() -> bool:
@@ -51,6 +51,12 @@ class TracedAsyncpgConnection:
         self._provider = provider
         self._execution_model = execution_model
         self._max_rows = max_rows
+        self._last_truncated = False
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
 
     async def execute(self, sql: str, *params: Any) -> str:
         """Execute a statement with tracing when enabled."""
@@ -71,7 +77,11 @@ class TracedAsyncpgConnection:
 
         async def _run():
             rows = await self._conn.fetch(sql, *params)
-            return cap_rows([dict(row) for row in rows], self._max_rows)
+            capped_rows, truncated = cap_rows_with_metadata(
+                [dict(row) for row in rows], self._max_rows
+            )
+            self._last_truncated = truncated
+            return capped_rows
 
         return await trace_query_operation(
             "dal.query.execute",

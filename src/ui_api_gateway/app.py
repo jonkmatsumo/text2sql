@@ -119,9 +119,38 @@ app = FastAPI(title="Text2SQL UI API Gateway", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 
 
+ERROR_CATEGORIES = {
+    "auth",
+    "connectivity",
+    "timeout",
+    "resource_exhausted",
+    "syntax",
+    "unsupported",
+    "transient",
+    "unknown",
+}
+
+ERROR_CATEGORY_BY_CODE = {
+    "missing_secret": "auth",
+    "connection_error": "connectivity",
+    "unsupported_provider": "unsupported",
+    "athena_start_failed": "transient",
+    "databricks_submit_failed": "transient",
+}
+
+
+def _derive_error_category(error_code: Optional[str]) -> Optional[str]:
+    if not error_code:
+        return None
+    if error_code in ERROR_CATEGORIES:
+        return error_code
+    return ERROR_CATEGORY_BY_CODE.get(error_code)
+
+
 def _build_error_response(exc: MCPError, request_id: str = None) -> dict:
     """Build a standardized error response payload."""
-    return {
+    error_category = exc.details.get("error_category") if exc.details else None
+    payload = {
         "error": {
             "message": exc.message,
             "code": exc.code,
@@ -129,6 +158,9 @@ def _build_error_response(exc: MCPError, request_id: str = None) -> dict:
             "request_id": request_id,
         }
     }
+    if error_category:
+        payload["error"]["error_category"] = error_category
+    return payload
 
 
 @app.exception_handler(MCPTimeoutError)
@@ -234,6 +266,7 @@ class QueryTargetConfigResponse(BaseModel):
     last_test_status: Optional[str] = None
     last_error_code: Optional[str] = None
     last_error_message: Optional[str] = None
+    last_error_category: Optional[str] = None
 
 
 class QueryTargetSettingsResponse(BaseModel):
@@ -249,6 +282,17 @@ class QueryTargetTestResponse(BaseModel):
     ok: bool
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    error_category: Optional[str] = None
+
+
+class QueryTargetConfigHistoryEntry(BaseModel):
+    """History entry for query-target configuration events."""
+
+    id: UUID
+    config_id: UUID
+    event_type: str
+    snapshot: Dict[str, Any]
+    created_at: Optional[str] = None
 
 
 def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetConfigResponse:
@@ -263,6 +307,7 @@ def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetCon
         last_test_status=record.last_test_status,
         last_error_code=record.last_error_code,
         last_error_message=record.last_error_message,
+        last_error_category=_derive_error_category(record.last_error_code),
     )
 
 
@@ -303,6 +348,36 @@ async def get_query_target_settings() -> QueryTargetSettingsResponse:
         active=_to_query_target_response(active) if active else None,
         pending=_to_query_target_response(pending) if pending else None,
     )
+
+
+@app.get(
+    "/settings/query-target/history",
+    response_model=List[QueryTargetConfigHistoryEntry],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_query_target_history(
+    limit: int = Query(50, ge=1, le=200),
+) -> List[QueryTargetConfigHistoryEntry]:
+    """Return recent query-target configuration history."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+
+    records = await QueryTargetConfigStore.list_history(limit=limit)
+    entries = [
+        QueryTargetConfigHistoryEntry(
+            id=record.id,
+            config_id=record.config_id,
+            event_type=record.event_type,
+            snapshot=record.snapshot,
+            created_at=record.created_at,
+        )
+        for record in records
+    ]
+    entries.sort(key=lambda entry: entry.created_at or "", reverse=True)
+    return entries
 
 
 @app.post(
@@ -398,6 +473,7 @@ async def test_query_target_settings(payload: QueryTargetConfigPayload) -> Query
         ok=result.ok,
         error_code=result.error_code,
         error_message=result.error_message,
+        error_category=_derive_error_category(result.error_code),
     )
 
 

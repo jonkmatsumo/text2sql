@@ -4,13 +4,15 @@ import { VegaEmbed } from "react-vega";
 import { fetchMetricsPreview } from "../api";
 import { MetricsPreviewResponse, MetricsBucket } from "../types";
 import { grafanaBaseUrl } from "../config";
+import { ChartFrame } from "../components/charts/ChartFrame";
 
 interface MetricPanel {
   title: string;
   description: string;
-  data: { timestamp: string; value: number }[];
+  data: { timestamp: string; value: number | null }[];
   color: string;
   unit?: string;
+  missingBuckets?: boolean;
 }
 
 const WINDOW_OPTIONS = [
@@ -25,25 +27,11 @@ function TimeSeriesChart({
   color,
   unit
 }: {
-  data: { timestamp: string; value: number }[];
+  data: { timestamp: string; value: number | null }[];
   color: string;
   unit?: string;
 }) {
-  if (data.length === 0) {
-    return (
-      <div
-        style={{
-          padding: "40px",
-          textAlign: "center",
-          color: "var(--muted)",
-          backgroundColor: "var(--surface-muted)",
-          borderRadius: "8px"
-        }}
-      >
-        No data available in this window
-      </div>
-    );
-  }
+  if (data.length === 0) return null;
 
   const spec: any = {
     $schema: "https://vega.github.io/schema/vega-lite/v5.json",
@@ -92,17 +80,34 @@ function TimeSeriesChart({
   return <VegaEmbed spec={spec} options={{ actions: false }} />;
 }
 
-function MetricCard({ panel }: { panel: MetricPanel }) {
+function MetricCard({
+  panel,
+  isLoading,
+  error,
+  meta
+}: {
+  panel: MetricPanel;
+  isLoading: boolean;
+  error: string | null;
+  meta?: { asOf?: string; window?: string };
+}) {
+  const hasData = panel.data.some((point) => point.value != null);
+  const isEmpty = !isLoading && !error && !hasData;
+
   return (
-    <div className="panel" style={{ marginBottom: "24px" }}>
-      <div style={{ marginBottom: "16px" }}>
-        <h3 style={{ margin: "0 0 4px 0" }}>{panel.title}</h3>
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.9rem" }}>
-          {panel.description}
-        </p>
-      </div>
+    <ChartFrame
+      title={panel.title}
+      description={panel.description}
+      isLoading={isLoading}
+      error={error}
+      isEmpty={isEmpty}
+      meta={{
+        ...meta,
+        missingBuckets: panel.missingBuckets
+      }}
+    >
       <TimeSeriesChart data={panel.data} color={panel.color} unit={panel.unit} />
-    </div>
+    </ChartFrame>
   );
 }
 
@@ -111,6 +116,7 @@ export default function MetricsPreview() {
   const [window, setWindow] = useState("1h");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [asOfLabel, setAsOfLabel] = useState<string | null>(null);
 
   const loadMetrics = async (currentWindow: string) => {
     setIsLoading(true);
@@ -119,6 +125,7 @@ export default function MetricsPreview() {
     try {
       const data = await fetchMetricsPreview(currentWindow);
       setMetrics(data);
+      setAsOfLabel(`(client) ${new Date().toLocaleString()}`);
     } catch (err: any) {
       setError(err.message || "Failed to load metrics data");
     } finally {
@@ -131,7 +138,34 @@ export default function MetricsPreview() {
   }, [window]);
 
   const panels: MetricPanel[] = useMemo(() => {
-    if (!metrics || !metrics.timeseries) return [];
+    if (!metrics || !metrics.timeseries) {
+      return [
+        {
+          title: "Traces Over Time",
+          description: "Number of traces recorded",
+          data: [],
+          color: "#6366f1",
+          unit: "traces",
+          missingBuckets: false
+        },
+        {
+          title: "Error Rate Over Time",
+          description: "Percentage of traces with error status",
+          data: [],
+          color: "#ef4444",
+          unit: "% errors",
+          missingBuckets: false
+        },
+        {
+          title: "Average Duration Over Time",
+          description: "Average trace duration in milliseconds",
+          data: [],
+          color: "#10b981",
+          unit: "ms",
+          missingBuckets: false
+        }
+      ];
+    }
 
     return [
       {
@@ -142,7 +176,8 @@ export default function MetricsPreview() {
           value: b.count
         })),
         color: "#6366f1",
-        unit: "traces"
+        unit: "traces",
+        missingBuckets: false
       },
       {
         title: "Error Rate Over Time",
@@ -152,22 +187,41 @@ export default function MetricsPreview() {
           value: b.count > 0 ? (b.error_count / b.count) * 100 : 0
         })),
         color: "#ef4444",
-        unit: "% errors"
+        unit: "% errors",
+        missingBuckets: false
       },
       {
         title: "Average Duration Over Time",
         description: "Average trace duration in milliseconds",
         data: metrics.timeseries.map((b: MetricsBucket) => ({
           timestamp: b.timestamp,
-          value: b.avg_duration || 0
+          value: b.avg_duration ?? null
         })),
         color: "#10b981",
-        unit: "ms"
+        unit: "ms",
+        missingBuckets: metrics.timeseries.some(
+          (bucket) => bucket.avg_duration == null
+        )
       }
     ];
   }, [metrics]);
 
   const hasGrafana = !!grafanaBaseUrl;
+  const windowMeta = useMemo(() => {
+    if (!metrics) return undefined;
+    const windowMinutes = metrics.window_minutes;
+    const startTime = new Date(metrics.start_time);
+    const endTime = new Date(startTime.getTime() + windowMinutes * 60 * 1000);
+    return `Last ${windowMinutes} minutes · ${startTime.toLocaleString()} → ${endTime.toLocaleString()}`;
+  }, [metrics]);
+
+  const sharedMeta = useMemo(() => {
+    if (!metrics && !asOfLabel) return undefined;
+    return {
+      window: windowMeta,
+      asOf: asOfLabel || undefined
+    };
+  }, [windowMeta, asOfLabel, metrics]);
 
   return (
     <>
@@ -247,37 +301,23 @@ export default function MetricsPreview() {
         </div>
       </div>
 
-      {isLoading && (
-        <div className="panel" style={{ textAlign: "center", padding: "60px" }}>
-          <div style={{ color: "var(--muted)" }}>Aggregating metrics...</div>
-        </div>
-      )}
-
-      {error && (
-        <div className="panel" style={{ textAlign: "center", padding: "40px" }}>
-          <div style={{ color: "var(--error)", marginBottom: "16px" }}>
-            Failed to load metrics data
-          </div>
-          <div style={{ color: "var(--muted)", marginBottom: "20px", fontSize: "0.9rem" }}>
-            {error}
-          </div>
-          <button
-            type="button"
-            onClick={() => loadMetrics(window)}
-            style={{
-              padding: "10px 20px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: "var(--accent)",
-              color: "#fff",
-              fontWeight: 500,
-              cursor: "pointer"
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
+          gap: "24px"
+        }}
+      >
+        {panels.map((panel) => (
+          <MetricCard
+            key={panel.title}
+            panel={panel}
+            isLoading={isLoading}
+            error={error}
+            meta={sharedMeta}
+          />
+        ))}
+      </div>
 
       {!isLoading && !error && metrics && metrics.summary.total_count === 0 && (
         <div className="panel" style={{ textAlign: "center", padding: "60px" }}>
@@ -306,44 +346,30 @@ export default function MetricsPreview() {
       )}
 
       {!isLoading && !error && metrics && metrics.summary.total_count > 0 && (
-        <div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
-              gap: "24px"
-            }}
-          >
-            {panels.map((panel) => (
-              <MetricCard key={panel.title} panel={panel} />
-            ))}
+        <div style={{ marginTop: "32px", padding: "16px", backgroundColor: "var(--surface-muted)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+          <div style={{ fontWeight: 600, marginBottom: "8px" }}>Window Summary</div>
+          <div style={{ fontSize: "0.9rem", color: "var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+              <div>
+                  <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Total Traces</div>
+                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.total_count}</div>
+              </div>
+              <div>
+                  <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Errors</div>
+                  <div style={{ fontSize: "1.2rem", fontWeight: 700, color: metrics.summary.error_count > 0 ? "var(--error)" : "inherit" }}>
+                      {metrics.summary.error_count} ({((metrics.summary.error_count / metrics.summary.total_count) * 100).toFixed(1)}%)
+                  </div>
+              </div>
+              <div>
+                  <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Avg Duration</div>
+                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.avg_duration?.toFixed(0)} ms</div>
+              </div>
+              <div>
+                  <div style={{ color: "var(--muted)", marginBottom: "4px" }}>P95 Duration</div>
+                  <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.p95_duration?.toFixed(0)} ms</div>
+              </div>
           </div>
-
-          <div style={{ marginTop: "32px", padding: "16px", backgroundColor: "var(--surface-muted)", borderRadius: "8px", border: "1px solid var(--border)" }}>
-            <div style={{ fontWeight: 600, marginBottom: "8px" }}>Window Summary</div>
-            <div style={{ fontSize: "0.9rem", color: "var(--ink)", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
-                <div>
-                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Total Traces</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.total_count}</div>
-                </div>
-                <div>
-                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Errors</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700, color: metrics.summary.error_count > 0 ? "var(--error)" : "inherit" }}>
-                        {metrics.summary.error_count} ({((metrics.summary.error_count / metrics.summary.total_count) * 100).toFixed(1)}%)
-                    </div>
-                </div>
-                <div>
-                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>Avg Duration</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.avg_duration?.toFixed(0)} ms</div>
-                </div>
-                <div>
-                    <div style={{ color: "var(--muted)", marginBottom: "4px" }}>P95 Duration</div>
-                    <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>{metrics.summary.p95_duration?.toFixed(0)} ms</div>
-                </div>
-            </div>
-            <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--border)", fontSize: "0.85rem", color: "var(--muted)" }}>
-                <strong>Window Start:</strong> {new Date(metrics.start_time).toLocaleString()}
-            </div>
+          <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--border)", fontSize: "0.85rem", color: "var(--muted)" }}>
+              <strong>Window Start:</strong> {new Date(metrics.start_time).toLocaleString()}
           </div>
         </div>
       )}
