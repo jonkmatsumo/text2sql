@@ -9,6 +9,7 @@ import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
+import { computeSpanCoverage } from "../components/trace/trace_coverage";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 const SPAN_PAGE_LIMIT = 500;
@@ -179,13 +180,13 @@ export default function TraceDetail() {
   }, [trace, spans]);
 
   const traceDuration = trace?.duration_ms ?? 0;
-  const loadedSpanCount = spans.length;
-  const totalSpanCount = trace?.span_count;
-  const totalSpanKnown = totalSpanCount != null && totalSpanCount > 0;
-  const coveragePct = totalSpanKnown
-    ? Math.min(100, Math.round((loadedSpanCount / totalSpanCount) * 100))
-    : null;
-  const reachedMaxLimit = loadedSpanCount >= SPAN_MAX_LIMIT;
+  const {
+    loadedCount: loadedSpanCount,
+    totalCount: totalSpanCount,
+    totalKnown: totalSpanKnown,
+    coveragePct,
+    reachedMaxLimit
+  } = computeSpanCoverage(spans.length, trace?.span_count ?? null, SPAN_MAX_LIMIT);
 
   const handleSpanSelect = (spanId: string) => {
     if (!traceId) return;

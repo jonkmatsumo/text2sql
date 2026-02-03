@@ -3,6 +3,7 @@ import {
   buildWaterfallRows,
   computeCriticalPath,
   defaultGroupStrategy,
+  extractSpanEventMarkers,
   groupWaterfallRows,
 } from "./waterfall_model";
 import { SpanSummary } from "../../../types";
@@ -91,5 +92,35 @@ describe("waterfall_model critical path", () => {
 
     const single = computeCriticalPath([makeSpan({ span_id: "solo" })]);
     expect(Array.from(single)).toEqual(["solo"]);
+  });
+});
+
+describe("extractSpanEventMarkers", () => {
+  it("normalizes event timestamps relative to trace start", () => {
+    const traceStart = new Date("2024-01-01T00:00:00Z").getTime();
+    const span = makeSpan({
+      span_id: "event-span",
+      events: [
+        { name: "second", time_unix_nano: (traceStart + 20) * 1_000_000 },
+        { name: "first", timeUnixNano: (traceStart + 10) * 1_000_000 }
+      ],
+    });
+
+    const markers = extractSpanEventMarkers(span, traceStart);
+    expect(markers).toHaveLength(2);
+    expect(markers[0].name).toBe("first");
+    expect(markers[0].ts).toBeCloseTo(10);
+    expect(markers[1].ts).toBeCloseTo(20);
+  });
+
+  it("ignores events without timestamps", () => {
+    const traceStart = new Date("2024-01-01T00:00:00Z").getTime();
+    const span = makeSpan({
+      span_id: "event-span",
+      events: [{ name: "no-ts" }],
+    });
+
+    const markers = extractSpanEventMarkers(span, traceStart);
+    expect(markers).toHaveLength(0);
   });
 });
