@@ -683,6 +683,95 @@ body {
   color: var(--muted);
 }
 
+/* Grouped Waterfall Styles */
+.trace-waterfall__group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--surface-muted);
+  border-radius: 6px;
+  margin: 2px 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85rem;
+}
+
+.trace-waterfall__group-header:hover {
+  background: #e9e4db;
+}
+
+.trace-waterfall__group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trace-waterfall__group-toggle {
+  display: inline-block;
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  color: var(--muted);
+}
+
+.trace-waterfall__group-toggle.is-expanded {
+  transform: rotate(90deg);
+}
+
+.trace-waterfall__group-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.trace-waterfall__group-count {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.trace-waterfall__group-duration {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: monospace;
+}
+
+.trace-waterfall__group-critical-badge {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.trace-waterfall__row--critical {
+  border-left: 3px solid #ef4444 !important;
+  background: #fff5f5;
+}
+
+.trace-waterfall__bar--critical {
+  background: #ef4444 !important;
+}
+
+.trace-waterfall__controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  background: var(--surface-muted);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+
+.trace-waterfall__controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
 .trace-span-table__header,
 .trace-span-table__row {
   display: grid;
