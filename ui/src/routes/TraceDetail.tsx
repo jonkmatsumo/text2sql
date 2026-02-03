@@ -11,6 +11,7 @@ import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
+const SPAN_PAGE_LIMIT = 500;
 const SPAN_MAX_LIMIT = 5000;
 
 export default function TraceDetail() {
@@ -26,6 +27,8 @@ export default function TraceDetail() {
   const [isSpansLoading, setIsSpansLoading] = useState(true);
   const [isLoadingMoreSpans, setIsLoadingMoreSpans] = useState(false);
   const [hasPartialData, setHasPartialData] = useState(false);
+  const [spanOffset, setSpanOffset] = useState(0);
+  const [hasMoreSpans, setHasMoreSpans] = useState(false);
 
   const [selectedSpan, setSelectedSpan] = useState<SpanDetail | null>(null);
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
@@ -70,50 +73,31 @@ export default function TraceDetail() {
       setSpansError(null);
       setHasPartialData(false);
       setSpans([]);
+      setSpanOffset(0);
+      setHasMoreSpans(false);
     } else {
       setIsLoadingMoreSpans(true);
       setSpansError(null);
     }
 
-    const limit = 500;
-    const maxSpans = 5000;
-    let offset = resumeFromOffset ?? 0;
-    let pageNumber = isResume ? Math.floor(offset / limit) + 1 : 1;
-
     try {
-      while (true) {
-        const page = await fetchTraceSpans(traceId, limit, offset);
+      const offset = resumeFromOffset ?? 0;
+      const page = await fetchTraceSpans(traceId, SPAN_PAGE_LIMIT, offset);
 
-        // Append page results incrementally
-        setSpans((prev) => {
-          const existingIds = new Set(prev.map((s) => s.span_id));
-          const newSpans = page.filter((s) => !existingIds.has(s.span_id));
-          return [...prev, ...newSpans];
-        });
+      setSpans((prev) => {
+        const existingIds = new Set(prev.map((s) => s.span_id));
+        const newSpans = page.filter((s) => !existingIds.has(s.span_id));
+        return [...prev, ...newSpans];
+      });
 
-        // First page arrived - mark initial loading complete
-        if (pageNumber === 1) {
-          setIsSpansLoading(false);
-          if (page.length === limit) {
-            setIsLoadingMoreSpans(true);
-          }
-        }
-
-        // Check if we're done
-        if (page.length < limit) {
-          // Last page
-          setIsLoadingMoreSpans(false);
-          break;
-        }
-
-        offset += limit;
-        pageNumber++;
-
-        if (offset >= maxSpans) {
-          setIsLoadingMoreSpans(false);
-          break;
-        }
-      }
+      const nextOffset = offset + page.length;
+      setSpanOffset(nextOffset);
+      const totalSpans = trace?.span_count;
+      const hasMoreFromServer =
+        page.length === SPAN_PAGE_LIMIT &&
+        nextOffset < SPAN_MAX_LIMIT &&
+        (totalSpans == null || nextOffset < totalSpans);
+      setHasMoreSpans(hasMoreFromServer);
     } catch (err: unknown) {
       const errorMessage = getErrorMessage(err);
       setSpansError(errorMessage);
@@ -133,7 +117,7 @@ export default function TraceDetail() {
       setIsSpansLoading(false);
       setIsLoadingMoreSpans(false);
     }
-  }, [traceId]);
+  }, [traceId, trace?.span_count]);
 
   useEffect(() => {
     if (traceId) {
@@ -153,7 +137,11 @@ export default function TraceDetail() {
 
   const handleRetryRemainingSpans = () => {
     // Resume from where we left off
-    loadSpansData(spans.length);
+    loadSpansData(spanOffset);
+  };
+
+  const handleLoadMoreSpans = () => {
+    loadSpansData(spanOffset);
   };
 
   const filteredSpans = useMemo(() => {
@@ -475,6 +463,22 @@ export default function TraceDetail() {
                         showEvents={showEvents}
                         selectedSpanId={selectedSpanId}
                     />
+                    {(hasMoreSpans || reachedMaxLimit) && (
+                      <div className="trace-waterfall__load-more">
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreSpans}
+                          disabled={!hasMoreSpans || isLoadingMoreSpans || reachedMaxLimit}
+                        >
+                          {reachedMaxLimit ? "UI limit reached" : isLoadingMoreSpans ? "Loading..." : "Load more spans"}
+                        </button>
+                        <span className="trace-waterfall__load-more-note">
+                          {totalSpanKnown
+                            ? `${loadedSpanCount} of ${totalSpanCount} spans loaded`
+                            : `${loadedSpanCount} spans loaded`}
+                        </span>
+                      </div>
+                    )}
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", borderTop: "1px solid var(--border)" }}>
                             Loading more spans...
@@ -522,6 +526,22 @@ export default function TraceDetail() {
                       onSelect={handleSpanSelect}
                       selectedSpanId={selectedSpanId}
                     />
+                    {(hasMoreSpans || reachedMaxLimit) && (
+                      <div className="trace-waterfall__load-more trace-waterfall__load-more--table">
+                        <button
+                          type="button"
+                          onClick={handleLoadMoreSpans}
+                          disabled={!hasMoreSpans || isLoadingMoreSpans || reachedMaxLimit}
+                        >
+                          {reachedMaxLimit ? "UI limit reached" : isLoadingMoreSpans ? "Loading..." : "Load more spans"}
+                        </button>
+                        <span className="trace-waterfall__load-more-note">
+                          {totalSpanKnown
+                            ? `${loadedSpanCount} of ${totalSpanCount} spans loaded`
+                            : `${loadedSpanCount} spans loaded`}
+                        </span>
+                      </div>
+                    )}
                     {isLoadingMoreSpans && (
                         <div style={{ padding: "12px", textAlign: "center", color: "var(--muted)", fontSize: "0.9rem" }}>
                             Loading more spans...

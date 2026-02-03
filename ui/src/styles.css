@@ -882,6 +882,41 @@ body {
   text-decoration: none;
 }
 
+.trace-waterfall__load-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.85rem;
+}
+
+.trace-waterfall__load-more--table {
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+}
+
+.trace-waterfall__load-more button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trace-waterfall__load-more button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.trace-waterfall__load-more-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 /* Artifact Panel Styles */
 .artifact-panel {
   background: var(--surface);
