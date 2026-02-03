@@ -4,6 +4,7 @@ import {
   computeCriticalPath,
   defaultGroupStrategy,
   extractSpanEventMarkers,
+  mapSpanStage,
   groupWaterfallRows,
 } from "./waterfall_model";
 import { SpanSummary } from "../../../types";
@@ -92,6 +93,23 @@ describe("waterfall_model critical path", () => {
 
     const single = computeCriticalPath([makeSpan({ span_id: "solo" })]);
     expect(Array.from(single)).toEqual(["solo"]);
+  });
+});
+
+describe("mapSpanStage", () => {
+  it("prefers explicit stage attributes", () => {
+    const span = makeSpan({
+      span_id: "stage",
+      span_attributes: { "telemetry.stage": "custom" }
+    });
+    expect(mapSpanStage(span)).toEqual({ key: "custom", label: "custom" });
+  });
+
+  it("maps known name patterns to stages", () => {
+    const llm = makeSpan({ span_id: "llm", name: "llm.call" });
+    const tool = makeSpan({ span_id: "tool", name: "tool.invoke" });
+    expect(mapSpanStage(llm).key).toBe("llm");
+    expect(mapSpanStage(tool).key).toBe("tool");
   });
 });
 
