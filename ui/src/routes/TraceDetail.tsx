@@ -5,6 +5,7 @@ import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../typ
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow, WaterfallViewHandle } from "../components/trace/WaterfallView";
 import { buildWaterfallRows, computeCriticalPath } from "../components/trace/waterfall/waterfall_model";
+import { WaterfallMiniMap } from "../components/trace/waterfall/WaterfallMiniMap";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
@@ -566,18 +567,21 @@ export default function TraceDetail() {
                       </div>
                     )}
                     {traceView === "waterfall" ? (
-                      <WaterfallView
-                          rows={rows}
-                          traceStart={traceStart}
-                          traceDurationMs={traceDuration}
-                          onSelect={handleSpanSelect}
-                          criticalPath={criticalPath}
-                          showCriticalPath={showCriticalPath}
-                          showEvents={showEvents}
-                          selectedSpanId={selectedSpanId}
-                          matchIds={waterfallMatches}
-                          ref={waterfallViewRef}
-                      />
+                      <>
+                        <WaterfallView
+                            rows={rows}
+                            traceStart={traceStart}
+                            traceDurationMs={traceDuration}
+                            onSelect={handleSpanSelect}
+                            criticalPath={criticalPath}
+                            showCriticalPath={showCriticalPath}
+                            showEvents={showEvents}
+                            selectedSpanId={selectedSpanId}
+                            matchIds={waterfallMatches}
+                            ref={waterfallViewRef}
+                        />
+                        <WaterfallMiniMap />
+                      </>
                     ) : (
                       <TraceGraphView
                         spans={filteredSpans}

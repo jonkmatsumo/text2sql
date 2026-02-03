@@ -904,6 +904,29 @@ body {
   cursor: not-allowed;
 }
 
+.trace-waterfall__minimap {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.trace-waterfall__minimap-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e5e7eb 0%, #cbd5f5 50%, #e5e7eb 100%);
+}
+
+.trace-waterfall__minimap-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 .trace-waterfall__row--match {
   background: #fef9c3;
 }
