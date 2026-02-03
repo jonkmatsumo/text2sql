@@ -63,9 +63,11 @@ export function defaultGroupStrategy(span: SpanSummary): { key: string; label: s
     return { key: String(eventType), label: String(eventType) };
   }
 
-  // Fallback to service_name
-  if (span.service_name) {
-    return { key: span.service_name, label: span.service_name };
+  // Fallback to service name span attribute
+  const serviceName = attrs["service.name"] || attrs["service_name"];
+  if (serviceName) {
+    const label = String(serviceName);
+    return { key: label, label };
   }
 
   // Final fallback
