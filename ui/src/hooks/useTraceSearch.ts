@@ -157,6 +157,8 @@ export interface FacetFilters {
   status: string; // "all" or specific status
   durationBucket: DurationBucket;
   hasErrors: "all" | "yes" | "no";
+  durationMinMs?: number | null;
+  durationMaxMs?: number | null;
 }
 
 export interface SortState {
@@ -196,7 +198,13 @@ function parseUrlParams(searchParams: URLSearchParams): {
     facets: {
       status: searchParams.get("status") || "all",
       durationBucket: (searchParams.get("duration") as DurationBucket) || "all",
-      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all"
+      hasErrors: (searchParams.get("errors") as "all" | "yes" | "no") || "all",
+      durationMinMs: searchParams.get("duration_min_ms")
+        ? parseInt(searchParams.get("duration_min_ms") || "0", 10)
+        : null,
+      durationMaxMs: searchParams.get("duration_max_ms")
+        ? parseInt(searchParams.get("duration_max_ms") || "0", 10)
+        : null
     },
     sort: {
       key: (searchParams.get("sort") as SortKey) || "start_time",
@@ -231,6 +239,8 @@ function buildUrlParams(
   if (facets.status !== "all") params.set("status", facets.status);
   if (facets.durationBucket !== "all") params.set("duration", facets.durationBucket);
   if (facets.hasErrors !== "all") params.set("errors", facets.hasErrors);
+  if (facets.durationMinMs != null) params.set("duration_min_ms", facets.durationMinMs.toString());
+  if (facets.durationMaxMs != null) params.set("duration_max_ms", facets.durationMaxMs.toString());
 
   if (sort.key !== "start_time") params.set("sort", sort.key);
   if (sort.direction !== "desc") params.set("dir", sort.direction);
@@ -360,6 +370,8 @@ export function useTraceSearch() {
          if (facets.hasErrors === "yes" && !hasErr) return false;
          if (facets.hasErrors === "no" && hasErr) return false;
       }
+      if (facets.durationMinMs != null && t.duration_ms < facets.durationMinMs) return false;
+      if (facets.durationMaxMs != null && t.duration_ms > facets.durationMaxMs) return false;
       return true;
     });
   }, [traces, facets]);
@@ -400,7 +412,8 @@ export function useTraceSearch() {
   const activeFacetCount =
     (facets.status !== "all" ? 1 : 0) +
     (facets.durationBucket !== "all" ? 1 : 0) +
-    (facets.hasErrors !== "all" ? 1 : 0);
+    (facets.hasErrors !== "all" ? 1 : 0) +
+    (facets.durationMinMs != null || facets.durationMaxMs != null ? 1 : 0);
 
   const handleClearFilters = useCallback(() => {
      setFilters({
@@ -413,7 +426,9 @@ export function useTraceSearch() {
      setFacets({
        status: "all",
        durationBucket: "all",
-       hasErrors: "all"
+       hasErrors: "all",
+       durationMinMs: null,
+       durationMaxMs: null
      });
   }, []);
 

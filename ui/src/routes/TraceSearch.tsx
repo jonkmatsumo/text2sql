@@ -4,6 +4,7 @@ import { useTraceSearch } from "../hooks/useTraceSearch";
 import { TraceFiltersPanel } from "../components/trace/TraceFiltersPanel";
 import { TraceFacetsPanel } from "../components/trace/TraceFacetsPanel";
 import { TraceResultsTable } from "../components/trace/TraceResultsTable";
+import { DurationHistogram } from "../components/trace/search/DurationHistogram";
 
 export default function TraceSearch() {
   const {
@@ -22,9 +23,11 @@ export default function TraceSearch() {
     facetSource,
     facetSampleCount,
     facetTotalCount,
+    facetMeta,
     statusCounts,
     availableStatuses,
     durationBucketCounts,
+    durationHistogram,
     activeFacetCount,
     handleClearFilters
   } = useTraceSearch();
@@ -84,6 +87,23 @@ export default function TraceSearch() {
           onFiltersChange={setFilters}
           onSearch={() => loadTraces(false)}
           isLoading={isLoading}
+        />
+
+        <DurationHistogram
+          traces={traces}
+          bins={durationHistogram}
+          scopeLabel={
+            facetSource === "server"
+              ? facetMeta?.isSampled || facetMeta?.isTruncated
+                ? "Server sample (approximate)"
+                : "Dataset-wide (server)"
+              : `Subset of loaded results (${facetSampleCount})`
+          }
+          range={{
+            min: facets.durationMinMs ?? null,
+            max: facets.durationMaxMs ?? null
+          }}
+          onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
         />
 
         <TraceFacetsPanel

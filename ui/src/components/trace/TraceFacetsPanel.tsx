@@ -88,7 +88,13 @@ export function TraceFacetsPanel({
         {activeFacetCount > 0 && (
           <button
             type="button"
-            onClick={() => onFacetsChange({ status: "all", durationBucket: "all", hasErrors: "all" })}
+            onClick={() => onFacetsChange({
+              status: "all",
+              durationBucket: "all",
+              hasErrors: "all",
+              durationMinMs: null,
+              durationMaxMs: null
+            })}
             style={{
               padding: "4px 12px",
               borderRadius: "6px",

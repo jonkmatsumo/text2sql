@@ -993,6 +993,83 @@ body {
   font-size: 0.78rem;
 }
 
+.trace-histogram {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.trace-histogram__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.trace-histogram__header h3 {
+  margin: 0 0 4px 0;
+}
+
+.trace-histogram__inputs {
+  display: flex;
+  gap: 10px;
+}
+
+.trace-histogram__inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.trace-histogram__inputs input {
+  width: 90px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.trace-histogram__bars {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 6px;
+  align-items: end;
+  height: 120px;
+  padding: 8px 4px;
+}
+
+.trace-histogram__bar {
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.trace-histogram__bar-fill {
+  width: 100%;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, #6366f1 0%, #a5b4fc 100%);
+}
+
+.trace-histogram__percentiles {
+  display: flex;
+  gap: 16px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.trace-histogram__empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
 .trace-waterfall__load-more {
   display: flex;
   align-items: center;
