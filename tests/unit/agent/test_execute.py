@@ -192,6 +192,40 @@ class TestValidateAndExecuteNode:
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")
     @patch("agent.nodes.execute.TenantRewriter")
+    async def test_validate_and_execute_node_error_category(
+        self, mock_rewriter, mock_enforcer, mock_get_tools
+    ):
+        """Test error handling when tool returns categorized error payload."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        payload = json.dumps(
+            [{"error": "Database Error: syntax error", "error_category": "syntax"}]
+        )
+        mock_tool.ainvoke = AsyncMock(return_value=payload)
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT FROM",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["error"] == "Database Error: syntax error"
+        assert result["error_category"] == "syntax"
+        assert result["query_result"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
     async def test_validate_and_execute_node_missing_tool(
         self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):

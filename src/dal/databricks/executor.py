@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.async_utils import with_timeout
+from dal.tracing import trace_query_operation
 
 
 class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
@@ -39,23 +41,45 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
         }
         if params:
             payload["parameters"] = params
-        response = await asyncio.to_thread(
-            _request,
-            "POST",
-            f"{self._host}/api/2.0/sql/statements",
-            self._token,
-            payload,
+        operation = with_timeout(
+            asyncio.to_thread(
+                _request,
+                "POST",
+                f"{self._host}/api/2.0/sql/statements",
+                self._token,
+                payload,
+                self._timeout_seconds,
+            ),
+            timeout_seconds=self._timeout_seconds,
+        )
+        response = await trace_query_operation(
+            "dal.query.submit",
+            provider="databricks",
+            execution_model="async",
+            sql=sql,
+            operation=operation,
         )
         return response["statement_id"]
 
     async def poll(self, job_id: str) -> NormalizedStatus:
         """Poll the status of a running query."""
-        response = await asyncio.to_thread(
-            _request,
-            "GET",
-            f"{self._host}/api/2.0/sql/statements/{job_id}",
-            self._token,
-            None,
+        operation = with_timeout(
+            asyncio.to_thread(
+                _request,
+                "GET",
+                f"{self._host}/api/2.0/sql/statements/{job_id}",
+                self._token,
+                None,
+                self._timeout_seconds,
+            ),
+            timeout_seconds=self._timeout_seconds,
+        )
+        response = await trace_query_operation(
+            "dal.query.poll",
+            provider="databricks",
+            execution_model="async",
+            sql=None,
+            operation=operation,
         )
         state = response.get("status", {}).get("state") or response.get("state")
         return _map_status(state)
@@ -63,12 +87,24 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
     async def fetch(self, job_id: str, max_rows: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch results for a completed query."""
         limit = max_rows if max_rows is not None else self._max_rows
-        return await asyncio.to_thread(
-            _fetch_results,
-            self._host,
-            self._token,
-            job_id,
-            limit,
+        operation = with_timeout(
+            asyncio.to_thread(
+                _fetch_results,
+                self._host,
+                self._token,
+                job_id,
+                limit,
+                self._timeout_seconds,
+            ),
+            timeout_seconds=self._timeout_seconds,
+            on_timeout=lambda: self.cancel(job_id),
+        )
+        return await trace_query_operation(
+            "dal.query.fetch",
+            provider="databricks",
+            execution_model="async",
+            sql=None,
+            operation=operation,
         )
 
     async def cancel(self, job_id: str) -> None:
@@ -79,35 +115,39 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
             f"{self._host}/api/2.0/sql/statements/{job_id}/cancel",
             self._token,
             None,
+            self._timeout_seconds,
         )
 
 
-def _request(method: str, url: str, token: str, payload: Optional[dict]) -> dict:
+def _request(method: str, url: str, token: str, payload: Optional[dict], timeout: float) -> dict:
     data = None
     headers = {"Authorization": f"Bearer {token}"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         body = response.read().decode("utf-8")
         return json.loads(body) if body else {}
 
 
-def _fetch_results(host: str, token: str, job_id: str, max_rows: int) -> List[Dict[str, Any]]:
+def _fetch_results(
+    host: str, token: str, job_id: str, max_rows: int, timeout: float
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     response = _request(
         "GET",
         f"{host}/api/2.0/sql/statements/{job_id}",
         token,
         None,
+        timeout,
     )
     rows.extend(_parse_result(response))
 
     next_link = _get_next_chunk_link(response)
     while next_link and len(rows) < max_rows:
         url = next_link if next_link.startswith("http") else f"{host}{next_link}"
-        chunk = _request("GET", url, token, None)
+        chunk = _request("GET", url, token, None, timeout)
         rows.extend(_parse_result(chunk))
         next_link = _get_next_chunk_link(chunk)
 

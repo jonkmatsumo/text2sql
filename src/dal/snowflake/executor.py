@@ -6,6 +6,7 @@ from snowflake.connector.constants import QueryStatus
 
 from dal.async_query_executor import AsyncQueryExecutor
 from dal.async_query_executor import QueryStatus as NormalizedStatus
+from dal.tracing import trace_query_operation
 
 
 class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
@@ -18,16 +19,34 @@ class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
     async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
         """Submit a query for asynchronous execution."""
         bound_params = params if params is not None else []
-        return await asyncio.to_thread(_submit, self._conn, sql, bound_params)
+        return await trace_query_operation(
+            "dal.query.submit",
+            provider="snowflake",
+            execution_model="async",
+            sql=sql,
+            operation=asyncio.to_thread(_submit, self._conn, sql, bound_params),
+        )
 
     async def poll(self, job_id: str) -> NormalizedStatus:
         """Poll the status of a running query."""
-        status = await asyncio.to_thread(self._conn.get_query_status, job_id)
+        status = await trace_query_operation(
+            "dal.query.poll",
+            provider="snowflake",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(self._conn.get_query_status, job_id),
+        )
         return _map_status(status)
 
     async def fetch(self, job_id: str, max_rows: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch results for a completed query."""
-        return await asyncio.to_thread(_fetch, self._conn, job_id, max_rows)
+        return await trace_query_operation(
+            "dal.query.fetch",
+            provider="snowflake",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(_fetch, self._conn, job_id, max_rows),
+        )
 
     async def cancel(self, job_id: str) -> None:
         """Cancel a running query."""
@@ -48,10 +67,17 @@ def _fetch(
     max_rows: Optional[int],
 ) -> List[Dict[str, Any]]:
     cursor = conn.get_results_from_sfqid(job_id)
-    rows = cursor.fetchall()
-    if max_rows is not None:
-        rows = rows[:max_rows]
     columns = [desc[0] for desc in cursor.description] if cursor.description else []
+    batch_size = min(1000, max_rows) if max_rows else 1000
+    rows: List[tuple] = []
+    while True:
+        batch = cursor.fetchmany(batch_size)
+        if not batch:
+            break
+        rows.extend(batch)
+        if max_rows is not None and len(rows) >= max_rows:
+            rows = rows[:max_rows]
+            break
     return [dict(zip(columns, row)) for row in rows]
 
 

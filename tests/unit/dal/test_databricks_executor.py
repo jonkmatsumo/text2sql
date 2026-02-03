@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 import dal.databricks.executor as executor_mod
@@ -9,8 +11,8 @@ from dal.databricks.executor import DatabricksAsyncQueryExecutor
 async def test_databricks_executor_submit_poll_fetch(monkeypatch):
     """Validate submit/poll/fetch wiring for Databricks executor."""
 
-    def fake_request(method, url, token, payload):
-        _ = token, payload
+    def fake_request(method, url, token, payload, timeout):
+        _ = token, payload, timeout
         if method == "POST" and url.endswith("/api/2.0/sql/statements"):
             return {"statement_id": "stmt-1"}
         if method == "GET" and url.endswith("/api/2.0/sql/statements/stmt-1"):
@@ -44,3 +46,44 @@ async def test_databricks_executor_submit_poll_fetch(monkeypatch):
 
     rows = await executor.fetch(job_id, max_rows=10)
     assert rows == [{"id": 1}]
+
+
+@pytest.mark.asyncio
+async def test_databricks_executor_fetch_timeout_calls_cancel(monkeypatch):
+    """Verify fetch timeout triggers cancel."""
+    calls = []
+
+    def slow_request(method, url, token, payload, timeout):
+        _ = token, payload, timeout
+        calls.append((method, url))
+        if method == "POST" and url.endswith("/cancel"):
+            return {}
+        if method == "GET":
+            import time
+
+            time.sleep(0.05)
+            return {
+                "status": {"state": "SUCCEEDED"},
+                "result": {
+                    "data_array": [[1]],
+                    "schema": {"columns": [{"name": "id"}]},
+                },
+            }
+        return {"statement_id": "stmt-1"}
+
+    monkeypatch.setattr(executor_mod, "_request", slow_request)
+
+    executor = DatabricksAsyncQueryExecutor(
+        host="https://example.cloud.databricks.com",
+        token="token",
+        warehouse_id="wh",
+        catalog="main",
+        schema="public",
+        timeout_seconds=0.001,
+        max_rows=1000,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await executor.fetch("stmt-1", max_rows=10)
+
+    assert any(url.endswith("/cancel") for _, url in calls)

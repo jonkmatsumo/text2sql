@@ -176,6 +176,15 @@ docker compose -f docker-compose.test.yml up -d
 pytest tests/integration/
 ```
 
+Quick DAL-only sweep:
+```bash
+make test-dal
+```
+`make test-dal` uses `.venv/bin/python` when available to avoid `uv` cache instability. If you hit a `uv` cache error, run via a local cache directory:
+```bash
+uv run --cache-dir ./.uv-cache pytest tests/unit/dal -v
+```
+
 ## Configuration
 
 The system uses environment variables for configuration. See `.env.example` for a complete list of available options.
@@ -184,10 +193,30 @@ The system uses environment variables for configuration. See `.env.example` for 
 - **Control-Plane**: Always uses PostgreSQL to store query registries, embeddings, and metadata.
 - **Query-Target**: The database you want to query. You can toggle this via `QUERY_TARGET_BACKEND`.
 
+If the control-plane database is configured, query-target settings can also be managed from the UI (Settings → Query Target). The UI stores metadata and **secret references only**; secrets must remain in environment variables or an external secret manager. Activating a new query-target requires a backend restart and will show a pending status until the service boots successfully.
+
 ### Supported Backends
 Switch between supported databases by setting `QUERY_TARGET_BACKEND` (e.g., `postgres`, `mysql`, `snowflake`, `bigquery`, `athena`, `databricks`, `duckdb`, `clickhouse`, `redshift`, `sqlite`).
 
 Each backend requires specific environment variables for connection (e.g., `DB_HOST`, `SNOWFLAKE_ACCOUNT`, etc.). Refer to the Data Abstraction Layer (DAL) documentation or `.env.example` for specific credential requirements.
+
+#### DuckDB Notes
+- Use `DUCKDB_PATH=:memory:` for an in-memory database.
+- Set `DUCKDB_READ_ONLY=true` to open a file-backed DuckDB database in read-only mode.
+
+### DAL Feature Flags
+- `DAL_EXPERIMENTAL_FEATURES=true` enables opt-in features like schema cache, error classification metadata, and display-only type normalization.
+- `DAL_TRACE_QUERIES=true` emits DAL query spans with hashed SQL only (no raw SQL).
+- `DAL_ALLOW_LOCAL_QUERY_TARGETS=true` allows UI-configured local providers (SQLite/DuckDB) in non-production environments.
+
+### Async Provider Guardrails
+Async warehouses (Snowflake, BigQuery, Athena, Databricks) enforce timeouts and attempt cancellation on deadline. Configure provider-specific `*_QUERY_TIMEOUT_SECS` and `*_MAX_ROWS` in `.env.example`.
+
+### Redshift Notes
+Redshift query targets avoid explicit transaction wrappers; compatibility guardrails still apply.
+
+### Postgres Cloud Notes
+Managed Postgres variants (Aurora, RDS, Azure Database for PostgreSQL, Cloud SQL for PostgreSQL) work via `QUERY_TARGET_BACKEND=postgres`. Configure connectivity/TLS at the deployment layer; the DAL does not abstract vendor-specific SSL configuration.
 
 ### Observability
 OTEL-based observability is mandatory for trace storage and debugging. The stack is automatically initialized during `make up`.

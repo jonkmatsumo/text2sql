@@ -108,6 +108,7 @@ class ControlPlaneDatabase:
             "pinned_recommendations",
             "synth_generation_runs",
             "synth_templates",
+            "query_target_configs",
         ]
         missing_tables = []
 

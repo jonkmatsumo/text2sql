@@ -25,9 +25,12 @@ async def test_bigquery_schema_introspector(monkeypatch):
 
     monkeypatch.setattr(
         "dal.bigquery.schema_introspector.BigQueryConfig.from_env",
-        lambda: _FakeConfig(),
+        lambda: (_ for _ in ()).throw(AssertionError("from_env should not be called")),
     )
     monkeypatch.setattr("dal.bigquery.schema_introspector._run_query", fake_run_query)
+    from dal.bigquery.query_target import BigQueryQueryTargetDatabase
+
+    monkeypatch.setattr(BigQueryQueryTargetDatabase, "_config", _FakeConfig(), raising=False)
 
     introspector = BigQuerySchemaIntrospector()
     table_names = await introspector.list_table_names()

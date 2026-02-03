@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from dal.feature_flags import experimental_features_enabled
+
+
+def maybe_classify_error(provider: str, exc: Exception) -> Optional[str]:
+    """Return an error category when experimental classification is enabled."""
+    if not experimental_features_enabled():
+        return None
+    return classify_error(provider, exc)
+
+
+def classify_error(provider: str, exc: Exception) -> str:
+    """Classify an error into a provider-agnostic category."""
+    message = str(exc).lower()
+    class_name = exc.__class__.__name__.lower()
+    module_name = exc.__class__.__module__.lower()
+    provider = provider.lower()
+
+    if _matches_any(
+        message, ("permission denied", "not authorized", "access denied", "unauthorized")
+    ):
+        return "auth"
+    if _matches_any(
+        message,
+        (
+            "could not connect",
+            "connection refused",
+            "network",
+            "dns",
+            "connection failed",
+        ),
+    ):
+        return "connectivity"
+    if _matches_any(message, ("timeout", "timed out", "deadline exceeded")):
+        return "timeout"
+    if _matches_any(message, ("out of memory", "quota", "resource exhausted", "capacity")):
+        return "resource_exhausted"
+    if _matches_any(
+        message, ("syntax error", "sql compilation error", "parse error", "invalid query")
+    ):
+        return "syntax"
+    if _matches_any(message, ("not supported", "unsupported", "feature not supported")):
+        return "unsupported"
+
+    if module_name.startswith("asyncpg") and "syntax" in class_name:
+        return "syntax"
+    if module_name.startswith("asyncpg") and "invalidauthorization" in class_name:
+        return "auth"
+
+    if provider in {"bigquery", "snowflake", "athena", "databricks"}:
+        if class_name in {"badrequest", "programmingerror"}:
+            return "syntax"
+        if class_name in {"forbidden", "unauthorized"}:
+            return "auth"
+        if class_name in {"toomanyrequests", "serviceunavailable"}:
+            return "transient"
+
+    if class_name in {"timeout", "timeouterror"}:
+        return "timeout"
+    if class_name in {"connectionerror", "operationalerror"}:
+        return "connectivity"
+
+    return "unknown"
+
+
+def _matches_any(text: str, fragments: tuple[str, ...]) -> bool:
+    return any(fragment in text for fragment in fragments)

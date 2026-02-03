@@ -31,135 +31,333 @@ class Database:
         """Initialize connection pools."""
         from common.config.env import get_env_int, get_env_str
         from dal.capabilities import capabilities_for_provider
+        from dal.query_target_config_source import (
+            build_clickhouse_params,
+            build_mysql_params,
+            build_postgres_params,
+            finalize_pending_config,
+            guardrail_bool,
+            guardrail_int,
+            load_query_target_config_selection,
+            resolve_secret_ref,
+        )
         from dal.util.env import get_provider_env
 
-        backend_override = get_env_str("QUERY_TARGET_BACKEND")
-        if backend_override:
-            cls._query_target_provider = get_provider_env(
-                "QUERY_TARGET_BACKEND",
-                default="postgres",
-                allowed={
-                    "postgres",
-                    "sqlite",
-                    "mysql",
-                    "snowflake",
-                    "redshift",
-                    "bigquery",
-                    "athena",
-                    "databricks",
-                    "cockroachdb",
-                    "duckdb",
-                    "clickhouse",
-                },
-            )
+        selection = await load_query_target_config_selection()
+        pending_config = selection.pending
+        active_config = selection.active
+        runtime_config = pending_config or active_config
+
+        if runtime_config is None:
+            backend_override = get_env_str("QUERY_TARGET_BACKEND")
+            if backend_override:
+                cls._query_target_provider = get_provider_env(
+                    "QUERY_TARGET_BACKEND",
+                    default="postgres",
+                    allowed={
+                        "postgres",
+                        "sqlite",
+                        "mysql",
+                        "snowflake",
+                        "redshift",
+                        "bigquery",
+                        "athena",
+                        "databricks",
+                        "cockroachdb",
+                        "duckdb",
+                        "clickhouse",
+                    },
+                )
+            else:
+                cls._query_target_provider = get_provider_env(
+                    "QUERY_TARGET_PROVIDER",
+                    default="postgres",
+                    allowed={
+                        "postgres",
+                        "sqlite",
+                        "mysql",
+                        "snowflake",
+                        "redshift",
+                        "bigquery",
+                        "athena",
+                        "databricks",
+                        "cockroachdb",
+                        "duckdb",
+                        "clickhouse",
+                    },
+                )
         else:
-            cls._query_target_provider = get_provider_env(
-                "QUERY_TARGET_PROVIDER",
-                default="postgres",
-                allowed={
-                    "postgres",
-                    "sqlite",
-                    "mysql",
-                    "snowflake",
-                    "redshift",
-                    "bigquery",
-                    "athena",
-                    "databricks",
-                    "cockroachdb",
-                    "duckdb",
-                    "clickhouse",
-                },
-            )
+            cls._query_target_provider = runtime_config.provider
 
         cls._query_target_capabilities = capabilities_for_provider(cls._query_target_provider)
 
-        if cls._query_target_provider == "sqlite":
-            from dal.sqlite import SqliteQueryTargetDatabase
+        async def _init_query_target(runtime_config):
+            if cls._query_target_provider == "sqlite":
+                from dal.sqlite import SqliteQueryTargetDatabase
 
-            sqlite_path = get_env_str("SQLITE_DB_PATH")
-            await SqliteQueryTargetDatabase.init(sqlite_path)
-        elif cls._query_target_provider == "mysql":
-            from dal.mysql import MysqlQueryTargetDatabase
+                if runtime_config:
+                    max_rows = runtime_config.guardrails.get("max_rows")
+                    await SqliteQueryTargetDatabase.init(
+                        runtime_config.metadata["path"], max_rows=max_rows
+                    )
+                else:
+                    sqlite_path = get_env_str("SQLITE_DB_PATH")
+                    await SqliteQueryTargetDatabase.init(sqlite_path)
+            elif cls._query_target_provider == "mysql":
+                from dal.mysql import MysqlQueryTargetDatabase
 
-            db_host = get_env_str("DB_HOST")
-            db_port = get_env_int("DB_PORT", 3306)
-            db_name = get_env_str("DB_NAME")
-            db_user = get_env_str("DB_USER")
-            db_pass = get_env_str("DB_PASS")
-            await MysqlQueryTargetDatabase.init(
-                host=db_host,
-                port=db_port,
-                db_name=db_name,
-                user=db_user,
-                password=db_pass,
-            )
-        elif cls._query_target_provider == "snowflake":
-            from dal.snowflake import SnowflakeQueryTargetDatabase
-            from dal.snowflake.config import SnowflakeConfig
-
-            await SnowflakeQueryTargetDatabase.init(SnowflakeConfig.from_env())
-        elif cls._query_target_provider == "redshift":
-            from dal.redshift import RedshiftQueryTargetDatabase
-
-            db_host = get_env_str("DB_HOST")
-            db_port = get_env_int("DB_PORT", 5439)
-            db_name = get_env_str("DB_NAME")
-            db_user = get_env_str("DB_USER")
-            db_pass = get_env_str("DB_PASS")
-            await RedshiftQueryTargetDatabase.init(
-                host=db_host,
-                port=db_port,
-                db_name=db_name,
-                user=db_user,
-                password=db_pass,
-            )
-        elif cls._query_target_provider == "bigquery":
-            from dal.bigquery import BigQueryConfig, BigQueryQueryTargetDatabase
-
-            await BigQueryQueryTargetDatabase.init(BigQueryConfig.from_env())
-        elif cls._query_target_provider == "athena":
-            from dal.athena import AthenaConfig, AthenaQueryTargetDatabase
-
-            await AthenaQueryTargetDatabase.init(AthenaConfig.from_env())
-        elif cls._query_target_provider == "databricks":
-            from dal.databricks import DatabricksConfig, DatabricksQueryTargetDatabase
-
-            await DatabricksQueryTargetDatabase.init(DatabricksConfig.from_env())
-        elif cls._query_target_provider == "duckdb":
-            from dal.duckdb import DuckDBConfig, DuckDBQueryTargetDatabase
-
-            await DuckDBQueryTargetDatabase.init(DuckDBConfig.from_env())
-        elif cls._query_target_provider == "clickhouse":
-            from dal.clickhouse import ClickHouseConfig, ClickHouseQueryTargetDatabase
-
-            await ClickHouseQueryTargetDatabase.init(ClickHouseConfig.from_env())
-        else:
-            # Postgres Config
-            db_host = get_env_str("DB_HOST", "localhost")
-            db_port = get_env_int("DB_PORT", 5432)
-            db_name = get_env_str("DB_NAME", "pagila")
-            # Default to the hardened mcp_reader role
-            db_user = get_env_str("DB_USER", "mcp_reader")
-            db_pass = get_env_str("DB_PASS", "mcp_secure_pass")
-
-            dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
-
-            try:
-                # 1. Init Postgres
-                cls._pool = await asyncpg.create_pool(
-                    dsn,
-                    min_size=5,
-                    max_size=20,
-                    command_timeout=60,
-                    server_settings={
-                        "application_name": "bi_agent_mcp",
-                        "default_transaction_read_only": "on",
-                    },
+                if runtime_config:
+                    params = build_mysql_params(runtime_config.metadata, runtime_config.auth)
+                    max_rows = runtime_config.guardrails.get("max_rows")
+                    db_host = params["host"]
+                    db_port = params["port"]
+                    db_name = params["db_name"]
+                    db_user = params["user"]
+                    db_pass = params["password"]
+                else:
+                    db_host = get_env_str("DB_HOST")
+                    db_port = get_env_int("DB_PORT", 3306)
+                    db_name = get_env_str("DB_NAME")
+                    db_user = get_env_str("DB_USER")
+                    db_pass = get_env_str("DB_PASS")
+                    max_rows = None
+                await MysqlQueryTargetDatabase.init(
+                    host=db_host,
+                    port=db_port,
+                    db_name=db_name,
+                    user=db_user,
+                    password=db_pass,
+                    max_rows=max_rows,
                 )
-                print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
-            except Exception as e:
-                await cls.close()  # Cleanup partials
-                raise ConnectionError(f"Failed to initialize databases: {e}")
+            elif cls._query_target_provider == "snowflake":
+                from dal.snowflake import SnowflakeQueryTargetDatabase
+                from dal.snowflake.config import SnowflakeConfig
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    password = resolve_secret_ref(runtime_config.auth, "SNOWFLAKE_PASSWORD")
+                    config = SnowflakeConfig(
+                        account=runtime_config.metadata["account"],
+                        user=runtime_config.metadata["user"],
+                        password=password,
+                        warehouse=runtime_config.metadata["warehouse"],
+                        database=runtime_config.metadata["database"],
+                        schema=runtime_config.metadata["schema"],
+                        role=runtime_config.metadata.get("role"),
+                        authenticator=runtime_config.metadata.get("authenticator"),
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        poll_interval_seconds=guardrail_int(
+                            guardrails.get("poll_interval_seconds"), 1
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                        warn_after_seconds=guardrail_int(guardrails.get("warn_after_seconds"), 10),
+                    )
+                    await SnowflakeQueryTargetDatabase.init(config)
+                else:
+                    await SnowflakeQueryTargetDatabase.init(SnowflakeConfig.from_env())
+            elif cls._query_target_provider == "redshift":
+                from dal.redshift import RedshiftQueryTargetDatabase
+
+                if runtime_config:
+                    params = build_postgres_params(
+                        runtime_config.metadata, runtime_config.auth, default_port=5439
+                    )
+                    max_rows = runtime_config.guardrails.get("max_rows")
+                    db_host = params["host"]
+                    db_port = params["port"]
+                    db_name = params["db_name"]
+                    db_user = params["user"]
+                    db_pass = params["password"]
+                else:
+                    db_host = get_env_str("DB_HOST")
+                    db_port = get_env_int("DB_PORT", 5439)
+                    db_name = get_env_str("DB_NAME")
+                    db_user = get_env_str("DB_USER")
+                    db_pass = get_env_str("DB_PASS")
+                    max_rows = None
+                await RedshiftQueryTargetDatabase.init(
+                    host=db_host,
+                    port=db_port,
+                    db_name=db_name,
+                    user=db_user,
+                    password=db_pass,
+                    max_rows=max_rows,
+                )
+            elif cls._query_target_provider == "bigquery":
+                from dal.bigquery import BigQueryConfig, BigQueryQueryTargetDatabase
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    config = BigQueryConfig(
+                        project=runtime_config.metadata["project"],
+                        dataset=runtime_config.metadata["dataset"],
+                        location=runtime_config.metadata.get("location"),
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        poll_interval_seconds=guardrail_int(
+                            guardrails.get("poll_interval_seconds"), 1
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                    )
+                    await BigQueryQueryTargetDatabase.init(config)
+                else:
+                    await BigQueryQueryTargetDatabase.init(BigQueryConfig.from_env())
+            elif cls._query_target_provider == "athena":
+                from dal.athena import AthenaConfig, AthenaQueryTargetDatabase
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    config = AthenaConfig(
+                        region=runtime_config.metadata["region"],
+                        workgroup=runtime_config.metadata["workgroup"],
+                        output_location=runtime_config.metadata["output_location"],
+                        database=runtime_config.metadata["database"],
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        poll_interval_seconds=guardrail_int(
+                            guardrails.get("poll_interval_seconds"), 1
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                    )
+                    await AthenaQueryTargetDatabase.init(config)
+                else:
+                    await AthenaQueryTargetDatabase.init(AthenaConfig.from_env())
+            elif cls._query_target_provider == "databricks":
+                from dal.databricks import DatabricksConfig, DatabricksQueryTargetDatabase
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    token = resolve_secret_ref(runtime_config.auth, "DATABRICKS_TOKEN")
+                    if not token:
+                        raise ValueError("Missing Databricks token reference.")
+                    config = DatabricksConfig(
+                        host=runtime_config.metadata["host"],
+                        token=token,
+                        warehouse_id=runtime_config.metadata["warehouse_id"],
+                        catalog=runtime_config.metadata["catalog"],
+                        schema=runtime_config.metadata["schema"],
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        poll_interval_seconds=guardrail_int(
+                            guardrails.get("poll_interval_seconds"), 1
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                    )
+                    await DatabricksQueryTargetDatabase.init(config)
+                else:
+                    await DatabricksQueryTargetDatabase.init(DatabricksConfig.from_env())
+            elif cls._query_target_provider == "duckdb":
+                from dal.duckdb import DuckDBConfig, DuckDBQueryTargetDatabase
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    config = DuckDBConfig(
+                        path=runtime_config.metadata["path"],
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                        read_only=guardrail_bool(guardrails.get("read_only"), False),
+                    )
+                    await DuckDBQueryTargetDatabase.init(config)
+                else:
+                    await DuckDBQueryTargetDatabase.init(DuckDBConfig.from_env())
+            elif cls._query_target_provider == "clickhouse":
+                from dal.clickhouse import ClickHouseConfig, ClickHouseQueryTargetDatabase
+
+                if runtime_config:
+                    guardrails = runtime_config.guardrails
+                    params = build_clickhouse_params(runtime_config.metadata, runtime_config.auth)
+                    config = ClickHouseConfig(
+                        host=params["host"],
+                        port=params["port"],
+                        database=params["database"],
+                        user=params["user"],
+                        password=params["password"],
+                        secure=params["secure"],
+                        query_timeout_seconds=guardrail_int(
+                            guardrails.get("query_timeout_seconds"), 30
+                        ),
+                        max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
+                    )
+                    await ClickHouseQueryTargetDatabase.init(config)
+                else:
+                    await ClickHouseQueryTargetDatabase.init(ClickHouseConfig.from_env())
+            else:
+                # Postgres/Cockroach Config
+                if runtime_config:
+                    default_port = 5432 if cls._query_target_provider == "postgres" else 26257
+                    params = build_postgres_params(
+                        runtime_config.metadata,
+                        runtime_config.auth,
+                        default_port=default_port,
+                    )
+                    db_host = params["host"]
+                    db_port = params["port"]
+                    db_name = params["db_name"]
+                    db_user = params["user"]
+                    db_pass = params["password"]
+                else:
+                    db_host = get_env_str("DB_HOST", "localhost")
+                    db_port = get_env_int("DB_PORT", 5432)
+                    db_name = get_env_str("DB_NAME", "pagila")
+                    # Default to the hardened mcp_reader role
+                    db_user = get_env_str("DB_USER", "mcp_reader")
+                    db_pass = get_env_str("DB_PASS", "mcp_secure_pass")
+
+                dsn = f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+
+                try:
+                    # 1. Init Postgres
+                    cls._pool = await asyncpg.create_pool(
+                        dsn,
+                        min_size=5,
+                        max_size=20,
+                        command_timeout=60,
+                        server_settings={
+                            "application_name": "bi_agent_mcp",
+                            "default_transaction_read_only": "on",
+                        },
+                    )
+                    print(f"✓ Database connection pool established: {db_user}@{db_host}/{db_name}")
+                except Exception as e:
+                    await cls.close()  # Cleanup partials
+                    raise ConnectionError(f"Failed to initialize databases: {e}")
+
+        init_config = runtime_config
+        try:
+            await _init_query_target(init_config)
+        except Exception:
+            if pending_config and init_config is pending_config:
+                await finalize_pending_config(
+                    pending_config,
+                    active_config,
+                    success=False,
+                    error_message="Query-target initialization failed.",
+                )
+                if active_config:
+                    init_config = active_config
+                    cls._query_target_provider = init_config.provider
+                    cls._query_target_capabilities = capabilities_for_provider(
+                        cls._query_target_provider
+                    )
+                    await _init_query_target(init_config)
+                else:
+                    raise
+            else:
+                raise
+
+        if pending_config and init_config is pending_config:
+            await finalize_pending_config(
+                pending_config,
+                active_config,
+                success=True,
+            )
 
         # 2. Init Stores via Factory
         from dal.factory import (
@@ -471,7 +669,16 @@ class Database:
                         )
 
                     # Yield the configured connection to the caller
-                    yield conn
+                    from dal.tracing import TracedAsyncpgConnection, trace_enabled
+
+                    if trace_enabled():
+                        yield TracedAsyncpgConnection(
+                            conn,
+                            provider=cls._query_target_provider,
+                            execution_model=cls.get_query_target_capabilities().execution_model,
+                        )
+                    else:
+                        yield conn
                     # Transaction commits/rolls back automatically here
                     # Connection is returned to pool, tenant context is cleared
             else:
@@ -480,4 +687,13 @@ class Database:
                         "SELECT set_config('app.current_tenant', $1, true)",
                         str(tenant_id),
                     )
-                yield conn
+                from dal.tracing import TracedAsyncpgConnection, trace_enabled
+
+                if trace_enabled():
+                    yield TracedAsyncpgConnection(
+                        conn,
+                        provider=cls._query_target_provider,
+                        execution_model=cls.get_query_target_capabilities().execution_model,
+                    )
+                else:
+                    yield conn

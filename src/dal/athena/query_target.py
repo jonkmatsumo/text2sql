@@ -8,6 +8,7 @@ from dal.async_query_executor import QueryStatus
 from dal.athena.config import AthenaConfig
 from dal.athena.executor import AthenaAsyncQueryExecutor
 from dal.athena.param_translation import translate_postgres_params_to_athena
+from dal.tracing import trace_query_operation
 
 
 class AthenaQueryTargetDatabase:
@@ -69,24 +70,40 @@ class _AthenaConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, query_params = translate_postgres_params_to_athena(sql, list(params))
-        job_id = await self._executor.submit(sql, query_params)
-        await _poll_until_done(
-            self._executor,
-            job_id,
-            query_timeout_seconds=self._query_timeout_seconds,
-            poll_interval_seconds=self._poll_interval_seconds,
+
+        async def _run():
+            job_id = await self._executor.submit(sql, query_params)
+            await _poll_until_done(
+                self._executor,
+                job_id,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+            )
+            return "OK"
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="athena",
+            execution_model="async",
+            sql=sql,
+            operation=_run(),
         )
-        return "OK"
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         sql, query_params = translate_postgres_params_to_athena(sql, list(params))
-        return await _fetch_with_guardrails(
-            self._executor,
-            sql,
-            query_params,
-            query_timeout_seconds=self._query_timeout_seconds,
-            poll_interval_seconds=self._poll_interval_seconds,
-            max_rows=self._max_rows,
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="athena",
+            execution_model="async",
+            sql=sql,
+            operation=_fetch_with_guardrails(
+                self._executor,
+                sql,
+                query_params,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+                max_rows=self._max_rows,
+            ),
         )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:

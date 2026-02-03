@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import pytest
@@ -73,6 +74,7 @@ class _FakePaginatedAthenaClient:
     def __init__(self):
         self._status = "SUCCEEDED"
         self._call_count = 0
+        self._max_results_calls = []
 
     def start_query_execution(self, **kwargs):
         return {"QueryExecutionId": "paginated-exec-1"}
@@ -83,6 +85,7 @@ class _FakePaginatedAthenaClient:
     def get_query_results(self, QueryExecutionId, MaxResults, NextToken=None):
         """Simulate paginated results: first call returns NextToken, second does not."""
         self._call_count += 1
+        self._max_results_calls.append(MaxResults)
 
         if NextToken is None:
             # First page: header row + 2 data rows + NextToken
@@ -164,6 +167,33 @@ async def test_athena_executor_pagination_respects_max_rows(monkeypatch):
     assert len(rows) == 2
     assert rows[0] == {"id": "1", "name": "Alice"}
     assert rows[1] == {"id": "2", "name": "Bob"}
+    assert fake_client._call_count == 1
+    assert fake_client._max_results_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_athena_executor_pagination_fetches_remaining(monkeypatch):
+    """Verify pagination fetches only remaining rows on later pages."""
+    fake_client = _FakePaginatedAthenaClient()
+    fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", fake_boto3)
+
+    executor = AthenaAsyncQueryExecutor(
+        region="us-east-1",
+        workgroup="primary",
+        output_location="s3://bucket/out/",
+        database="db",
+        timeout_seconds=5,
+        max_rows=3,
+    )
+
+    rows = await executor.fetch("paginated-exec-1", max_rows=3)
+
+    assert len(rows) == 3
+    assert rows[0] == {"id": "1", "name": "Alice"}
+    assert rows[2] == {"id": "3", "name": "Charlie"}
+    assert fake_client._call_count == 2
+    assert fake_client._max_results_calls == [4, 1]
 
 
 @pytest.mark.asyncio
@@ -193,6 +223,33 @@ async def test_athena_executor_skips_header_row(monkeypatch):
     # Should only have the data row, header skipped
     assert len(rows) == 1
     assert rows[0] == {"col1": "actual_value"}
+
+
+@pytest.mark.asyncio
+async def test_athena_executor_header_value_not_dropped(monkeypatch):
+    """Verify a data row equal to header values is not dropped."""
+    fake_client = _FakeAthenaClient()
+    fake_client._rows = [
+        {"Data": [{"VarCharValue": "col1"}]},  # Header row
+        {"Data": [{"VarCharValue": "col1"}]},  # Data row with same value
+    ]
+
+    fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", fake_boto3)
+
+    executor = AthenaAsyncQueryExecutor(
+        region="us-east-1",
+        workgroup="primary",
+        output_location="s3://bucket/out/",
+        database="db",
+        timeout_seconds=5,
+        max_rows=1000,
+    )
+
+    rows = await executor.fetch("exec-1", max_rows=100)
+
+    assert len(rows) == 1
+    assert rows[0] == {"col1": "col1"}
 
 
 @pytest.mark.asyncio
@@ -227,3 +284,43 @@ async def test_athena_status_mapping(monkeypatch):
     assert _map_status("CANCELLED") == QueryStatus.CANCELLED
     assert _map_status("QUEUED") == QueryStatus.RUNNING
     assert _map_status("RUNNING") == QueryStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_athena_executor_fetch_timeout_calls_cancel(monkeypatch):
+    """Verify fetch timeout triggers stop_query_execution."""
+
+    class _SlowAthenaClient(_FakeAthenaClient):
+        def __init__(self):
+            super().__init__()
+            self._stopped_ids = []
+
+        def get_query_results(self, QueryExecutionId, MaxResults, NextToken=None):
+            _ = QueryExecutionId, MaxResults, NextToken
+            import time
+
+            time.sleep(0.05)
+            return super().get_query_results(QueryExecutionId, MaxResults, NextToken)
+
+        def stop_query_execution(self, QueryExecutionId):
+            self._stopped_ids.append(QueryExecutionId)
+            super().stop_query_execution(QueryExecutionId)
+
+    fake_client = _SlowAthenaClient()
+    fake_boto3 = types.SimpleNamespace(client=lambda service, region_name=None: fake_client)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", fake_boto3)
+
+    executor = AthenaAsyncQueryExecutor(
+        region="us-east-1",
+        workgroup="primary",
+        output_location="s3://bucket/out/",
+        database="db",
+        timeout_seconds=0.001,
+        max_rows=1000,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await executor.fetch("exec-1", max_rows=10)
+
+    assert fake_client._status == "CANCELLED"
+    assert fake_client._stopped_ids == ["exec-1"]

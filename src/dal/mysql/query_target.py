@@ -5,6 +5,8 @@ import aiomysql
 
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
 from dal.mysql.quoting import translate_double_quotes_to_backticks
+from dal.tracing import trace_query_operation
+from dal.util.row_limits import cap_rows, get_sync_max_rows
 
 
 class MysqlQueryTargetDatabase:
@@ -16,6 +18,7 @@ class MysqlQueryTargetDatabase:
     _user: Optional[str] = None
     _password: Optional[str] = None
     _pool: Optional[aiomysql.Pool] = None
+    _max_rows: int = 0
 
     @classmethod
     async def init(
@@ -25,6 +28,7 @@ class MysqlQueryTargetDatabase:
         db_name: Optional[str],
         user: Optional[str],
         password: Optional[str],
+        max_rows: Optional[int] = None,
     ) -> None:
         """Initialize MySQL query-target config."""
         cls._host = host
@@ -32,6 +36,7 @@ class MysqlQueryTargetDatabase:
         cls._db_name = db_name
         cls._user = user
         cls._password = password
+        cls._max_rows = max_rows if max_rows is not None else get_sync_max_rows()
 
         missing = [
             name
@@ -77,38 +82,68 @@ class MysqlQueryTargetDatabase:
             raise RuntimeError("MySQL pool not initialized. Call MysqlQueryTargetDatabase.init().")
 
         async with cls._pool.acquire() as conn:
-            wrapper = _MysqlConnection(conn)
+            wrapper = _MysqlConnection(conn, max_rows=cls._max_rows)
             yield wrapper
 
 
 class _MysqlConnection:
     """Adapter providing asyncpg-like helpers over aiomysql."""
 
-    def __init__(self, conn: aiomysql.Connection) -> None:
+    def __init__(self, conn: aiomysql.Connection, max_rows: int) -> None:
         self._conn = conn
+        self._max_rows = max_rows
 
     async def execute(self, sql: str, *params: Any) -> str:
-        async with self._conn.cursor() as cursor:
-            sql = translate_double_quotes_to_backticks(sql)
-            sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
-            await cursor.execute(sql, bound_params)
-            return _format_execute_status(sql, cursor.rowcount)
+        sql = translate_double_quotes_to_backticks(sql)
+        sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+
+        async def _run():
+            async with self._conn.cursor() as cursor:
+                await cursor.execute(sql, bound_params)
+                return _format_execute_status(sql, cursor.rowcount)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="mysql",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
-        async with self._conn.cursor() as cursor:
-            sql = translate_double_quotes_to_backticks(sql)
-            sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
-            await cursor.execute(sql, bound_params)
-            rows = await cursor.fetchall()
-            return list(rows)
+        sql = translate_double_quotes_to_backticks(sql)
+        sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+
+        async def _run():
+            async with self._conn.cursor() as cursor:
+                await cursor.execute(sql, bound_params)
+                rows = await cursor.fetchall()
+                return cap_rows(list(rows), self._max_rows)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="mysql",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
-        async with self._conn.cursor() as cursor:
-            sql = translate_double_quotes_to_backticks(sql)
-            sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
-            await cursor.execute(sql, bound_params)
-            row = await cursor.fetchone()
-            return row
+        sql = translate_double_quotes_to_backticks(sql)
+        sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+
+        async def _run():
+            async with self._conn.cursor() as cursor:
+                await cursor.execute(sql, bound_params)
+                return await cursor.fetchone()
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="mysql",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
 
     async def fetchval(self, sql: str, *params: Any) -> Any:
         row = await self.fetchrow(sql, *params)

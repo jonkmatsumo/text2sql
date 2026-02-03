@@ -2,7 +2,7 @@
 
 COMPOSE_FILES = -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.observability.yml -f docker-compose.grafana.yml
 
-.PHONY: help app-up docker-clean docker-clean-deep docker-nuke otel-migrate otel-up eval-airflow-up eval-airflow-down eval-airflow-logs
+.PHONY: help app-up docker-clean docker-clean-deep docker-nuke otel-migrate otel-up eval-airflow-up eval-airflow-down eval-airflow-logs test-dal
 
 help:
 	@echo "Available targets:"
@@ -88,3 +88,12 @@ docker-nuke:
 	@echo "Deleting local-data..."
 	rm -rf ./local-data/*
 	@echo "Environment nuked. Run ./scripts/dev/bootstrap_local_data.sh to re-initialize."
+
+test-dal:
+	@if [ -x ".venv/bin/python" ]; then \
+		.venv/bin/python -m pytest tests/unit/dal -v; \
+		.venv/bin/python -m pytest tests/unit/mcp_server/unit/test_providers.py -v; \
+	else \
+		uv run pytest tests/unit/dal -v; \
+		uv run pytest tests/unit/mcp_server/unit/test_providers.py -v; \
+	fi

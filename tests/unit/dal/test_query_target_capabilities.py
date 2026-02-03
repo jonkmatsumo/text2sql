@@ -1,21 +1,11 @@
 import pytest
 
 from dal.capabilities import BackendCapabilities, capabilities_for_provider
+from dal.util.env import PROVIDER_ALIASES
 
 # All known providers that should be registered in capabilities
-KNOWN_PROVIDERS = {
-    "postgres",
-    "sqlite",
-    "mysql",
-    "snowflake",
-    "redshift",
-    "bigquery",
-    "athena",
-    "databricks",
-    "cockroachdb",
-    "duckdb",
-    "clickhouse",
-}
+QUERY_TARGET_ALLOWED = {value for value in PROVIDER_ALIASES.values() if value != "memgraph"}
+KNOWN_PROVIDERS = set(QUERY_TARGET_ALLOWED)
 
 # Async warehouse providers (execution_model == "async")
 ASYNC_PROVIDERS = {"snowflake", "bigquery", "athena", "databricks"}
@@ -42,6 +32,10 @@ class TestCapabilitiesCompleteness:
             assert isinstance(
                 caps, BackendCapabilities
             ), f"{provider} did not return BackendCapabilities"
+
+    def test_known_providers_match_query_target_allowlist(self):
+        """Known provider set should match query-target allowlist."""
+        assert KNOWN_PROVIDERS == QUERY_TARGET_ALLOWED
 
     def test_unknown_provider_returns_defaults(self):
         """Unknown providers should return the default (Postgres-like) capabilities."""

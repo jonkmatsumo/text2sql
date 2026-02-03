@@ -12,7 +12,7 @@ class BigQuerySchemaIntrospector(SchemaIntrospector):
 
     async def list_table_names(self, schema: str = "public") -> List[str]:
         """List all table names in the configured BigQuery dataset."""
-        config = BigQueryConfig.from_env()
+        config = _get_config()
         namespace = CatalogNamespace(config.project, config.dataset)
         query = (
             f"SELECT table_name FROM `{namespace.to_bigquery()}.INFORMATION_SCHEMA.TABLES` "
@@ -23,7 +23,7 @@ class BigQuerySchemaIntrospector(SchemaIntrospector):
 
     async def get_table_def(self, table_name: str, schema: str = "public") -> TableDef:
         """Get the full definition of a table (columns)."""
-        config = BigQueryConfig.from_env()
+        config = _get_config()
         namespace = CatalogNamespace(config.project, config.dataset)
         query = (
             "SELECT column_name, data_type, is_nullable "
@@ -50,11 +50,17 @@ class BigQuerySchemaIntrospector(SchemaIntrospector):
         self, table_name: str, limit: int = 3, schema: str = "public"
     ) -> List[dict]:
         """Fetch sample rows for a BigQuery table."""
-        config = BigQueryConfig.from_env()
+        config = _get_config()
         namespace = CatalogNamespace(config.project, config.dataset, table_name)
         query = f"SELECT * FROM `{namespace.to_bigquery()}` LIMIT {int(limit)}"
         rows = await _run_query(query, config.location)
         return rows
+
+
+def _get_config() -> BigQueryConfig:
+    from dal.bigquery.query_target import BigQueryQueryTargetDatabase
+
+    return BigQueryQueryTargetDatabase._config or BigQueryConfig.from_env()
 
 
 async def _run_query(sql: str, location: str | None, parameters: dict | None = None) -> List[dict]:

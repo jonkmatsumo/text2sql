@@ -103,12 +103,6 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
             )
 
-            # Check if the tool returned a database error string (simple case)
-            if isinstance(result, str):
-                if "Error:" in result or "Database Error:" in result:
-                    span.set_outputs({"error": result})
-                    return {"error": result, "query_result": None}
-
             # Use robust parsing utility
             from agent.utils.parsing import parse_tool_output
 
@@ -123,8 +117,30 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     and "error" in parsed_data[0]
                 ):
                     error_msg = parsed_data[0]["error"]
-                    span.set_outputs({"error": error_msg})
-                    return {"error": error_msg, "query_result": None}
+                    error_category = parsed_data[0].get("error_category")
+                    span.set_outputs(
+                        {
+                            "error": error_msg,
+                            "error_category": error_category,
+                        }
+                    )
+                    if error_category:
+                        span.set_attribute("error_category", error_category)
+                    return {
+                        "error": error_msg,
+                        "query_result": None,
+                        "error_category": error_category,
+                    }
+
+                if (
+                    isinstance(parsed_data, list)
+                    and len(parsed_data) == 1
+                    and isinstance(parsed_data[0], str)
+                ):
+                    raw_str = parsed_data[0]
+                    if "Error:" in raw_str or "Database Error:" in raw_str:
+                        span.set_outputs({"error": raw_str})
+                        return {"error": raw_str, "query_result": None}
 
                 query_result = parsed_data
                 error = None

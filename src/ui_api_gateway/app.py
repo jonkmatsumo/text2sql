@@ -18,6 +18,10 @@ from common.config.env import get_env_int, get_env_list, get_env_str
 from dal.control_plane import ControlPlaneDatabase
 from dal.database import Database
 from dal.factory import get_synth_run_store
+from dal.query_target_config import QueryTargetConfigRecord
+from dal.query_target_config_store import QueryTargetConfigStore
+from dal.query_target_test import QueryTargetTestResult, test_query_target_connection
+from dal.query_target_validation import QueryTargetValidationError, validate_query_target_payload
 from ingestion.patterns.enum_detector import EnumLikeColumnDetector
 from ingestion.patterns.generator import detect_candidates, generate_suggestions
 from synthetic_data_gen.config import SynthConfig
@@ -87,6 +91,8 @@ async def lifespan(app):
     else:
         logger.info("Gateway using legacy ControlPlaneDatabase path")
 
+    await QueryTargetConfigStore.init()
+
     # Initialize Main Database for Ingestion Wizard (Direct Access)
     try:
         await Database.init()
@@ -98,6 +104,8 @@ async def lifespan(app):
     # Shutdown: Close OpsJobsClient connection pool
     if not use_legacy_dal():
         await OpsJobsClient.close()
+
+    await QueryTargetConfigStore.close()
 
     # Close Main Database
     await Database.close()
@@ -197,6 +205,67 @@ class OpsJobResponse(BaseModel):
     result: Dict[str, Any] = {}
 
 
+class QueryTargetConfigPayload(BaseModel):
+    """Payload for query-target settings."""
+
+    provider: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    auth: Dict[str, Any] = Field(default_factory=dict)
+    guardrails: Dict[str, Any] = Field(default_factory=dict)
+    config_id: Optional[UUID] = None
+
+
+class QueryTargetActivatePayload(BaseModel):
+    """Payload for activating a pending query-target config."""
+
+    config_id: UUID
+
+
+class QueryTargetConfigResponse(BaseModel):
+    """Response for persisted query-target config."""
+
+    id: UUID
+    provider: str
+    metadata: Dict[str, Any]
+    auth: Dict[str, Any]
+    guardrails: Dict[str, Any]
+    status: str
+    last_tested_at: Optional[str] = None
+    last_test_status: Optional[str] = None
+    last_error_code: Optional[str] = None
+    last_error_message: Optional[str] = None
+
+
+class QueryTargetSettingsResponse(BaseModel):
+    """Response containing active/pending query-target configs."""
+
+    active: Optional[QueryTargetConfigResponse] = None
+    pending: Optional[QueryTargetConfigResponse] = None
+
+
+class QueryTargetTestResponse(BaseModel):
+    """Response for query-target connection tests."""
+
+    ok: bool
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+def _to_query_target_response(record: QueryTargetConfigRecord) -> QueryTargetConfigResponse:
+    return QueryTargetConfigResponse(
+        id=record.id,
+        provider=record.provider,
+        metadata=record.metadata,
+        auth=record.auth,
+        guardrails=record.guardrails,
+        status=record.status.value,
+        last_tested_at=record.last_tested_at,
+        last_test_status=record.last_test_status,
+        last_error_code=record.last_error_code,
+        last_error_message=record.last_error_message,
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -211,6 +280,125 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Query Target Settings ---
+
+
+@app.get(
+    "/settings/query-target",
+    response_model=QueryTargetSettingsResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def get_query_target_settings() -> QueryTargetSettingsResponse:
+    """Return active/pending query-target config."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+    active = await QueryTargetConfigStore.get_active()
+    pending = await QueryTargetConfigStore.get_pending()
+    return QueryTargetSettingsResponse(
+        active=_to_query_target_response(active) if active else None,
+        pending=_to_query_target_response(pending) if pending else None,
+    )
+
+
+@app.post(
+    "/settings/query-target",
+    response_model=QueryTargetConfigResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def upsert_query_target_settings(
+    payload: QueryTargetConfigPayload,
+) -> QueryTargetConfigResponse:
+    """Create or update a query-target config (inactive)."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+    try:
+        metadata, auth, guardrails = validate_query_target_payload(
+            payload.provider, payload.metadata, payload.auth, payload.guardrails
+        )
+    except QueryTargetValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    record = await QueryTargetConfigStore.upsert_config(
+        provider=payload.provider.strip().lower(),
+        metadata=metadata,
+        auth=auth,
+        guardrails=guardrails,
+    )
+    return _to_query_target_response(record)
+
+
+@app.post(
+    "/settings/query-target/activate",
+    response_model=QueryTargetConfigResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def activate_query_target_settings(
+    payload: QueryTargetActivatePayload,
+) -> QueryTargetConfigResponse:
+    """Mark a query-target config as pending activation."""
+    if not QueryTargetConfigStore.is_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Query-target settings store not configured",
+        )
+
+    record = await QueryTargetConfigStore.get_by_id(payload.config_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Query-target config not found",
+        )
+
+    if record.last_test_status != "passed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query-target config must pass test-connection before activation",
+        )
+
+    await QueryTargetConfigStore.set_pending(record.id)
+    pending = await QueryTargetConfigStore.get_pending()
+    return _to_query_target_response(pending or record)
+
+
+@app.post(
+    "/settings/query-target/test-connection",
+    response_model=QueryTargetTestResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def test_query_target_settings(payload: QueryTargetConfigPayload) -> QueryTargetTestResponse:
+    """Test query-target connection for provided settings."""
+    try:
+        metadata, auth, guardrails = validate_query_target_payload(
+            payload.provider, payload.metadata, payload.auth, payload.guardrails
+        )
+    except QueryTargetValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    result: QueryTargetTestResult = await test_query_target_connection(
+        payload.provider.strip().lower(), metadata, auth, guardrails
+    )
+
+    if payload.config_id and QueryTargetConfigStore.is_available():
+        await QueryTargetConfigStore.record_test_result(
+            payload.config_id,
+            status="passed" if result.ok else "failed",
+            error_code=result.error_code,
+            error_message=result.error_message,
+        )
+
+    return QueryTargetTestResponse(
+        ok=result.ok,
+        error_code=result.error_code,
+        error_message=result.error_message,
+    )
 
 
 # --- Ingestion Wizard Models ---

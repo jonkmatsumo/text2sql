@@ -647,3 +647,87 @@ export const SynthService = {
     return response.json();
   }
 };
+
+export interface QueryTargetConfigPayload {
+  provider: string;
+  metadata: Record<string, unknown>;
+  auth: Record<string, unknown>;
+  guardrails: Record<string, unknown>;
+  config_id?: string;
+}
+
+export interface QueryTargetConfigResponse {
+  id: string;
+  provider: string;
+  metadata: Record<string, unknown>;
+  auth: Record<string, unknown>;
+  guardrails: Record<string, unknown>;
+  status: string;
+  last_tested_at?: string | null;
+  last_test_status?: string | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+}
+
+export interface QueryTargetSettingsResponse {
+  active?: QueryTargetConfigResponse | null;
+  pending?: QueryTargetConfigResponse | null;
+}
+
+export interface QueryTargetTestResponse {
+  ok: boolean;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export async function fetchQueryTargetSettings(): Promise<QueryTargetSettingsResponse> {
+  const response = await fetch(`${uiApiBase}/settings/query-target`, {
+    headers: getAuthHeaders()
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to fetch query-target settings");
+  }
+  return response.json();
+}
+
+export async function upsertQueryTargetSettings(
+  payload: QueryTargetConfigPayload
+): Promise<QueryTargetConfigResponse> {
+  const response = await fetch(`${uiApiBase}/settings/query-target`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to save query-target settings");
+  }
+  return response.json();
+}
+
+export async function testQueryTargetSettings(
+  payload: QueryTargetConfigPayload
+): Promise<QueryTargetTestResponse> {
+  const response = await fetch(`${uiApiBase}/settings/query-target/test-connection`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to test query-target settings");
+  }
+  return response.json();
+}
+
+export async function activateQueryTargetSettings(
+  configId: string
+): Promise<QueryTargetConfigResponse> {
+  const response = await fetch(`${uiApiBase}/settings/query-target/activate`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ config_id: configId })
+  });
+  if (!response.ok) {
+    await throwApiError(response, "Failed to activate query-target settings");
+  }
+  return response.json();
+}
