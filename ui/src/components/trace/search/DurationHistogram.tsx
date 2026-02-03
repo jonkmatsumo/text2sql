@@ -7,6 +7,7 @@ interface DurationHistogramProps {
   scopeLabel: string;
   range: { min: number | null; max: number | null };
   onRangeChange: (next: { min: number | null; max: number | null }) => void;
+  percentiles?: { p50_ms?: number | null; p95_ms?: number | null; p99_ms?: number | null };
 }
 
 function computeClientBins(traces: TraceSummary[], bucketCount = 12) {
@@ -40,7 +41,8 @@ export const DurationHistogram: React.FC<DurationHistogramProps> = ({
   bins,
   scopeLabel,
   range,
-  onRangeChange
+  onRangeChange,
+  percentiles
 }) => {
   const effectiveBins = useMemo(
     () => bins ?? computeClientBins(traces),
@@ -49,9 +51,9 @@ export const DurationHistogram: React.FC<DurationHistogramProps> = ({
 
   const maxCount = Math.max(1, ...effectiveBins.map((b) => b.count));
   const durations = useMemo(() => traces.map((t) => t.duration_ms), [traces]);
-  const p50 = percentile(durations, 50);
-  const p95 = percentile(durations, 95);
-  const p99 = percentile(durations, 99);
+  const p50 = percentiles?.p50_ms ?? percentile(durations, 50);
+  const p95 = percentiles?.p95_ms ?? percentile(durations, 95);
+  const p99 = percentiles?.p99_ms ?? percentile(durations, 99);
 
   return (
     <div className="trace-histogram">

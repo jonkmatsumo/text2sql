@@ -30,6 +30,7 @@ export default function TraceSearch() {
     durationHistogram,
     aggregationAsOf,
     aggregationWindow,
+    aggregationPercentiles,
     activeFacetCount,
     handleClearFilters
   } = useTraceSearch();
@@ -101,6 +102,7 @@ export default function TraceSearch() {
                 : "Dataset-wide (server)"
               : `Subset of loaded results (${facetSampleCount})`
           }
+          percentiles={aggregationPercentiles ?? undefined}
           range={{
             min: facets.durationMinMs ?? null,
             max: facets.durationMaxMs ?? null

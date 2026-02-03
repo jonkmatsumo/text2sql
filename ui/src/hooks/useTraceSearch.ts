@@ -287,6 +287,7 @@ export function useTraceSearch() {
   const [serverFacetMeta, setServerFacetMeta] = useState<{ isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null>(null);
   const [aggregationAsOf, setAggregationAsOf] = useState<string | null>(null);
   const [aggregationWindow, setAggregationWindow] = useState<{ start?: string | null; end?: string | null } | null>(null);
+  const [aggregationPercentiles, setAggregationPercentiles] = useState<{ p50_ms?: number | null; p95_ms?: number | null; p99_ms?: number | null } | null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -385,12 +386,14 @@ export function useTraceSearch() {
         start: result.window_start ?? null,
         end: result.window_end ?? null
       });
+      setAggregationPercentiles(result.percentiles ?? null);
     } catch {
       setServerFacets(null);
       setServerTotalCount(null);
       setServerFacetMeta(null);
       setAggregationAsOf(null);
       setAggregationWindow(null);
+      setAggregationPercentiles(null);
     }
   }, [filters, facets]);
 
@@ -514,6 +517,7 @@ export function useTraceSearch() {
     durationHistogram,
     aggregationAsOf,
     aggregationWindow,
+    aggregationPercentiles,
     activeFacetCount,
     handleClearFilters
   };
