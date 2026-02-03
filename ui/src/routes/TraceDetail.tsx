@@ -4,51 +4,13 @@ import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans, getErrorMessage } f
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
 import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
+import { buildWaterfallRows } from "../components/trace/waterfall/waterfall_model";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
 import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
-
-function buildSpanRows(spans: SpanSummary[]): WaterfallRow[] {
-  const byId = new Map<string, SpanSummary>();
-  const children = new Map<string | null, SpanSummary[]>();
-
-  spans.forEach((span) => {
-    byId.set(span.span_id, span);
-  });
-
-  spans.forEach((span) => {
-    const parent = span.parent_span_id || null;
-    if (!children.has(parent)) children.set(parent, []);
-    children.get(parent)!.push(span);
-  });
-
-  const sortSpans = (a: SpanSummary, b: SpanSummary) => {
-    const at = new Date(a.start_time).getTime();
-    const bt = new Date(b.start_time).getTime();
-    if (at !== bt) return at - bt;
-    const aSeq = Number(a.span_attributes?.["event.seq"] ?? 0);
-    const bSeq = Number(b.span_attributes?.["event.seq"] ?? 0);
-    return aSeq - bSeq;
-  };
-
-  const roots = spans.filter(
-    (span) => !span.parent_span_id || !byId.has(span.parent_span_id)
-  );
-  roots.sort(sortSpans);
-
-  const rows: WaterfallRow[] = [];
-  const walk = (span: SpanSummary, depth: number) => {
-    rows.push({ span, depth });
-    const kids = (children.get(span.span_id) || []).sort(sortSpans);
-    kids.forEach((child) => walk(child, depth + 1));
-  };
-
-  roots.forEach((root) => walk(root, 0));
-  return rows;
-}
 
 export default function TraceDetail() {
   const { traceId } = useParams();
@@ -200,7 +162,7 @@ export default function TraceDetail() {
     });
   }, [spans, search]);
 
-  const rows = useMemo(() => buildSpanRows(filteredSpans), [filteredSpans]);
+  const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
 
   const sortedTableSpans = useMemo(() => {
     const data = [...filteredSpans];
