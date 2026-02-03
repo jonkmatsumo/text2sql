@@ -257,6 +257,18 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
   return data.trace_id;
 }
 
+export async function fetchBlobContent(blobUrl: string): Promise<any> {
+  const response = await fetch(blobUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch blob content: ${response.statusText}`);
+  }
+  const contentType = response.headers.get("Content-Type");
+  if (contentType?.includes("application/json")) {
+    return response.json();
+  }
+  return response.text();
+}
+
 export async function listTraces(
   params: ListTracesParams = {}
 ): Promise<PaginatedTracesResponse> {

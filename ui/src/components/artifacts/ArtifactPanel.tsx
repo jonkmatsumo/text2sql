@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { CopyButton } from "./CopyButton";
 import { ArtifactKeyValue } from "./ArtifactKeyValue";
+import { fetchBlobContent } from "../../api";
 
 interface ArtifactPanelProps {
   title: string;
@@ -10,9 +11,7 @@ interface ArtifactPanelProps {
   size?: number;
   blobUrl?: string;
   isRedacted?: boolean;
-  onLoadFullPayload?: () => void;
-  isLoadingFullPayload?: boolean;
-  fullPayloadError?: string;
+  onLoadFullPayload?: (content: any) => void;
 }
 
 function formatSize(bytes?: number) {
@@ -25,16 +24,39 @@ function formatSize(bytes?: number) {
 
 export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   title,
-  content,
+  content: initialContent,
   payloadType,
   hash,
   size,
   blobUrl,
   isRedacted,
-  onLoadFullPayload,
-  isLoadingFullPayload,
-  fullPayloadError
+  onLoadFullPayload
 }) => {
+  const [content, setContent] = useState(initialContent);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLoadFullPayload = async () => {
+    if (!blobUrl) return;
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      // TODO: If blob_url is not directly fetchable due to CORS,
+      // we need a backend proxy endpoint like /api/v1/proxy/blob?url=...
+      const fullContent = await fetchBlobContent(blobUrl);
+      setContent(fullContent);
+      if (onLoadFullPayload) {
+        onLoadFullPayload(fullContent);
+      }
+    } catch (err) {
+      setError("Failed to load full payload. It might be blocked by CORS or the link has expired.");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const isLarge = size && size > 256 * 1024;
   const isJson = typeof content === "object" && content !== null;
   const contentString = isJson ? JSON.stringify(content, null, 2) : String(content || "");
@@ -65,27 +87,34 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
             <code>{contentString}</code>
           </pre>
         ) : (
-          <div className="artifact-panel__empty">No content available</div>
+          <div className="artifact-panel__empty">
+            {blobUrl ? "Payload is stored in a separate blob." : "No content available"}
+          </div>
         )}
 
-        {blobUrl && !content && !isLoadingFullPayload && (
+        {blobUrl && !content && !isLoading && (
           <div className="artifact-panel__blob-action">
             <button
               type="button"
               className="btn-load-blob"
-              onClick={onLoadFullPayload}
+              onClick={handleLoadFullPayload}
             >
               Load Full Payload
             </button>
           </div>
         )}
 
-        {isLoadingFullPayload && (
+        {isLoading && (
           <div className="artifact-panel__loading">Loading full payload...</div>
         )}
 
-        {fullPayloadError && (
-          <div className="artifact-panel__error">{fullPayloadError}</div>
+        {error && (
+          <div className="artifact-panel__error">
+            {error}
+            <div style={{ marginTop: "8px", fontSize: "0.75rem", color: "var(--muted)" }}>
+              If this persists, please contact admin to ensure the telemetry proxy is configured.
+            </div>
+          </div>
         )}
       </div>
     </div>
