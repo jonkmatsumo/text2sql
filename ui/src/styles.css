@@ -1209,3 +1209,36 @@ body {
     width: auto;
   }
 }
+
+.trace-waterfall__event-marker {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 50%;
+  pointer-events: auto;
+  z-index: 2;
+  transition: transform 0.1s;
+}
+
+.trace-waterfall__event-marker:hover {
+  transform: translateY(-50%) scale(1.5);
+  background: #fbbf24;
+  border-color: #92400e;
+  z-index: 10;
+}
+
+.trace-waterfall__event-overflow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #fff;
+  font-weight: bold;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  z-index: 3;
+}

@@ -1,5 +1,5 @@
-import React from "react";
-import { WaterfallRow } from "./waterfall_model";
+import React, { useMemo } from "react";
+import { WaterfallRow, extractSpanEventMarkers } from "./waterfall_model";
 
 interface WaterfallSpanRowProps {
   row: WaterfallRow;
@@ -8,6 +8,7 @@ interface WaterfallSpanRowProps {
   onSelect: (spanId: string) => void;
   isCriticalPath?: boolean;
   isSelected?: boolean;
+  showEvents?: boolean;
 }
 
 function formatMs(value: number) {
@@ -21,11 +22,21 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   totalDuration,
   onSelect,
   isCriticalPath,
-  isSelected
+  isSelected,
+  showEvents = true
 }) => {
   const startMs = new Date(row.span.start_time).getTime();
   const offsetPct = ((startMs - traceStart) / totalDuration) * 100;
   const widthPct = (row.span.duration_ms / totalDuration) * 100;
+
+  const markers = useMemo(() => {
+    if (!showEvents) return [];
+    return extractSpanEventMarkers(row.span, traceStart);
+  }, [row.span, traceStart, showEvents]);
+
+  const maxVisibleMarkers = 10;
+  const visibleMarkers = markers.slice(0, maxVisibleMarkers);
+  const overflowCount = markers.length - maxVisibleMarkers;
 
   return (
     <button
@@ -44,9 +55,30 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
           className={`trace-waterfall__bar ${isCriticalPath ? "trace-waterfall__bar--critical" : ""}`}
           style={{
             marginLeft: `${Math.max(0, offsetPct)}%`,
-            width: `${Math.max(2, widthPct)}%`
+            width: `${Math.max(0.5, widthPct)}%`
           }}
-        />
+        >
+          {visibleMarkers.map((marker, i) => {
+            const relativeOffsetPct = ((marker.ts - (startMs - traceStart)) / Math.max(1, row.span.duration_ms)) * 100;
+            return (
+              <div
+                key={i}
+                className="trace-waterfall__event-marker"
+                style={{ left: `${Math.max(0, Math.min(100, relativeOffsetPct))}%` }}
+                title={`${marker.name} (+${Math.round(marker.ts - (startMs - traceStart))}ms)`}
+              />
+            );
+          })}
+          {overflowCount > 0 && (
+            <div
+              className="trace-waterfall__event-overflow"
+              style={{ left: "calc(100% + 4px)" }}
+              title={`${overflowCount} more events`}
+            >
+              +{overflowCount}
+            </div>
+          )}
+        </div>
         <span className="trace-waterfall__duration">
           {formatMs(row.span.duration_ms)}
         </span>
