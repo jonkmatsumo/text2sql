@@ -884,6 +884,26 @@ body {
   color: var(--muted);
 }
 
+.trace-waterfall__search-nav {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.trace-waterfall__search-nav button {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.trace-waterfall__search-nav button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .trace-waterfall__row--match {
   background: #fef9c3;
 }

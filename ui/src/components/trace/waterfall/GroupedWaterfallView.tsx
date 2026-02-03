@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import VirtualList from "../../common/VirtualList";
+import React, { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import VirtualList, { VirtualListHandle } from "../../common/VirtualList";
 import { WaterfallRow, WaterfallGroup, groupWaterfallRows } from "./waterfall_model";
 import { GroupHeaderRow } from "./GroupHeaderRow";
 import { WaterfallSpanRow } from "./WaterfallSpanRow";
@@ -16,11 +16,15 @@ interface GroupedWaterfallViewProps {
   matchIds?: Set<string>;
 }
 
+export interface GroupedWaterfallHandle {
+  scrollToSpanId: (spanId: string) => void;
+}
+
 type RenderableItem =
   | { type: "group"; group: WaterfallGroup }
   | { type: "span"; row: WaterfallRow; groupKey: string };
 
-export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
+export const GroupedWaterfallView = React.forwardRef<GroupedWaterfallHandle, GroupedWaterfallViewProps>(({
   rows,
   traceStart,
   traceDurationMs,
@@ -30,8 +34,10 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
   selectedSpanId,
   showEvents = true,
   matchIds
-}) => {
+}, ref) => {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [pendingScrollSpanId, setPendingScrollSpanId] = useState<string | null>(null);
+  const listRef = useRef<VirtualListHandle | null>(null);
 
   const groups = useMemo(() => groupWaterfallRows(rows), [rows]);
 
@@ -60,6 +66,41 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
     return items;
   }, [groups, collapsedGroups]);
 
+  const spanToGroup = useMemo(() => {
+    const mapping = new Map<string, string>();
+    groups.forEach(group => {
+      group.rows.forEach(row => mapping.set(row.span.span_id, group.id));
+    });
+    return mapping;
+  }, [groups]);
+
+  useImperativeHandle(ref, () => ({
+    scrollToSpanId(spanId: string) {
+      const groupId = spanToGroup.get(spanId);
+      if (groupId && collapsedGroups.has(groupId)) {
+        setCollapsedGroups(prev => {
+          const next = new Set(prev);
+          next.delete(groupId);
+          return next;
+        });
+        setPendingScrollSpanId(spanId);
+        return;
+      }
+      setPendingScrollSpanId(spanId);
+    }
+  }), [collapsedGroups, spanToGroup]);
+
+  useEffect(() => {
+    if (!pendingScrollSpanId) return;
+    const index = flattenedItems.findIndex(
+      (item) => item.type === "span" && item.row.span.span_id === pendingScrollSpanId
+    );
+    if (index >= 0) {
+      listRef.current?.scrollToIndex(index);
+      setPendingScrollSpanId(null);
+    }
+  }, [flattenedItems, pendingScrollSpanId]);
+
   const totalDuration = traceDurationMs || 1;
   const height = Math.min(600, Math.max(300, flattenedItems.length * 32));
 
@@ -73,6 +114,7 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
         items={flattenedItems}
         rowHeight={32}
         height={height}
+        ref={listRef}
         renderRow={(item) => {
           if (item.type === "group") {
             const criticalPathSpanCount = showCriticalPath && criticalPath
@@ -108,4 +150,4 @@ export const GroupedWaterfallView: React.FC<GroupedWaterfallViewProps> = ({
       />
     </div>
   );
-};
+});

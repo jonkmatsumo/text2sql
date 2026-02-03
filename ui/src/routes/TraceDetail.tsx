@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { fetchSpanDetail, fetchTraceDetail, fetchTraceSpans, getErrorMessage } from "../api";
 import { SpanDetail, SpanSummary, TraceDetail as TraceDetailModel } from "../types";
 import SpanDetailDrawer from "../components/trace/SpanDetailDrawer";
-import WaterfallView, { WaterfallRow } from "../components/trace/WaterfallView";
+import WaterfallView, { WaterfallRow, WaterfallViewHandle } from "../components/trace/WaterfallView";
 import { buildWaterfallRows, computeCriticalPath } from "../components/trace/waterfall/waterfall_model";
 import SpanTable from "../components/trace/SpanTable";
 import PromptViewer from "../components/trace/PromptViewer";
@@ -40,6 +40,8 @@ export default function TraceDetail() {
   const [showEvents, setShowEvents] = useState(true);
   const [traceView, setTraceView] = useState<"waterfall" | "graph">("waterfall");
   const [waterfallSearch, setWaterfallSearch] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const waterfallViewRef = useRef<WaterfallViewHandle | null>(null);
 
   const { reportFailure, reportSuccess } = useOtelHealth();
 
@@ -185,6 +187,13 @@ export default function TraceDetail() {
     return matches;
   }, [spans, waterfallSearch]);
 
+  const waterfallMatchList = useMemo(() => {
+    if (waterfallMatches.size === 0) return [];
+    return rows
+      .filter((row) => waterfallMatches.has(row.span.span_id))
+      .map((row) => row.span.span_id);
+  }, [rows, waterfallMatches]);
+
   const rows = useMemo(() => buildWaterfallRows(filteredSpans), [filteredSpans]);
 
   const criticalPath = useMemo(() => computeCriticalPath(spans), [spans]);
@@ -230,6 +239,28 @@ export default function TraceDetail() {
   };
 
   const interactionId = searchParams.get("interactionId");
+
+  useEffect(() => {
+    if (!waterfallSearch.trim()) {
+      setActiveMatchIndex(0);
+      return;
+    }
+    if (waterfallMatchList.length > 0) {
+      setActiveMatchIndex(0);
+      const first = waterfallMatchList[0];
+      waterfallViewRef.current?.scrollToSpanId(first);
+    }
+  }, [waterfallSearch, waterfallMatchList]);
+
+  const handleJumpMatch = (direction: 1 | -1) => {
+    if (waterfallMatchList.length === 0) return;
+    const nextIndex =
+      (activeMatchIndex + direction + waterfallMatchList.length) % waterfallMatchList.length;
+    const spanId = waterfallMatchList[nextIndex];
+    setActiveMatchIndex(nextIndex);
+    waterfallViewRef.current?.scrollToSpanId(spanId);
+    handleSpanSelect(spanId);
+  };
 
   if (isTraceLoading) {
     return (
@@ -484,6 +515,22 @@ export default function TraceDetail() {
                                 {waterfallMatches.size} match{waterfallMatches.size === 1 ? "" : "es"}
                               </span>
                             )}
+                            <div className="trace-waterfall__search-nav">
+                              <button
+                                type="button"
+                                onClick={() => handleJumpMatch(-1)}
+                                disabled={waterfallMatchList.length === 0}
+                              >
+                                Prev
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleJumpMatch(1)}
+                                disabled={waterfallMatchList.length === 0}
+                              >
+                                Next
+                              </button>
+                            </div>
                           </div>
                         )}
                         {traceView === "waterfall" && (
@@ -529,6 +576,7 @@ export default function TraceDetail() {
                           showEvents={showEvents}
                           selectedSpanId={selectedSpanId}
                           matchIds={waterfallMatches}
+                          ref={waterfallViewRef}
                       />
                     ) : (
                       <TraceGraphView
