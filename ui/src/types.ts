@@ -18,6 +18,8 @@ export interface ListTracesParams {
     trace_id?: string;
     start_time_gte?: string;
     start_time_lte?: string;
+    duration_min_ms?: number;
+    duration_max_ms?: number;
     limit?: number;
     offset?: number;
     order?: "asc" | "desc";

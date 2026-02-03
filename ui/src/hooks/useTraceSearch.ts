@@ -318,6 +318,8 @@ export function useTraceSearch() {
       if (filters.service) params.service_name = filters.service;
       if (filters.startTimeGte) params.start_time_gte = filters.startTimeGte;
       if (filters.startTimeLte) params.start_time_lte = filters.startTimeLte;
+      if (facets.durationMinMs != null) params.duration_min_ms = facets.durationMinMs;
+      if (facets.durationMaxMs != null) params.duration_max_ms = facets.durationMaxMs;
 
       const data = await listTraces(params);
 
@@ -357,7 +359,7 @@ export function useTraceSearch() {
     } finally {
       setIsLoading(false);
     }
-  }, [filters, nextOffset]);
+  }, [filters, facets.durationMinMs, facets.durationMaxMs, nextOffset]);
 
   const loadAggregations = useCallback(async () => {
     try {

@@ -278,6 +278,8 @@ export async function listTraces(
   if (params.trace_id) searchParams.append("trace_id", params.trace_id);
   if (params.start_time_gte) searchParams.append("start_time_gte", params.start_time_gte);
   if (params.start_time_lte) searchParams.append("start_time_lte", params.start_time_lte);
+  if (params.duration_min_ms != null) searchParams.append("duration_min_ms", params.duration_min_ms.toString());
+  if (params.duration_max_ms != null) searchParams.append("duration_max_ms", params.duration_max_ms.toString());
   if (params.limit !== undefined) searchParams.append("limit", params.limit.toString());
   if (params.offset !== undefined) searchParams.append("offset", params.offset.toString());
   if (params.order) searchParams.append("order", params.order);
