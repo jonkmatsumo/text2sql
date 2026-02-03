@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { listTraces } from "../api";
+import { fetchTraceAggregations, listTraces } from "../api";
 import { TraceSummary } from "../types";
 
 export type SortKey = "start_time" | "duration_ms" | "span_count" | "status";
@@ -78,6 +78,22 @@ export function useTraceSearchFacets({
         counts["all"] = DURATION_BUCKETS.filter(b => b.value !== "all")
           .reduce((sum, b) => sum + (counts[b.value] || 0), 0);
       }
+      return counts;
+    }
+    if (Array.isArray(serverHistogram) && serverHistogram.length > 0) {
+      const counts: Record<string, number> = {};
+      DURATION_BUCKETS.forEach((b) => counts[b.value] = 0);
+      serverHistogram.forEach((bin: any) => {
+        const start = bin.start_ms ?? bin.startMs ?? 0;
+        const end = bin.end_ms ?? bin.endMs ?? 0;
+        DURATION_BUCKETS.forEach((bucket) => {
+          if (bucket.value === "all") return;
+          if (start < bucket.max && end >= bucket.min) {
+            counts[bucket.value] += bin.count ?? 0;
+          }
+        });
+        counts["all"] += bin.count ?? 0;
+      });
       return counts;
     }
     const counts: Record<string, number> = {};
@@ -269,6 +285,8 @@ export function useTraceSearch() {
   const [serverFacets, setServerFacets] = useState<ServerFacetPayload | null>(null);
   const [serverTotalCount, setServerTotalCount] = useState<number | null>(null);
   const [serverFacetMeta, setServerFacetMeta] = useState<{ isSampled?: boolean; sampleRate?: number; isTruncated?: boolean } | null>(null);
+  const [aggregationAsOf, setAggregationAsOf] = useState<string | null>(null);
+  const [aggregationWindow, setAggregationWindow] = useState<{ start?: string | null; end?: string | null } | null>(null);
 
   // Sync state to URL
   useEffect(() => {
@@ -340,11 +358,50 @@ export function useTraceSearch() {
     }
   }, [filters, nextOffset]);
 
+  const loadAggregations = useCallback(async () => {
+    try {
+      const result = await fetchTraceAggregations({
+        service: filters.service || undefined,
+        trace_id: filters.traceId || undefined,
+        status: facets.status !== "all" ? facets.status.toUpperCase() : undefined,
+        has_errors: facets.hasErrors !== "all" ? facets.hasErrors : undefined,
+        start_time_gte: filters.startTimeGte || undefined,
+        start_time_lte: filters.startTimeLte || undefined,
+        duration_min_ms: facets.durationMinMs ?? undefined,
+        duration_max_ms: facets.durationMaxMs ?? undefined
+      });
+      setServerFacets({
+        status: result.facet_counts?.status,
+        duration_histogram: result.duration_histogram
+      });
+      setServerTotalCount(result.total_count);
+      setServerFacetMeta({
+        isSampled: result.sampling?.is_sampled,
+        sampleRate: result.sampling?.sample_rate ?? undefined,
+        isTruncated: result.truncation?.is_truncated,
+      });
+      setAggregationAsOf(result.as_of ?? null);
+      setAggregationWindow({
+        start: result.window_start ?? null,
+        end: result.window_end ?? null
+      });
+    } catch {
+      setServerFacets(null);
+      setServerTotalCount(null);
+      setServerFacetMeta(null);
+      setAggregationAsOf(null);
+      setAggregationWindow(null);
+    }
+  }, [filters, facets]);
+
   // Initial load
   useEffect(() => {
     loadTraces(false);
-  }, [filters]); // When filters change, reload. Facets are client side?
+  }, [filters]); // When filters change, reload list
 
+  useEffect(() => {
+    loadAggregations();
+  }, [filters, facets, loadAggregations]);
   // Derived state (Client-side filtering/sorting for facets)
   const filteredTraces = useMemo(() => {
     return traces.filter((t) => {
@@ -455,6 +512,8 @@ export function useTraceSearch() {
     availableStatuses,
     durationBucketCounts,
     durationHistogram,
+    aggregationAsOf,
+    aggregationWindow,
     activeFacetCount,
     handleClearFilters
   };

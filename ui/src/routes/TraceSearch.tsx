@@ -28,6 +28,8 @@ export default function TraceSearch() {
     availableStatuses,
     durationBucketCounts,
     durationHistogram,
+    aggregationAsOf,
+    aggregationWindow,
     activeFacetCount,
     handleClearFilters
   } = useTraceSearch();
@@ -105,6 +107,22 @@ export default function TraceSearch() {
           }}
           onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
         />
+
+        {facetSource === "server" && (
+          <div className="trace-search__trust">
+            <span>Total: {facetTotalCount.toLocaleString()} traces</span>
+            {facetMeta?.isSampled && (
+              <span>Sampled ({facetMeta.sampleRate ? `${Math.round(facetMeta.sampleRate * 100)}%` : "rate unknown"})</span>
+            )}
+            {facetMeta?.isTruncated && <span>Truncated results</span>}
+            {aggregationAsOf && <span>As of {new Date(aggregationAsOf).toLocaleString()}</span>}
+            {aggregationWindow?.start && aggregationWindow?.end && (
+              <span>
+                Window: {new Date(aggregationWindow.start).toLocaleString()} → {new Date(aggregationWindow.end).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
 
         <TraceFacetsPanel
           facets={facets}

@@ -7,7 +7,8 @@ import {
   TraceDetail,
   ListTracesParams,
   PaginatedTracesResponse,
-  MetricsPreviewResponse
+  MetricsPreviewResponse,
+  TraceAggregationsResponse
 } from "./types";
 import {
   Interaction,
@@ -285,6 +286,38 @@ export async function listTraces(
   const response = await fetch(url);
   if (!response.ok) {
     await throwApiError(response, "Failed to list traces");
+  }
+  return response.json();
+}
+
+export async function fetchTraceAggregations(params: {
+  service?: string;
+  trace_id?: string;
+  status?: string;
+  has_errors?: "yes" | "no";
+  start_time_gte?: string;
+  start_time_lte?: string;
+  duration_min_ms?: number | null;
+  duration_max_ms?: number | null;
+} = {}): Promise<TraceAggregationsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.service) searchParams.append("service", params.service);
+  if (params.trace_id) searchParams.append("trace_id", params.trace_id);
+  if (params.status) searchParams.append("status", params.status);
+  if (params.has_errors) searchParams.append("has_errors", params.has_errors);
+  if (params.start_time_gte) searchParams.append("start_time_gte", params.start_time_gte);
+  if (params.start_time_lte) searchParams.append("start_time_lte", params.start_time_lte);
+  if (params.duration_min_ms != null) {
+    searchParams.append("duration_min_ms", String(params.duration_min_ms));
+  }
+  if (params.duration_max_ms != null) {
+    searchParams.append("duration_max_ms", String(params.duration_max_ms));
+  }
+
+  const url = `${otelBase}/api/v1/traces/aggregations${searchParams.toString() ? `?${searchParams}` : ""}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    await throwApiError(response, "Failed to fetch trace aggregations");
   }
   return response.json();
 }

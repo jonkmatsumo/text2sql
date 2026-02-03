@@ -1080,6 +1080,19 @@ body {
   border-radius: 8px;
 }
 
+.trace-search__trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--surface-muted);
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
 .tool-inspector {
   border: 1px solid var(--border);
   border-radius: 12px;

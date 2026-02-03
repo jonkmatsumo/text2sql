@@ -23,6 +23,26 @@ export interface ListTracesParams {
     order?: "asc" | "desc";
 }
 
+export interface TraceAggregationsResponse {
+    total_count: number;
+    facet_counts: {
+        service: Record<string, number>;
+        status: Record<string, number>;
+        error: Record<string, number>;
+    };
+    duration_histogram: Array<{ start_ms: number; end_ms: number; count: number }>;
+    percentiles: {
+        p50_ms?: number | null;
+        p95_ms?: number | null;
+        p99_ms?: number | null;
+    };
+    sampling: { is_sampled: boolean; sample_rate?: number | null };
+    truncation: { is_truncated: boolean; limit?: number | null };
+    as_of: string;
+    window_start?: string | null;
+    window_end?: string | null;
+}
+
 export type MetricsBucket = OtelComponents["schemas"]["MetricsBucket"];
 export type MetricsSummary = OtelComponents["schemas"]["MetricsSummary"];
 export type MetricsPreviewResponse = OtelComponents["schemas"]["MetricsPreviewResponse"];
