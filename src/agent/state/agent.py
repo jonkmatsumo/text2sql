@@ -114,6 +114,11 @@ class AgentState(TypedDict):
     # Classified error type (aggregation_misuse, missing_join, type_mismatch, etc.)
     error_category: Optional[str]
 
+    # Schema drift hints (missing tables/columns)
+    schema_drift_suspected: Optional[bool]
+    missing_identifiers: Optional[List[str]]
+    schema_drift_auto_refresh: Optional[bool]
+
     # =========================================================================
     # Cache and Metadata
     # =========================================================================
