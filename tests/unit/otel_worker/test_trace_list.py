@@ -22,5 +22,6 @@ class TestTraceList(unittest.TestCase):
         with patch("otel_worker.storage.postgres.engine", mock_engine):
             list_traces(duration_min_ms=150, duration_max_ms=500)
             executed_query = mock_conn.execute.call_args[0][0]
-            self.assertIn("duration_ms >= :duration_min_ms", executed_query)
-            self.assertIn("duration_ms <= :duration_max_ms", executed_query)
+            executed_sql = str(executed_query)
+            self.assertIn("duration_ms >= :duration_min_ms", executed_sql)
+            self.assertIn("duration_ms <= :duration_max_ms", executed_sql)
