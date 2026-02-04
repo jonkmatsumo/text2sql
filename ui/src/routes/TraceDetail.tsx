@@ -12,6 +12,9 @@ import ApiLinksPanel from "../components/trace/ApiLinksPanel";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 import { computeSpanCoverage } from "../components/trace/trace_coverage";
 import { TraceGraphView } from "../components/trace/graph/TraceGraphView";
+import { buildVerboseSteps } from "../components/trace/verbose/verbose_step_builder";
+import { VerboseStepper } from "../components/trace/verbose/VerboseStepper";
+import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 
 const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
 const SPAN_PAGE_LIMIT = 500;
@@ -20,6 +23,9 @@ const SPAN_MAX_LIMIT = 5000;
 export default function TraceDetail() {
   const { traceId } = useParams();
   const [searchParams] = useSearchParams();
+  const [verboseMode, setVerboseMode] = useState(() =>
+    loadVerboseMode(searchParams.toString())
+  );
 
   const [trace, setTrace] = useState<TraceDetailModel | null>(null);
   const [traceError, setTraceError] = useState<string | null>(null);
@@ -69,6 +75,14 @@ export default function TraceDetail() {
       setIsTraceLoading(false);
     }
   }, [traceId, reportSuccess, reportFailure]);
+
+  useEffect(() => {
+    const fromQuery = getVerboseModeFromSearch(searchParams.toString());
+    if (fromQuery) {
+      setVerboseMode(true);
+      saveVerboseMode(true);
+    }
+  }, [searchParams]);
 
   const loadSpansData = useCallback(async (resumeFromOffset?: number) => {
     if (!traceId || !TRACE_ID_RE.test(traceId)) return;
@@ -220,6 +234,10 @@ export default function TraceDetail() {
   }, [trace, spans]);
 
   const traceDuration = trace?.duration_ms ?? 0;
+  const verboseSteps = useMemo(
+    () => buildVerboseSteps(spans, traceStart),
+    [spans, traceStart]
+  );
   const {
     loadedCount: loadedSpanCount,
     totalCount: totalSpanCount,
@@ -243,6 +261,12 @@ export default function TraceDetail() {
     setTraceView("waterfall");
     handleSpanSelect(spanId);
     waterfallViewRef.current?.scrollToSpanId(spanId);
+  };
+
+  const handleVerboseToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.target.checked;
+    setVerboseMode(enabled);
+    saveVerboseMode(enabled);
   };
 
   const interactionId = searchParams.get("interactionId");
@@ -357,6 +381,20 @@ export default function TraceDetail() {
           <p className="subtitle">Service: {trace.service_name}</p>
         </div>
       </header>
+
+      <div style={{ margin: "12px 0 20px", display: "flex", alignItems: "center", gap: "12px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={verboseMode}
+            onChange={handleVerboseToggle}
+          />
+          <span style={{ fontWeight: 600 }}>Verbose / Diagnostic View</span>
+        </label>
+        <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
+          Shows intermediate agent artifacts captured in telemetry.
+        </span>
+      </div>
 
       <div className="trace-metadata">
         <div className="trace-metadata__card">
@@ -688,6 +726,17 @@ export default function TraceDetail() {
         </div>
 
         <div className="trace-detail__right">
+          {verboseMode && spansError && spans.length === 0 && (
+            <div className="trace-panel">
+              <h3>Verbose / Diagnostic View</h3>
+              <div style={{ color: "var(--muted)" }}>
+                Trace spans are unavailable, so verbose artifacts cannot be derived.
+              </div>
+            </div>
+          )}
+          {verboseMode && !spansError && (
+            <VerboseStepper steps={verboseSteps} onRevealSpan={handleRevealSpan} />
+          )}
           <PromptViewer span={selectedSpan} onRevealSpan={handleRevealSpan} />
           <ApiLinksPanel traceId={trace.trace_id} />
           <div className="trace-panel">

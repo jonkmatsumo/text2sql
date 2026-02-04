@@ -11,6 +11,7 @@ interface ArtifactPanelProps {
   size?: number;
   blobUrl?: string;
   isRedacted?: boolean;
+  isTruncated?: boolean;
   onLoadFullPayload?: (content: any) => void;
 }
 
@@ -30,6 +31,7 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   size,
   blobUrl,
   isRedacted,
+  isTruncated,
   onLoadFullPayload
 }) => {
   const [content, setContent] = useState(initialContent);
@@ -68,6 +70,7 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
           <h4 className="artifact-panel__title">{title}</h4>
           <div className="artifact-panel__badges">
             {isLarge && <span className="artifact-badge artifact-badge--warning">Large Payload</span>}
+            {isTruncated && <span className="artifact-badge artifact-badge--warning">Truncated</span>}
             {isRedacted && <span className="artifact-badge artifact-badge--danger">Redacted</span>}
             {blobUrl && <span className="artifact-badge artifact-badge--info">Blob-backed</span>}
           </div>

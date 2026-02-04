@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
 import { fetchAvailableModels } from "../api";
@@ -29,7 +30,11 @@ describe("AgentChat models", () => {
       return Promise.resolve([{ value: "gpt-4o", label: "GPT-4o" }]);
     });
 
-    render(<AgentChat />);
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
 
     await waitFor(() => {
       expect(mockedFetchModels).toHaveBeenCalledWith("openai");

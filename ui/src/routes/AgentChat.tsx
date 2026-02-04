@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { runAgent, submitFeedback } from "../api";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
@@ -7,6 +8,7 @@ import { useAvailableModels } from "../hooks/useAvailableModels";
 import { ChartRenderer } from "../components/charts/ChartRenderer";
 import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
+import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 
 interface Message {
   role: "user" | "assistant";
@@ -102,6 +104,10 @@ export default function AgentChat() {
   const [error, setError] = useState<string | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const threadIdRef = useRef<string>(crypto.randomUUID());
+  const [searchParams] = useSearchParams();
+  const [verboseMode, setVerboseMode] = useState(() =>
+    loadVerboseMode(searchParams.toString())
+  );
 
   const fallbackModels = FALLBACK_MODELS[llmProvider] || FALLBACK_MODELS.openai;
   const { models: availableModels, isLoading: modelsLoading, error: modelsError } =
@@ -119,6 +125,20 @@ export default function AgentChat() {
       setLlmModel(availableModels[0].value);
     }
   }, [availableModels, llmModel]);
+
+  useEffect(() => {
+    const fromQuery = getVerboseModeFromSearch(searchParams.toString());
+    if (fromQuery) {
+      setVerboseMode(true);
+      saveVerboseMode(true);
+    }
+  }, [searchParams]);
+
+  const handleVerboseToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.target.checked;
+    setVerboseMode(enabled);
+    saveVerboseMode(enabled);
+  };
 
   const handleClearHistory = async () => {
     if (messages.length === 0) return;
@@ -206,6 +226,22 @@ export default function AgentChat() {
             This React client mirrors the Streamlit chat while the agent continues to run
             server-side.
           </p>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              marginTop: "12px",
+              fontWeight: 600
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={verboseMode}
+              onChange={handleVerboseToggle}
+            />
+            Verbose / Diagnostic View
+          </label>
         </div>
       </header>
 
@@ -333,11 +369,28 @@ export default function AgentChat() {
                 <div className="bubble-header">
                   <span>{msg.role === "user" ? "You" : "Assistant"}</span>
                   {(msg.traceId || msg.interactionId) && (
-                    <TraceLink
-                      traceId={msg.traceId}
-                      interactionId={msg.interactionId}
-                      variant="icon"
-                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <TraceLink
+                        traceId={msg.traceId}
+                        interactionId={msg.interactionId}
+                        variant="icon"
+                      />
+                      {verboseMode && (
+                        <a
+                          href={
+                            msg.traceId
+                              ? `/traces/${msg.traceId}?verbose=1`
+                              : msg.interactionId
+                                ? `/traces/interaction/${msg.interactionId}?verbose=1`
+                                : undefined
+                          }
+                          className="trace-link__btn"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Verbose Trace
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="bubble-body">
