@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Awaitable, Callable, Optional
 
 
@@ -12,5 +13,9 @@ async def with_timeout(
         return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
     except asyncio.TimeoutError:
         if on_timeout is not None:
-            await on_timeout()
+            try:
+                await on_timeout()
+            except Exception as exc:
+                logger = logging.getLogger(__name__)
+                logger.warning("Timeout cancellation failed: %s", exc)
         raise
