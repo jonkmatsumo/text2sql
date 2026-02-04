@@ -713,20 +713,38 @@ class Database:
 
         async with cls.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             fetch_with_columns = getattr(conn, "fetch_with_columns", None)
+            prepare = getattr(conn, "prepare", None)
             supports_fetch_with_columns = (
                 include_columns
                 and callable(fetch_with_columns)
                 and "fetch_with_columns" in type(conn).__dict__
             )
+            supports_prepare = (
+                include_columns and callable(prepare) and "prepare" in type(conn).__dict__
+            )
             if params:
                 if supports_fetch_with_columns:
                     rows, columns = await fetch_with_columns(sql, *params)
                     return QueryResult(rows=rows, columns=columns)
+                if supports_prepare:
+                    from dal.util.column_metadata import columns_from_asyncpg_attributes
+
+                    statement = await prepare(sql)
+                    rows = await statement.fetch(*params)
+                    columns = columns_from_asyncpg_attributes(statement.get_attributes())
+                    return QueryResult(rows=[dict(row) for row in rows], columns=columns)
                 rows = await conn.fetch(sql, *params)
             else:
                 if supports_fetch_with_columns:
                     rows, columns = await fetch_with_columns(sql)
                     return QueryResult(rows=rows, columns=columns)
+                if supports_prepare:
+                    from dal.util.column_metadata import columns_from_asyncpg_attributes
+
+                    statement = await prepare(sql)
+                    rows = await statement.fetch()
+                    columns = columns_from_asyncpg_attributes(statement.get_attributes())
+                    return QueryResult(rows=[dict(row) for row in rows], columns=columns)
                 rows = await conn.fetch(sql)
 
         return QueryResult(rows=rows, columns=None)

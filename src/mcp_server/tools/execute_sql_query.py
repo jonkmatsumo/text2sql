@@ -8,6 +8,7 @@ import asyncpg
 
 from dal.database import Database
 from dal.error_classification import emit_classified_error, maybe_classify_error
+from dal.util.column_metadata import build_column_meta
 
 TOOL_NAME = "execute_sql_query"
 
@@ -16,7 +17,7 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
     first_row = rows[0]
-    return [{"name": key, "type": "unknown"} for key in first_row.keys()]
+    return [build_column_meta(key, "unknown") for key in first_row.keys()]
 
 
 async def handler(

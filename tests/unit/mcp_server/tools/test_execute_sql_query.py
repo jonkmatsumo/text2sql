@@ -67,8 +67,24 @@ class TestExecuteSqlQuery:
             assert list(data.keys()) == ["rows", "columns"]
             assert data["rows"] == mock_rows
             assert data["columns"] == [
-                {"name": "count", "type": "unknown"},
-                {"name": "created_at", "type": "unknown"},
+                {
+                    "name": "count",
+                    "type": "unknown",
+                    "db_type": None,
+                    "nullable": None,
+                    "precision": None,
+                    "scale": None,
+                    "timezone": None,
+                },
+                {
+                    "name": "created_at",
+                    "type": "unknown",
+                    "db_type": None,
+                    "nullable": None,
+                    "precision": None,
+                    "scale": None,
+                    "timezone": None,
+                },
             ]
 
     @pytest.mark.asyncio

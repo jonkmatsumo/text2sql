@@ -91,6 +91,29 @@ class TracedAsyncpgConnection:
             operation=_run(),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[list[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+
+        async def _run():
+            from dal.util.column_metadata import columns_from_asyncpg_attributes
+
+            statement = await self._conn.prepare(sql)
+            attrs = statement.get_attributes()
+            rows = await statement.fetch(*params)
+            capped_rows, truncated = cap_rows_with_metadata(
+                [dict(row) for row in rows], self._max_rows
+            )
+            self._last_truncated = truncated
+            return capped_rows, columns_from_asyncpg_attributes(attrs)
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider=self._provider,
+            execution_model=self._execution_model,
+            sql=sql,
+            operation=_run(),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         """Fetch a single row with tracing when enabled."""
         rows = await self.fetch(sql, *params)
