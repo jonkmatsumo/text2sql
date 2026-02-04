@@ -5,6 +5,7 @@ import { TraceFiltersPanel } from "../components/trace/TraceFiltersPanel";
 import { TraceFacetsPanel } from "../components/trace/TraceFacetsPanel";
 import { TraceResultsTable } from "../components/trace/TraceResultsTable";
 import { DurationHistogram } from "../components/trace/search/DurationHistogram";
+import { FacetPanel, StatusDistribution } from "../components/trace/search/FacetPanel";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DataTrustRow } from "../components/common/DataTrustRow";
 import { CopyButton } from "../components/artifacts/CopyButton";
@@ -145,23 +146,31 @@ export default function TraceSearch() {
           </div>
         </div>
 
-        <DurationHistogram
-          traces={traces}
-          bins={durationHistogram}
-          scopeLabel={
-            facetSource === "server"
-              ? facetMeta?.isSampled || facetMeta?.isTruncated
-                ? "Server sample (approximate)"
-                : "Dataset-wide (server)"
-              : `Subset of loaded results (${facetSampleCount})`
-          }
-          percentiles={aggregationPercentiles ?? undefined}
-          range={{
-            min: facets.durationMinMs ?? null,
-            max: facets.durationMaxMs ?? null
-          }}
-          onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
-        />
+        <FacetPanel
+          title="Distributions"
+          description="View duration landmarks and status counts before adjusting filters."
+        >
+          <div className="trace-search__distribution-grid">
+            <DurationHistogram
+              traces={traces}
+              bins={durationHistogram}
+              scopeLabel={
+                facetSource === "server"
+                  ? facetMeta?.isSampled || facetMeta?.isTruncated
+                    ? "Server sample (approximate)"
+                    : "Dataset-wide (server)"
+                  : `Subset of loaded results (${facetSampleCount})`
+              }
+              percentiles={aggregationPercentiles ?? undefined}
+              range={{
+                min: facets.durationMinMs ?? null,
+                max: facets.durationMaxMs ?? null
+              }}
+              onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
+            />
+            <StatusDistribution counts={statusCounts} totalCount={facetTotalCount} />
+          </div>
+        </FacetPanel>
 
         <TraceFacetsPanel
           facets={facets}
