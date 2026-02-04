@@ -228,3 +228,23 @@ Managed Postgres variants (Aurora, RDS, Azure Database for PostgreSQL, Cloud SQL
 
 ### Observability
 OTEL-based observability is mandatory for trace storage and debugging. The stack is automatically initialized during `make up`.
+
+### Ops Runbook: Agent Remaining Hardening Pass
+New environment flags introduced by the remaining hardening pass:
+- `AGENT_SYNTHESIZE_TEMPERATURE` (float)
+- `AGENT_SYNTHESIZE_MODE` (`deterministic` or unset)
+- `AGENT_SCHEMA_DRIFT_HINTS` (default: true)
+- `AGENT_SCHEMA_DRIFT_AUTO_REFRESH` (default: false)
+- `AGENT_EMPTY_RESULT_SANITY_CHECK` (default: false)
+- `AGENT_INTERACTION_PERSISTENCE_MODE` (`best_effort` default, `strict` optional)
+
+Focused unit tests added in this pass can be run with:
+```bash
+python3 -m pytest tests/unit/agent/test_retrieve.py
+python3 -m pytest tests/unit/agent/test_synthesize.py
+python3 -m pytest tests/unit/agent/test_schema_drift.py
+python3 -m pytest tests/unit/dal/test_async_cancel_contract.py
+python3 -m pytest tests/unit/agent/test_empty_results.py
+python3 -m pytest tests/unit/agent/test_persistence_modes.py
+python3 -m pytest tests/unit/agent/test_retry_observability.py
+```
