@@ -1079,6 +1079,12 @@ body {
   color: var(--muted);
 }
 
+.trace-histogram__percentile-note {
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
 .trace-histogram__inputs {
   display: flex;
   gap: 10px;
@@ -1102,6 +1108,7 @@ body {
 
 .trace-histogram__bars {
   display: grid;
+  position: relative;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 6px;
   align-items: end;
@@ -1134,6 +1141,37 @@ body {
   color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: 8px;
+}
+
+.trace-histogram__markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.trace-histogram__marker {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.trace-histogram__marker-line {
+  width: 1px;
+  flex: 1;
+  background: rgba(15, 118, 110, 0.8);
+}
+
+.trace-histogram__marker-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
 }
 
 .trace-search__trust {
