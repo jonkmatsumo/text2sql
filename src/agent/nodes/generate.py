@@ -174,7 +174,7 @@ async def get_few_shot_examples(
             return "\n\n".join(formatted)
 
         except Exception as e:
-            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            logger.warning("Could not retrieve few-shot examples: %s", e)
             return ""
 
 

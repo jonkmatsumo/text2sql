@@ -227,8 +227,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     "tenant_id": tenant_id,
                                 }
                             )
-                except Exception as e:
-                    print(f"Warning: Cache update failed: {e}")
+                except Exception:
+                    logger.warning("Cache update failed", exc_info=True)
 
             return {
                 "query_result": query_result,

@@ -494,15 +494,14 @@ async def run_agent_with_tracing(
                             },
                             exc_info=True,
                         )
-                        # Diagnostic print for immediate visibility
-                        print(f"CRITICAL: Update failed for {interaction_id}: {e}")
+                        logger.error("Update failed for %s: %s", interaction_id, e)
 
                         # Mark result as having persistence failure (observable)
                         result["persistence_failed"] = True
                         result["persistence_error"] = str(e)
                 else:
                     logger.error("update_interaction tool not found in available tools")
-                    print("CRITICAL: update_interaction tool missing!")
+                    logger.error("update_interaction tool missing!")
 
         # Metadata is already handled early and made sticky via telemetry_context
 
