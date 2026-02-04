@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_server.tools.get_semantic_subgraph import TOOL_NAME
+from mcp_server.tools.get_semantic_subgraph import TOOL_NAME, _apply_column_guardrails
 from mcp_server.tools.get_semantic_subgraph import handler as get_semantic_subgraph
 
 
@@ -307,3 +307,26 @@ class TestGetSemanticSubgraph:
         seed_span = next(span for name, span in spans if name == "seed_selection")
         assert seed_span.attributes["seed_selection.path"] == "table"
         assert seed_span.attributes["seed_selection.table_hit_count"] == 1
+
+    def test_column_guardrails_filter_generic(self):
+        """Generic column names should be filtered without strong separation."""
+        seeds = [
+            {"node": {"name": "id", "table": "t1"}, "score": 0.65},
+            {"node": {"name": "status", "table": "t2"}, "score": 0.64},
+            {"node": {"name": "email", "table": "t3"}, "score": 0.63},
+        ]
+        filtered, relaxed = _apply_column_guardrails(seeds)
+        assert relaxed is False
+        assert any(s["node"]["name"] == "email" for s in filtered)
+        assert all(s["node"]["name"] != "id" for s in filtered)
+
+    def test_column_guardrails_relax_backstop(self):
+        """Guardrails should relax when everything would be dropped."""
+        seeds = [
+            {"node": {"name": "id", "table": "t1"}, "score": 0.65},
+            {"node": {"name": "status", "table": "t2"}, "score": 0.64},
+            {"node": {"name": "amount", "table": "t3"}, "score": 0.63},
+        ]
+        filtered, relaxed = _apply_column_guardrails(seeds)
+        assert relaxed is True
+        assert filtered
