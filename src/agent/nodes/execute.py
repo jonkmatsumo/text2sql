@@ -43,6 +43,7 @@ def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
 
 def parse_execute_tool_response(payload) -> dict:
     """Parse execute_sql_query response into a normalized shape."""
+    # TODO(p0): attach diagnostic context for malformed tool payloads.
     from agent.utils.parsing import parse_tool_output
 
     def _looks_like_json_object(value) -> bool:

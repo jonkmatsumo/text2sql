@@ -127,6 +127,7 @@ def route_after_execution(state: AgentState) -> str:
         str: Next node name
     """
     if state.get("error"):
+        # TODO(p0): make retry budget deadline-aware with observed LLM latency.
         deadline_ts = state.get("deadline_ts")
         min_retry_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
         remaining = None

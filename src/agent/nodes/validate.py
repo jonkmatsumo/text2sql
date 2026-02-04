@@ -38,6 +38,7 @@ async def validate_sql_node(state: AgentState) -> dict:
 
     Runs AST validation on generated SQL before execution.
     Extracts metadata for audit logging and performs security checks.
+    TODO(p0): add optional schema-bound validation against raw schema context.
 
     If validation fails, returns structured error for the healer loop.
     If validation passes, enriches state with metadata for auditing.
