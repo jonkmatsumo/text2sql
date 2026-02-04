@@ -1,11 +1,12 @@
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { runAgent, submitFeedback } from "../api";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { useAvailableModels } from "../hooks/useAvailableModels";
-
-const VegaChart = React.lazy(() => import("../components/common/VegaChart"));
+import { ChartRenderer } from "../components/charts/ChartRenderer";
+import { ErrorState } from "../components/common/ErrorState";
+import { ChartSchema } from "../types/charts";
 
 interface Message {
   role: "user" | "assistant";
@@ -357,9 +358,32 @@ export default function AgentChat() {
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>
-                      <Suspense fallback={<div className="loading">Loading chart...</div>}>
-                        <VegaChart spec={msg.vizSpec} />
-                      </Suspense>
+                      {(() => {
+                        const isSchema =
+                          msg.vizSpec &&
+                          typeof msg.vizSpec === "object" &&
+                          "chartType" in msg.vizSpec;
+                        const schema =
+                          isSchema && Array.isArray((msg.vizSpec as ChartSchema).series)
+                            ? (msg.vizSpec as ChartSchema)
+                            : undefined;
+                        const legacySpec = !isSchema ? msg.vizSpec : undefined;
+
+                        if (isSchema && !schema) {
+                          return (
+                            <>
+                              <ErrorState error="Invalid chart schema from agent." />
+                              <pre className="result-block">
+                                {formatValue(msg.vizSpec)}
+                              </pre>
+                            </>
+                          );
+                        }
+
+                        return (
+                          <ChartRenderer schema={schema} legacySpec={legacySpec} />
+                        );
+                      })()}
                     </div>
                   )}
 
