@@ -1143,6 +1143,30 @@ body {
   border-radius: 8px;
 }
 
+.trace-histogram__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.trace-histogram__preset {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--ink);
+  transition: all 0.2s;
+}
+
+.trace-histogram__preset.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 .trace-histogram__markers {
   position: absolute;
   left: 0;

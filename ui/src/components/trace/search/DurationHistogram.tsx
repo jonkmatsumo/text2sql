@@ -158,6 +158,28 @@ export const DurationHistogram: React.FC<DurationHistogramProps> = ({
     subset: "Percentiles based on the currently loaded spans."
   };
 
+  const quickRangeOptions = useMemo(() => {
+    const presets: Array<{ label: string; min: number | null; max: number | null }> = [
+      { label: "< 100ms", min: null, max: 100 },
+      { label: "< 500ms", min: null, max: 500 }
+    ];
+    if (computedPercentiles?.p50_ms != null && computedPercentiles?.p95_ms != null) {
+      presets.push({
+        label: "P50–P95",
+        min: Math.round(computedPercentiles.p50_ms),
+        max: Math.round(computedPercentiles.p95_ms)
+      });
+    }
+    if (computedPercentiles?.p95_ms != null) {
+      presets.push({
+        label: "> P95",
+        min: Math.round(computedPercentiles.p95_ms),
+        max: null
+      });
+    }
+    return presets;
+  }, [computedPercentiles]);
+
   const span = Math.max(1, histogramRange.max - histogramRange.min);
 
   return (
@@ -201,6 +223,24 @@ export const DurationHistogram: React.FC<DurationHistogramProps> = ({
           </label>
         </div>
       </div>
+
+      {quickRangeOptions.length > 0 && (
+        <div className="trace-histogram__presets">
+          {quickRangeOptions.map((preset) => {
+            const isActive = preset.min === range.min && preset.max === range.max;
+            return (
+              <button
+                key={`${preset.label}-${preset.min}-${preset.max}`}
+                type="button"
+                className={`trace-histogram__preset${isActive ? " is-active" : ""}`}
+                onClick={() => onRangeChange({ min: preset.min, max: preset.max })}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {effectiveBins.length === 0 ? (
         <div className="trace-histogram__empty">No duration data available.</div>
