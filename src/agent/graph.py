@@ -23,7 +23,7 @@ from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
 from agent.state import AgentState
 from agent.telemetry import SpanType, telemetry
-from common.config.env import get_env_bool, get_env_str
+from common.config.env import get_env_bool, get_env_float, get_env_str
 
 logger = logging.getLogger(__name__)
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -128,6 +128,22 @@ def route_after_execution(state: AgentState) -> str:
     """
     if state.get("error"):
         deadline_ts = state.get("deadline_ts")
+        min_retry_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
+        remaining = None
+        if deadline_ts is not None:
+            remaining = deadline_ts - time.monotonic()
+            span = telemetry.get_current_span()
+            if span:
+                span.set_attribute("retry.budget_remaining_seconds", max(0.0, remaining))
+            if remaining < min_retry_budget:
+                if span:
+                    span.set_attribute("retry.stopped_due_to_budget", True)
+                state["error"] = "Retry budget exhausted before attempting another correction."
+                state["error_category"] = "timeout"
+                return "failed"
+        span = telemetry.get_current_span()
+        if span:
+            span.set_attribute("retry.stopped_due_to_budget", False)
         if deadline_ts is not None and time.monotonic() >= deadline_ts:
             return "failed"  # Budget exhausted
         if state.get("retry_count", 0) >= 3:
