@@ -130,6 +130,12 @@ make up
 | `VITE_AGENT_SERVICE_URL` | `http://localhost:8081` | Agent service |
 | `VITE_UI_API_URL` | `http://localhost:8082` | UI API service |
 
+### UI Diagnostics
+
+Native SVG charts now provide hover tooltips via the ChartSchema renderers. Tooltips follow the cursor and use axis formatting when available.
+
+Verbose / Diagnostic View is opt-in and trace-backed. Enable it in Agent Chat or Trace Detail (or use `?verbose=1`) to render intermediate agent steps derived from OTEL span attributes. Payloads may be truncated or redacted and are collapsed by default.
+
 ## Project Structure
 
 ```
