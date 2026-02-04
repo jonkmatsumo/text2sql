@@ -17,6 +17,7 @@ export function Tooltip({ x, y, items, visible }: TooltipProps) {
 
   return (
     <div
+      data-testid="chart-tooltip"
       style={{
         position: "absolute",
         top: y,

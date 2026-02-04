@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useRef, useState } from "react";
 import { ScatterChartSchema } from "../../../types/charts";
 import { Axis } from "../primitives/Axis";
 import { EmptyState } from "../../common/EmptyState";
 import { formatNumber } from "../utils/formatters";
 import { getNumericExtent, linearScale } from "../utils/scales";
+import { Tooltip } from "../primitives/Tooltip";
 
 const DEFAULT_HEIGHT = 220;
 const DEFAULT_WIDTH = 640;
@@ -25,6 +26,13 @@ export function ScatterChart({ schema }: { schema: ScatterChartSchema }) {
   const width = schema.meta?.width ?? DEFAULT_WIDTH;
   const height = schema.meta?.height ?? DEFAULT_HEIGHT;
   const margin = DEFAULT_MARGIN;
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [tooltip, setTooltip] = useState<{
+    x: number;
+    y: number;
+    visible: boolean;
+    items: { label: string; value: string }[];
+  }>({ x: 0, y: 0, visible: false, items: [] });
 
   const allPoints = schema.series.flatMap((series) => series.points);
   const xValues = allPoints
@@ -45,48 +53,86 @@ export function ScatterChart({ schema }: { schema: ScatterChartSchema }) {
   const xTicks = buildTicks(xDomain, schema.xAxis?.tickCount ?? 5);
   const yTicks = buildTicks(yDomain, schema.yAxis?.tickCount ?? 4);
 
+  const showTooltip = (
+    event: React.MouseEvent<SVGCircleElement>,
+    xValue: number,
+    yValue: number,
+    seriesName: string
+  ) => {
+    if (!wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const xLabel = schema.xAxis?.label || "X";
+    const yLabel = schema.yAxis?.label || seriesName;
+    setTooltip({
+      x: event.clientX - rect.left + 12,
+      y: event.clientY - rect.top + 12,
+      visible: true,
+      items: [
+        { label: xLabel, value: formatNumber(xValue, 2) },
+        { label: yLabel, value: formatNumber(yValue, 2) }
+      ]
+    });
+  };
+
+  const hideTooltip = () => {
+    setTooltip((prev) => ({ ...prev, visible: false }));
+  };
+
   return (
-    <svg
-      data-testid="scatter-chart"
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      height={height}
-    >
-      <g transform={`translate(${margin.left}, ${margin.top})`}>
-        {schema.series.map((series) => {
-          const color = series.color || "var(--accent)";
+    <div ref={wrapperRef} style={{ position: "relative" }}>
+      <svg
+        data-testid="scatter-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        width="100%"
+        height={height}
+        onMouseLeave={hideTooltip}
+      >
+        <g transform={`translate(${margin.left}, ${margin.top})`}>
+          {schema.series.map((series) => {
+            const color = series.color || "var(--accent)";
           return series.points.map((point, idx) => {
-            if (point.y == null || typeof point.x !== "number") return null;
-            return (
-              <circle
-                key={`${series.name}-${idx}`}
-                cx={xScale(point.x)}
-                cy={yScale(point.y)}
-                r={4}
-                fill={color}
-                opacity={0.8}
-              />
-            );
-          });
-        })}
-        <Axis
-          orientation="bottom"
-          ticks={xTicks}
-          scale={xScale}
-          length={innerWidth}
-          offset={innerHeight}
-          tickFormat={(value) => formatNumber(value, 2)}
-          label={schema.xAxis?.label}
-        />
-        <Axis
-          orientation="left"
-          ticks={yTicks}
-          scale={yScale}
-          length={innerHeight}
-          tickFormat={(value) => formatNumber(value, 2)}
-          label={schema.yAxis?.label}
-        />
-      </g>
-    </svg>
+              const xValue = point.x;
+              if (point.y == null || typeof xValue !== "number") return null;
+              return (
+                <circle
+                  key={`${series.name}-${idx}`}
+                  cx={xScale(xValue)}
+                  cy={yScale(point.y)}
+                  r={4}
+                  fill={color}
+                  opacity={0.8}
+                  onMouseEnter={(event) =>
+                    showTooltip(event, xValue, point.y ?? 0, series.name)
+                  }
+                />
+              );
+            });
+          })}
+          <Axis
+            orientation="bottom"
+            ticks={xTicks}
+            scale={xScale}
+            length={innerWidth}
+            offset={innerHeight}
+            tickFormat={(value) => formatNumber(value, 2)}
+            label={schema.xAxis?.label}
+          />
+          <Axis
+            orientation="left"
+            ticks={yTicks}
+            scale={yScale}
+            length={innerHeight}
+            tickFormat={(value) => formatNumber(value, 2)}
+            label={schema.yAxis?.label}
+          />
+        </g>
+      </svg>
+      <Tooltip
+        x={tooltip.x}
+        y={tooltip.y}
+        items={tooltip.items}
+        visible={tooltip.visible}
+      />
+    </div>
   );
 }
