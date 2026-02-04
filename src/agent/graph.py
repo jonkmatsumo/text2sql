@@ -160,6 +160,7 @@ def route_after_execution(state: AgentState) -> str:
 def _estimate_correction_budget_seconds(state: AgentState) -> float:
     """Estimate time needed for another correction attempt."""
     min_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
+    # Fixed overhead captures prompt assembly + orchestration costs.
     overhead_seconds = 0.5
     observed = state.get("latency_correct_seconds") or state.get("latency_generate_seconds")
     if observed is None:

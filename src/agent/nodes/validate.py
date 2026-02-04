@@ -61,6 +61,7 @@ def _extract_identifiers(sql_query: str) -> Tuple[Set[str], Set[Tuple[str, str]]
         return set(), set()
 
     if expression.find(exp.With):
+        # Conservative: skip binding when CTEs are present to avoid false positives.
         return set(), set()
 
     tables = set()
@@ -71,6 +72,7 @@ def _extract_identifiers(sql_query: str) -> Tuple[Set[str], Set[Tuple[str, str]]
         if table.name:
             tables.add(table.name)
     for column in expression.find_all(exp.Column):
+        # Only validate fully qualified columns (table.column) to avoid alias ambiguity.
         if column.table and column.name:
             columns.add((column.table, column.name))
     return tables, columns
