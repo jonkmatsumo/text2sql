@@ -216,6 +216,7 @@ Each backend requires specific environment variables for connection (e.g., `DB_H
 - `DAL_ALLOW_LOCAL_QUERY_TARGETS=true` allows UI-configured local providers (SQLite/DuckDB) in non-production environments.
 - `DAL_SCHEMA_CACHE_MAX_ENTRIES=1000` caps schema cache entries (LRU eviction).
 - `DAL_CLASSIFIED_ERROR_TELEMETRY=true` (default: true) emits structured logs and span events for classified DAL errors. Set `DAL_CLASSIFIED_ERROR_TELEMETRY=false` to disable. Guardrails: attributes are bounded cardinality and exclude raw SQL or user identifiers.
+- `DAL_PROVIDER_AWARE_RETRY=true` (default: true) enables provider-aware retry classification for transient errors.
 
 ### Async Provider Guardrails
 Async warehouses (Snowflake, BigQuery, Athena, Databricks) enforce timeouts and attempt cancellation on deadline. Configure provider-specific `*_QUERY_TIMEOUT_SECS` and `*_MAX_ROWS` in `.env.example`.
@@ -237,6 +238,7 @@ New environment flags introduced by the remaining hardening pass:
 - `AGENT_SCHEMA_DRIFT_AUTO_REFRESH` (default: false)
 - `AGENT_EMPTY_RESULT_SANITY_CHECK` (default: false)
 - `AGENT_INTERACTION_PERSISTENCE_MODE` (`best_effort` default, `strict` optional)
+- `AGENT_CACHE_SCHEMA_VALIDATION` (default: false)
 
 Focused unit tests added in this pass can be run with:
 ```bash

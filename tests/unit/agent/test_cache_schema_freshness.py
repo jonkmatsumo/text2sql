@@ -23,6 +23,9 @@ def _mock_span_ctx(mock_start_span):
 async def test_cache_hit_with_matching_snapshot_allows_cache(mock_get_tools, mock_start_span):
     """Matching schema snapshot should allow cache hit."""
     _mock_span_ctx(mock_start_span)
+    from agent.nodes import cache_lookup as cache_mod
+
+    cache_mod._SCHEMA_SNAPSHOT_CACHE.clear()
 
     cache_tool = AsyncMock()
     cache_tool.name = "lookup_cache"
@@ -71,6 +74,9 @@ async def test_cache_hit_with_matching_snapshot_allows_cache(mock_get_tools, moc
 async def test_cache_hit_with_mismatched_snapshot_rejected(mock_get_tools, mock_start_span):
     """Mismatched schema snapshot should reject cache hit."""
     _mock_span_ctx(mock_start_span)
+    from agent.nodes import cache_lookup as cache_mod
+
+    cache_mod._SCHEMA_SNAPSHOT_CACHE.clear()
 
     cache_tool = AsyncMock()
     cache_tool.name = "lookup_cache"
@@ -120,6 +126,9 @@ async def test_cache_hit_with_mismatched_snapshot_rejected(mock_get_tools, mock_
 async def test_cache_hit_without_snapshot_allowed(mock_get_tools, mock_start_span):
     """Missing cached snapshot should allow cache hit."""
     _mock_span_ctx(mock_start_span)
+    from agent.nodes import cache_lookup as cache_mod
+
+    cache_mod._SCHEMA_SNAPSHOT_CACHE.clear()
 
     cache_tool = AsyncMock()
     cache_tool.name = "lookup_cache"
