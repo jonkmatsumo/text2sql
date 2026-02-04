@@ -10,6 +10,7 @@ from agent.state import AgentState
 from agent.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
+from common.config.env import get_env_str
 
 load_dotenv()
 
@@ -59,6 +60,22 @@ def correct_sql_node(state: AgentState) -> dict:
         # Classify the error using taxonomy
         error_category, category_info = classify_error(error or "")
         span.set_attribute("error_category", error_category)
+        max_attempts = 3
+        span.set_attribute("retry.attempt", retry)
+        span.set_attribute("retry.max_attempts", max_attempts)
+        span.set_attribute("retry.reason_category", error_category)
+
+        if telemetry.get_current_span():
+            telemetry.get_current_span().add_event(
+                "agent.retry",
+                {
+                    "stage": "correct_sql",
+                    "reason_category": error_category,
+                    "attempt": retry,
+                    "max_attempts": max_attempts,
+                    "provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
+                },
+            )
 
         # Generate targeted correction strategy
         correction_strategy = generate_correction_strategy(
