@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
+from agent.config import get_synthesize_temperature
 from agent.llm_client import get_llm
 from agent.state import AgentState
 from agent.telemetry import telemetry
@@ -113,7 +114,7 @@ Be concise but informative. Use numbers and data from the results.
             ]
         )
 
-        chain = prompt | get_llm(temperature=0.7)
+        chain = prompt | get_llm(temperature=get_synthesize_temperature())
 
         response = chain.invoke(
             {
