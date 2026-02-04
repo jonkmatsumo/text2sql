@@ -57,6 +57,8 @@ def synthesize_insight_node(state: AgentState) -> dict:
         result_row_limit = state.get("result_row_limit")
         result_rows_returned = state.get("result_rows_returned")
         result_columns = state.get("result_columns")
+        result_is_limited = state.get("result_is_limited")
+        result_limit = state.get("result_limit")
 
         # Get the original question from the LAST user message (not first)
         # This is important because checkpointer accumulates messages across turns
@@ -81,6 +83,9 @@ def synthesize_insight_node(state: AgentState) -> dict:
             span.set_attribute("result.row_limit", result_row_limit)
         if result_rows_returned is not None:
             span.set_attribute("result.rows_returned", result_rows_returned)
+        span.set_attribute("result.is_limited", bool(result_is_limited))
+        if result_limit is not None:
+            span.set_attribute("result.limit", result_limit)
 
         if query_result is None:
             response_content = "I couldn't retrieve any results for your query."
@@ -170,6 +175,7 @@ Be concise but informative. Use numbers and data from the results.
             span.set_attributes(usage_stats)
 
         response_content = response.content
+        warnings = []
         if result_is_truncated:
             warning = "Note: Results are truncated"
             if result_row_limit:
@@ -177,7 +183,17 @@ Be concise but informative. Use numbers and data from the results.
             if result_rows_returned is not None:
                 warning += f" (showing {result_rows_returned})"
             warning += "."
-            response_content = f"{warning}\n\n{response_content}"
+            warnings.append(warning)
+        if result_is_limited:
+            if result_limit is not None:
+                warnings.append(
+                    f"Note: This query is limited to the top {result_limit} rows (ORDER BY/LIMIT)."
+                )
+            else:
+                warnings.append("Note: This query is limited (ORDER BY/LIMIT).")
+        if warnings:
+            warning_block = "\n".join(warnings)
+            response_content = f"{warning_block}\n\n{response_content}"
 
         span.set_outputs({"response_length": len(response_content)})
 

@@ -1,9 +1,35 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
+from typing import Optional, Tuple
+
+import sqlglot
+from sqlglot import exp
+
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
+
+
+def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
+    try:
+        expression = sqlglot.parse_one(sql_query)
+    except Exception:
+        return False, None
+
+    limit_node = expression.find(exp.Limit)
+    top_cls = getattr(exp, "Top", None)
+    top_node = expression.find(top_cls) if top_cls else None
+
+    node = limit_node or top_node
+    if not node:
+        return False, None
+
+    limit_expr = node.args.get("expression")
+    if isinstance(limit_expr, exp.Literal) and limit_expr.is_int:
+        return True, int(limit_expr.this)
+
+    return True, None
 
 
 async def validate_sql_node(state: AgentState) -> dict:
@@ -39,6 +65,11 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "ast_validation_result": None,
             }
 
+        is_limited, limit_value = _extract_limit(sql_query)
+        span.set_attribute("result.is_limited", bool(is_limited))
+        if limit_value is not None:
+            span.set_attribute("result.limit", limit_value)
+
         # Run AST validation
         result = validate_sql(sql_query)
 
@@ -73,6 +104,8 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
                 "column_usage": result.metadata.column_usage if result.metadata else [],
                 "join_complexity": result.metadata.join_complexity if result.metadata else 0,
+                "result_is_limited": is_limited,
+                "result_limit": limit_value,
             }
 
         # Validation passed - enrich state with metadata
@@ -90,6 +123,8 @@ async def validate_sql_node(state: AgentState) -> dict:
             "table_lineage": result.metadata.table_lineage if result.metadata else [],
             "column_usage": result.metadata.column_usage if result.metadata else [],
             "join_complexity": result.metadata.join_complexity if result.metadata else 0,
+            "result_is_limited": is_limited,
+            "result_limit": limit_value,
             # Optionally use normalized SQL
             "current_sql": result.parsed_sql if result.parsed_sql else sql_query,
         }
