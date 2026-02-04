@@ -136,6 +136,30 @@ class _MysqlConnection:
             operation=_run(),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+        sql = translate_double_quotes_to_backticks(sql)
+        sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+
+        async def _run():
+            from dal.util.column_metadata import columns_from_cursor_description
+
+            async with self._conn.cursor() as cursor:
+                await cursor.execute(sql, bound_params)
+                rows = await cursor.fetchall()
+                capped_rows, truncated = cap_rows_with_metadata(list(rows), self._max_rows)
+                self._last_truncated = truncated
+                columns = columns_from_cursor_description(cursor.description, provider="mysql")
+                return capped_rows, columns
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="mysql",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))

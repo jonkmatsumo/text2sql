@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 
-from dal.util.column_metadata import columns_from_asyncpg_attributes
+from dal.util.column_metadata import (
+    columns_from_asyncpg_attributes,
+    columns_from_cursor_description,
+)
 
 
 @dataclass
@@ -49,3 +52,26 @@ class TestColumnMetadata:
                 "timezone": None,
             },
         ]
+
+    def test_columns_from_cursor_description_sqlite(self):
+        """Build column metadata from sqlite cursor description."""
+        description = [("id", None, None, None, None, None, None)]
+        columns = columns_from_cursor_description(description, provider="sqlite")
+        assert columns == [
+            {
+                "name": "id",
+                "type": "unknown",
+                "db_type": None,
+                "nullable": None,
+                "precision": None,
+                "scale": None,
+                "timezone": None,
+            }
+        ]
+
+    def test_columns_from_cursor_description_mysql(self):
+        """Build column metadata from mysql cursor description."""
+        description = [("count", 3, None, None, None, None, None)]
+        columns = columns_from_cursor_description(description, provider="mysql")
+        assert columns[0]["name"] == "count"
+        assert columns[0]["type"] == "integer"

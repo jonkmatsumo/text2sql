@@ -92,6 +92,30 @@ class _SqliteConnection:
             operation=_run(),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+        sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+
+        async def _run():
+            from dal.util.column_metadata import columns_from_cursor_description
+
+            cursor = await self._conn.execute(sql, bound_params)
+            rows = await cursor.fetchall()
+            capped_rows, truncated = cap_rows_with_metadata(
+                [dict(row) for row in rows], self._max_rows
+            )
+            self._last_truncated = truncated
+            columns = columns_from_cursor_description(cursor.description, provider="sqlite")
+            return capped_rows, columns
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="sqlite",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
