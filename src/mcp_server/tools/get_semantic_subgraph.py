@@ -9,7 +9,9 @@ Uses deterministic "Mini-Schema" expansion:
 import asyncio
 import json
 import logging
+import time
 
+from common.telemetry import Telemetry
 from dal.database import Database
 from dal.memgraph import MemgraphStore
 from ingestion.vector_indexer import VectorIndexer
@@ -38,20 +40,68 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
     introspector = Database.get_schema_introspector()
 
     try:
-        # 1. Seed Selection (Tables-First)
-        table_hits = await indexer.search_nodes(query_text, label="Table", k=TABLES_K)
-
-        if not table_hits:
-            logger.info("No table hits, falling back to column search")
-            seeds = await indexer.search_nodes(query_text, label="Column", k=COLUMNS_K)
-            seed_table_names = list(
-                set(s["node"].get("table") for s in seeds if s["node"].get("table"))
+        seed_start = time.monotonic()
+        with Telemetry.start_span(
+            "seed_selection",
+            attributes={
+                "seed_selection.k_tables": TABLES_K,
+                "seed_selection.k_columns": COLUMNS_K,
+            },
+        ) as seed_span:
+            # 1. Seed Selection (Tables-First)
+            table_hits, table_meta = await indexer.search_nodes_with_metadata(
+                query_text, label="Table", k=TABLES_K
             )
-            seed_scores = {s["node"].get("table"): s["score"] for s in seeds}
-        else:
-            seeds = table_hits
-            seed_table_names = [s["node"].get("name") for s in seeds]
-            seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
+
+            column_meta = {"threshold": 0.0, "timing_ms": {}}
+            if not table_hits:
+                logger.info("No table hits, falling back to column search")
+                seeds, column_meta = await indexer.search_nodes_with_metadata(
+                    query_text, label="Column", k=COLUMNS_K
+                )
+                seed_table_names = list(
+                    set(s["node"].get("table") for s in seeds if s["node"].get("table"))
+                )
+                seed_scores = {s["node"].get("table"): s["score"] for s in seeds}
+                seed_span.set_attribute("seed_selection.path", "column_fallback")
+                seed_span.set_attribute("seed_selection.column_hit_count", len(seeds))
+            else:
+                seeds = table_hits
+                seed_table_names = [s["node"].get("name") for s in seeds]
+                seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
+                seed_span.set_attribute("seed_selection.path", "table")
+                seed_span.set_attribute("seed_selection.column_hit_count", 0)
+
+            seed_span.set_attribute("seed_selection.table_hit_count", len(table_hits))
+            seed_span.set_attribute(
+                "seed_selection.similarity_threshold_table", table_meta.get("threshold", 0.0)
+            )
+            seed_span.set_attribute(
+                "seed_selection.similarity_threshold_column", column_meta.get("threshold", 0.0)
+            )
+
+            table_timing = table_meta.get("timing_ms", {})
+            column_timing = column_meta.get("timing_ms", {})
+            if table_timing:
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.table_embedding", table_timing.get("embedding", 0.0)
+                )
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.table_search", table_timing.get("search", 0.0)
+                )
+            if column_timing:
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.column_embedding",
+                    column_timing.get("embedding", 0.0),
+                )
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.column_search", column_timing.get("search", 0.0)
+                )
+
+            seed_span.set_attribute(
+                "seed_selection.latency_ms.traversal_start",
+                (time.monotonic() - seed_start) * 1000,
+            )
 
         if not seed_table_names:
             return {"nodes": [], "relationships": []}

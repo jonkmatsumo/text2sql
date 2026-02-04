@@ -150,7 +150,29 @@ class VectorIndexer:
         Returns:
             List of dicts with 'node' and 'score' keys, sorted by score desc.
         """
+        results, _ = await self.search_nodes_with_metadata(
+            query_text=query_text,
+            label=label,
+            k=k,
+            apply_threshold=apply_threshold,
+        )
+        return results
+
+    async def search_nodes_with_metadata(
+        self,
+        query_text: str,
+        label: str = "Table",
+        k: int = 5,
+        apply_threshold: bool = True,
+    ) -> tuple[List[dict], dict]:
+        """Search for nearest nodes and return metadata for telemetry.
+
+        Returns:
+            Tuple of (hits, metadata) where metadata includes threshold and timing.
+        """
+        embed_start = time.monotonic()
         query_vector = await self.embedding_service.embed_text(query_text)
+        embed_ms = (time.monotonic() - embed_start) * 1000
 
         def _run_search():
             start_time = time.monotonic()
@@ -167,10 +189,18 @@ class VectorIndexer:
             ) as span:
                 try:
                     if not query_vector:
-                        return []
+                        return [], {
+                            "threshold": 0.0,
+                            "timing_ms": {
+                                "search": 0.0,
+                                "total": 0.0,
+                            },
+                        }
 
                     # Delegate to DAL
+                    search_start = time.monotonic()
                     mapped_hits = self.store.search_ann_seeds(label, query_vector, k)
+                    search_ms = (time.monotonic() - search_start) * 1000
 
                     # Apply adaptive thresholding
                     threshold_val = 0.0
@@ -202,7 +232,13 @@ class VectorIndexer:
                     )
 
                     Telemetry.set_span_status(span, success=True)
-                    return mapped_hits
+                    return mapped_hits, {
+                        "threshold": threshold_val,
+                        "timing_ms": {
+                            "search": search_ms,
+                            "total": elapsed_ms,
+                        },
+                    }
                 except Exception as e:
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     logger.error(
@@ -221,4 +257,13 @@ class VectorIndexer:
                     raise
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _run_search)
+        hits, metadata = await loop.run_in_executor(None, _run_search)
+        metadata = dict(metadata)
+        timing_ms = dict(metadata.get("timing_ms", {}))
+        timing_ms["embedding"] = embed_ms
+        if "total" in timing_ms:
+            timing_ms["total"] = timing_ms["total"] + embed_ms
+        else:
+            timing_ms["total"] = embed_ms
+        metadata["timing_ms"] = timing_ms
+        return hits, metadata

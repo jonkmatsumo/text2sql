@@ -43,8 +43,11 @@ class TestGetSemanticSubgraph:
         mock_indexer = MagicMock()
 
         # Tables-first: returns table hits
-        mock_indexer.search_nodes = AsyncMock(
-            return_value=[{"node": {"name": "customers"}, "score": 0.9}]
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=(
+                [{"node": {"name": "customers"}, "score": 0.9}],
+                {"threshold": 0.75, "timing_ms": {"embedding": 1.0, "search": 2.0}},
+            )
         )
 
         # Mock store and session
@@ -124,7 +127,9 @@ class TestGetSemanticSubgraph:
     async def test_get_semantic_subgraph_no_seeds(self):
         """Test handling no search results."""
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes = AsyncMock(return_value=[])
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=([], {"threshold": 0.0, "timing_ms": {}})
+        )
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
@@ -147,7 +152,7 @@ class TestGetSemanticSubgraph:
     async def test_get_semantic_subgraph_error(self):
         """Test error handling."""
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes = AsyncMock(side_effect=Exception("Search failed"))
+        mock_indexer.search_nodes_with_metadata = AsyncMock(side_effect=Exception("Search failed"))
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
@@ -175,9 +180,9 @@ class TestGetSemanticSubgraph:
 
         def track_calls(query_text, label, k, apply_threshold=True):
             call_order.append(label)
-            return []
+            return [], {"threshold": 0.0, "timing_ms": {}}
 
-        mock_indexer.search_nodes = AsyncMock(side_effect=track_calls)
+        mock_indexer.search_nodes_with_metadata = AsyncMock(side_effect=track_calls)
 
         with patch(
             "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
@@ -195,3 +200,110 @@ class TestGetSemanticSubgraph:
 
                 # Should search tables first
                 assert call_order[0] == "Table"
+
+    @pytest.mark.asyncio
+    async def test_seed_selection_telemetry_column_fallback(self):
+        """Telemetry records column fallback only when table hits are empty."""
+        mock_indexer = MagicMock()
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            side_effect=[
+                ([], {"threshold": 0.0, "timing_ms": {"embedding": 1.0, "search": 2.0}}),
+                (
+                    [{"node": {"name": "email", "table": "users"}, "score": 0.8}],
+                    {"threshold": 0.6, "timing_ms": {"embedding": 1.5, "search": 2.5}},
+                ),
+            ]
+        )
+
+        spans = []
+
+        class FakeSpan:
+            def __init__(self, attributes=None):
+                self.attributes = dict(attributes or {})
+
+            def set_attribute(self, key, value):
+                self.attributes[key] = value
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_start_span(name, attributes=None):
+            span = FakeSpan(attributes)
+            spans.append((name, span))
+            yield span
+
+        with patch(
+            "mcp_server.tools.get_semantic_subgraph.Telemetry.start_span",
+            side_effect=fake_start_span,
+        ):
+            with patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                    return_value=self._mock_introspector(),
+                ):
+                    with patch(
+                        "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                        return_value=mock_indexer,
+                    ):
+                        await get_semantic_subgraph("email addresses")
+
+        seed_span = next(span for name, span in spans if name == "seed_selection")
+        assert seed_span.attributes["seed_selection.path"] == "column_fallback"
+        assert seed_span.attributes["seed_selection.table_hit_count"] == 0
+        assert seed_span.attributes["seed_selection.column_hit_count"] == 1
+        assert seed_span.attributes["seed_selection.k_tables"] == 5
+        assert seed_span.attributes["seed_selection.k_columns"] == 3
+        assert seed_span.attributes["seed_selection.similarity_threshold_column"] == 0.6
+
+    @pytest.mark.asyncio
+    async def test_seed_selection_telemetry_table_path(self):
+        """Telemetry records table path when table hits are present."""
+        mock_indexer = MagicMock()
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=(
+                [{"node": {"name": "users"}, "score": 0.9}],
+                {"threshold": 0.7, "timing_ms": {"embedding": 1.0, "search": 2.0}},
+            )
+        )
+
+        spans = []
+
+        class FakeSpan:
+            def __init__(self, attributes=None):
+                self.attributes = dict(attributes or {})
+
+            def set_attribute(self, key, value):
+                self.attributes[key] = value
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_start_span(name, attributes=None):
+            span = FakeSpan(attributes)
+            spans.append((name, span))
+            yield span
+
+        with patch(
+            "mcp_server.tools.get_semantic_subgraph.Telemetry.start_span",
+            side_effect=fake_start_span,
+        ):
+            with patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                    return_value=self._mock_introspector(),
+                ):
+                    with patch(
+                        "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                        return_value=mock_indexer,
+                    ):
+                        await get_semantic_subgraph("find users")
+
+        seed_span = next(span for name, span in spans if name == "seed_selection")
+        assert seed_span.attributes["seed_selection.path"] == "table"
+        assert seed_span.attributes["seed_selection.table_hit_count"] == 1
