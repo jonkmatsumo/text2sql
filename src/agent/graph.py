@@ -322,8 +322,22 @@ async def run_agent_with_tracing(
         from agent.tools import mcp_tools_context, unpack_mcp_result
         from agent.utils.retry import retry_with_backoff
 
-        # Check fail-open mode (default: fail-closed for reliability)
-        persistence_fail_open = get_env_bool("PERSISTENCE_FAIL_OPEN", False)
+        # Interaction persistence mode (default: best_effort)
+        persistence_mode = (get_env_str("AGENT_INTERACTION_PERSISTENCE_MODE", "") or "").strip()
+        if not persistence_mode:
+            legacy_fail_open = get_env_bool("PERSISTENCE_FAIL_OPEN", None)
+            if legacy_fail_open is True:
+                persistence_mode = "best_effort"
+            elif legacy_fail_open is False:
+                persistence_mode = "strict"
+            else:
+                persistence_mode = "best_effort"
+        if persistence_mode not in {"best_effort", "strict"}:
+            logger.warning(
+                "Invalid AGENT_INTERACTION_PERSISTENCE_MODE: %s; defaulting to best_effort",
+                persistence_mode,
+            )
+            persistence_mode = "best_effort"
 
         async with mcp_tools_context() as tools:
             schema_snapshot_id = inputs.get("schema_snapshot_id")
@@ -356,6 +370,7 @@ async def run_agent_with_tracing(
 
             # 1. Start Interaction Logging (Pre-execution) with retry
             interaction_id = None
+            interaction_persisted = False
             create_tool = next((t for t in tools if t.name == "create_interaction"), None)
             if create_tool:
                 try:
@@ -392,6 +407,8 @@ async def run_agent_with_tracing(
                     )
                     interaction_id = unpack_mcp_result(raw_interaction_id)
                     inputs["interaction_id"] = interaction_id
+                    interaction_persisted = True
+                    inputs["interaction_persisted"] = True
                     # Also make interaction_id sticky
                     telemetry.update_current_trace({"interaction_id": interaction_id})
                     if telemetry.get_current_span():
@@ -415,23 +432,29 @@ async def run_agent_with_tracing(
                             "persistence.create.failure",
                             {"exception": str(e), "type": type(e).__name__},
                         )
-                    if not persistence_fail_open:
-                        # Default: fail-closed - interaction persistence is required
-                        raise RuntimeError(
-                            f"Interaction creation failed (persistence_fail_open=False): {e}"
-                        ) from e
-                    # Fail-open mode: continue without interaction_id but emit warning
+                    if telemetry.get_current_span():
+                        telemetry.get_current_span().add_event(
+                            "interaction.persist_failed",
+                            {"stage": "create", "exception_type": type(e).__name__},
+                        )
+                    interaction_persisted = False
+                    inputs["interaction_persisted"] = False
+                    if persistence_mode == "strict":
+                        raise RuntimeError(f"Interaction creation failed (mode=strict): {e}") from e
                     logger.warning(
-                        "Continuing without interaction_id (PERSISTENCE_FAIL_OPEN=true)",
+                        "Continuing without interaction_id (best_effort)",
                         extra={"trace_id": thread_id},
                     )
             else:
                 logger.warning("create_interaction tool not available")
+                inputs["interaction_persisted"] = False
 
             # Execute workflow
             result = inputs.copy()
             try:
                 result = await app.ainvoke(inputs, config=config)
+                if "interaction_persisted" not in result:
+                    result["interaction_persisted"] = interaction_persisted
             except Exception as execute_err:
                 logger.error(
                     "Critical error in agent workflow",
@@ -510,6 +533,10 @@ async def run_agent_with_tracing(
                                 "persistence.update.failure",
                                 {"interaction_id": interaction_id, "exception": str(e)},
                             )
+                            telemetry.get_current_span().add_event(
+                                "interaction.persist_failed",
+                                {"stage": "update", "exception_type": type(e).__name__},
+                            )
                         # Structured logging - update failure is observable
                         logger.error(
                             "Failed to update interaction after all retries",
@@ -527,9 +554,15 @@ async def run_agent_with_tracing(
                         # Mark result as having persistence failure (observable)
                         result["persistence_failed"] = True
                         result["persistence_error"] = str(e)
+                        result["interaction_persisted"] = False
+                        if persistence_mode == "strict":
+                            raise RuntimeError(
+                                f"Interaction update failed (mode=strict): {e}"
+                            ) from e
                 else:
                     logger.error("update_interaction tool not found in available tools")
                     logger.error("update_interaction tool missing!")
+                    result["interaction_persisted"] = False
 
         # Metadata is already handled early and made sticky via telemetry_context
 
