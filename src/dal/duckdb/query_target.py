@@ -95,6 +95,26 @@ class _DuckDBConnection:
             operation=_run(),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+
+        async def _run():
+            rows, columns = await self._run_query_with_columns(sql, list(params))
+            limit = self._max_rows
+            if self._sync_max_rows:
+                limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
+            capped_rows, truncated = cap_rows_with_metadata(rows, limit)
+            self._last_truncated = truncated
+            return capped_rows, columns
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="duckdb",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
@@ -110,6 +130,23 @@ class _DuckDBConnection:
             cursor = self._conn.execute(sql, params)
             cols = [desc[0] for desc in cursor.description] if cursor.description else []
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+        return await asyncio.wait_for(
+            asyncio.to_thread(_execute),
+            timeout=self._query_timeout_seconds,
+        )
+
+    async def _run_query_with_columns(
+        self, sql: str, params: List[Any]
+    ) -> tuple[List[Dict[str, Any]], list]:
+        def _execute():
+            from dal.util.column_metadata import columns_from_cursor_description
+
+            cursor = self._conn.execute(sql, params)
+            cols = [desc[0] for desc in cursor.description] if cursor.description else []
+            rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+            columns = columns_from_cursor_description(cursor.description, provider="duckdb")
+            return rows, columns
 
         return await asyncio.wait_for(
             asyncio.to_thread(_execute),

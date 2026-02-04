@@ -125,6 +125,25 @@ class _SnowflakeConnection:
             ),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+        sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="snowflake",
+            execution_model="async",
+            sql=sql,
+            operation=_fetch_with_guardrails_with_columns(
+                self._executor,
+                sql,
+                bound_params,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+                max_rows=self._max_rows,
+                warn_after_seconds=self._warn_after_seconds,
+            ),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
@@ -218,6 +237,45 @@ async def _fetch_with_guardrails(
             max_rows_limit,
         )
     return rows
+
+
+async def _fetch_with_guardrails_with_columns(
+    executor: SnowflakeAsyncQueryExecutor,
+    sql: str,
+    params: Dict[str, Any],
+    query_timeout_seconds: int,
+    poll_interval_seconds: int,
+    max_rows: int,
+    warn_after_seconds: int,
+) -> tuple[List[Dict[str, Any]], list]:
+    """Fetch rows and columns with guardrails."""
+    logger = logging.getLogger(__name__)
+    started_at = time.monotonic()
+    job_id = await executor.submit(sql, params if params else None)
+    try:
+        while True:
+            status = await executor.poll(job_id)
+            if status == QueryStatus.SUCCEEDED:
+                break
+            if status == QueryStatus.CANCELLED:
+                raise RuntimeError(f"Snowflake query {job_id} was cancelled.")
+            if status == QueryStatus.FAILED:
+                raise RuntimeError(f"Snowflake query {job_id} failed.")
+            if time.monotonic() - started_at >= query_timeout_seconds:
+                await executor.cancel(job_id)
+                raise TimeoutError(
+                    f"Snowflake query {job_id} exceeded {query_timeout_seconds}s timeout."
+                )
+            await asyncio.sleep(poll_interval_seconds)
+        rows, columns = await executor.fetch_with_columns(job_id, max_rows=max_rows)
+        elapsed = time.monotonic() - started_at
+        if elapsed >= warn_after_seconds:
+            logger.warning("Snowflake query %s took %.2fs.", job_id, elapsed)
+        if max_rows and len(rows) >= max_rows:
+            logger.warning("Snowflake query %s hit max rows cap (%s).", job_id, max_rows)
+        return rows, columns
+    finally:
+        await executor.cancel(job_id)
 
 
 def _format_execute_status(sql: str, rowcount: int) -> str:

@@ -48,6 +48,18 @@ class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
             operation=asyncio.to_thread(_fetch, self._conn, job_id, max_rows),
         )
 
+    async def fetch_with_columns(
+        self, job_id: str, max_rows: Optional[int] = None
+    ) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch results and column metadata for a completed query."""
+        return await trace_query_operation(
+            "dal.query.fetch",
+            provider="snowflake",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(_fetch_with_columns, self._conn, job_id, max_rows),
+        )
+
     async def cancel(self, job_id: str) -> None:
         """Cancel a running query."""
         await asyncio.to_thread(self._conn.cancel_query, job_id)
@@ -79,6 +91,35 @@ def _fetch(
             rows = rows[:max_rows]
             break
     return [dict(zip(columns, row)) for row in rows]
+
+
+def _fetch_with_columns(
+    conn: snowflake.connector.SnowflakeConnection,
+    job_id: str,
+    max_rows: Optional[int],
+) -> tuple[List[Dict[str, Any]], list]:
+    """Fetch Snowflake results along with column metadata."""
+    cursor = conn.get_results_from_sfqid(job_id)
+    columns = _columns_from_snowflake_description(cursor.description or [])
+    batch_size = min(1000, max_rows) if max_rows else 1000
+    rows: List[tuple] = []
+    while True:
+        batch = cursor.fetchmany(batch_size)
+        if not batch:
+            break
+        rows.extend(batch)
+        if max_rows is not None and len(rows) >= max_rows:
+            rows = rows[:max_rows]
+            break
+    col_names = [col.get("name") for col in columns]
+    return [dict(zip(col_names, row)) for row in rows], columns
+
+
+def _columns_from_snowflake_description(description: list) -> list:
+    """Build column metadata from Snowflake cursor description."""
+    from dal.util.column_metadata import columns_from_cursor_description
+
+    return columns_from_cursor_description(description, provider="snowflake")
 
 
 def _map_status(status: QueryStatus) -> NormalizedStatus:

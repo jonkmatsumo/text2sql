@@ -47,6 +47,47 @@ class TestExecuteSqlQuery:
             assert data[0]["count"] == 1000
 
     @pytest.mark.asyncio
+    async def test_execute_sql_query_include_columns_opt_in(self):
+        """Opt-in include_columns returns wrapper with rows and columns."""
+        mock_conn = AsyncMock()
+        mock_rows = [{"count": 1000, "created_at": "2024-01-01T00:00:00Z"}]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+            result = await handler(
+                "SELECT COUNT(*) as count, NOW() as created_at FROM film",
+                tenant_id=1,
+                include_columns=True,
+            )
+
+            data = json.loads(result)
+            assert list(data.keys()) == ["rows", "columns"]
+            assert data["rows"] == mock_rows
+            assert data["columns"] == [
+                {
+                    "name": "count",
+                    "type": "unknown",
+                    "db_type": None,
+                    "nullable": None,
+                    "precision": None,
+                    "scale": None,
+                    "timezone": None,
+                },
+                {
+                    "name": "created_at",
+                    "type": "unknown",
+                    "db_type": None,
+                    "nullable": None,
+                    "precision": None,
+                    "scale": None,
+                    "timezone": None,
+                },
+            ]
+
+    @pytest.mark.asyncio
     async def test_execute_sql_query_empty_result(self):
         """Test handling empty result set."""
         mock_conn = AsyncMock()

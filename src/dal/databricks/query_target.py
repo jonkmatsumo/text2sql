@@ -107,6 +107,24 @@ class _DatabricksConnection:
             ),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+        sql, query_params = translate_postgres_params_to_databricks(sql, list(params))
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="databricks",
+            execution_model="async",
+            sql=sql,
+            operation=_fetch_with_guardrails_with_columns(
+                self._executor,
+                sql,
+                query_params,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+                max_rows=self._max_rows,
+            ),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
@@ -165,3 +183,30 @@ async def _fetch_with_guardrails(
     if max_rows and len(rows) >= max_rows:
         logger.warning("Databricks statement %s hit max rows cap (%s).", job_id, max_rows)
     return rows
+
+
+async def _fetch_with_guardrails_with_columns(
+    executor: DatabricksAsyncQueryExecutor,
+    sql: str,
+    params: list,
+    query_timeout_seconds: int,
+    poll_interval_seconds: int,
+    max_rows: int,
+) -> tuple[List[Dict[str, Any]], list]:
+    """Fetch rows and columns with guardrails."""
+    logger = logging.getLogger(__name__)
+    job_id = await executor.submit(sql, params)
+    started_at = time.monotonic()
+    await _poll_until_done(
+        executor,
+        job_id,
+        query_timeout_seconds=query_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    rows, columns = await executor.fetch_with_columns(job_id, max_rows=max_rows)
+    elapsed = time.monotonic() - started_at
+    if elapsed >= query_timeout_seconds:
+        logger.warning("Databricks statement %s took %.2fs.", job_id, elapsed)
+    if max_rows and len(rows) >= max_rows:
+        logger.warning("Databricks statement %s hit max rows cap (%s).", job_id, max_rows)
+    return rows, columns
