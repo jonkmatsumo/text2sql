@@ -14,7 +14,7 @@ def test_run_agent_success(monkeypatch):
             "error": None,
             "from_cache": False,
             "interaction_id": "interaction-1",
-            "viz_spec": {"mark": "bar"},
+            "viz_spec": {"chartType": "bar"},
             "viz_reason": None,
         }
 
@@ -36,7 +36,7 @@ def test_run_agent_success(monkeypatch):
     assert body["from_cache"] is False
     assert body["interaction_id"] == "interaction-1"
     assert body["trace_id"] == "a" * 32
-    assert body["viz_spec"] == {"mark": "bar"}
+    assert body["viz_spec"] == {"chartType": "bar"}
 
 
 def test_run_agent_error(monkeypatch):

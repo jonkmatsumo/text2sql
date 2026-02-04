@@ -8,8 +8,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.graph import run_agent_with_tracing
 from agent.telemetry import telemetry
+
+try:
+    from agent.graph import run_agent_with_tracing
+except Exception:
+    run_agent_with_tracing = None
 
 app = FastAPI(title="Text2SQL Agent Service")
 
@@ -58,6 +62,12 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
     """Run the agent and return UI-compatible results."""
     thread_id = request.thread_id or str(uuid.uuid4())
     try:
+        global run_agent_with_tracing
+        if run_agent_with_tracing is None:
+            from agent.graph import run_agent_with_tracing as _run_agent_with_tracing
+
+            run_agent_with_tracing = _run_agent_with_tracing
+
         state = await run_agent_with_tracing(
             question=request.question,
             tenant_id=request.tenant_id,
