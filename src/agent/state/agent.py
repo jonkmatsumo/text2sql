@@ -37,6 +37,20 @@ class AgentState(TypedDict):
     # Raw result set from the database (List of dicts)
     query_result: Optional[List[dict]]
 
+    # Result metadata from execution (truncation, columns, limits)
+    result_is_truncated: Optional[bool]
+    result_row_limit: Optional[int]
+    result_rows_returned: Optional[int]
+    result_total_row_estimate: Optional[int]
+    result_columns: Optional[List[dict]]
+
+    # Deadline propagation and budgeting
+    deadline_ts: Optional[float]
+    timeout_seconds: Optional[float]
+
+    # Schema snapshot identifier (versioning/fingerprint)
+    schema_snapshot_id: Optional[str]
+
     # Error message from the last execution attempt (if any)
     error: Optional[str]
 

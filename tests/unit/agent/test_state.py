@@ -93,6 +93,21 @@ class TestAgentStateStructure:
         for field in required_fields:
             assert field in state, f"Required field '{field}' missing"
 
+    def test_state_metadata_fields_present(self):
+        """Verify result/timeout/schema metadata keys exist on AgentState."""
+        metadata_fields = [
+            "result_is_truncated",
+            "result_row_limit",
+            "result_rows_returned",
+            "result_total_row_estimate",
+            "result_columns",
+            "deadline_ts",
+            "timeout_seconds",
+            "schema_snapshot_id",
+        ]
+        for field in metadata_fields:
+            assert field in AgentState.__annotations__, f"Missing AgentState key: {field}"
+
 
 class TestMessageReducer:
     """Test message reducer functionality."""
