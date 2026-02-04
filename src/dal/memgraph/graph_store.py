@@ -260,11 +260,13 @@ class MemgraphStore(GraphStore):
             Where 'node' is a flat dictionary of node properties.
         """
         # Strategy selection based on label (could be config-driven in future)
-        # FIXME: Re-enable HNSW search when vector_search module is available
-        # if label == "Table":
-        #     query = ... (HNSW)
-        # else:
-        #     query = ... (Cosine fallback)
+        if label == "Table" and self.supports_vector_search() and self.has_index(index_name):
+            return self._search_ann_seeds_vector_search(
+                embedding=embedding,
+                k=k,
+                index_name=index_name,
+                embedding_property=embedding_property,
+            )
 
         # CURRENT FIX: Client-side cosine similarity (Memgraph vector modules missing)
         # 1. Fetch all candidate nodes
@@ -312,6 +314,85 @@ class MemgraphStore(GraphStore):
 
             # 2. Sort by score DESC and take top K
             candidates.sort(key=lambda x: x["score"], reverse=True)
+            return candidates[:k]
+
+    def supports_vector_search(self) -> bool:
+        """Return True if vector_search module is available."""
+        try:
+            _ = self._vector_search_index_info()
+            return True
+        except Exception:
+            return False
+
+    def has_index(self, index_name: str) -> bool:
+        """Return True if the vector_search index exists."""
+        try:
+            rows = self._vector_search_index_info()
+        except Exception:
+            return False
+
+        for row in rows:
+            name = row.get("name") or row.get("index_name") or row.get("index")
+            if name == index_name:
+                return True
+        return False
+
+    def _vector_search_index_info(self) -> List[Dict[str, Any]]:
+        """Fetch vector_search index info from Memgraph."""
+        query = "CALL vector_search.show_index_info()"
+        with self.driver.session() as session:
+            result = session.run(query)
+            return [dict(record) for record in result]
+
+    def _search_ann_seeds_vector_search(
+        self,
+        embedding: List[float],
+        k: int,
+        index_name: str,
+        embedding_property: str,
+    ) -> List[Dict[str, Any]]:
+        """Use Memgraph vector_search to retrieve top-k table seeds."""
+        query = """
+        CALL vector_search.search($index_name, $k, $embedding)
+        YIELD node, distance, score
+        RETURN node, distance, score
+        """
+        with self.driver.session() as session:
+            result = session.run(
+                query,
+                {"index_name": index_name, "k": k, "embedding": embedding},
+            )
+            candidates = []
+            for record in result:
+                neo_node = record.get("node")
+                if neo_node is None:
+                    continue
+
+                props = dict(neo_node)
+                props.pop(embedding_property, None)
+
+                if "id" not in props:
+                    try:
+                        props["id"] = str(neo_node.element_id)
+                    except AttributeError:
+                        pass
+
+                if "score" in record and record.get("score") is not None:
+                    score = float(record.get("score"))
+                elif "similarity" in record and record.get("similarity") is not None:
+                    score = float(record.get("similarity"))
+                else:
+                    distance = record.get("distance")
+                    score = 0.0
+                    if distance is not None:
+                        try:
+                            score = 1.0 - float(distance)
+                        except (TypeError, ValueError):
+                            score = 0.0
+
+                candidates.append({"node": props, "score": score})
+
+            candidates.sort(key=lambda x: (-x["score"], str(x["node"].get("id", ""))))
             return candidates[:k]
 
     def run_query(
