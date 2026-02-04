@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, StateGraph
 
-from agent.graph import route_after_execution
+from agent.graph import route_after_execution, route_after_validation
 from agent.nodes.execute import validate_and_execute_node
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
@@ -227,3 +227,49 @@ async def test_golden_malformed_tool_response_includes_trace_id(monkeypatch):
         result = await validate_and_execute_node(state)
 
     assert "Trace ID" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_golden_schema_binding_failure_skips_execute(monkeypatch):
+    """Schema binding validation should prevent execution when enabled."""
+    monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "true")
+
+    raw_schema = [
+        {"type": "Table", "name": "customers"},
+        {"type": "Column", "name": "id", "table": "customers"},
+    ]
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show customers")],
+        schema_context="",
+        raw_schema_context=raw_schema,
+        current_sql="SELECT customers.name FROM customers",
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    workflow = StateGraph(AgentState)
+
+    async def _correct_node(s):
+        return s
+
+    async def _execute_node(_state):
+        raise AssertionError("execute node should not run on schema binding failure")
+
+    workflow.add_node("validate", validate_sql_node)
+    workflow.add_node("execute", _execute_node)
+    workflow.add_node("correct", _correct_node)
+    workflow.set_entry_point("validate")
+    workflow.add_conditional_edges(
+        "validate",
+        route_after_validation,
+        {"execute": "execute", "correct": "correct"},
+    )
+    workflow.add_edge("correct", END)
+    workflow.add_edge("execute", END)
+
+    with patch("agent.nodes.validate.telemetry.start_span", return_value=_DummySpan()):
+        result = await workflow.compile().ainvoke(state)
+
+    assert result.get("error_category") == "schema_binding"

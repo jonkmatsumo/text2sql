@@ -1,6 +1,6 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
-from typing import Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import sqlglot
 from sqlglot import exp
@@ -9,6 +9,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
+from common.config.env import get_env_bool
 
 
 def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
@@ -30,6 +31,49 @@ def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
         return True, int(limit_expr.this)
 
     return True, None
+
+
+def _build_schema_binding(raw_schema_context: list[dict]) -> Dict[str, Set[str]]:
+    tables: Dict[str, Set[str]] = {}
+    for node in raw_schema_context:
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "Table":
+            name = node.get("name")
+            if name:
+                tables.setdefault(str(name), set())
+    for node in raw_schema_context:
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") != "Column":
+            continue
+        table = node.get("table")
+        name = node.get("name")
+        if table and name and str(table) in tables:
+            tables[str(table)].add(str(name))
+    return tables
+
+
+def _extract_identifiers(sql_query: str) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+    try:
+        expression = sqlglot.parse_one(sql_query)
+    except Exception:
+        return set(), set()
+
+    if expression.find(exp.With):
+        return set(), set()
+
+    tables = set()
+    columns = set()
+    for table in expression.find_all(exp.Table):
+        if table.db or table.catalog:
+            continue
+        if table.name:
+            tables.add(table.name)
+    for column in expression.find_all(exp.Column):
+        if column.table and column.name:
+            columns.add((column.table, column.name))
+    return tables, columns
 
 
 async def validate_sql_node(state: AgentState) -> dict:
@@ -70,6 +114,43 @@ async def validate_sql_node(state: AgentState) -> dict:
         span.set_attribute("result.is_limited", bool(is_limited))
         if limit_value is not None:
             span.set_attribute("result.limit", limit_value)
+
+        schema_binding_enabled = get_env_bool("AGENT_SCHEMA_BINDING_VALIDATION", False) is True
+        if schema_binding_enabled:
+            raw_schema_context = state.get("raw_schema_context") or []
+            schema_map = (
+                _build_schema_binding(raw_schema_context)
+                if isinstance(raw_schema_context, list)
+                else {}
+            )
+            if schema_map:
+                referenced_tables, referenced_columns = _extract_identifiers(sql_query)
+                missing_tables = sorted(t for t in referenced_tables if t not in schema_map)
+                missing_columns = sorted(
+                    f"{table}.{column}"
+                    for table, column in referenced_columns
+                    if table in schema_map and column not in schema_map[table]
+                )
+                span.set_attribute("validation.schema_bound", True)
+                span.set_attribute("validation.missing_tables", ",".join(missing_tables[:20]))
+                span.set_attribute("validation.missing_columns", ",".join(missing_columns[:20]))
+                if missing_tables or missing_columns:
+                    error_parts = []
+                    if missing_tables:
+                        error_parts.append(f"missing tables: {', '.join(missing_tables)}")
+                    if missing_columns:
+                        error_parts.append(f"missing columns: {', '.join(missing_columns)}")
+                    error_msg = "Schema validation failed; " + "; ".join(error_parts)
+                    span.set_outputs({"error": error_msg, "schema_bound": True})
+                    return {
+                        "error": error_msg,
+                        "error_category": "schema_binding",
+                        "ast_validation_result": {"is_valid": False},
+                        "result_is_limited": is_limited,
+                        "result_limit": limit_value,
+                    }
+            else:
+                span.set_attribute("validation.schema_bound", False)
 
         # Run AST validation
         result = validate_sql(sql_query)
