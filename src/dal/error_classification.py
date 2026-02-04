@@ -72,8 +72,23 @@ def classify_error(provider: str, exc: Exception) -> str:
 
 def emit_classified_error(provider: str, operation: str, category: str, exc: Exception) -> None:
     """Emit structured telemetry for classified errors when enabled."""
-    if not get_env_bool("DAL_CLASSIFIED_ERROR_TELEMETRY", False):
+    if not get_env_bool("DAL_CLASSIFIED_ERROR_TELEMETRY", True):
         return
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            span.add_event(
+                "dal.error.classified",
+                {
+                    "provider": provider,
+                    "category": category,
+                    "operation": operation,
+                },
+            )
+    except Exception:
+        pass
     logger.error(
         "dal_error_classified",
         extra={
