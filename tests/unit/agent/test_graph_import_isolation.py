@@ -45,7 +45,7 @@ else:
     sys.exit(0)
 """
     cwd = os.getcwd()
-    pythonpath = os.path.join(cwd, "agent", "src")
+    pythonpath = os.path.join(cwd, "src")
 
     env = os.environ.copy()
     env["PYTHONPATH"] = pythonpath + os.pathsep + env.get("PYTHONPATH", "")
