@@ -43,8 +43,16 @@ def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
 
 def parse_execute_tool_response(payload) -> dict:
     """Parse execute_sql_query response into a normalized shape."""
-    # TODO(p0): attach diagnostic context for malformed tool payloads.
     from agent.utils.parsing import parse_tool_output
+
+    def _payload_preview(value) -> str:
+        preview = "" if value is None else str(value)
+        return preview[:500]
+
+    def _payload_type(value) -> str:
+        if value is None:
+            return "null"
+        return type(value).__name__
 
     def _looks_like_json_object(value) -> bool:
         if not isinstance(value, str):
@@ -54,6 +62,13 @@ def parse_execute_tool_response(payload) -> dict:
 
     def _is_message_wrapper(value) -> bool:
         return isinstance(value, dict) and any(key in value for key in ("type", "content", "text"))
+
+    diagnostics = {
+        "payload_type": _payload_type(payload),
+        "payload_preview": _payload_preview(payload),
+    }
+    if payload is None:
+        return {"response_shape": "malformed", "diagnostics": diagnostics}
 
     dict_payload = (
         isinstance(payload, dict) and not _is_message_wrapper(payload)
@@ -77,15 +92,13 @@ def parse_execute_tool_response(payload) -> dict:
                     "columns": item.get("columns"),
                 }
             if dict_payload:
-                return {"response_shape": "malformed"}
+                return {"response_shape": "malformed", "diagnostics": diagnostics}
             return {"response_shape": "legacy", "rows": parsed}
         if isinstance(item, str) and (
             "Error:" in item or "Database Error:" in item or "Execution Error:" in item
         ):
             return {"response_shape": "error", "error": item, "error_category": None}
-        if dict_payload:
-            return {"response_shape": "malformed"}
-        return {"response_shape": "legacy", "rows": parsed}
+        return {"response_shape": "malformed", "diagnostics": diagnostics}
     if isinstance(parsed, list):
         return {"response_shape": "legacy", "rows": parsed}
     elif isinstance(parsed, dict):
@@ -99,6 +112,8 @@ def parse_execute_tool_response(payload) -> dict:
     else:
         response_shape = "malformed"
 
+    if response_shape == "malformed":
+        return {"response_shape": response_shape, "diagnostics": diagnostics}
     return {"response_shape": response_shape}
 
 
@@ -255,7 +270,20 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
 
             if parsed.get("response_shape") == "malformed":
-                error_msg = "Tool response malformed; check MCP tool version compatibility."
+                diagnostics = parsed.get("diagnostics") or {}
+                payload_type = diagnostics.get("payload_type")
+                payload_preview = diagnostics.get("payload_preview")
+                if payload_type:
+                    span.set_attribute("tool.malformed.payload_type", payload_type)
+                if payload_preview:
+                    span.set_attribute("tool.malformed.payload_preview", payload_preview)
+
+                trace_id = telemetry.get_current_trace_id()
+                if trace_id:
+                    error_msg = f"Tool response malformed. Trace ID: {trace_id}."
+                else:
+                    error_msg = "Tool response malformed. Trace ID unavailable."
+
                 span.set_outputs({"error": error_msg})
                 span.set_attribute("tool.response_shape", "malformed")
                 return {

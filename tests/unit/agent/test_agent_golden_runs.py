@@ -197,3 +197,33 @@ async def test_golden_retry_budget_message(monkeypatch):
 
     assert result == "failed"
     assert "Retry budget exhausted" in state["error"]
+
+
+@pytest.mark.asyncio
+async def test_golden_malformed_tool_response_includes_trace_id(monkeypatch):
+    """Malformed tool responses should surface trace id for diagnostics."""
+    tool = AsyncMock()
+    tool.name = "execute_sql_query"
+    tool.ainvoke = AsyncMock(return_value=json.dumps({"unexpected": "shape"}))
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show rows")],
+        schema_context="",
+        current_sql="SELECT * FROM items",
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    with (
+        patch("agent.nodes.execute.get_mcp_tools", AsyncMock(return_value=[tool])),
+        patch("agent.nodes.execute.PolicyEnforcer") as mock_enforcer,
+        patch("agent.nodes.execute.TenantRewriter") as mock_rewriter,
+        patch("agent.nodes.execute.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.execute.telemetry.get_current_trace_id", return_value="e" * 32),
+    ):
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        result = await validate_and_execute_node(state)
+
+    assert "Trace ID" in result["error"]

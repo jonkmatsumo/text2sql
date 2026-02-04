@@ -89,14 +89,21 @@ async def test_execute_parses_legacy_list_rows(
 
 @pytest.mark.asyncio
 @patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.telemetry.get_current_trace_id")
 @patch("agent.nodes.execute.get_mcp_tools")
 @patch("agent.nodes.execute.PolicyEnforcer")
 @patch("agent.nodes.execute.TenantRewriter")
 async def test_execute_detects_malformed_dict_payload(
-    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+    mock_rewriter,
+    mock_enforcer,
+    mock_get_tools,
+    mock_trace_id,
+    mock_start_span,
+    schema_fixture,
 ):
     """Malformed payloads should fail closed."""
     _mock_span_ctx(mock_start_span)
+    mock_trace_id.return_value = "a" * 32
     mock_enforcer.validate_sql.return_value = None
     mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
 
@@ -118,3 +125,86 @@ async def test_execute_detects_malformed_dict_payload(
 
     assert result["query_result"] is None
     assert result["error_category"] == "tool_response_malformed"
+    assert "Trace ID" in result["error"]
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.telemetry.get_current_trace_id")
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_execute_detects_malformed_string_payload(
+    mock_rewriter,
+    mock_enforcer,
+    mock_get_tools,
+    mock_trace_id,
+    mock_start_span,
+    schema_fixture,
+):
+    """Unexpected string payloads should fail closed."""
+    _mock_span_ctx(mock_start_span)
+    mock_trace_id.return_value = "b" * 32
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    mock_tool.ainvoke = AsyncMock(return_value="unexpected payload")
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql=schema_fixture.sample_query,
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    result = await validate_and_execute_node(state)
+
+    assert result["query_result"] is None
+    assert result["error_category"] == "tool_response_malformed"
+    assert "Trace ID" in result["error"]
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.telemetry.get_current_trace_id")
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_execute_detects_null_payload(
+    mock_rewriter,
+    mock_enforcer,
+    mock_get_tools,
+    mock_trace_id,
+    mock_start_span,
+    schema_fixture,
+):
+    """Null payloads should fail closed."""
+    _mock_span_ctx(mock_start_span)
+    mock_trace_id.return_value = "c" * 32
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    mock_tool.ainvoke = AsyncMock(return_value=None)
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql=schema_fixture.sample_query,
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    result = await validate_and_execute_node(state)
+
+    assert result["query_result"] is None
+    assert result["error_category"] == "tool_response_malformed"
+    assert "Trace ID" in result["error"]
