@@ -326,6 +326,34 @@ async def run_agent_with_tracing(
         persistence_fail_open = get_env_bool("PERSISTENCE_FAIL_OPEN", False)
 
         async with mcp_tools_context() as tools:
+            schema_snapshot_id = inputs.get("schema_snapshot_id")
+            if not schema_snapshot_id:
+                snapshot_mode = get_env_str("SCHEMA_SNAPSHOT_MODE", "fingerprint").strip().lower()
+                if snapshot_mode == "static":
+                    schema_snapshot_id = "v1.0"
+                elif snapshot_mode == "fingerprint":
+                    subgraph_tool = next(
+                        (t for t in tools if t.name == "get_semantic_subgraph"), None
+                    )
+                    if subgraph_tool:
+                        try:
+                            payload = {"query": question}
+                            if tenant_id is not None:
+                                payload["tenant_id"] = tenant_id
+                            raw_subgraph = await subgraph_tool.ainvoke(payload)
+                            from agent.utils.parsing import parse_tool_output
+                            from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+
+                            parsed = parse_tool_output(raw_subgraph)
+                            if isinstance(parsed, list) and parsed:
+                                parsed = parsed[0]
+                            nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
+                            schema_snapshot_id = resolve_schema_snapshot_id(nodes)
+                        except Exception:
+                            logger.warning("Failed to compute schema snapshot id", exc_info=True)
+                schema_snapshot_id = schema_snapshot_id or "unknown"
+                inputs["schema_snapshot_id"] = schema_snapshot_id
+
             # 1. Start Interaction Logging (Pre-execution) with retry
             interaction_id = None
             create_tool = next((t for t in tools if t.name == "create_interaction"), None)
@@ -345,7 +373,7 @@ async def run_agent_with_tracing(
                         return await create_tool.ainvoke(
                             {
                                 "conversation_id": session_id or thread_id,
-                                "schema_snapshot_id": inputs.get("schema_snapshot_id") or "unknown",
+                                "schema_snapshot_id": schema_snapshot_id or "unknown",
                                 "user_nlq_text": question,
                                 "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                                 "prompt_version": "v1.0",
