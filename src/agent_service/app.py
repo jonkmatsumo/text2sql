@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent.telemetry import telemetry
+from common.config.env import get_env_bool, get_env_str
 
 try:
     from agent.graph import run_agent_with_tracing
@@ -55,6 +57,7 @@ class AgentRunResponse(BaseModel):
     trace_id: Optional[str] = None
     viz_spec: Optional[dict] = None
     viz_reason: Optional[str] = None
+    provenance: Optional[dict] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -95,6 +98,22 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
             trace_id = None
 
+        provenance = None
+        if get_env_bool("AGENT_RESPONSE_PROVENANCE_METADATA", False):
+            provider = get_env_str("QUERY_TARGET_BACKEND", "postgres")
+            executed_at = datetime.now(timezone.utc).isoformat()
+            rows_returned = state.get("result_rows_returned")
+            if rows_returned is None and isinstance(state.get("query_result"), list):
+                rows_returned = len(state.get("query_result") or [])
+            provenance = {
+                "executed_at": executed_at,
+                "provider": provider,
+                "schema_snapshot_id": state.get("schema_snapshot_id"),
+                "is_truncated": state.get("result_is_truncated"),
+                "is_limited": state.get("result_is_limited"),
+                "rows_returned": rows_returned,
+            }
+
         return AgentRunResponse(
             sql=state.get("current_sql"),
             result=state.get("query_result"),
@@ -106,6 +125,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             trace_id=trace_id,
             viz_spec=state.get("viz_spec"),
             viz_reason=state.get("viz_reason"),
+            provenance=provenance,
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)
