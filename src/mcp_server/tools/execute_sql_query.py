@@ -11,6 +11,7 @@ from dal.database import Database
 from dal.error_classification import emit_classified_error, maybe_classify_error
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
+from dal.util.timeouts import run_with_timeout
 
 TOOL_NAME = "execute_sql_query"
 
@@ -182,12 +183,10 @@ async def handler(
                 return rows
 
             try:
-                if timeout_seconds and timeout_seconds > 0:
-                    result = await asyncio.wait_for(_fetch_rows(), timeout=timeout_seconds)
-                else:
-                    result = await _fetch_rows()
+                result = await run_with_timeout(
+                    _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
+                )
             except asyncio.TimeoutError:
-                await _cancel_best_effort(conn)
                 return json.dumps(
                     {
                         "error": "Execution timed out.",

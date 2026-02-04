@@ -38,9 +38,15 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_fk_enforcement=False,
             supports_schema_cache=True,
         )
+    if normalized == "postgres":
+        return BackendCapabilities(
+            execution_model="sync",
+            supports_cancel=True,
+        )
     if normalized == "sqlite":
         return BackendCapabilities(
             execution_model="sync",
+            supports_cancel=True,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=True,
@@ -99,6 +105,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "duckdb":
         return BackendCapabilities(
             execution_model="sync",
+            supports_cancel=True,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=True,

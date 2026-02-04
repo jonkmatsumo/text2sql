@@ -120,6 +120,12 @@ class _SqliteConnection:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
 
+    async def cancel(self) -> None:
+        """Best-effort cancellation for in-flight queries."""
+        interrupt = getattr(self._conn, "interrupt", None)
+        if callable(interrupt):
+            interrupt()
+
     async def fetchval(self, sql: str, *params: Any) -> Any:
         row = await self.fetchrow(sql, *params)
         if row is None:
