@@ -273,6 +273,51 @@ class TestRetrieveContextNode:
     @pytest.mark.asyncio
     @patch("agent.nodes.retrieve.telemetry.start_span")
     @patch("agent.nodes.retrieve.get_mcp_tools")
+    async def test_retrieve_context_node_no_prints_and_safe_logs(
+        self, mock_get_mcp_tools, mock_start_span
+    ):
+        """Ensure retrieve does not print and logs only safe metadata."""
+        self._mock_telemetry_span(mock_start_span)
+
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph"
+        mock_subgraph_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"nodes": [], "relationships": []})
+        )
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="test query")],
+            schema_context="",
+            current_sql=None,
+            query_result=None,
+            error=None,
+            retry_count=0,
+            interaction_id="interaction-123",
+        )
+
+        with (
+            patch("builtins.print") as mock_print,
+            patch("agent.nodes.retrieve.logger") as mock_logger,
+        ):
+            await retrieve_context_node(state)
+
+            mock_print.assert_not_called()
+            assert mock_logger.info.called
+            extra = mock_logger.info.call_args.kwargs.get("extra", {})
+            allowed_keys = {
+                "interaction_id",
+                "schema_source",
+                "tables_retrieved",
+                "nodes_retrieved",
+            }
+            assert set(extra.keys()).issubset(allowed_keys)
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.retrieve.telemetry.start_span")
+    @patch("agent.nodes.retrieve.get_mcp_tools")
     async def test_retrieve_context_node_single_result(self, mock_get_mcp_tools, mock_start_span):
         """Test context retrieval with a single result."""
         self._mock_telemetry_span(mock_start_span)

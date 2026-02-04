@@ -125,6 +125,16 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         schema_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
 
+        logger.info(
+            "Schema retrieval completed",
+            extra={
+                "interaction_id": state.get("interaction_id"),
+                "schema_source": "semantic_subgraph",
+                "tables_retrieved": len(table_names),
+                "nodes_retrieved": len(raw_nodes),
+            },
+        )
+
         return {
             "schema_context": context_str,
             "raw_schema_context": raw_nodes,
