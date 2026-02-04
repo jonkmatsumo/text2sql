@@ -1,6 +1,10 @@
+import sys
 from contextlib import asynccontextmanager
 
 import pytest
+
+if sys.version_info < (3, 10):
+    pytest.skip("Athena schema typing requires Python 3.10+", allow_module_level=True)
 
 from dal.athena.schema_introspector import AthenaSchemaIntrospector
 

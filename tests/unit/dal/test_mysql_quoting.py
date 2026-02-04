@@ -1,4 +1,8 @@
-from dal.mysql.quoting import translate_double_quotes_to_backticks
+import pytest
+
+pytest.importorskip("aiomysql")
+
+from dal.mysql.quoting import translate_double_quotes_to_backticks  # noqa: E402
 
 
 def test_translate_double_quoted_identifiers():

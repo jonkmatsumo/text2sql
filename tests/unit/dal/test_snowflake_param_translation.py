@@ -1,6 +1,13 @@
+import sys
+
 import pytest
 
-from dal.snowflake.param_translation import translate_postgres_params_to_snowflake
+pytest.importorskip("snowflake")
+
+if sys.version_info < (3, 10):
+    pytest.skip("Snowflake param typing requires Python 3.10+", allow_module_level=True)
+
+from dal.snowflake.param_translation import translate_postgres_params_to_snowflake  # noqa: E402
 
 
 def test_translate_single_placeholder():

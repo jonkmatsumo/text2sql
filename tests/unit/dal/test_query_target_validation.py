@@ -1,6 +1,14 @@
+import sys
+
 import pytest
 
-from dal.query_target_validation import QueryTargetValidationError, validate_query_target_payload
+if sys.version_info < (3, 10):
+    pytest.skip("Query target validation typing requires Python 3.10+", allow_module_level=True)
+
+from dal.query_target_validation import (  # noqa: E402
+    QueryTargetValidationError,
+    validate_query_target_payload,
+)
 
 
 def test_validation_rejects_secret_fields():

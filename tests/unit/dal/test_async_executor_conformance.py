@@ -1,11 +1,17 @@
 """Async executor protocol conformance tests (mock-only)."""
 
 import asyncio
+import sys
 import types
 
 import pytest
 
-from dal.async_query_executor import QueryStatus
+pytest.importorskip("snowflake")
+
+if sys.version_info < (3, 10):
+    pytest.skip("Async executor protocol typing requires Python 3.10+", allow_module_level=True)
+
+from dal.async_query_executor import QueryStatus  # noqa: E402
 
 
 @pytest.mark.asyncio

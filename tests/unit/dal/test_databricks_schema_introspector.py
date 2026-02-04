@@ -1,6 +1,10 @@
+import sys
 from contextlib import asynccontextmanager
 
 import pytest
+
+if sys.version_info < (3, 10):
+    pytest.skip("Databricks schema typing requires Python 3.10+", allow_module_level=True)
 
 from dal.databricks.schema_introspector import DatabricksSchemaIntrospector
 

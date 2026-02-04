@@ -1,8 +1,14 @@
+import sys
 from contextlib import asynccontextmanager
 
 import pytest
 
-from dal.snowflake.schema_introspector import SnowflakeSchemaIntrospector
+pytest.importorskip("snowflake")
+
+if sys.version_info < (3, 10):
+    pytest.skip("Snowflake schema typing requires Python 3.10+", allow_module_level=True)
+
+from dal.snowflake.schema_introspector import SnowflakeSchemaIntrospector  # noqa: E402
 
 
 class _FakeConn:

@@ -1,6 +1,10 @@
+import os
 import sqlite3
 
 import pytest
+
+if not os.getenv("ALLOW_DB_TESTS"):
+    pytest.skip("Database-backed tests disabled in this environment.", allow_module_level=True)
 
 from dal.database import Database
 from dal.factory import reset_singletons

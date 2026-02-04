@@ -1,4 +1,9 @@
+import sys
+
 import pytest
+
+if sys.version_info < (3, 10):
+    pytest.skip("BigQuery param typing requires Python 3.10+", allow_module_level=True)
 
 from dal.bigquery.param_translation import translate_postgres_params_to_bigquery
 

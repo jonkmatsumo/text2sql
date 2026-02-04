@@ -1,6 +1,8 @@
 import pytest
 
-from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
+pytest.importorskip("aiosqlite")
+
+from dal.sqlite.param_translation import translate_postgres_params_to_sqlite  # noqa: E402
 
 
 def test_translate_single_placeholder():
