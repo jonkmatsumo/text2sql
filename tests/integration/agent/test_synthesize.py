@@ -286,6 +286,70 @@ class TestSynthesizeInsightNode:
 
     @patch("agent.llm_client.get_llm")
     @patch("agent.nodes.synthesize.ChatPromptTemplate")
+    def test_synthesize_prompt_includes_column_hints_when_present(
+        self, mock_prompt_class, mock_llm
+    ):
+        """Include column type hints when available."""
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        mock_response = MagicMock()
+        mock_response.content = "Summary"
+        mock_chain.invoke.return_value = mock_response
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="Show me orders")],
+            schema_context="",
+            current_sql="SELECT id FROM orders",
+            query_result=[{"id": 1}],
+            error=None,
+            retry_count=0,
+            result_columns=[{"name": "id", "type": "int"}],
+        )
+
+        synthesize_insight_node(state)
+
+        call_kwargs = mock_chain.invoke.call_args[0][0]
+        assert "Column types:" in call_kwargs["column_hints"]
+        assert "id: int" in call_kwargs["column_hints"]
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.synthesize.ChatPromptTemplate")
+    def test_synthesize_prompt_omits_column_hints_when_missing(self, mock_prompt_class, mock_llm):
+        """Skip column type hints when not available."""
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        mock_response = MagicMock()
+        mock_response.content = "Summary"
+        mock_chain.invoke.return_value = mock_response
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="Show me orders")],
+            schema_context="",
+            current_sql="SELECT id FROM orders",
+            query_result=[{"id": 1}],
+            error=None,
+            retry_count=0,
+        )
+
+        synthesize_insight_node(state)
+
+        call_kwargs = mock_chain.invoke.call_args[0][0]
+        assert call_kwargs["column_hints"] == ""
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_returns_aimessage(self, mock_prompt_class, mock_llm):
         """Test that result contains AIMessage objects, not dicts."""
         mock_prompt = MagicMock()

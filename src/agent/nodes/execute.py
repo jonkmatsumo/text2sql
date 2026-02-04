@@ -100,6 +100,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "sql_query": rewritten_sql,
                     "tenant_id": tenant_id,
                     "params": execute_params,
+                    "include_columns": True,
                 }
             )
 
@@ -110,6 +111,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_is_truncated = None
             result_row_limit = None
             result_rows_returned = None
+            result_columns = None
 
             if parsed_data:
                 # Check for wrapped error object {"error": "..."}
@@ -148,6 +150,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     result_is_truncated = metadata.get("is_truncated")
                     result_row_limit = metadata.get("row_limit")
                     result_rows_returned = metadata.get("rows_returned")
+                    result_columns = envelope.get("columns")
                     error = None
                 else:
                     if (
@@ -185,6 +188,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("result.row_limit", result_row_limit)
             if result_rows_returned is not None:
                 span.set_attribute("result.rows_returned", result_rows_returned)
+            span.set_attribute("result.columns_available", bool(result_columns))
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -217,6 +221,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     if result_rows_returned is not None
                     else (len(query_result) if query_result else 0)
                 ),
+                "result_columns": result_columns,
             }
 
         except Exception as e:

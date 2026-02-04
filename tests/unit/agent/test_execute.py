@@ -192,6 +192,67 @@ class TestValidateAndExecuteNode:
         assert result["result_is_truncated"] is False
 
     @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_requests_include_columns(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Ensure execute tool requests column metadata."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        mock_tool.ainvoke = AsyncMock(return_value=json.dumps({"rows": [], "metadata": {}}))
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        await validate_and_execute_node(state)
+
+        call_args = mock_tool.ainvoke.call_args[0][0]
+        assert call_args["include_columns"] is True
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_stores_result_columns(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Store column metadata from tool envelope."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        columns = [{"name": "id", "type": "int"}]
+        payload = json.dumps({"rows": [{"id": 1}], "columns": columns, "metadata": {}})
+        mock_tool.ainvoke = AsyncMock(return_value=payload)
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["result_columns"] == columns
+
+    @pytest.mark.asyncio
     @pytest.mark.asyncio
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")

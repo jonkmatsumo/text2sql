@@ -38,6 +38,7 @@ def synthesize_insight_node(state: AgentState) -> dict:
         result_is_truncated = state.get("result_is_truncated")
         result_row_limit = state.get("result_row_limit")
         result_rows_returned = state.get("result_rows_returned")
+        result_columns = state.get("result_columns")
 
         # Get the original question from the LAST user message (not first)
         # This is important because checkpointer accumulates messages across turns
@@ -75,18 +76,40 @@ def synthesize_insight_node(state: AgentState) -> dict:
         # Format result as JSON string for LLM
         result_str = json.dumps(query_result, indent=2, default=str)
 
+        column_hints = ""
+        if isinstance(result_columns, list) and result_columns:
+            hint_lines = []
+            max_columns = 50
+            max_type_len = 48
+            for col in result_columns[:max_columns]:
+                if not isinstance(col, dict):
+                    continue
+                name = str(col.get("name", "")).strip()
+                type_hint = col.get("type") or col.get("db_type") or "unknown"
+                type_hint = str(type_hint)
+                if len(type_hint) > max_type_len:
+                    type_hint = f"{type_hint[: max_type_len - 3]}..."
+                if name:
+                    hint_lines.append(f"- {name}: {type_hint}")
+            if hint_lines:
+                column_hints = "Column types:\n" + "\n".join(hint_lines)
+
         system_prompt = """You are a helpful data analyst assistant.
 Format the query results into a clear, natural language response.
 Be concise but informative. Use numbers and data from the results.
 """
 
+        user_prompt = (
+            "Question: {question}\n\n"
+            "Query Results:\n{results}\n\n"
+            "{column_hints}\n\n"
+            "Provide a clear answer:"
+        )
+
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", system_prompt),
-                (
-                    "user",
-                    "Question: {question}\n\nQuery Results:\n{results}\n\nProvide a clear answer:",
-                ),
+                ("user", user_prompt),
             ]
         )
 
@@ -96,6 +119,7 @@ Be concise but informative. Use numbers and data from the results.
             {
                 "question": original_question,
                 "results": result_str,
+                "column_hints": column_hints,
             }
         )
 
