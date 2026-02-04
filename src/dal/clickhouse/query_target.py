@@ -103,6 +103,26 @@ class _ClickHouseConnection:
             operation=_run(),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+
+        async def _run():
+            rows, columns = await self._run_query_with_columns(sql, list(params))
+            limit = self._max_rows
+            if self._sync_max_rows:
+                limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
+            capped_rows, truncated = cap_rows_with_metadata(rows, limit)
+            self._last_truncated = truncated
+            return capped_rows, columns
+
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="clickhouse",
+            execution_model="sync",
+            sql=sql,
+            operation=_run(),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
@@ -127,3 +147,33 @@ class _ClickHouseConnection:
             _execute(),
             timeout=self._query_timeout_seconds,
         )
+
+    async def _run_query_with_columns(
+        self, sql: str, params: List[Any]
+    ) -> tuple[List[Dict[str, Any]], list]:
+        translated_sql, bound_params = translate_postgres_params_to_clickhouse(sql, params)
+
+        async def _execute():
+            rows, columns = await self._conn.fetch(
+                translated_sql, bound_params, columnar=False, with_column_types=True
+            )
+            col_names = [col[0] for col in columns]
+            row_dicts = [dict(zip(col_names, row)) for row in rows]
+            return row_dicts, _columns_from_clickhouse_types(columns)
+
+        return await asyncio.wait_for(
+            _execute(),
+            timeout=self._query_timeout_seconds,
+        )
+
+
+def _columns_from_clickhouse_types(columns: list) -> list:
+    """Build column metadata from ClickHouse column types."""
+    from dal.util.column_metadata import build_column_meta
+    from dal.util.logical_types import logical_type_from_db_type
+
+    metadata = []
+    for name, db_type in columns or []:
+        logical_type = logical_type_from_db_type(db_type, provider="clickhouse")
+        metadata.append(build_column_meta(name, logical_type, db_type=db_type))
+    return metadata

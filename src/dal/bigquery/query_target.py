@@ -104,6 +104,24 @@ class _BigQueryConnection:
             ),
         )
 
+    async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch rows with column metadata when supported."""
+        sql, query_params = translate_postgres_params_to_bigquery(sql, list(params))
+        return await trace_query_operation(
+            "dal.query.execute",
+            provider="bigquery",
+            execution_model="async",
+            sql=sql,
+            operation=_fetch_with_guardrails_with_columns(
+                self._executor,
+                sql,
+                query_params,
+                query_timeout_seconds=self._query_timeout_seconds,
+                poll_interval_seconds=self._poll_interval_seconds,
+                max_rows=self._max_rows,
+            ),
+        )
+
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
@@ -160,3 +178,46 @@ async def _fetch_with_guardrails(
     if max_rows and len(rows) >= max_rows:
         logger.warning("BigQuery job %s hit max rows cap (%s).", job_id, max_rows)
     return rows
+
+
+def _columns_from_schema(schema: list) -> list:
+    """Build column metadata from BigQuery schema fields."""
+    from dal.util.column_metadata import build_column_meta
+    from dal.util.logical_types import logical_type_from_db_type
+
+    columns = []
+    for field in schema or []:
+        name = getattr(field, "name", None)
+        db_type = getattr(field, "field_type", None) or getattr(field, "type", None)
+        mode = getattr(field, "mode", None)
+        nullable = mode == "NULLABLE" if mode is not None else None
+        logical_type = logical_type_from_db_type(db_type, provider="bigquery")
+        columns.append(build_column_meta(name, logical_type, db_type=db_type, nullable=nullable))
+    return columns
+
+
+async def _fetch_with_guardrails_with_columns(
+    executor: BigQueryAsyncQueryExecutor,
+    sql: str,
+    params: list,
+    query_timeout_seconds: int,
+    poll_interval_seconds: int,
+    max_rows: int,
+) -> tuple[List[Dict[str, Any]], list]:
+    """Fetch rows and columns with guardrails."""
+    logger = logging.getLogger(__name__)
+    job_id = await executor.submit(sql, params)
+    started_at = time.monotonic()
+    await _poll_until_done(
+        executor,
+        job_id,
+        query_timeout_seconds=query_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    rows, schema = await executor.fetch_with_schema(job_id, max_rows=max_rows)
+    elapsed = time.monotonic() - started_at
+    if elapsed >= query_timeout_seconds:
+        logger.warning("BigQuery job %s took %.2fs.", job_id, elapsed)
+    if max_rows and len(rows) >= max_rows:
+        logger.warning("BigQuery job %s hit max rows cap (%s).", job_id, max_rows)
+    return rows, _columns_from_schema(schema)

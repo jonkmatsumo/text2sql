@@ -82,6 +82,31 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
             on_timeout=lambda: self.cancel(job_id),
         )
 
+    async def fetch_with_schema(
+        self, job_id: str, max_rows: Optional[int] = None
+    ) -> tuple[List[Dict[str, Any]], list]:
+        """Fetch results and schema for a completed query."""
+        job = await trace_query_operation(
+            "dal.query.fetch",
+            provider="bigquery",
+            execution_model="async",
+            sql=None,
+            operation=asyncio.to_thread(_get_job, self._client, job_id, self._location),
+        )
+        limit = max_rows if max_rows is not None else self._max_rows
+        rows = await with_timeout(
+            asyncio.to_thread(
+                _fetch_rows,
+                job,
+                limit,
+                self._timeout_seconds,
+            ),
+            timeout_seconds=self._timeout_seconds,
+            on_timeout=lambda: self.cancel(job_id),
+        )
+        schema = job.schema or []
+        return rows, schema
+
     async def cancel(self, job_id: str) -> None:
         """Cancel a running query."""
         await asyncio.to_thread(self._client.cancel_job, job_id, location=self._location)
