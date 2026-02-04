@@ -1,5 +1,6 @@
 """Tests for execute_sql_query tool."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -224,3 +225,27 @@ class TestExecuteSqlQuery:
             mock_conn.fetch.assert_called_once_with("SELECT * FROM film WHERE film_id = $1", 1)
             data = json.loads(result)
             assert len(data["rows"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_respects_timeout_seconds(self):
+        """Timeouts should return a classified timeout error."""
+        mock_conn = AsyncMock()
+
+        async def slow_fetch(*_args, **_kwargs):
+            await asyncio.sleep(0.01)
+            return [{"id": 1}]
+
+        mock_conn.fetch = AsyncMock(side_effect=slow_fetch)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+            result = await handler(
+                "SELECT * FROM film",
+                tenant_id=1,
+                timeout_seconds=0.001,
+            )
+
+            data = json.loads(result)
+            assert data["error_category"] == "timeout"

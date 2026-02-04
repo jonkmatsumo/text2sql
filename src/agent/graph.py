@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 import re
+import time
 import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -126,6 +127,9 @@ def route_after_execution(state: AgentState) -> str:
         str: Next node name
     """
     if state.get("error"):
+        deadline_ts = state.get("deadline_ts")
+        if deadline_ts is not None and time.monotonic() >= deadline_ts:
+            return "failed"  # Budget exhausted
         if state.get("retry_count", 0) >= 3:
             return "failed"  # Go to graceful failure
         return "correct"  # Go to self-correction
@@ -242,6 +246,8 @@ async def run_agent_with_tracing(
     user_id: str = None,
     thread_id: str = None,
     schema_snapshot_id: str = None,
+    timeout_seconds: float = None,
+    deadline_ts: float = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
@@ -285,6 +291,9 @@ async def run_agent_with_tracing(
         serialized_ctx = telemetry.serialize_context(telemetry_context)
 
         # Prepare initial state
+        if deadline_ts is None and timeout_seconds:
+            deadline_ts = time.monotonic() + timeout_seconds
+
         inputs = {
             "messages": [HumanMessage(content=question)],
             "schema_context": "",
@@ -302,6 +311,8 @@ async def run_agent_with_tracing(
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
+            "deadline_ts": deadline_ts,
+            "timeout_seconds": timeout_seconds,
         }
 
         # Config with thread_id for checkpointer

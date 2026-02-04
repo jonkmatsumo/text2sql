@@ -217,6 +217,27 @@ class TestRouteAfterExecution:
         # Should route to correct since retry_count defaults to 0
         assert result == "correct"
 
+    def test_route_error_with_deadline_exhausted_to_failed(self):
+        """Route to failed when deadline is exhausted."""
+        clean_agent_modules()
+        import time
+
+        from agent.graph import route_after_execution
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error="Some error",
+            retry_count=0,
+            deadline_ts=time.monotonic() - 1.0,
+        )
+
+        result = route_after_execution(state)
+
+        assert result == "failed"
+
     def test_route_no_error_with_empty_result(self):
         """Test routing when no error but result is empty."""
         clean_agent_modules()

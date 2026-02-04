@@ -1,6 +1,7 @@
 """SQL execution node for running validated queries with telemetry tracing."""
 
 import logging
+import time
 
 from agent.state import AgentState
 from agent.telemetry import telemetry
@@ -94,6 +95,21 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             # Pass params only if the rewritten SQL contains placeholders (e.g. $1)
             # This prevents "server expects 0 arguments" errors for queries on public tables
             execute_params = [tenant_id] if (tenant_id and "$1" in rewritten_sql) else []
+            remaining = None
+            deadline_ts = state.get("deadline_ts")
+            if deadline_ts is not None:
+                remaining = max(0.0, deadline_ts - time.monotonic())
+                span.set_attribute("deadline.propagated", True)
+                span.set_attribute("deadline.remaining_seconds", remaining)
+                if remaining < 0.5:
+                    error = "Execution timed out before query could start."
+                    span.set_attribute("timeout.triggered", True)
+                    span.set_outputs({"error": error})
+                    return {
+                        "error": error,
+                        "error_category": "timeout",
+                        "query_result": None,
+                    }
 
             result = await executor_tool.ainvoke(
                 {
@@ -101,6 +117,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "tenant_id": tenant_id,
                     "params": execute_params,
                     "include_columns": True,
+                    "timeout_seconds": remaining,
                 }
             )
 
@@ -131,6 +148,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     )
                     if error_category:
                         span.set_attribute("error_category", error_category)
+                        span.set_attribute("timeout.triggered", error_category == "timeout")
                     return {
                         "error": error_msg,
                         "query_result": None,
@@ -189,6 +207,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if result_rows_returned is not None:
                 span.set_attribute("result.rows_returned", result_rows_returned)
             span.set_attribute("result.columns_available", bool(result_columns))
+            span.set_attribute("timeout.triggered", False)
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)

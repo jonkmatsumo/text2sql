@@ -1,6 +1,8 @@
 """HTTP service for running the Text2SQL agent."""
 
+import asyncio
 import re
+import time
 import uuid
 from typing import Any, Optional
 
@@ -37,6 +39,7 @@ class AgentRunRequest(BaseModel):
     question: str
     tenant_id: int = Field(default=1, ge=1)
     thread_id: Optional[str] = None
+    timeout_seconds: Optional[float] = Field(default=None, gt=0)
 
 
 class AgentRunResponse(BaseModel):
@@ -68,10 +71,18 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
             run_agent_with_tracing = _run_agent_with_tracing
 
-        state = await run_agent_with_tracing(
-            question=request.question,
-            tenant_id=request.tenant_id,
-            thread_id=thread_id,
+        timeout_seconds = request.timeout_seconds or 30.0
+        deadline_ts = time.monotonic() + timeout_seconds
+
+        state = await asyncio.wait_for(
+            run_agent_with_tracing(
+                question=request.question,
+                tenant_id=request.tenant_id,
+                thread_id=thread_id,
+                timeout_seconds=timeout_seconds,
+                deadline_ts=deadline_ts,
+            ),
+            timeout=timeout_seconds,
         )
 
         response_text = None
@@ -96,5 +107,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             viz_spec=state.get("viz_spec"),
             viz_reason=state.get("viz_reason"),
         )
+    except asyncio.TimeoutError:
+        return AgentRunResponse(error="Request timed out.", trace_id=None)
     except Exception as exc:
         return AgentRunResponse(error=str(exc), trace_id=None)
