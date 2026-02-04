@@ -73,6 +73,17 @@ async def handler(
     Returns:
         JSON array of result rows, or error message as string.
     """
+
+    def _unsupported_capability_response(required_capability: str) -> str:
+        return json.dumps(
+            {
+                "error": f"Requested capability is not supported: {required_capability}.",
+                "error_category": "unsupported_capability",
+                "required_capability": required_capability,
+            },
+            separators=(",", ":"),
+        )
+
     # Require tenant_id for RLS enforcement
     if tenant_id is None:
         error_msg = (
@@ -102,6 +113,13 @@ async def handler(
                 f"Error: Query contains forbidden keyword matching '{pattern}'. "
                 "Read-only access only."
             )
+
+    caps = Database.get_query_target_capabilities()
+    if include_columns and not caps.supports_column_metadata:
+        return _unsupported_capability_response("column_metadata")
+    if timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async":
+        if not caps.supports_cancel:
+            return _unsupported_capability_response("async_cancel")
 
     if Database.get_query_target_provider() == "redshift":
         from dal.redshift import validate_redshift_query
