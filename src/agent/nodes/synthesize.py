@@ -35,6 +35,9 @@ def synthesize_insight_node(state: AgentState) -> dict:
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "synthesize_insight")
         query_result = state["query_result"]
+        result_is_truncated = state.get("result_is_truncated")
+        result_row_limit = state.get("result_row_limit")
+        result_rows_returned = state.get("result_rows_returned")
 
         # Get the original question from the LAST user message (not first)
         # This is important because checkpointer accumulates messages across turns
@@ -54,6 +57,11 @@ def synthesize_insight_node(state: AgentState) -> dict:
                 "result_count": len(query_result) if query_result else 0,
             }
         )
+        span.set_attribute("result.is_truncated", bool(result_is_truncated))
+        if result_row_limit is not None:
+            span.set_attribute("result.row_limit", result_row_limit)
+        if result_rows_returned is not None:
+            span.set_attribute("result.rows_returned", result_rows_returned)
 
         if not query_result:
             response_content = "I couldn't retrieve any results for your query."
@@ -98,8 +106,18 @@ Be concise but informative. Use numbers and data from the results.
         if usage_stats:
             span.set_attributes(usage_stats)
 
-        span.set_outputs({"response_length": len(response.content)})
+        response_content = response.content
+        if result_is_truncated:
+            warning = "Note: Results are truncated"
+            if result_row_limit:
+                warning += f" to {result_row_limit} rows"
+            if result_rows_returned is not None:
+                warning += f" (showing {result_rows_returned})"
+            warning += "."
+            response_content = f"{warning}\n\n{response_content}"
+
+        span.set_outputs({"response_length": len(response_content)})
 
         return {
-            "messages": [AIMessage(content=response.content)],
+            "messages": [AIMessage(content=response_content)],
         }

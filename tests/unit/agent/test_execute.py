@@ -122,6 +122,76 @@ class TestValidateAndExecuteNode:
         assert result["error"] is None
 
     @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_parses_truncation_envelope(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Test execution parses truncation metadata envelope."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        payload = json.dumps(
+            {
+                "rows": [{"id": 1}],
+                "metadata": {"is_truncated": True, "row_limit": 100, "rows_returned": 1},
+            }
+        )
+        mock_tool.ainvoke = AsyncMock(return_value=payload)
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["query_result"] == [{"id": 1}]
+        assert result["error"] is None
+        assert result["result_is_truncated"] is True
+        assert result["result_row_limit"] == 100
+        assert result["result_rows_returned"] == 1
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_backcompat_raw_rows(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Test backcompat when tool returns raw row list."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1}])
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["query_result"] == [{"id": 1}]
+        assert result["error"] is None
+        assert result["result_is_truncated"] is False
+
+    @pytest.mark.asyncio
     @pytest.mark.asyncio
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")

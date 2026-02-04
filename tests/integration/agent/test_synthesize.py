@@ -218,6 +218,74 @@ class TestSynthesizeInsightNode:
 
     @patch("agent.llm_client.get_llm")
     @patch("agent.nodes.synthesize.ChatPromptTemplate")
+    def test_synthesize_includes_truncation_warning_when_truncated(
+        self, mock_prompt_class, mock_llm
+    ):
+        """Warn users when results are truncated."""
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        mock_response = MagicMock()
+        mock_response.content = "Found results."
+        mock_chain.invoke.return_value = mock_response
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="Show me orders")],
+            schema_context="",
+            current_sql="SELECT * FROM orders",
+            query_result=[{"id": 1}],
+            error=None,
+            retry_count=0,
+            result_is_truncated=True,
+            result_row_limit=100,
+            result_rows_returned=1,
+        )
+
+        result = synthesize_insight_node(state)
+
+        assert result["messages"][0].content.startswith("Note: Results are truncated")
+        assert "100" in result["messages"][0].content
+        assert "showing 1" in result["messages"][0].content
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.synthesize.ChatPromptTemplate")
+    def test_synthesize_no_warning_when_not_truncated(self, mock_prompt_class, mock_llm):
+        """Do not warn users when results are not truncated."""
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        mock_response = MagicMock()
+        mock_response.content = "Found results."
+        mock_chain.invoke.return_value = mock_response
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="Show me orders")],
+            schema_context="",
+            current_sql="SELECT * FROM orders",
+            query_result=[{"id": 1}],
+            error=None,
+            retry_count=0,
+            result_is_truncated=False,
+            result_row_limit=100,
+            result_rows_returned=1,
+        )
+
+        result = synthesize_insight_node(state)
+
+        assert result["messages"][0].content == "Found results."
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.synthesize.ChatPromptTemplate")
     def test_synthesize_insight_node_returns_aimessage(self, mock_prompt_class, mock_llm):
         """Test that result contains AIMessage objects, not dicts."""
         mock_prompt = MagicMock()

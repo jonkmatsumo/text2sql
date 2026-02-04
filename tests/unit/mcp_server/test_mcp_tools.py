@@ -59,8 +59,9 @@ class TestExecuteSqlQuery:
             import json
 
             data = json.loads(result)
-            assert len(data) == 1
-            assert data[0]["count"] == 1000
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert data["rows"][0]["count"] == 1000
+            assert data["metadata"]["is_truncated"] is False
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_empty_result(self):
@@ -79,7 +80,9 @@ class TestExecuteSqlQuery:
             import json
 
             data = json.loads(result)
-            assert data == []
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert data["rows"] == []
+            assert data["metadata"]["is_truncated"] is False
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_size_limit(self):
@@ -99,11 +102,10 @@ class TestExecuteSqlQuery:
             import json
 
             data = json.loads(result)
-            assert "error" in data
-            assert "too large" in data["error"]
-            assert "1001 rows" in data["error"]
-            assert "truncated_result" in data
-            assert len(data["truncated_result"]) == 1000
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert len(data["rows"]) == 1000
+            assert data["metadata"]["is_truncated"] is True
+            assert data["metadata"]["row_limit"] == 1000
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_drop(self):

@@ -62,7 +62,8 @@ async def test_snowflake_query_target_introspection_and_exec():
                 tenant_id=1,
                 params=[1],
             )
-            assert json.loads(result_json) == [{"name": "Ada"}]
+            data = json.loads(result_json)
+            assert data["rows"] == [{"name": "Ada"}]
         finally:
             await Database.close()
     finally:

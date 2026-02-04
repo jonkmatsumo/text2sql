@@ -107,6 +107,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             from agent.utils.parsing import parse_tool_output
 
             parsed_data = parse_tool_output(result)
+            result_is_truncated = None
+            result_row_limit = None
+            result_rows_returned = None
 
             if parsed_data:
                 # Check for wrapped error object {"error": "..."}
@@ -135,15 +138,30 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if (
                     isinstance(parsed_data, list)
                     and len(parsed_data) == 1
-                    and isinstance(parsed_data[0], str)
+                    and isinstance(parsed_data[0], dict)
+                    and "rows" in parsed_data[0]
+                    and "metadata" in parsed_data[0]
                 ):
-                    raw_str = parsed_data[0]
-                    if "Error:" in raw_str or "Database Error:" in raw_str:
-                        span.set_outputs({"error": raw_str})
-                        return {"error": raw_str, "query_result": None}
+                    envelope = parsed_data[0]
+                    query_result = envelope.get("rows") or []
+                    metadata = envelope.get("metadata") or {}
+                    result_is_truncated = metadata.get("is_truncated")
+                    result_row_limit = metadata.get("row_limit")
+                    result_rows_returned = metadata.get("rows_returned")
+                    error = None
+                else:
+                    if (
+                        isinstance(parsed_data, list)
+                        and len(parsed_data) == 1
+                        and isinstance(parsed_data[0], str)
+                    ):
+                        raw_str = parsed_data[0]
+                        if "Error:" in raw_str or "Database Error:" in raw_str:
+                            span.set_outputs({"error": raw_str})
+                            return {"error": raw_str, "query_result": None}
 
-                query_result = parsed_data
-                error = None
+                    query_result = parsed_data
+                    error = None
             else:
                 # Parsing failed or empty result. Check if it looks like an error string
                 raw_str = str(result)
@@ -162,6 +180,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "success": True,
                 }
             )
+            span.set_attribute("result.is_truncated", bool(result_is_truncated))
+            if result_row_limit is not None:
+                span.set_attribute("result.row_limit", result_row_limit)
+            if result_rows_returned is not None:
+                span.set_attribute("result.rows_returned", result_rows_returned)
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -184,7 +207,17 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 except Exception as e:
                     print(f"Warning: Cache update failed: {e}")
 
-            return {"query_result": query_result, "error": error}
+            return {
+                "query_result": query_result,
+                "error": error,
+                "result_is_truncated": result_is_truncated or False,
+                "result_row_limit": result_row_limit,
+                "result_rows_returned": (
+                    result_rows_returned
+                    if result_rows_returned is not None
+                    else (len(query_result) if query_result else 0)
+                ),
+            }
 
         except Exception as e:
             error = str(e)

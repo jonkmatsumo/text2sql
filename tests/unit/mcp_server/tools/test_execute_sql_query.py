@@ -43,8 +43,10 @@ class TestExecuteSqlQuery:
             mock_conn.fetch.assert_called_once_with("SELECT COUNT(*) as count FROM film")
 
             data = json.loads(result)
-            assert len(data) == 1
-            assert data[0]["count"] == 1000
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert data["rows"][0]["count"] == 1000
+            assert data["metadata"]["is_truncated"] is False
+            assert data["metadata"]["rows_returned"] == 1
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):
@@ -64,8 +66,10 @@ class TestExecuteSqlQuery:
             )
 
             data = json.loads(result)
-            assert list(data.keys()) == ["rows", "columns"]
+            assert list(data.keys()) == ["rows", "metadata", "columns"]
             assert data["rows"] == mock_rows
+            assert data["metadata"]["is_truncated"] is False
+            assert data["metadata"]["rows_returned"] == 1
             assert data["columns"] == [
                 {
                     "name": "count",
@@ -100,7 +104,10 @@ class TestExecuteSqlQuery:
             result = await handler("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
             data = json.loads(result)
-            assert data == []
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert data["rows"] == []
+            assert data["metadata"]["is_truncated"] is False
+            assert data["metadata"]["rows_returned"] == 0
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_size_limit(self):
@@ -116,11 +123,11 @@ class TestExecuteSqlQuery:
             result = await handler("SELECT * FROM film", tenant_id=1)
 
             data = json.loads(result)
-            assert "error" in data
-            assert "too large" in data["error"]
-            assert "1001 rows" in data["error"]
-            assert "truncated_result" in data
-            assert len(data["truncated_result"]) == 1000
+            assert list(data.keys()) == ["rows", "metadata"]
+            assert len(data["rows"]) == 1000
+            assert data["metadata"]["is_truncated"] is True
+            assert data["metadata"]["row_limit"] == 1000
+            assert data["metadata"]["rows_returned"] == 1000
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_drop(self):
@@ -216,4 +223,4 @@ class TestExecuteSqlQuery:
 
             mock_conn.fetch.assert_called_once_with("SELECT * FROM film WHERE film_id = $1", 1)
             data = json.loads(result)
-            assert len(data) == 1
+            assert len(data["rows"]) == 1
