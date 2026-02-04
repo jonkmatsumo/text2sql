@@ -121,10 +121,14 @@ async def retrieve_context_node(state: AgentState) -> dict:
             }
         )
 
+        raw_nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+        from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+
+        schema_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
+
         return {
             "schema_context": context_str,
-            "raw_schema_context": (
-                graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
-            ),
+            "raw_schema_context": raw_nodes,
             "table_names": table_names,
+            "schema_snapshot_id": schema_snapshot_id,
         }

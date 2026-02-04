@@ -106,6 +106,7 @@ class TestRetrieveContextNode:
         assert "table_names" in result
         assert "customer" in result["table_names"]
         assert "payment" in result["table_names"]
+        assert result["schema_snapshot_id"].startswith("fp-")
 
     @pytest.mark.asyncio
     @patch("agent.nodes.retrieve.telemetry.start_span")

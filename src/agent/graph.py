@@ -241,6 +241,7 @@ async def run_agent_with_tracing(
     session_id: str = None,
     user_id: str = None,
     thread_id: str = None,
+    schema_snapshot_id: str = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
@@ -300,6 +301,7 @@ async def run_agent_with_tracing(
             "from_cache": False,
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
+            "schema_snapshot_id": schema_snapshot_id,
         }
 
         # Config with thread_id for checkpointer
@@ -332,7 +334,7 @@ async def run_agent_with_tracing(
                         return await create_tool.ainvoke(
                             {
                                 "conversation_id": session_id or thread_id,
-                                "schema_snapshot_id": "v1.0",  # TODO: Dynamic snapshot ID
+                                "schema_snapshot_id": inputs.get("schema_snapshot_id") or "unknown",
                                 "user_nlq_text": question,
                                 "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                                 "prompt_version": "v1.0",
