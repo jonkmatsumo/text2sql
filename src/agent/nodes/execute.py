@@ -1,6 +1,7 @@
 """SQL execution node for running validated queries with telemetry tracing."""
 
 import logging
+import re
 import time
 
 from agent.state import AgentState
@@ -9,8 +10,31 @@ from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
+from common.config.env import get_env_bool
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_missing_identifiers(error_text: str) -> list[str]:
+    patterns = [
+        r'relation "(?P<name>[^"]+)" does not exist',
+        r'table "(?P<name>[^"]+)" does not exist',
+        r'column "(?P<name>[^"]+)" does not exist',
+        r"no such table: (?P<name>[\w\.]+)",
+        r"unknown column (?P<name>[\w\.]+)",
+    ]
+    identifiers = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, error_text, flags=re.IGNORECASE):
+            name = match.group("name")
+            if name and name not in identifiers:
+                identifiers.append(name)
+    return identifiers
+
+
+def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
+    identifiers = _extract_missing_identifiers(error_text)
+    return (len(identifiers) > 0, identifiers)
 
 
 async def validate_and_execute_node(state: AgentState) -> dict:
@@ -130,6 +154,23 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_rows_returned = None
             result_columns = None
 
+            def _maybe_add_schema_drift(error_msg: str) -> dict:
+                if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
+                    return {}
+                suspected, identifiers = _schema_drift_hint(error_msg)
+                if not suspected:
+                    return {}
+                auto_refresh = get_env_bool("AGENT_SCHEMA_DRIFT_AUTO_REFRESH", False)
+                span.set_attribute("schema.drift.suspected", True)
+                span.set_attribute("schema.drift.missing_identifiers_count", len(identifiers))
+                span.set_attribute("schema.drift.auto_refresh_enabled", auto_refresh)
+                return {
+                    "schema_drift_suspected": True,
+                    "missing_identifiers": identifiers,
+                    "schema_snapshot_id": state.get("schema_snapshot_id"),
+                    "schema_drift_auto_refresh": auto_refresh,
+                }
+
             if parsed_data:
                 # Check for wrapped error object {"error": "..."}
                 if (
@@ -149,10 +190,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     if error_category:
                         span.set_attribute("error_category", error_category)
                         span.set_attribute("timeout.triggered", error_category == "timeout")
+                    drift_hint = _maybe_add_schema_drift(error_msg)
                     return {
                         "error": error_msg,
                         "query_result": None,
                         "error_category": error_category,
+                        **drift_hint,
                     }
 
                 if (
@@ -179,7 +222,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         raw_str = parsed_data[0]
                         if "Error:" in raw_str or "Database Error:" in raw_str:
                             span.set_outputs({"error": raw_str})
-                            return {"error": raw_str, "query_result": None}
+                            drift_hint = _maybe_add_schema_drift(raw_str)
+                            return {"error": raw_str, "query_result": None, **drift_hint}
 
                     query_result = parsed_data
                     error = None
@@ -189,7 +233,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if "Error:" in raw_str or "Database Error:" in raw_str:
                     error = raw_str
                     span.set_outputs({"error": error})
-                    return {"error": error, "query_result": None}
+                    drift_hint = _maybe_add_schema_drift(raw_str)
+                    return {"error": error, "query_result": None, **drift_hint}
 
                 # Otherwise, assume it's just empty result set
                 query_result = []
