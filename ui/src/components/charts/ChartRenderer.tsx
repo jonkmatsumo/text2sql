@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React from "react";
 import { EmptyState } from "../common/EmptyState";
 import { ErrorState } from "../common/ErrorState";
 import { ChartSchema, ChartMeta } from "../../types/charts";
@@ -6,8 +6,6 @@ import { AreaChart } from "./renderers/AreaChart";
 import { BarChart } from "./renderers/BarChart";
 import { LineChart } from "./renderers/LineChart";
 import { ScatterChart } from "./renderers/ScatterChart";
-
-const VegaChart = React.lazy(() => import("../common/VegaChart"));
 
 const CHART_RENDERER_V2_KEY = "CHART_RENDERER_V2";
 
@@ -30,7 +28,6 @@ function isChartRendererV2Enabled(): boolean {
 
 interface ChartRendererProps {
   schema?: ChartSchema;
-  legacySpec?: Record<string, unknown>;
   title?: string;
   meta?: ChartMeta;
 }
@@ -52,7 +49,6 @@ function renderSchemaChart(schema: ChartSchema) {
 
 export function ChartRenderer({
   schema,
-  legacySpec,
   title,
   meta
 }: ChartRendererProps) {
@@ -69,14 +65,6 @@ export function ChartRenderer({
 
   if (schema?.chartType) {
     return renderSchemaChart(schema);
-  }
-
-  if (legacySpec) {
-    return (
-      <Suspense fallback={<div style={{ padding: "16px" }}>Loading chart...</div>}>
-        <VegaChart spec={legacySpec} />
-      </Suspense>
-    );
   }
 
   void meta;

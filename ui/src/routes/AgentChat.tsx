@@ -367,9 +367,8 @@ export default function AgentChat() {
                           isSchema && Array.isArray((msg.vizSpec as ChartSchema).series)
                             ? (msg.vizSpec as ChartSchema)
                             : undefined;
-                        const legacySpec = !isSchema ? msg.vizSpec : undefined;
 
-                        if (isSchema && !schema) {
+                        if (!isSchema || (isSchema && !schema)) {
                           return (
                             <>
                               <ErrorState error="Invalid chart schema from agent." />
@@ -380,9 +379,7 @@ export default function AgentChat() {
                           );
                         }
 
-                        return (
-                          <ChartRenderer schema={schema} legacySpec={legacySpec} />
-                        );
+                        return <ChartRenderer schema={schema} />;
                       })()}
                     </div>
                   )}
