@@ -1,6 +1,7 @@
 """Insight synthesis node for formatting results with MLflow tracing."""
 
 import json
+import re
 
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
@@ -11,10 +12,26 @@ from agent.llm_client import get_llm
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
+from common.config.env import get_env_bool
 
 load_dotenv()
 
 # Initialize LLM using the factory (temperature=0.7 for more creative responses)
+
+
+def _sanity_check_enabled() -> bool:
+    return get_env_bool("AGENT_EMPTY_RESULT_SANITY_CHECK", False) is True
+
+
+def _question_implies_existence(question: str) -> bool:
+    if not question:
+        return False
+    return bool(
+        re.search(
+            r"\b(top|latest|most|highest|lowest|newest|recent|last|biggest|best)\b",
+            question.lower(),
+        )
+    )
 
 
 def synthesize_insight_node(state: AgentState) -> dict:
@@ -65,8 +82,29 @@ def synthesize_insight_node(state: AgentState) -> dict:
         if result_rows_returned is not None:
             span.set_attribute("result.rows_returned", result_rows_returned)
 
-        if not query_result:
+        if query_result is None:
             response_content = "I couldn't retrieve any results for your query."
+            span.set_outputs({"response": response_content})
+            return {
+                "messages": [
+                    AIMessage(content=response_content),
+                ]
+            }
+
+        if isinstance(query_result, list) and len(query_result) == 0:
+            response_lines = [
+                "I couldn't find any rows matching your query.",
+                "Try widening your filters or adjusting the time range.",
+            ]
+            if state.get("schema_drift_suspected"):
+                response_lines.append(
+                    "The schema may have changed; consider refreshing schema context and retrying."
+                )
+            if _sanity_check_enabled() and _question_implies_existence(original_question):
+                response_lines.append(
+                    "If you expected results, double-check filters or try a broader query."
+                )
+            response_content = " ".join(response_lines)
             span.set_outputs({"response": response_content})
             return {
                 "messages": [
