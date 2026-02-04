@@ -726,6 +726,12 @@ export default function TraceDetail() {
         </div>
 
         <div className="trace-detail__right">
+          {verboseMode && isSpansLoading && spans.length === 0 && (
+            <div className="trace-panel">
+              <h3>Verbose / Diagnostic View</h3>
+              <div style={{ color: "var(--muted)" }}>Loading trace artifacts...</div>
+            </div>
+          )}
           {verboseMode && spansError && spans.length === 0 && (
             <div className="trace-panel">
               <h3>Verbose / Diagnostic View</h3>
