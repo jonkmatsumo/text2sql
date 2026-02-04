@@ -699,3 +699,34 @@ class Database:
                     )
                 else:
                     yield conn
+
+    @classmethod
+    async def fetch_query(
+        cls,
+        sql: str,
+        tenant_id: Optional[int] = None,
+        params: Optional[list] = None,
+        include_columns: bool = False,
+    ):
+        """Fetch rows with optional column metadata when supported."""
+        from dal.query_result import QueryResult
+
+        async with cls.get_connection(tenant_id=tenant_id, read_only=True) as conn:
+            fetch_with_columns = getattr(conn, "fetch_with_columns", None)
+            supports_fetch_with_columns = (
+                include_columns
+                and callable(fetch_with_columns)
+                and "fetch_with_columns" in type(conn).__dict__
+            )
+            if params:
+                if supports_fetch_with_columns:
+                    rows, columns = await fetch_with_columns(sql, *params)
+                    return QueryResult(rows=rows, columns=columns)
+                rows = await conn.fetch(sql, *params)
+            else:
+                if supports_fetch_with_columns:
+                    rows, columns = await fetch_with_columns(sql)
+                    return QueryResult(rows=rows, columns=columns)
+                rows = await conn.fetch(sql)
+
+        return QueryResult(rows=rows, columns=None)

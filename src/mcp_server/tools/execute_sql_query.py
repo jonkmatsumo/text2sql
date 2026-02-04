@@ -78,56 +78,66 @@ async def handler(
                 separators=(",", ":"),
             )
 
-    async with Database.get_connection(tenant_id, read_only=True) as conn:
-        try:
-            # Execution
-            if params:
-                rows = await conn.fetch(sql_query, *params)
-            else:
-                rows = await conn.fetch(sql_query)
+    try:
+        columns = None
+        if include_columns:
+            query_result = await Database.fetch_query(
+                sql_query,
+                tenant_id=tenant_id,
+                params=params,
+                include_columns=True,
+            )
+            result = query_result.rows
+            columns = query_result.columns
+        else:
+            async with Database.get_connection(tenant_id, read_only=True) as conn:
+                if params:
+                    rows = await conn.fetch(sql_query, *params)
+                else:
+                    rows = await conn.fetch(sql_query)
 
-            # Serialization
-            result = [dict(row) for row in rows]
+                result = [dict(row) for row in rows]
 
-            # Size Safety Valve
-            if len(result) > 1000:
-                error_msg = (
-                    f"Result set too large ({len(result)} rows). "
-                    "Please add a LIMIT clause to your query."
-                )
-                return json.dumps(
-                    {
-                        "error": error_msg,
-                        "truncated_result": result[:1000],
-                    },
-                    default=str,
-                )
+        # Size Safety Valve
+        if len(result) > 1000:
+            error_msg = (
+                f"Result set too large ({len(result)} rows). "
+                "Please add a LIMIT clause to your query."
+            )
+            return json.dumps(
+                {
+                    "error": error_msg,
+                    "truncated_result": result[:1000],
+                },
+                default=str,
+            )
 
-            if include_columns:
+        if include_columns:
+            if not columns:
                 columns = _build_columns_from_rows(result)
-                return json.dumps(
-                    {"rows": result, "columns": columns},
-                    default=str,
-                    separators=(",", ":"),
-                )
+            return json.dumps(
+                {"rows": result, "columns": columns},
+                default=str,
+                separators=(",", ":"),
+            )
 
-            return json.dumps(result, default=str, separators=(",", ":"))
+        return json.dumps(result, default=str, separators=(",", ":"))
 
-        except asyncpg.PostgresError as e:
-            error_message = f"Database Error: {str(e)}"
-            payload = {"error": error_message}
-            provider = Database.get_query_target_provider()
-            category = maybe_classify_error(provider, e)
-            if category:
-                payload["error_category"] = category
-                emit_classified_error(provider, "execute_sql_query", category, e)
-            return json.dumps(payload)
-        except Exception as e:
-            error_message = f"Execution Error: {str(e)}"
-            payload = {"error": error_message}
-            provider = Database.get_query_target_provider()
-            category = maybe_classify_error(provider, e)
-            if category:
-                payload["error_category"] = category
-                emit_classified_error(provider, "execute_sql_query", category, e)
-            return json.dumps(payload)
+    except asyncpg.PostgresError as e:
+        error_message = f"Database Error: {str(e)}"
+        payload = {"error": error_message}
+        provider = Database.get_query_target_provider()
+        category = maybe_classify_error(provider, e)
+        if category:
+            payload["error_category"] = category
+            emit_classified_error(provider, "execute_sql_query", category, e)
+        return json.dumps(payload)
+    except Exception as e:
+        error_message = f"Execution Error: {str(e)}"
+        payload = {"error": error_message}
+        provider = Database.get_query_target_provider()
+        category = maybe_classify_error(provider, e)
+        if category:
+            payload["error_category"] = category
+            emit_classified_error(provider, "execute_sql_query", category, e)
+        return json.dumps(payload)
