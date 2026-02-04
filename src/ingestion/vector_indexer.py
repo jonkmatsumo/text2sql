@@ -4,9 +4,13 @@ Includes adaptive thresholding to filter low-quality vector matches.
 """
 
 import asyncio
+import hashlib
 import logging
+import os
+import struct
 import time
-from typing import List, Optional
+from collections import OrderedDict
+from typing import List, Optional, Tuple
 
 from openai import AsyncOpenAI
 
@@ -19,6 +23,79 @@ logger = logging.getLogger(__name__)
 # Relaxed thresholds to ensure dimension tables (e.g., language) are included
 MIN_SCORE_ABSOLUTE = 0.45  # Lowered from 0.55 to catch indirect semantic matches
 SCORE_DROP_TOLERANCE = 0.15  # Increased from 0.08 to allow more score variance
+
+COLUMN_FALLBACK_CACHE_TTL_SECONDS = 15 * 60
+COLUMN_FALLBACK_CACHE_MAX_SIZE = 512
+
+
+class ColumnFallbackCache:
+    """Small in-memory TTL cache for column fallback seeds."""
+
+    def __init__(self, ttl_seconds: int, max_size: int):
+        """Initialize cache with TTL and max size."""
+        self.ttl_seconds = ttl_seconds
+        self.max_size = max_size
+        self._store: "OrderedDict[str, tuple[float, list[dict], float]]" = OrderedDict()
+
+    def get(self, key: str, now: Optional[float] = None) -> Optional[Tuple[List[dict], float]]:
+        """Return cached hits/threshold if present and not expired."""
+        now = now if now is not None else time.monotonic()
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        timestamp, hits, threshold = entry
+        if now - timestamp > self.ttl_seconds:
+            self._store.pop(key, None)
+            return None
+        self._store.move_to_end(key)
+        return hits, threshold
+
+    def set(
+        self,
+        key: str,
+        hits: List[dict],
+        threshold: float,
+        now: Optional[float] = None,
+    ) -> None:
+        """Store hits and threshold with current timestamp."""
+        now = now if now is not None else time.monotonic()
+        self._store[key] = (now, hits, threshold)
+        self._store.move_to_end(key)
+        while len(self._store) > self.max_size:
+            self._store.popitem(last=False)
+
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        self._store.clear()
+
+
+_COLUMN_FALLBACK_CACHE = ColumnFallbackCache(
+    ttl_seconds=COLUMN_FALLBACK_CACHE_TTL_SECONDS,
+    max_size=COLUMN_FALLBACK_CACHE_MAX_SIZE,
+)
+
+
+def _column_cache_enabled() -> bool:
+    """Return True when column fallback cache is enabled via env."""
+    return os.getenv("COLUMN_FALLBACK_CACHE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _embedding_hash(embedding: list[float]) -> str:
+    """Hash embedding vector into a stable cache key."""
+    if not embedding:
+        return "empty"
+    packed = struct.pack(f"{len(embedding)}d", *embedding)
+    return hashlib.sha256(packed).hexdigest()
+
+
+def reset_column_fallback_cache() -> None:
+    """Reset the in-memory column fallback cache (test helper)."""
+    _COLUMN_FALLBACK_CACHE.clear()
 
 
 class EmbeddingService:
@@ -155,6 +232,7 @@ class VectorIndexer:
             label=label,
             k=k,
             apply_threshold=apply_threshold,
+            use_column_cache=False,
         )
         return results
 
@@ -164,6 +242,7 @@ class VectorIndexer:
         label: str = "Table",
         k: int = 5,
         apply_threshold: bool = True,
+        use_column_cache: bool = False,
     ) -> tuple[List[dict], dict]:
         """Search for nearest nodes and return metadata for telemetry.
 
@@ -173,6 +252,22 @@ class VectorIndexer:
         embed_start = time.monotonic()
         query_vector = await self.embedding_service.embed_text(query_text)
         embed_ms = (time.monotonic() - embed_start) * 1000
+        cache_hit = False
+        if use_column_cache and label == "Column" and _column_cache_enabled():
+            cache_key = _embedding_hash(query_vector)
+            cached = _COLUMN_FALLBACK_CACHE.get(cache_key)
+            if cached is not None:
+                cached_hits, cached_threshold = cached
+                cache_hit = True
+                return cached_hits, {
+                    "threshold": cached_threshold,
+                    "timing_ms": {
+                        "embedding": embed_ms,
+                        "search": 0.0,
+                        "total": embed_ms,
+                    },
+                    "cache_hit": True,
+                }
 
         def _run_search():
             start_time = time.monotonic()
@@ -266,4 +361,9 @@ class VectorIndexer:
         else:
             timing_ms["total"] = embed_ms
         metadata["timing_ms"] = timing_ms
+        metadata["cache_hit"] = cache_hit
+
+        if use_column_cache and label == "Column" and _column_cache_enabled():
+            cache_key = _embedding_hash(query_vector)
+            _COLUMN_FALLBACK_CACHE.set(cache_key, hits, metadata.get("threshold", 0.0))
         return hits, metadata

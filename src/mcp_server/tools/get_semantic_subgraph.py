@@ -57,7 +57,7 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
             if not table_hits:
                 logger.info("No table hits, falling back to column search")
                 seeds, column_meta = await indexer.search_nodes_with_metadata(
-                    query_text, label="Column", k=COLUMNS_K
+                    query_text, label="Column", k=COLUMNS_K, use_column_cache=True
                 )
                 seed_table_names = list(
                     set(s["node"].get("table") for s in seeds if s["node"].get("table"))
@@ -71,6 +71,7 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
                 seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
                 seed_span.set_attribute("seed_selection.path", "table")
                 seed_span.set_attribute("seed_selection.column_hit_count", 0)
+                seed_span.set_attribute("seed_selection.column_cache_hit", False)
 
             seed_span.set_attribute("seed_selection.table_hit_count", len(table_hits))
             seed_span.set_attribute(
@@ -78,6 +79,9 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
             )
             seed_span.set_attribute(
                 "seed_selection.similarity_threshold_column", column_meta.get("threshold", 0.0)
+            )
+            seed_span.set_attribute(
+                "seed_selection.column_cache_hit", column_meta.get("cache_hit", False)
             )
 
             table_timing = table_meta.get("timing_ms", {})

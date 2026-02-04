@@ -2,7 +2,12 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from ingestion.vector_indexer import VectorIndexer, apply_adaptive_threshold
+from ingestion.vector_indexer import (
+    _COLUMN_FALLBACK_CACHE,
+    VectorIndexer,
+    apply_adaptive_threshold,
+    reset_column_fallback_cache,
+)
 
 
 class TestVectorIndexerCharacterization:
@@ -177,3 +182,88 @@ class TestVectorIndexerObservability:
             mock_span.set_attribute.assert_any_call("vector.threshold_applied", True)
 
             mock_telemetry.set_span_status.assert_called_with(mock_span, success=True)
+
+
+class TestVectorIndexerColumnFallbackCache:
+    """Tests for column fallback caching."""
+
+    @pytest.mark.asyncio
+    async def test_column_cache_hit_returns_cached_results(self, monkeypatch):
+        """Cache hits should skip search and return cached results."""
+        reset_column_fallback_cache()
+        monkeypatch.setenv("COLUMN_FALLBACK_CACHE_ENABLED", "true")
+
+        store = MagicMock()
+        store.search_ann_seeds.return_value = [{"node": {"name": "col"}, "score": 0.9}]
+        with patch("ingestion.vector_indexer.AsyncOpenAI"):
+            indexer = VectorIndexer(store=store)
+            indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1, 0.2])
+
+            hits1, meta1 = await indexer.search_nodes_with_metadata(
+                "query", label="Column", k=1, use_column_cache=True
+            )
+            hits2, meta2 = await indexer.search_nodes_with_metadata(
+                "query", label="Column", k=1, use_column_cache=True
+            )
+
+        assert hits1 == hits2
+        assert meta1["cache_hit"] is False
+        assert meta2["cache_hit"] is True
+        assert store.search_ann_seeds.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_column_cache_ttl_expiration(self, monkeypatch):
+        """Expired entries should force recomputation."""
+        reset_column_fallback_cache()
+        monkeypatch.setenv("COLUMN_FALLBACK_CACHE_ENABLED", "true")
+
+        original_ttl = _COLUMN_FALLBACK_CACHE.ttl_seconds
+        _COLUMN_FALLBACK_CACHE.ttl_seconds = -1
+        try:
+            store = MagicMock()
+            store.search_ann_seeds.return_value = [{"node": {"name": "col"}, "score": 0.9}]
+            with patch("ingestion.vector_indexer.AsyncOpenAI"):
+                indexer = VectorIndexer(store=store)
+                indexer.embedding_service.embed_text = AsyncMock(return_value=[0.1, 0.2])
+
+                await indexer.search_nodes_with_metadata(
+                    "query", label="Column", k=1, use_column_cache=True
+                )
+                await indexer.search_nodes_with_metadata(
+                    "query", label="Column", k=1, use_column_cache=True
+                )
+
+            assert store.search_ann_seeds.call_count == 2
+        finally:
+            _COLUMN_FALLBACK_CACHE.ttl_seconds = original_ttl
+
+    @pytest.mark.asyncio
+    async def test_column_cache_lru_eviction(self, monkeypatch):
+        """LRU eviction should drop oldest entries when capacity is exceeded."""
+        reset_column_fallback_cache()
+        monkeypatch.setenv("COLUMN_FALLBACK_CACHE_ENABLED", "true")
+
+        original_max_size = _COLUMN_FALLBACK_CACHE.max_size
+        _COLUMN_FALLBACK_CACHE.max_size = 1
+        try:
+            store = MagicMock()
+            store.search_ann_seeds.return_value = [{"node": {"name": "col"}, "score": 0.9}]
+            with patch("ingestion.vector_indexer.AsyncOpenAI"):
+                indexer = VectorIndexer(store=store)
+                indexer.embedding_service.embed_text = AsyncMock(
+                    side_effect=[[0.1, 0.2], [0.2, 0.3], [0.1, 0.2]]
+                )
+
+                await indexer.search_nodes_with_metadata(
+                    "query-a", label="Column", k=1, use_column_cache=True
+                )
+                await indexer.search_nodes_with_metadata(
+                    "query-b", label="Column", k=1, use_column_cache=True
+                )
+                await indexer.search_nodes_with_metadata(
+                    "query-a", label="Column", k=1, use_column_cache=True
+                )
+
+            assert store.search_ann_seeds.call_count == 3
+        finally:
+            _COLUMN_FALLBACK_CACHE.max_size = original_max_size

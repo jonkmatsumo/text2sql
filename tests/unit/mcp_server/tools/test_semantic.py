@@ -178,7 +178,7 @@ class TestGetSemanticSubgraph:
 
         call_order = []
 
-        def track_calls(query_text, label, k, apply_threshold=True):
+        def track_calls(query_text, label, k, apply_threshold=True, use_column_cache=False):
             call_order.append(label)
             return [], {"threshold": 0.0, "timing_ms": {}}
 
