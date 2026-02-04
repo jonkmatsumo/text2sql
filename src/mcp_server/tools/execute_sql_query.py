@@ -12,8 +12,18 @@ from dal.error_classification import emit_classified_error, maybe_classify_error
 TOOL_NAME = "execute_sql_query"
 
 
+def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+    first_row = rows[0]
+    return [{"name": key, "type": "unknown"} for key in first_row.keys()]
+
+
 async def handler(
-    sql_query: str, tenant_id: Optional[int] = None, params: Optional[list] = None
+    sql_query: str,
+    tenant_id: Optional[int] = None,
+    params: Optional[list] = None,
+    include_columns: bool = False,
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON.
 
@@ -91,6 +101,14 @@ async def handler(
                         "truncated_result": result[:1000],
                     },
                     default=str,
+                )
+
+            if include_columns:
+                columns = _build_columns_from_rows(result)
+                return json.dumps(
+                    {"rows": result, "columns": columns},
+                    default=str,
+                    separators=(",", ":"),
                 )
 
             return json.dumps(result, default=str, separators=(",", ":"))
