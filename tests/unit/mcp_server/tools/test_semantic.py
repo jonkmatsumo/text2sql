@@ -330,3 +330,30 @@ class TestGetSemanticSubgraph:
         filtered, relaxed = _apply_column_guardrails(seeds)
         assert relaxed is True
         assert filtered
+
+    @pytest.mark.asyncio
+    async def test_table_hits_suppress_column_fallback(self):
+        """Table hits should prevent column fallback for column-style queries."""
+        mock_indexer = MagicMock()
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=(
+                [{"node": {"name": "users"}, "score": 0.9}],
+                {"threshold": 0.7, "timing_ms": {"embedding": 1.0, "search": 2.0}},
+            )
+        )
+
+        with patch(
+            "mcp_server.tools.get_semantic_subgraph.Database.get_graph_store",
+            return_value=MagicMock(),
+        ):
+            with patch(
+                "mcp_server.tools.get_semantic_subgraph.Database.get_schema_introspector",
+                return_value=self._mock_introspector(),
+            ):
+                with patch(
+                    "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
+                    return_value=mock_indexer,
+                ):
+                    await get_semantic_subgraph("email addresses")
+
+        assert mock_indexer.search_nodes_with_metadata.call_count == 1
