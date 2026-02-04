@@ -1,6 +1,6 @@
-"""Agent Visualization Module (Vega-Lite MVP).
+"""Agent Visualization Module (ChartSchema MVP).
 
-This module provides utilities to generate Vega-Lite specifications from
+This module provides utilities to generate lightweight chart schemas from
 tabular data returned by MCP SQL queries.
 
 Design Notes:

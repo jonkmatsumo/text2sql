@@ -135,7 +135,7 @@ class AgentState(TypedDict):
     # Visualization Fields
     # =========================================================================
 
-    # Generated Vega-Lite specification for the query result
+    # Generated chart schema specification for the query result
     viz_spec: Optional[dict]
 
     # Reason for generating (or skipping) visualization

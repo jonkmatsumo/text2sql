@@ -39,8 +39,8 @@ class TestSemanticTraversalGuardrail:
         # 1. FIXED SEEDS
         # We mock VectorIndexer to return exactly one table: "users"
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes = AsyncMock(
-            return_value=[{"node": {"name": "users"}, "score": 1.0}]
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=([{"node": {"name": "users"}, "score": 1.0}], {"threshold": 0.0})
         )
 
         # 2. FIXED SCHEMA (Introspector)
@@ -99,8 +99,8 @@ class TestSemanticTraversalGuardrail:
         """Prove that traversal follows outgoing FKs exactly as before."""
         # 1. FIXED SEEDS: "orders"
         mock_indexer = MagicMock()
-        mock_indexer.search_nodes = AsyncMock(
-            return_value=[{"node": {"name": "orders"}, "score": 1.0}]
+        mock_indexer.search_nodes_with_metadata = AsyncMock(
+            return_value=([{"node": {"name": "orders"}, "score": 1.0}], {"threshold": 0.0})
         )
 
         # 2. SCHEMA

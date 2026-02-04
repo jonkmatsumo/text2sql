@@ -1,10 +1,14 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useOtelHealth } from "../hooks/useOtelHealth";
 import { useTraceSearch } from "../hooks/useTraceSearch";
 import { TraceFiltersPanel } from "../components/trace/TraceFiltersPanel";
 import { TraceFacetsPanel } from "../components/trace/TraceFacetsPanel";
 import { TraceResultsTable } from "../components/trace/TraceResultsTable";
 import { DurationHistogram } from "../components/trace/search/DurationHistogram";
+import { FacetPanel, StatusDistribution } from "../components/trace/search/FacetPanel";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { DataTrustRow } from "../components/common/DataTrustRow";
+import { CopyButton } from "../components/artifacts/CopyButton";
 
 export default function TraceSearch() {
   const {
@@ -28,9 +32,16 @@ export default function TraceSearch() {
     availableStatuses,
     durationBucketCounts,
     durationHistogram,
+    aggregationAsOf,
+    aggregationWindow,
+    aggregationPercentiles,
     activeFacetCount,
     handleClearFilters
   } = useTraceSearch();
+  const navigate = useNavigate();
+  const [compareSearchParams] = useSearchParams();
+  const searchUrl = typeof window !== "undefined" ? window.location.href : "";
+  const [compareTarget, setCompareTarget] = useState<"left" | "right">("right");
 
   const { health } = useOtelHealth();
   const { isHealthy, lastError: healthError } = health;
@@ -38,6 +49,12 @@ export default function TraceSearch() {
 
   const handleLoadMore = () => {
     loadTraces(true);
+  };
+
+  const handleCompareSelection = (traceId: string) => {
+    const params = new URLSearchParams(compareSearchParams);
+    params.set(compareTarget, traceId);
+    navigate(`/admin/traces/compare?${params.toString()}`);
   };
 
   return (
@@ -52,27 +69,29 @@ export default function TraceSearch() {
             </p>
           </div>
 
-          {/* Health Indicator */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <div
-              style={{
-                width: "10px",
-                height: "10px",
-                borderRadius: "50%",
-                backgroundColor: isHealthLoading
-                  ? "var(--muted)"
+          <div className="trace-search__hero-actions">
+            <CopyButton text={searchUrl} label="Copy search link" />
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  backgroundColor: isHealthLoading
+                    ? "var(--muted)"
+                    : isHealthy
+                    ? "var(--accent)"
+                    : "#ef4444"
+                }}
+              />
+              <span style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
+                {isHealthLoading
+                  ? "Checking Telemetry..."
                   : isHealthy
-                  ? "var(--accent)"
-                  : "#ef4444"
-              }}
-            />
-            <span style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
-              {isHealthLoading
-                ? "Checking Telemetry..."
-                : isHealthy
-                ? "Telemetry System Online"
-                : "Telemetry System Unreachable"}
-            </span>
+                  ? "Telemetry System Online"
+                  : "Telemetry System Unreachable"}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -89,22 +108,69 @@ export default function TraceSearch() {
           isLoading={isLoading}
         />
 
-        <DurationHistogram
-          traces={traces}
-          bins={durationHistogram}
+        <DataTrustRow
           scopeLabel={
             facetSource === "server"
               ? facetMeta?.isSampled || facetMeta?.isTruncated
-                ? "Server sample (approximate)"
+                ? "Dataset sample (server)"
                 : "Dataset-wide (server)"
-              : `Subset of loaded results (${facetSampleCount})`
+              : `Loaded subset (${facetSampleCount} traces)`
           }
-          range={{
-            min: facets.durationMinMs ?? null,
-            max: facets.durationMaxMs ?? null
-          }}
-          onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
+          totalCount={facetTotalCount}
+          filteredCount={filteredTraces.length}
+          isSampled={facetMeta?.isSampled ?? null}
+          sampleRate={facetMeta?.sampleRate ?? null}
+          isTruncated={facetMeta?.isTruncated ?? null}
+          asOf={aggregationAsOf}
+          windowStart={aggregationWindow?.start ?? null}
+          windowEnd={aggregationWindow?.end ?? null}
         />
+
+        <div className="trace-search__compare-target">
+          <span>Compare target</span>
+          <div className="trace-search__compare-buttons">
+            <button
+              type="button"
+              className={compareTarget === "left" ? "active" : ""}
+              onClick={() => setCompareTarget("left")}
+            >
+              Left
+            </button>
+            <button
+              type="button"
+              className={compareTarget === "right" ? "active" : ""}
+              onClick={() => setCompareTarget("right")}
+            >
+              Right
+            </button>
+          </div>
+        </div>
+
+        <FacetPanel
+          title="Distributions"
+          description="View duration landmarks and status counts before adjusting filters."
+        >
+          <div className="trace-search__distribution-grid">
+            <DurationHistogram
+              traces={traces}
+              bins={durationHistogram}
+              scopeLabel={
+                facetSource === "server"
+                  ? facetMeta?.isSampled || facetMeta?.isTruncated
+                    ? "Server sample (approximate)"
+                    : "Dataset-wide (server)"
+                  : `Subset of loaded results (${facetSampleCount})`
+              }
+              percentiles={aggregationPercentiles ?? undefined}
+              range={{
+                min: facets.durationMinMs ?? null,
+                max: facets.durationMaxMs ?? null
+              }}
+              onRangeChange={(next) => setFacets({ ...facets, durationMinMs: next.min, durationMaxMs: next.max })}
+            />
+            <StatusDistribution counts={statusCounts} totalCount={facetTotalCount} />
+          </div>
+        </FacetPanel>
 
         <TraceFacetsPanel
           facets={facets}
@@ -135,6 +201,8 @@ export default function TraceSearch() {
            totalCount={facetTotalCount}
            filteredCount={filteredTraces.length}
            onClearFilters={handleClearFilters}
+           compareTarget={compareTarget}
+           onSelectForCompare={handleCompareSelection}
         />
     </div>
   );

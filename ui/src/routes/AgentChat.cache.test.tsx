@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
 import { runAgent, fetchAvailableModels } from "../api";
@@ -30,7 +31,11 @@ describe("AgentChat cache rendering", () => {
       cache_similarity: 0.953,
     });
 
-    render(<AgentChat />);
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
 
     const input = screen.getByPlaceholderText(/ask a question/i);
     fireEvent.change(input, { target: { value: "test query" } });

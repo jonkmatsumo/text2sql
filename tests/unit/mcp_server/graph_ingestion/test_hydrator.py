@@ -48,6 +48,42 @@ async def test_hydrate_schema(mock_embedding_service):
     mock_introspector.get_sample_rows.assert_called_with("t1")
 
 
+@patch("ingestion.graph_hydrator.EmbeddingService")
+def test_table_embedding_text_includes_normalized_hints(mock_embedding_service):
+    """Ensure embedding text includes column names, normalized tokens, and synonyms."""
+    mock_store = MagicMock(spec=GraphStore)
+    mock_embedding_service.return_value.embed_text = MagicMock(return_value=[0.1, 0.2])
+    hydrator = GraphHydrator(store=mock_store)
+
+    table_def = TableDef(
+        name="orders",
+        description="order records",
+        columns=[
+            ColumnDef(
+                name="email_addr",
+                data_type="varchar",
+                is_primary_key=False,
+                is_nullable=True,
+            ),
+            ColumnDef(
+                name="qty",
+                data_type="integer",
+                is_primary_key=False,
+                is_nullable=False,
+            ),
+        ],
+        foreign_keys=[],
+    )
+
+    hydrator._create_table_node(table_def, table_def.columns)
+
+    call_args = hydrator.embedding_service.embed_text.call_args[0][0]
+    assert "email_addr" in call_args
+    assert "email addr" in call_args
+    assert "email address" in call_args
+    assert "quantity" in call_args
+
+
 class TestShouldSkipColumnEmbedding:
     """Tests for the should_skip_column_embedding helper."""
 

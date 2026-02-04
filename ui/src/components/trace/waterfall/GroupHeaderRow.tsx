@@ -4,6 +4,7 @@ interface GroupHeaderRowProps {
   label: string;
   spanCount: number;
   totalDurationMs: number;
+  totalSelfTimeMs?: number;
   isExpanded: boolean;
   onToggle: () => void;
   criticalPathSpanCount?: number;
@@ -18,6 +19,7 @@ export const GroupHeaderRow: React.FC<GroupHeaderRowProps> = ({
   label,
   spanCount,
   totalDurationMs,
+  totalSelfTimeMs,
   isExpanded,
   onToggle,
   criticalPathSpanCount
@@ -38,6 +40,7 @@ export const GroupHeaderRow: React.FC<GroupHeaderRowProps> = ({
       </div>
       <div className="trace-waterfall__group-duration">
         {formatMs(totalDurationMs)} (agg)
+        {totalSelfTimeMs != null ? ` · self ${formatMs(totalSelfTimeMs)}` : ""}
       </div>
     </div>
   );

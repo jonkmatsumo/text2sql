@@ -1,14 +1,14 @@
 import logging
 
 from agent.state import AgentState
-from agent.viz.spec import build_vega_lite_spec
+from agent.viz.schema import build_chart_schema
 
 logger = logging.getLogger(__name__)
 
 
 def visualize_query_node(state: AgentState) -> dict:
     """
-    Generate a Vega-Lite visualization specification from the query result.
+    Generate a chart schema visualization specification from the query result.
 
     This node inspects the 'query_result' in the state. If the data is suitable
     for visualization (based on heuristics), it populates 'viz_spec'.
@@ -40,15 +40,15 @@ def visualize_query_node(state: AgentState) -> dict:
 
         try:
             # Generate spec
-            spec = build_vega_lite_spec(query_result)
+            spec = build_chart_schema(query_result)
 
             if spec:
-                logger.info(f"Generated visualization: {spec.get('mark')} chart")
+                logger.info(f"Generated visualization: {spec.get('chartType')} chart")
                 span.set_attribute("viz_generated", True)
-                span.set_attribute("viz_type", spec.get("mark"))
+                span.set_attribute("viz_type", spec.get("chartType"))
                 return {
                     "viz_spec": spec,
-                    "viz_reason": f"Generated {spec.get('mark')} chart based on data shape",
+                    "viz_reason": (f"Generated {spec.get('chartType')} chart based on data shape"),
                 }
             else:
                 logger.info("Data not suitable for visualization")

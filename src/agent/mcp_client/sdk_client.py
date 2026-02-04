@@ -11,7 +11,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from mcp import ClientSession
+try:
+    from mcp import ClientSession
+except Exception:  # pragma: no cover - environment dependent import
+    ClientSession = None
 
 from agent.utils.parsing import normalize_payload
 
@@ -78,6 +81,11 @@ class MCPClient:
                 tools = await mcp.list_tools()
         """
         from contextlib import AsyncExitStack
+
+        if ClientSession is None:
+            raise RuntimeError(
+                "MCP SDK is not available. Install the 'mcp' package to use MCPClient."
+            )
 
         async with AsyncExitStack() as stack:
             if self.transport == "sse":

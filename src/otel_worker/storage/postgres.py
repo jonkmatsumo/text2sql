@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import threading
 from collections import deque
@@ -382,6 +383,8 @@ def list_traces(
     trace_id: str = None,
     start_time_gte: datetime = None,
     start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
     limit: int = 50,
     offset: int = 0,
     order: str = "desc",
@@ -408,6 +411,12 @@ def list_traces(
     if start_time_lte:
         query += " AND start_time <= :start_time_lte"
         params["start_time_lte"] = start_time_lte
+    if duration_min_ms is not None:
+        query += " AND duration_ms >= :duration_min_ms"
+        params["duration_min_ms"] = duration_min_ms
+    if duration_max_ms is not None:
+        query += " AND duration_ms <= :duration_max_ms"
+        params["duration_max_ms"] = duration_max_ms
 
     query += f" ORDER BY start_time {order.upper()}"
     query += " LIMIT :limit OFFSET :offset"
@@ -415,6 +424,187 @@ def list_traces(
     with engine.connect() as conn:
         result = conn.execute(text(query), params)
         return [dict(row._mapping) for row in result]
+
+
+def _build_trace_filter_clause(
+    service: str = None,
+    trace_id: str = None,
+    status: str = None,
+    has_errors: str = None,
+    start_time_gte: datetime = None,
+    start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
+):
+    clauses = []
+    params = {}
+
+    if service:
+        clauses.append("service_name = :service")
+        params["service"] = service
+    if trace_id:
+        clauses.append("trace_id = :trace_id")
+        params["trace_id"] = trace_id
+    if status:
+        clauses.append("status = :status")
+        params["status"] = status
+    if has_errors == "yes":
+        clauses.append("error_count > 0")
+    elif has_errors == "no":
+        clauses.append("error_count = 0")
+    if start_time_gte:
+        clauses.append("start_time >= :start_time_gte")
+        params["start_time_gte"] = start_time_gte
+    if start_time_lte:
+        clauses.append("start_time <= :start_time_lte")
+        params["start_time_lte"] = start_time_lte
+    if duration_min_ms is not None:
+        clauses.append("duration_ms >= :duration_min_ms")
+        params["duration_min_ms"] = duration_min_ms
+    if duration_max_ms is not None:
+        clauses.append("duration_ms <= :duration_max_ms")
+        params["duration_max_ms"] = duration_max_ms
+
+    where = " AND ".join(clauses) if clauses else "1=1"
+    return where, params
+
+
+def _compute_histogram_bins(values: list[int], bin_count: int = 20):
+    if not values:
+        return []
+    min_val = min(values)
+    max_val = max(values)
+    span = max(1, max_val - min_val)
+    width = max(1, math.ceil(span / bin_count))
+    bins = [
+        {"start_ms": min_val + i * width, "end_ms": min_val + (i + 1) * width, "count": 0}
+        for i in range(bin_count)
+    ]
+    for value in values:
+        idx = min(bin_count - 1, max(0, (value - min_val) // width))
+        bins[int(idx)]["count"] += 1
+    return bins
+
+
+def _compute_percentiles(values: list[int]):
+    if not values:
+        return {"p50_ms": None, "p95_ms": None, "p99_ms": None}
+    sorted_vals = sorted(values)
+
+    def pick(pct: float) -> int:
+        idx = max(0, min(len(sorted_vals) - 1, math.ceil((pct / 100) * len(sorted_vals)) - 1))
+        return int(sorted_vals[idx])
+
+    return {"p50_ms": pick(50), "p95_ms": pick(95), "p99_ms": pick(99)}
+
+
+def compute_trace_aggregations(
+    service: str = None,
+    trace_id: str = None,
+    status: str = None,
+    has_errors: str = None,
+    start_time_gte: datetime = None,
+    start_time_lte: datetime = None,
+    duration_min_ms: int = None,
+    duration_max_ms: int = None,
+    bin_count: int = 20,
+):
+    """Compute trace aggregation data for search facets and histograms."""
+    traces_table = get_table_name("traces")
+    where, params = _build_trace_filter_clause(
+        service=service,
+        trace_id=trace_id,
+        status=status,
+        has_errors=has_errors,
+        start_time_gte=start_time_gte,
+        start_time_lte=start_time_lte,
+        duration_min_ms=duration_min_ms,
+        duration_max_ms=duration_max_ms,
+    )
+
+    with engine.connect() as conn:
+        total_row = conn.execute(
+            text(
+                f"""
+                SELECT COUNT(*) as total_count
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchone()
+        total_count = int(total_row[0]) if total_row else 0
+
+        service_rows = conn.execute(
+            text(
+                f"""
+                SELECT service_name, COUNT(*) as count
+                FROM {traces_table}
+                WHERE {where}
+                GROUP BY service_name
+                """
+            ),
+            params,
+        ).fetchall()
+        service_counts = {row[0]: int(row[1]) for row in service_rows if row[0] is not None}
+
+        status_rows = conn.execute(
+            text(
+                f"""
+                SELECT status, COUNT(*) as count
+                FROM {traces_table}
+                WHERE {where}
+                GROUP BY status
+                """
+            ),
+            params,
+        ).fetchall()
+        status_counts = {row[0].lower(): int(row[1]) for row in status_rows if row[0] is not None}
+
+        error_rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                    SUM(CASE WHEN error_count > 0 THEN 1 ELSE 0 END) as has_errors,
+                    SUM(CASE WHEN error_count = 0 THEN 1 ELSE 0 END) as no_errors
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchone()
+        error_counts = {
+            "has_errors": int(error_rows[0] or 0),
+            "no_errors": int(error_rows[1] or 0),
+        }
+
+        duration_rows = conn.execute(
+            text(
+                f"""
+                SELECT duration_ms
+                FROM {traces_table}
+                WHERE {where}
+                """
+            ),
+            params,
+        ).fetchall()
+        durations = [int(row[0]) for row in duration_rows if row[0] is not None]
+
+    histogram = _compute_histogram_bins(durations, bin_count=bin_count)
+    percentiles = _compute_percentiles(durations)
+
+    return {
+        "total_count": total_count,
+        "facet_counts": {
+            "service": service_counts,
+            "status": status_counts,
+            "error": error_counts,
+        },
+        "duration_histogram": histogram,
+        "percentiles": percentiles,
+        "sampling": {"is_sampled": False, "sample_rate": 1.0},
+        "truncation": {"is_truncated": False, "limit": None},
+    }
 
 
 def get_trace(trace_id: str, include_attributes: bool = False):
@@ -449,6 +639,76 @@ def get_trace(trace_id: str, include_attributes: bool = False):
         return data
 
 
+def _to_ms(value: datetime) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return int(value.timestamp() * 1000)
+    try:
+        return int(datetime.fromisoformat(value).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+def _compute_self_time_map(spans: list[dict]) -> dict[str, int]:
+    by_id = {span["span_id"]: span for span in spans if span.get("span_id")}
+    child_intervals: dict[str, list[tuple[int, int]]] = {}
+
+    for span in spans:
+        parent_id = span.get("parent_span_id")
+        if not parent_id or parent_id not in by_id:
+            continue
+        start_ms = _to_ms(span.get("start_time"))
+        end_ms = _to_ms(span.get("end_time"))
+        if start_ms is None or end_ms is None or end_ms <= start_ms:
+            continue
+        child_intervals.setdefault(parent_id, []).append((start_ms, end_ms))
+
+    self_time = {}
+    for span_id, span in by_id.items():
+        duration = span.get("duration_ms")
+        if duration is None:
+            self_time[span_id] = None
+            continue
+        intervals = child_intervals.get(span_id, [])
+        if not intervals:
+            self_time[span_id] = int(duration)
+            continue
+        intervals.sort(key=lambda item: item[0])
+        merged = []
+        current_start, current_end = intervals[0]
+        for start, end in intervals[1:]:
+            if start <= current_end:
+                current_end = max(current_end, end)
+            else:
+                merged.append((current_start, current_end))
+                current_start, current_end = start, end
+        merged.append((current_start, current_end))
+        child_total = sum(end - start for start, end in merged)
+        self_time[span_id] = max(0, int(duration) - int(child_total))
+
+    return self_time
+
+
+def _load_self_time_map(conn, trace_id: str, max_spans: int = 5000) -> dict[str, int]:
+    spans_table = get_table_name("spans")
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT span_id, parent_span_id, start_time, end_time, duration_ms
+            FROM {spans_table}
+            WHERE trace_id = :trace_id
+            ORDER BY start_time ASC
+            """
+        ),
+        {"trace_id": trace_id},
+    ).fetchall()
+    spans = [dict(row._mapping) for row in rows]
+    if len(spans) > max_spans:
+        return {}
+    return _compute_self_time_map(spans)
+
+
 def list_spans_for_trace(
     trace_id: str, limit: int = 200, offset: int = 0, include_attributes: bool = False
 ):
@@ -465,6 +725,7 @@ def list_spans_for_trace(
     params = {"trace_id": trace_id, "limit": limit, "offset": offset}
 
     with engine.connect() as conn:
+        self_time_map = _load_self_time_map(conn, trace_id)
         result = conn.execute(text(query), params)
         spans = []
         for row in result:
@@ -482,6 +743,7 @@ def list_spans_for_trace(
             if not include_attributes:
                 data.pop("span_attributes", None)
                 data.pop("events", None)
+            data["self_time_ms"] = self_time_map.get(data["span_id"])
             spans.append(data)
         return spans
 
@@ -509,6 +771,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
     payloads_table = get_table_name("span_payloads")
 
     with engine.connect() as conn:
+        self_time_map = _load_self_time_map(conn, trace_id)
         row = conn.execute(
             text(
                 f"""
@@ -533,6 +796,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
                     data[key] = json.loads(val)
                 except Exception:
                     pass
+        data["self_time_ms"] = self_time_map.get(data["span_id"])
 
         data["links"] = []
         data["payloads"] = []

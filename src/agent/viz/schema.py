@@ -1,15 +1,15 @@
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 
 class FieldType(Enum):
-    """Enumeration of Vega-Lite field types."""
+    """Enumeration of field types used for chart schema inference."""
 
-    NUMERIC = "quantitative"
+    NUMERIC = "numeric"
     TEMPORAL = "temporal"
-    CATEGORICAL = "nominal"
+    CATEGORICAL = "categorical"
 
 
 @dataclass
@@ -20,16 +20,47 @@ class FieldSpec:
     field_type: FieldType
 
 
+@dataclass
+class Point:
+    """Chart data point."""
+
+    x: Any
+    y: Optional[float]
+
+
+@dataclass
+class Series:
+    """Series of chart points."""
+
+    name: str
+    points: List[Point]
+
+
+@dataclass
+class AxisSpec:
+    """Axis configuration for a chart."""
+
+    label: Optional[str] = None
+    format: Optional[str] = None
+
+
+@dataclass
+class ChartSchema:
+    """Chart schema payload for the UI renderer."""
+
+    chartType: str
+    series: List[Series]
+    xAxis: Optional[AxisSpec] = None
+    yAxis: Optional[AxisSpec] = None
+
+
 def _is_numeric(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _is_temporal(value: Any) -> bool:
-    # Basic ISO date check YYYY-MM-DD
     if not isinstance(value, str):
         return False
-    # Simple regex for YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
-    # This matches typical SQL string outputs for dates
     iso_date_pattern = r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2}(\.\d+)?)?Z?$"
     return bool(re.match(iso_date_pattern, value))
 
@@ -39,12 +70,10 @@ def infer_fields(rows: List[Dict[str, Any]], sample_size: int = 100) -> List[Fie
     if not rows:
         return []
 
-    # Assume all rows have same keys
     keys = list(rows[0].keys())
     specs = []
 
     for key in keys:
-        # Check type based on sample
         is_num = True
         is_temp = True
 
@@ -63,7 +92,6 @@ def infer_fields(rows: List[Dict[str, Any]], sample_size: int = 100) -> List[Fie
                 is_temp = False
 
         if valid_samples == 0:
-            # Default to categorical if all None
             field_type = FieldType.CATEGORICAL
         elif is_num:
             field_type = FieldType.NUMERIC
@@ -77,14 +105,21 @@ def infer_fields(rows: List[Dict[str, Any]], sample_size: int = 100) -> List[Fie
     return specs
 
 
-def build_vega_lite_spec(
+def _drop_none(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return {key: _drop_none(value) for key, value in payload.items() if value is not None}
+    if isinstance(payload, list):
+        return [_drop_none(item) for item in payload]
+    return payload
+
+
+def build_chart_schema(
     rows: List[Dict[str, Any]], chart_hint: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
-    """Build a Vega-Lite specification from data rows."""
+    """Build a ChartSchema payload from data rows."""
     if not rows or not isinstance(rows, list):
         return None
 
-    # Defensive check for error objects or non-dict rows
     if not isinstance(rows[0], dict):
         return None
 
@@ -95,63 +130,43 @@ def build_vega_lite_spec(
 
     f1, f2 = fields[0], fields[1]
 
-    mark = None
-
-    # Identify x and y
-    # Priority: temporal > categorical > numeric for X axis usually?
-    # Let's follow heuristics:
-    # 2 cols:
-    # - cat + num -> bar (cat on X/Y, num on Y/X)
-    # - temp + num -> line (temp on X)
-    # - num + num -> scatter
-
+    chart_type = None
     x_field = None
     y_field = None
 
-    # helper for matching types
     types = {f1.field_type, f2.field_type}
 
     if FieldType.CATEGORICAL in types and FieldType.NUMERIC in types:
-        mark = "bar"
-        # Find which is which
+        chart_type = "bar"
         cat_field = f1 if f1.field_type == FieldType.CATEGORICAL else f2
         num_field = f1 if f1.field_type == FieldType.NUMERIC else f2
-
-        # Heuristic: if cat has many unique values, maybe horizontal bar?
-        # For now standard vertical bar
         x_field = cat_field
         y_field = num_field
-
     elif FieldType.TEMPORAL in types and FieldType.NUMERIC in types:
-        mark = "line"
+        chart_type = "line"
         temp_field = f1 if f1.field_type == FieldType.TEMPORAL else f2
         num_field = f1 if f1.field_type == FieldType.NUMERIC else f2
-
         x_field = temp_field
         y_field = num_field
-
     elif types == {FieldType.NUMERIC}:
-        mark = "point"  # scatter
+        chart_type = "scatter"
         x_field = f1
         y_field = f2
-
     else:
-        # e.g. cat+cat, temp+temp -> no chart
         return None
 
-    spec = {
-        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-        "description": "Agent generated visualization",
-        "data": {"values": rows},
-        "mark": mark,
-        "encoding": {
-            "x": {"field": x_field.name, "type": x_field.field_type.value},
-            "y": {"field": y_field.name, "type": y_field.field_type.value},
-            "tooltip": [
-                {"field": x_field.name, "type": x_field.field_type.value},
-                {"field": y_field.name, "type": y_field.field_type.value},
-            ],
-        },
-    }
+    points = [Point(x=row.get(x_field.name), y=row.get(y_field.name)) for row in rows]
 
-    return spec
+    x_axis = AxisSpec(label=x_field.name)
+    if x_field.field_type == FieldType.TEMPORAL:
+        x_axis.format = "%m/%d %H:%M"
+
+    schema = ChartSchema(
+        chartType=chart_type,
+        series=[Series(name=y_field.name, points=points)],
+        xAxis=x_axis,
+        yAxis=AxisSpec(label=y_field.name),
+    )
+
+    _ = chart_hint
+    return _drop_none(asdict(schema))

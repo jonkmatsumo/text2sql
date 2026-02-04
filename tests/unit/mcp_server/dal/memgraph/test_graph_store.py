@@ -27,6 +27,8 @@ class TestMemgraphStoreANN:
 
     def test_search_ann_seeds_client_side_cosine(self, store):
         """Verify client-side cosine similarity fallback."""
+        store.supports_vector_search = MagicMock(return_value=False)
+        store.has_index = MagicMock(return_value=False)
         mock_session = MagicMock()
         store.driver.session.return_value.__enter__.return_value = mock_session
 
@@ -70,3 +72,36 @@ class TestMemgraphStoreANN:
         assert "WHERE n.embedding IS NOT NULL" in query
         assert "RETURN n AS node" in query
         assert "vector.similarity" not in query
+
+    def test_search_ann_seeds_vector_search_tables(self, store):
+        """Verify vector_search is used for table seeds when available."""
+        store.supports_vector_search = MagicMock(return_value=True)
+        store.has_index = MagicMock(return_value=True)
+
+        mock_session = MagicMock()
+        store.driver.session.return_value.__enter__.return_value = mock_session
+
+        mock_node = MockNode(
+            {"id": "1", "name": "customers", "embedding": [0.1, 0.2]}, "1", ["Table"]
+        )
+        mock_record = MagicMock()
+        mock_record.get.side_effect = lambda k: {
+            "node": mock_node,
+            "distance": 0.1,
+            "score": None,
+        }.get(k)
+
+        mock_session.run.return_value = [mock_record]
+
+        embedding = [0.1, 0.2]
+        hits = store.search_ann_seeds("Table", embedding, k=3)
+
+        assert len(hits) == 1
+        assert hits[0]["node"]["name"] == "customers"
+
+        args, kwargs = mock_session.run.call_args
+        query = args[0]
+        assert "vector_search.search" in query
+        params = args[1] if len(args) > 1 else kwargs
+        assert params["index_name"] == "table_embedding_index"
+        assert params["k"] == 3

@@ -28,6 +28,51 @@ LOW_SIGNAL_COLUMNS = frozenset(
 # Pattern for generic ID columns (e.g., customer_id, but NOT primary key or foreign key)
 ID_COLUMN_PATTERN = re.compile(r".*_id$", re.IGNORECASE)
 
+ABBREVIATION_MAP = {
+    "addr": "address",
+    "amt": "amount",
+    "dt": "date",
+    "num": "number",
+    "qty": "quantity",
+    "ts": "timestamp",
+}
+
+SYNONYM_MAP = {
+    "addr": ["address"],
+    "email": ["email address"],
+    "qty": ["quantity"],
+}
+
+MAX_EMBEDDING_HINTS = 100
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen = set()
+    deduped = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
+def _normalize_identifier_variants(name: str) -> list[str]:
+    raw = name.strip()
+    if not raw:
+        return []
+    tokens = [t for t in re.split(r"[_\-\s]+", raw) if t]
+    spaced = " ".join(tokens)
+    expanded_tokens = [ABBREVIATION_MAP.get(t, t) for t in tokens]
+    expanded = " ".join(expanded_tokens)
+    return _dedupe_preserve_order([raw, spaced, expanded])
+
+
+def _synonym_expansions(tokens: list[str]) -> list[str]:
+    expansions = []
+    for token in tokens:
+        expansions.extend(SYNONYM_MAP.get(token, []))
+    return expansions
+
 
 def should_skip_column_embedding(
     col: ColumnDef,
@@ -156,9 +201,21 @@ class GraphHydrator:
         # We embed name, description, AND column names for better semantic search
         # "PG movies" -> matches column "rating" or "description"
         col_names = ", ".join([c.name for c in columns])
+        normalized_hints = []
+        synonym_hints = []
+        for col in columns:
+            variants = _normalize_identifier_variants(col.name)
+            normalized_hints.extend(variants)
+            for variant in variants:
+                synonym_hints.extend(_synonym_expansions(variant.split()))
+
+        normalized_hints = _dedupe_preserve_order(normalized_hints)[:MAX_EMBEDDING_HINTS]
+        synonym_hints = _dedupe_preserve_order(synonym_hints)[:MAX_EMBEDDING_HINTS]
+        hint_text = " ".join(normalized_hints + synonym_hints)
         embedding_text = (
             f"Table: {table.name}\n"
             f"Columns: {col_names}\n"
+            f"Column Hints: {hint_text}\n"
             f"Description: {table.description or ''}"
         )
         embedding = self.embedding_service.embed_text(embedding_text)

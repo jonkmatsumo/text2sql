@@ -9,7 +9,9 @@ Uses deterministic "Mini-Schema" expansion:
 import asyncio
 import json
 import logging
+import time
 
+from common.telemetry import Telemetry
 from dal.database import Database
 from dal.memgraph import MemgraphStore
 from ingestion.vector_indexer import VectorIndexer
@@ -22,6 +24,53 @@ logger = logging.getLogger(__name__)
 # Search parameters
 TABLES_K = 5  # Number of tables to retrieve
 COLUMNS_K = 3  # Number of columns to retrieve (fallback only)
+COLUMN_FALLBACK_MIN_SCORE = 0.6
+COLUMN_FALLBACK_GENERIC_STRICT_SCORE = 0.75
+COLUMN_FALLBACK_SCORE_SEPARATION = 0.1
+GENERIC_COLUMN_NAMES = {"id", "name", "status", "amount"}
+
+
+def _apply_column_guardrails(seeds: list[dict]) -> tuple[list[dict], bool]:
+    """Filter ambiguous column fallback seeds.
+
+    Returns:
+        Tuple of (filtered_seeds, relaxed_flag)
+    """
+    if not seeds:
+        return [], False
+
+    relaxed = False
+    filtered = [s for s in seeds if s.get("score", 0.0) >= COLUMN_FALLBACK_MIN_SCORE]
+    if not filtered:
+        relaxed = True
+        return seeds[:COLUMNS_K], relaxed
+
+    top_hits = filtered[:COLUMNS_K]
+    generic_count = 0
+    for hit in top_hits:
+        col_name = (hit.get("node", {}).get("name") or "").lower()
+        if col_name in GENERIC_COLUMN_NAMES:
+            generic_count += 1
+
+    if generic_count >= max(1, len(top_hits) // 2 + 1):
+        top_score = top_hits[0].get("score", 0.0)
+        second_score = top_hits[1].get("score", 0.0) if len(top_hits) > 1 else 0.0
+        strong_separation = (top_score - second_score) >= COLUMN_FALLBACK_SCORE_SEPARATION
+        guarded = []
+        for hit in filtered:
+            col_name = (hit.get("node", {}).get("name") or "").lower()
+            is_primary = bool(hit.get("node", {}).get("is_primary_key"))
+            if col_name in GENERIC_COLUMN_NAMES and not is_primary and not strong_separation:
+                if hit.get("score", 0.0) < COLUMN_FALLBACK_GENERIC_STRICT_SCORE:
+                    continue
+            guarded.append(hit)
+
+        if not guarded:
+            relaxed = True
+            return filtered[:COLUMNS_K], relaxed
+        return guarded, relaxed
+
+    return filtered, relaxed
 
 
 async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
@@ -38,20 +87,77 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
     introspector = Database.get_schema_introspector()
 
     try:
-        # 1. Seed Selection (Tables-First)
-        table_hits = await indexer.search_nodes(query_text, label="Table", k=TABLES_K)
-
-        if not table_hits:
-            logger.info("No table hits, falling back to column search")
-            seeds = await indexer.search_nodes(query_text, label="Column", k=COLUMNS_K)
-            seed_table_names = list(
-                set(s["node"].get("table") for s in seeds if s["node"].get("table"))
+        seed_start = time.monotonic()
+        with Telemetry.start_span(
+            "seed_selection",
+            attributes={
+                "seed_selection.k_tables": TABLES_K,
+                "seed_selection.k_columns": COLUMNS_K,
+            },
+        ) as seed_span:
+            # 1. Seed Selection (Tables-First)
+            table_hits, table_meta = await indexer.search_nodes_with_metadata(
+                query_text, label="Table", k=TABLES_K
             )
-            seed_scores = {s["node"].get("table"): s["score"] for s in seeds}
-        else:
-            seeds = table_hits
-            seed_table_names = [s["node"].get("name") for s in seeds]
-            seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
+
+            column_meta = {"threshold": 0.0, "timing_ms": {}}
+            if not table_hits:
+                logger.info("No table hits, falling back to column search")
+                seeds, column_meta = await indexer.search_nodes_with_metadata(
+                    query_text, label="Column", k=COLUMNS_K, use_column_cache=True
+                )
+                seeds, relaxed_guardrails = _apply_column_guardrails(seeds)
+                seed_table_names = list(
+                    set(s["node"].get("table") for s in seeds if s["node"].get("table"))
+                )
+                seed_scores = {s["node"].get("table"): s["score"] for s in seeds}
+                seed_span.set_attribute("seed_selection.path", "column_fallback")
+                seed_span.set_attribute("seed_selection.column_hit_count", len(seeds))
+                seed_span.set_attribute(
+                    "seed_selection.column_guardrail_relaxed", relaxed_guardrails
+                )
+            else:
+                seeds = table_hits
+                seed_table_names = [s["node"].get("name") for s in seeds]
+                seed_scores = {s["node"].get("name"): s["score"] for s in seeds}
+                seed_span.set_attribute("seed_selection.path", "table")
+                seed_span.set_attribute("seed_selection.column_hit_count", 0)
+                seed_span.set_attribute("seed_selection.column_cache_hit", False)
+                seed_span.set_attribute("seed_selection.column_guardrail_relaxed", False)
+
+            seed_span.set_attribute("seed_selection.table_hit_count", len(table_hits))
+            seed_span.set_attribute(
+                "seed_selection.similarity_threshold_table", table_meta.get("threshold", 0.0)
+            )
+            seed_span.set_attribute(
+                "seed_selection.similarity_threshold_column", column_meta.get("threshold", 0.0)
+            )
+            seed_span.set_attribute(
+                "seed_selection.column_cache_hit", column_meta.get("cache_hit", False)
+            )
+
+            table_timing = table_meta.get("timing_ms", {})
+            column_timing = column_meta.get("timing_ms", {})
+            if table_timing:
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.table_embedding", table_timing.get("embedding", 0.0)
+                )
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.table_search", table_timing.get("search", 0.0)
+                )
+            if column_timing:
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.column_embedding",
+                    column_timing.get("embedding", 0.0),
+                )
+                seed_span.set_attribute(
+                    "seed_selection.latency_ms.column_search", column_timing.get("search", 0.0)
+                )
+
+            seed_span.set_attribute(
+                "seed_selection.latency_ms.traversal_start",
+                (time.monotonic() - seed_start) * 1000,
+            )
 
         if not seed_table_names:
             return {"nodes": [], "relationships": []}

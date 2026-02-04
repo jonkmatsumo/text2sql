@@ -39,6 +39,7 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
   const maxVisibleMarkers = 10;
   const visibleMarkers = markers.slice(0, maxVisibleMarkers);
   const overflowCount = markers.length - maxVisibleMarkers;
+  const selfTimeMs = Number((row.span as any).self_time_ms ?? NaN);
 
   return (
     <button
@@ -84,6 +85,7 @@ export const WaterfallSpanRow: React.FC<WaterfallSpanRowProps> = ({
         </div>
         <span className="trace-waterfall__duration">
           {formatMs(row.span.duration_ms)}
+          {Number.isFinite(selfTimeMs) ? ` · self ${formatMs(selfTimeMs)}` : ""}
         </span>
       </div>
     </button>

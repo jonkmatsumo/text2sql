@@ -42,6 +42,60 @@ export interface WaterfallGroup {
   rows: WaterfallRow[];
   isExpanded: boolean;
   totalDurationMs: number;
+  totalSelfTimeMs: number;
+}
+
+export interface StageGroup {
+  id: string;
+  label: string;
+  rows: WaterfallRow[];
+  totalDurationMs: number;
+  totalSelfTimeMs: number;
+}
+
+export function mapSpanStage(span: SpanSummary): { key: string; label: string } {
+  const attrs = span.span_attributes || {};
+  const explicit = attrs["telemetry.stage"] || attrs["stage"] || attrs["span.stage"];
+  if (explicit) {
+    const label = String(explicit);
+    return { key: label, label };
+  }
+
+  const eventType = attrs["telemetry.event_type"] || attrs["event.type"];
+  const name = span.name.toLowerCase();
+
+  if (eventType === "llm" || name.includes("llm")) return { key: "llm", label: "LLM" };
+  if (eventType === "tool" || name.includes("tool")) return { key: "tool", label: "Tools" };
+  if (name.includes("db") || name.includes("sql")) return { key: "db", label: "Database" };
+  if (name.includes("cache")) return { key: "cache", label: "Cache" };
+  if (name.includes("router") || name.includes("route")) return { key: "routing", label: "Routing" };
+
+  return { key: "other", label: "Other" };
+}
+
+export function groupStageRows(rows: WaterfallRow[]): StageGroup[] {
+  const stages = new Map<string, StageGroup>();
+  const order: string[] = [];
+
+  rows.forEach((row) => {
+    const stage = mapSpanStage(row.span);
+    if (!stages.has(stage.key)) {
+      stages.set(stage.key, {
+        id: stage.key,
+        label: stage.label,
+        rows: [],
+        totalDurationMs: 0,
+        totalSelfTimeMs: 0,
+      });
+      order.push(stage.key);
+    }
+    const entry = stages.get(stage.key)!;
+    entry.rows.push(row);
+    entry.totalDurationMs += row.span.duration_ms;
+    entry.totalSelfTimeMs += Number((row.span as any).self_time_ms ?? 0);
+  });
+
+  return order.map((key) => stages.get(key)!);
 }
 
 export function buildWaterfallRows(spans: SpanSummary[]): WaterfallRow[] {
@@ -123,12 +177,14 @@ export function groupWaterfallRows(
         rows: [],
         isExpanded: true,
         totalDurationMs: 0,
+        totalSelfTimeMs: 0,
       });
       groupOrder.push(key);
     }
     const group = groupsMap.get(key)!;
     group.rows.push(row);
     group.totalDurationMs += row.span.duration_ms;
+    group.totalSelfTimeMs += Number((row.span as any).self_time_ms ?? 0);
   });
 
   return groupOrder.map((key) => groupsMap.get(key)!);

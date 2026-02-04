@@ -22,12 +22,12 @@ class TestVisualizeNode:
         data = [{"cat": "A", "val": 10}, {"cat": "B", "val": 20}]
         state = AgentState(query_result=data, viz_spec=None, viz_reason=None)
 
-        with patch("agent.nodes.visualize.build_vega_lite_spec") as mock_build:
-            mock_build.return_value = {"mark": "bar"}
+        with patch("agent.nodes.visualize.build_chart_schema") as mock_build:
+            mock_build.return_value = {"chartType": "bar"}
 
             result = visualize_query_node(state)
 
-            assert result["viz_spec"] == {"mark": "bar"}
+            assert result["viz_spec"] == {"chartType": "bar"}
             assert "Generated bar chart" in result["viz_reason"]
             mock_build.assert_called_once_with(data)
 
@@ -36,7 +36,7 @@ class TestVisualizeNode:
         data = [{"single_col": 1}]
         state = AgentState(query_result=data)
 
-        with patch("agent.nodes.visualize.build_vega_lite_spec") as mock_build:
+        with patch("agent.nodes.visualize.build_chart_schema") as mock_build:
             mock_build.return_value = None
 
             result = visualize_query_node(state)
@@ -48,7 +48,7 @@ class TestVisualizeNode:
         """Node should handle exceptions gracefully."""
         state = AgentState(query_result=[{"a": 1}])
 
-        with patch("agent.nodes.visualize.build_vega_lite_spec") as mock_build:
+        with patch("agent.nodes.visualize.build_chart_schema") as mock_build:
             mock_build.side_effect = Exception("Boom")
 
             result = visualize_query_node(state)
