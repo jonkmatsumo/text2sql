@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { VegaEmbed } from "react-vega";
 import { fetchMetricsPreview } from "../api";
 import { MetricsPreviewResponse, MetricsBucket } from "../types";
 import { grafanaBaseUrl } from "../config";
 import { ChartFrame } from "../components/charts/ChartFrame";
+import { ChartRenderer } from "../components/charts/ChartRenderer";
+import { AreaChartSchema } from "../types/charts";
 
 interface MetricPanel {
   title: string;
@@ -22,7 +23,7 @@ const WINDOW_OPTIONS = [
   { label: "Last 7 Days", value: "7d" }
 ];
 
-function TimeSeriesChart({
+function buildTimeSeriesSchema({
   data,
   color,
   unit
@@ -30,54 +31,30 @@ function TimeSeriesChart({
   data: { timestamp: string; value: number | null }[];
   color: string;
   unit?: string;
-}) {
-  if (data.length === 0) return null;
-
-  const spec: any = {
-    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-    width: "container",
-    height: 200,
-    data: {
-      values: data
-    },
-    mark: {
-      type: "area",
-      line: { color },
-      color: {
-        x1: 1,
-        y1: 1,
-        x2: 1,
-        y2: 0,
-        gradient: "linear",
-        stops: [
-          { offset: 0, color: "transparent" },
-          { offset: 1, color: `${color}40` }
-        ]
+}): AreaChartSchema {
+  return {
+    chartType: "area",
+    series: [
+      {
+        name: unit || "Value",
+        color,
+        gradient: true,
+        points: data.map((point) => ({
+          x: point.timestamp,
+          y: point.value
+        }))
       }
+    ],
+    xAxis: {
+      format: "%m/%d %H:%M"
     },
-    encoding: {
-      x: {
-        field: "timestamp",
-        type: "temporal",
-        axis: { title: null, format: "%m/%d %H:%M" }
-      },
-      y: {
-        field: "value",
-        type: "quantitative",
-        axis: { title: unit || null }
-      },
-      tooltip: [
-        { field: "timestamp", type: "temporal", title: "Time" },
-        { field: "value", type: "quantitative", title: unit || "Value", format: ".2f" }
-      ]
+    yAxis: {
+      label: unit
     },
-    config: {
-      view: { stroke: null },
-      axis: { grid: true, gridColor: "#e5e7eb" }
+    meta: {
+      height: 200
     }
   };
-
-  return <VegaEmbed spec={spec} options={{ actions: false }} />;
 }
 
 function MetricCard({
@@ -93,6 +70,11 @@ function MetricCard({
 }) {
   const hasData = panel.data.some((point) => point.value != null);
   const isEmpty = !isLoading && !error && !hasData;
+  const schema = buildTimeSeriesSchema({
+    data: panel.data,
+    color: panel.color,
+    unit: panel.unit
+  });
 
   return (
     <ChartFrame
@@ -106,7 +88,7 @@ function MetricCard({
         missingBuckets: panel.missingBuckets
       }}
     >
-      <TimeSeriesChart data={panel.data} color={panel.color} unit={panel.unit} />
+      <ChartRenderer schema={schema} title={panel.title} />
     </ChartFrame>
   );
 }
