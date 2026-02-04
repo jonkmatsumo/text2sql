@@ -119,6 +119,10 @@ class AgentState(TypedDict):
     missing_identifiers: Optional[List[str]]
     schema_drift_auto_refresh: Optional[bool]
 
+    # Per-node latency tracking (seconds)
+    latency_generate_seconds: Optional[float]
+    latency_correct_seconds: Optional[float]
+
     # =========================================================================
     # Cache and Metadata
     # =========================================================================

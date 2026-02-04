@@ -3,6 +3,8 @@
 Enhanced with error taxonomy for targeted correction strategies.
 """
 
+import time
+
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -147,6 +149,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
 
         chain = prompt | get_llm(temperature=0)
 
+        start_time = time.monotonic()
         response = chain.invoke(
             {
                 "correction_strategy": correction_strategy,
@@ -158,6 +161,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_msg": error,
             }
         )
+        latency_seconds = time.monotonic() - start_time
+        span.set_attribute("latency.correct_seconds", latency_seconds)
 
         # Capture token usage
         from agent.llm_client import extract_token_usage
@@ -190,4 +195,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "error": None,  # Reset error for next attempt
             "error_category": error_category,
             "correction_plan": correction_strategy,
+            "latency_correct_seconds": latency_seconds,
         }

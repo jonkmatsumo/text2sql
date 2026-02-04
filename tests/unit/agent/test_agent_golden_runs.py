@@ -188,15 +188,22 @@ async def test_golden_drift_hint_on_empty_results(monkeypatch):
 @pytest.mark.asyncio
 async def test_golden_retry_budget_message(monkeypatch):
     """Retry budget exhaustion should set a clear error message."""
-    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "5")
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "0")
     monkeypatch.setattr("agent.graph.time.monotonic", lambda: 100.0)
 
-    state = {"error": "Execution error", "retry_count": 0, "deadline_ts": 102.0}
+    state = {
+        "error": "Execution error",
+        "retry_count": 0,
+        "deadline_ts": 102.0,
+        "latency_correct_seconds": 2.0,
+    }
 
     result = route_after_execution(state)
 
     assert result == "failed"
     assert "Retry budget exhausted" in state["error"]
+    assert "remaining time" in state["error"]
+    assert "estimated" in state["error"]
 
 
 @pytest.mark.asyncio

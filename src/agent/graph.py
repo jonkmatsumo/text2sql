@@ -127,19 +127,23 @@ def route_after_execution(state: AgentState) -> str:
         str: Next node name
     """
     if state.get("error"):
-        # TODO(p0): make retry budget deadline-aware with observed LLM latency.
         deadline_ts = state.get("deadline_ts")
-        min_retry_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
         remaining = None
+        estimated_correction_budget = _estimate_correction_budget_seconds(state)
         if deadline_ts is not None:
             remaining = deadline_ts - time.monotonic()
             span = telemetry.get_current_span()
             if span:
-                span.set_attribute("retry.budget_remaining_seconds", max(0.0, remaining))
-            if remaining < min_retry_budget:
+                span.set_attribute("retry.remaining_budget_seconds", max(0.0, remaining))
+                span.set_attribute("retry.estimated_correction_budget", estimated_correction_budget)
+            if remaining < estimated_correction_budget:
                 if span:
                     span.set_attribute("retry.stopped_due_to_budget", True)
-                state["error"] = "Retry budget exhausted before attempting another correction."
+                state["error"] = (
+                    "Retry budget exhausted; remaining time "
+                    f"{max(0.0, remaining):.2f}s is below estimated "
+                    f"{estimated_correction_budget:.2f}s."
+                )
                 state["error_category"] = "timeout"
                 return "failed"
         span = telemetry.get_current_span()
@@ -151,6 +155,19 @@ def route_after_execution(state: AgentState) -> str:
             return "failed"  # Go to graceful failure
         return "correct"  # Go to self-correction
     return "visualize"  # Go to visualization (then synthesis)
+
+
+def _estimate_correction_budget_seconds(state: AgentState) -> float:
+    """Estimate time needed for another correction attempt."""
+    min_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
+    overhead_seconds = 0.5
+    observed = state.get("latency_correct_seconds") or state.get("latency_generate_seconds")
+    if observed is None:
+        observed = min_budget or 3.0
+    estimated = float(observed) + overhead_seconds
+    if min_budget:
+        estimated = max(estimated, float(min_budget))
+    return estimated
 
 
 def create_workflow() -> StateGraph:
