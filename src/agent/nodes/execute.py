@@ -15,6 +15,10 @@ from common.config.env import get_env_bool
 logger = logging.getLogger(__name__)
 
 
+class ToolResponseMalformedError(RuntimeError):
+    """Raised when execute_sql_query returns an unexpected payload."""
+
+
 def _extract_missing_identifiers(error_text: str) -> list[str]:
     patterns = [
         r'relation "(?P<name>[^"]+)" does not exist',
@@ -35,6 +39,66 @@ def _extract_missing_identifiers(error_text: str) -> list[str]:
 def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
     identifiers = _extract_missing_identifiers(error_text)
     return (len(identifiers) > 0, identifiers)
+
+
+def parse_execute_tool_response(payload) -> dict:
+    """Parse execute_sql_query response into a normalized shape."""
+    from agent.utils.parsing import parse_tool_output
+
+    def _looks_like_json_object(value) -> bool:
+        if not isinstance(value, str):
+            return False
+        stripped = value.strip()
+        return stripped.startswith("{") and stripped.endswith("}")
+
+    def _is_message_wrapper(value) -> bool:
+        return isinstance(value, dict) and any(key in value for key in ("type", "content", "text"))
+
+    dict_payload = (
+        isinstance(payload, dict) and not _is_message_wrapper(payload)
+    ) or _looks_like_json_object(payload)
+    parsed = parse_tool_output(payload)
+    response_shape = "legacy"
+    if isinstance(parsed, list) and len(parsed) == 1:
+        item = parsed[0]
+        if isinstance(item, dict):
+            if "error" in item:
+                return {
+                    "response_shape": "error",
+                    "error": item.get("error"),
+                    "error_category": item.get("error_category"),
+                }
+            if "rows" in item and "metadata" in item:
+                return {
+                    "response_shape": "enveloped",
+                    "rows": item.get("rows") or [],
+                    "metadata": item.get("metadata") or {},
+                    "columns": item.get("columns"),
+                }
+            if dict_payload:
+                return {"response_shape": "malformed"}
+            return {"response_shape": "legacy", "rows": parsed}
+        if isinstance(item, str) and (
+            "Error:" in item or "Database Error:" in item or "Execution Error:" in item
+        ):
+            return {"response_shape": "error", "error": item, "error_category": None}
+        if dict_payload:
+            return {"response_shape": "malformed"}
+        return {"response_shape": "legacy", "rows": parsed}
+    if isinstance(parsed, list):
+        return {"response_shape": "legacy", "rows": parsed}
+    elif isinstance(parsed, dict):
+        if "error" in parsed:
+            return {
+                "response_shape": "error",
+                "error": parsed.get("error"),
+                "error_category": parsed.get("error_category"),
+            }
+        response_shape = "malformed"
+    else:
+        response_shape = "malformed"
+
+    return {"response_shape": response_shape}
 
 
 async def validate_and_execute_node(state: AgentState) -> dict:
@@ -145,10 +209,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
             )
 
-            # Use robust parsing utility
-            from agent.utils.parsing import parse_tool_output
-
-            parsed_data = parse_tool_output(result)
+            parsed = parse_execute_tool_response(result)
             result_is_truncated = None
             result_row_limit = None
             result_rows_returned = None
@@ -171,73 +232,47 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "schema_drift_auto_refresh": auto_refresh,
                 }
 
-            if parsed_data:
-                # Check for wrapped error object {"error": "..."}
-                if (
-                    isinstance(parsed_data, list)
-                    and len(parsed_data) == 1
-                    and isinstance(parsed_data[0], dict)
-                    and "error" in parsed_data[0]
-                ):
-                    error_msg = parsed_data[0]["error"]
-                    error_category = parsed_data[0].get("error_category")
-                    span.set_outputs(
-                        {
-                            "error": error_msg,
-                            "error_category": error_category,
-                        }
-                    )
-                    if error_category:
-                        span.set_attribute("error_category", error_category)
-                        span.set_attribute("timeout.triggered", error_category == "timeout")
-                    drift_hint = _maybe_add_schema_drift(error_msg)
-                    return {
+            span.set_attribute("tool.response_shape", parsed.get("response_shape"))
+            if parsed.get("response_shape") == "error":
+                error_msg = parsed.get("error") or "Tool returned an error."
+                error_category = parsed.get("error_category")
+                span.set_outputs(
+                    {
                         "error": error_msg,
-                        "query_result": None,
                         "error_category": error_category,
-                        **drift_hint,
                     }
+                )
+                if error_category:
+                    span.set_attribute("error_category", error_category)
+                    span.set_attribute("timeout.triggered", error_category == "timeout")
+                drift_hint = _maybe_add_schema_drift(error_msg)
+                return {
+                    "error": error_msg,
+                    "query_result": None,
+                    "error_category": error_category,
+                    **drift_hint,
+                }
 
-                if (
-                    isinstance(parsed_data, list)
-                    and len(parsed_data) == 1
-                    and isinstance(parsed_data[0], dict)
-                    and "rows" in parsed_data[0]
-                    and "metadata" in parsed_data[0]
-                ):
-                    envelope = parsed_data[0]
-                    query_result = envelope.get("rows") or []
-                    metadata = envelope.get("metadata") or {}
-                    result_is_truncated = metadata.get("is_truncated")
-                    result_row_limit = metadata.get("row_limit")
-                    result_rows_returned = metadata.get("rows_returned")
-                    result_columns = envelope.get("columns")
-                    error = None
-                else:
-                    if (
-                        isinstance(parsed_data, list)
-                        and len(parsed_data) == 1
-                        and isinstance(parsed_data[0], str)
-                    ):
-                        raw_str = parsed_data[0]
-                        if "Error:" in raw_str or "Database Error:" in raw_str:
-                            span.set_outputs({"error": raw_str})
-                            drift_hint = _maybe_add_schema_drift(raw_str)
-                            return {"error": raw_str, "query_result": None, **drift_hint}
+            if parsed.get("response_shape") == "malformed":
+                error_msg = "Tool response malformed; check MCP tool version compatibility."
+                span.set_outputs({"error": error_msg})
+                span.set_attribute("tool.response_shape", "malformed")
+                return {
+                    "error": error_msg,
+                    "error_category": "tool_response_malformed",
+                    "query_result": None,
+                }
 
-                    query_result = parsed_data
-                    error = None
+            if parsed.get("response_shape") == "enveloped":
+                query_result = parsed.get("rows") or []
+                metadata = parsed.get("metadata") or {}
+                result_is_truncated = metadata.get("is_truncated")
+                result_row_limit = metadata.get("row_limit")
+                result_rows_returned = metadata.get("rows_returned")
+                result_columns = parsed.get("columns")
+                error = None
             else:
-                # Parsing failed or empty result. Check if it looks like an error string
-                raw_str = str(result)
-                if "Error:" in raw_str or "Database Error:" in raw_str:
-                    error = raw_str
-                    span.set_outputs({"error": error})
-                    drift_hint = _maybe_add_schema_drift(raw_str)
-                    return {"error": error, "query_result": None, **drift_hint}
-
-                # Otherwise, assume it's just empty result set
-                query_result = []
+                query_result = parsed.get("rows") or []
                 error = None
 
             span.set_outputs(
