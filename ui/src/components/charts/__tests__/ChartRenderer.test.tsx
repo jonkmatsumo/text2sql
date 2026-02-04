@@ -26,7 +26,7 @@ describe("ChartRenderer", () => {
     };
 
     render(<ChartRenderer schema={schema} />);
-    expect(screen.getByTestId("chart-line")).toBeInTheDocument();
+    expect(screen.getByTestId("line-chart")).toBeInTheDocument();
   });
 
   it("falls back to Vega when legacy spec present", async () => {

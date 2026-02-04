@@ -34,6 +34,7 @@ export interface LineChartSchema {
   series: Series[];
   xAxis?: AxisSpec;
   yAxis?: AxisSpec;
+  showMarkers?: boolean;
   meta?: ChartMeta;
 }
 
@@ -50,6 +51,7 @@ export interface BarChartSchema {
   series: Series[];
   xAxis?: AxisSpec;
   yAxis?: AxisSpec;
+  stacked?: boolean;
   meta?: ChartMeta;
 }
 
