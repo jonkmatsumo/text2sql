@@ -334,6 +334,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     "query": user_query,
                                     "sql": original_sql,
                                     "tenant_id": tenant_id,
+                                    "schema_snapshot_id": state.get("schema_snapshot_id"),
                                 }
                             )
                 except Exception:

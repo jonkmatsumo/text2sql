@@ -7,7 +7,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, StateGraph
 
-from agent.graph import route_after_execution, route_after_validation
+from agent.graph import route_after_cache_lookup, route_after_execution, route_after_validation
+from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.execute import validate_and_execute_node
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
@@ -280,3 +281,51 @@ async def test_golden_schema_binding_failure_skips_execute(monkeypatch):
         result = await workflow.compile().ainvoke(state)
 
     assert result.get("error_category") == "schema_binding"
+
+
+@pytest.mark.asyncio
+async def test_golden_cache_schema_mismatch_routes_to_retrieve(monkeypatch):
+    """Cache hit rejected on schema mismatch should route to retrieval."""
+    monkeypatch.setenv("AGENT_CACHE_SCHEMA_VALIDATION", "true")
+
+    cache_tool = AsyncMock()
+    cache_tool.name = "lookup_cache"
+    cache_tool.ainvoke = AsyncMock(
+        return_value=json.dumps(
+            {
+                "cache_id": "cache-1",
+                "value": "SELECT 1",
+                "similarity": 1.0,
+                "metadata": {"schema_snapshot_id": "fp-old"},
+            }
+        )
+    )
+
+    subgraph_tool = AsyncMock()
+    subgraph_tool.name = "get_semantic_subgraph"
+    subgraph_tool.ainvoke = AsyncMock(
+        return_value=json.dumps({"nodes": [{"type": "Table", "name": "t2"}]})
+    )
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show data")],
+        schema_context="",
+        current_sql=None,
+        query_result=None,
+        error=None,
+        retry_count=0,
+        tenant_id=1,
+    )
+
+    with (
+        patch("agent.nodes.cache_lookup.telemetry.start_span", return_value=_DummySpan()),
+        patch(
+            "agent.nodes.cache_lookup.get_mcp_tools",
+            AsyncMock(return_value=[cache_tool, subgraph_tool]),
+        ),
+        patch("agent.utils.schema_fingerprint.resolve_schema_snapshot_id", return_value="fp-new"),
+    ):
+        result = await cache_lookup_node(state)
+
+    assert result["from_cache"] is False
+    assert route_after_cache_lookup(result) == "retrieve"
