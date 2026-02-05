@@ -21,7 +21,9 @@ class ResultCompleteness:
     is_truncated: bool
     is_limited: bool
     row_limit: Optional[int] = None
+    query_limit: Optional[int] = None
     next_page_token: Optional[str] = None
+    page_size: Optional[int] = None
     partial_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -34,23 +36,34 @@ class ResultCompleteness:
         is_truncated: bool,
         is_limited: bool,
         row_limit: Optional[int],
+        query_limit: Optional[int] = None,
         next_page_token: Optional[str] = None,
+        page_size: Optional[int] = None,
+        partial_reason: Optional[str] = None,
     ) -> "ResultCompleteness":
         """Construct a completeness model from raw metadata."""
-        if next_page_token:
-            reason = PartialReason.PAGINATED.value
-        elif is_truncated:
-            reason = PartialReason.TRUNCATED.value
-        elif is_limited:
-            reason = PartialReason.LIMITED.value
-        else:
-            reason = None
+        reason = None
+        if partial_reason:
+            try:
+                reason = PartialReason(partial_reason).value
+            except ValueError:
+                reason = None
+
+        if reason is None:
+            if next_page_token:
+                reason = PartialReason.PAGINATED.value
+            elif is_truncated:
+                reason = PartialReason.TRUNCATED.value
+            elif is_limited:
+                reason = PartialReason.LIMITED.value
 
         return ResultCompleteness(
             rows_returned=rows_returned,
             is_truncated=is_truncated,
             is_limited=is_limited,
             row_limit=row_limit,
+            query_limit=query_limit,
             next_page_token=next_page_token,
+            page_size=page_size,
             partial_reason=reason,
         )

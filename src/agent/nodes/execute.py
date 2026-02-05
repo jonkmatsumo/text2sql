@@ -231,6 +231,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_row_limit = None
             result_rows_returned = None
             result_columns = None
+            result_next_page_token = None
+            result_page_size = None
+            result_partial_reason = None
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
@@ -299,6 +302,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_is_truncated = metadata.get("is_truncated")
                 result_row_limit = metadata.get("row_limit")
                 result_rows_returned = metadata.get("rows_returned")
+                result_next_page_token = metadata.get("next_page_token")
+                result_page_size = metadata.get("page_size")
+                result_partial_reason = metadata.get("partial_reason")
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -341,31 +347,29 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 except Exception:
                     logger.warning("Cache update failed", exc_info=True)
 
+            rows_returned = (
+                result_rows_returned
+                if result_rows_returned is not None
+                else (len(query_result) if query_result else 0)
+            )
+            is_limited = bool(state.get("result_is_limited"))
+            query_limit = state.get("result_limit") if is_limited else None
             return {
                 "query_result": query_result,
                 "error": error,
                 "result_is_truncated": result_is_truncated or False,
                 "result_row_limit": result_row_limit,
-                "result_rows_returned": (
-                    result_rows_returned
-                    if result_rows_returned is not None
-                    else (len(query_result) if query_result else 0)
-                ),
+                "result_rows_returned": (rows_returned),
                 "result_columns": result_columns,
                 "result_completeness": ResultCompleteness.from_parts(
-                    rows_returned=(
-                        result_rows_returned
-                        if result_rows_returned is not None
-                        else (len(query_result) if query_result else 0)
-                    ),
+                    rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),
-                    is_limited=bool(state.get("result_is_limited")),
-                    row_limit=(
-                        state.get("result_limit")
-                        if state.get("result_is_limited")
-                        else result_row_limit
-                    ),
-                    next_page_token=None,
+                    is_limited=is_limited,
+                    row_limit=result_row_limit,
+                    query_limit=query_limit,
+                    next_page_token=result_next_page_token,
+                    page_size=result_page_size,
+                    partial_reason=result_partial_reason,
                 ).to_dict(),
             }
 
