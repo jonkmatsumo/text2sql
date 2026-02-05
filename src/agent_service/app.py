@@ -42,6 +42,8 @@ class AgentRunRequest(BaseModel):
     tenant_id: int = Field(default=1, ge=1)
     thread_id: Optional[str] = None
     timeout_seconds: Optional[float] = Field(default=None, gt=0)
+    page_token: Optional[str] = None
+    page_size: Optional[int] = Field(default=None, gt=0)
 
 
 class AgentRunResponse(BaseModel):
@@ -58,6 +60,7 @@ class AgentRunResponse(BaseModel):
     viz_spec: Optional[dict] = None
     viz_reason: Optional[str] = None
     provenance: Optional[dict] = None
+    result_completeness: Optional[dict] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -84,6 +87,8 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 thread_id=thread_id,
                 timeout_seconds=timeout_seconds,
                 deadline_ts=deadline_ts,
+                page_token=request.page_token,
+                page_size=request.page_size,
             ),
             timeout=timeout_seconds,
         )
@@ -126,6 +131,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             viz_spec=state.get("viz_spec"),
             viz_reason=state.get("viz_reason"),
             provenance=provenance,
+            result_completeness=state.get("result_completeness"),
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)

@@ -283,6 +283,8 @@ async def run_agent_with_tracing(
     schema_snapshot_id: str = None,
     timeout_seconds: float = None,
     deadline_ts: float = None,
+    page_token: str = None,
+    page_size: int = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
@@ -348,6 +350,8 @@ async def run_agent_with_tracing(
             "schema_snapshot_id": schema_snapshot_id,
             "deadline_ts": deadline_ts,
             "timeout_seconds": timeout_seconds,
+            "page_token": page_token,
+            "page_size": page_size,
         }
 
         # Config with thread_id for checkpointer

@@ -47,6 +47,10 @@ class AgentState(TypedDict):
     result_limit: Optional[int]
     result_completeness: Optional[dict]
 
+    # Pagination inputs for executing subsequent pages
+    page_token: Optional[str]
+    page_size: Optional[int]
+
     # Deadline propagation and budgeting
     deadline_ts: Optional[float]
     timeout_seconds: Optional[float]

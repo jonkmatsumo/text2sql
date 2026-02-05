@@ -223,6 +223,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "params": execute_params,
                     "include_columns": True,
                     "timeout_seconds": remaining,
+                    "page_token": state.get("page_token"),
+                    "page_size": state.get("page_size"),
                 }
             )
 
