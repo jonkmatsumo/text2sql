@@ -1,6 +1,10 @@
 import asyncio
+import sys
 
 import pytest
+
+if sys.version_info < (3, 10):
+    pytest.skip("Databricks executor typing requires Python 3.10+", allow_module_level=True)
 
 import dal.databricks.executor as executor_mod
 from dal.async_query_executor import QueryStatus

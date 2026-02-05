@@ -1,6 +1,8 @@
 import pytest
 
-from dal.mysql.param_translation import translate_postgres_params_to_mysql
+pytest.importorskip("aiomysql")
+
+from dal.mysql.param_translation import translate_postgres_params_to_mysql  # noqa: E402
 
 
 def test_translate_single_placeholder():

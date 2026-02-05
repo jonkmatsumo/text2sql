@@ -35,8 +35,8 @@ class TestCreateInteractionFailure:
 
         mock_tools = [mock_create_tool, mock_update_tool]
 
-        # Ensure fail-open is NOT set
-        with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "false"}, clear=False):
+        # Strict mode should raise
+        with patch.dict(os.environ, {"AGENT_INTERACTION_PERSISTENCE_MODE": "strict"}, clear=False):
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
                 patch("agent.graph.telemetry") as mock_telemetry,
@@ -84,8 +84,10 @@ class TestCreateInteractionFailure:
             "error": None,
         }
 
-        # Set fail-open mode
-        with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "true"}, clear=False):
+        # Set best-effort mode
+        with patch.dict(
+            os.environ, {"AGENT_INTERACTION_PERSISTENCE_MODE": "best_effort"}, clear=False
+        ):
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
                 patch("agent.graph.app", mock_app),
@@ -102,6 +104,7 @@ class TestCreateInteractionFailure:
                 assert result.get("current_sql") == "SELECT 1"
                 # interaction_id should be None
                 assert result.get("interaction_id") is None
+                assert result.get("interaction_persisted") is False
 
     @pytest.mark.asyncio
     async def test_create_interaction_failure_logs_structured_error(self):
@@ -123,8 +126,10 @@ class TestCreateInteractionFailure:
 
         mock_tools = [mock_create_tool]
 
-        # Enable fail-open so we can capture logging
-        with patch.dict(os.environ, {"PERSISTENCE_FAIL_OPEN": "true"}, clear=False):
+        # Enable best-effort so we can capture logging
+        with patch.dict(
+            os.environ, {"AGENT_INTERACTION_PERSISTENCE_MODE": "best_effort"}, clear=False
+        ):
             with (
                 patch("agent.tools.get_mcp_tools", new=AsyncMock(return_value=mock_tools)),
                 patch("agent.graph.telemetry") as mock_telemetry,

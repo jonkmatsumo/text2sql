@@ -1,6 +1,7 @@
 """SQL generation node using LLM with RAG context, few-shot learning, and semantic caching."""
 
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
@@ -174,7 +175,7 @@ async def get_few_shot_examples(
             return "\n\n".join(formatted)
 
         except Exception as e:
-            print(f"Warning: Could not retrieve few-shot examples: {e}")
+            logger.warning("Could not retrieve few-shot examples: %s", e)
             return ""
 
 
@@ -347,12 +348,15 @@ Rules:
         chain = prompt | get_llm(temperature=0)
 
         # Generate SQL (MLflow autolog will capture token usage)
+        start_time = time.monotonic()
         response = chain.invoke(
             {
                 "schema_context": schema_context_to_use,
                 "question": user_query,
             }
         )
+        latency_seconds = time.monotonic() - start_time
+        span.set_attribute("latency.generate_seconds", latency_seconds)
 
         # Extract SQL from response (remove markdown code blocks if present)
         sql = response.content.strip()
@@ -381,4 +385,5 @@ Rules:
         return {
             "current_sql": sql,
             "from_cache": False,
+            "latency_generate_seconds": latency_seconds,
         }

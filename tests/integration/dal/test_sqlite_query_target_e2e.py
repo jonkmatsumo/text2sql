@@ -32,6 +32,7 @@ async def test_sqlite_query_target_introspection_and_exec(tmp_path, monkeypatch)
         result_json = await execute_sql_query(
             "SELECT name FROM users WHERE id = $1", tenant_id=1, params=[1]
         )
-        assert json.loads(result_json) == [{"name": "Ada"}]
+        data = json.loads(result_json)
+        assert data["rows"] == [{"name": "Ada"}]
     finally:
         await Database.close()

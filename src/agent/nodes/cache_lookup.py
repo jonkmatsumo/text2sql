@@ -1,14 +1,52 @@
 """Node for looking up queries in the semantic cache."""
 
 import logging
+import time
+from typing import Optional
 
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output
+from common.config.env import get_env_bool
 
 logger = logging.getLogger(__name__)
+_SCHEMA_SNAPSHOT_TTL_SECONDS = 60.0
+_SCHEMA_SNAPSHOT_CACHE = {}
+
+
+async def _get_current_schema_snapshot_id(
+    tools, user_query: str, tenant_id: Optional[int]
+) -> Optional[str]:
+    now = time.monotonic()
+    cache_key = tenant_id or 0
+    cached = _SCHEMA_SNAPSHOT_CACHE.get(cache_key)
+    if cached and now - cached["ts"] < _SCHEMA_SNAPSHOT_TTL_SECONDS:
+        return cached["value"]
+
+    subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
+    if not subgraph_tool:
+        return None
+
+    payload = {"query": user_query}
+    if tenant_id is not None:
+        payload["tenant_id"] = tenant_id
+    try:
+        raw_subgraph = await subgraph_tool.ainvoke(payload)
+    except Exception:
+        logger.warning("Schema snapshot fetch failed", exc_info=True)
+        return None
+
+    parsed = parse_tool_output(raw_subgraph)
+    if isinstance(parsed, list) and parsed:
+        parsed = parsed[0]
+    nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
+    from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+
+    snapshot_id = resolve_schema_snapshot_id(nodes)
+    _SCHEMA_SNAPSHOT_CACHE[cache_key] = {"value": snapshot_id, "ts": now}
+    return snapshot_id
 
 
 async def cache_lookup_node(state: AgentState) -> dict:
@@ -36,6 +74,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
         if not cache_tool:
             logger.warning("lookup_cache tool not found")
             span.set_attribute("lookup_mode", "error")
+            span.set_attribute("cache.hit", False)
             return {"cached_sql": None, "from_cache": False}
 
         try:
@@ -47,6 +86,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
             if not cache_data:
                 logger.info("Cache Miss or Rejected Hit")
+                span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
                 return {"cached_sql": None, "from_cache": False}
 
@@ -54,11 +94,13 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 cache_data = cache_data[0]
             if not isinstance(cache_data, dict):
                 logger.info("Cache Miss or Rejected Hit")
+                span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
                 return {"cached_sql": None, "from_cache": False}
 
             if not cache_data.get("value"):
                 logger.info("Cache Miss or Rejected Hit")
+                span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
                 return {"cached_sql": None, "from_cache": False}
 
@@ -66,6 +108,47 @@ async def cache_lookup_node(state: AgentState) -> dict:
             cached_sql = cache_data.get("value")
             cache_id = cache_data.get("cache_id")
             similarity = cache_data.get("similarity", 1.0)  # Could be 1.0 for fingerprint
+            cache_metadata = cache_data.get("metadata") or {}
+
+            span.set_attribute("cache.hit", True)
+            span.set_attribute("cache.snapshot_missing", False)
+            span.set_attribute("cache.snapshot_mismatch", False)
+            if cache_id:
+                span.set_attribute("cache.cache_id", cache_id)
+
+            if get_env_bool("AGENT_CACHE_SCHEMA_VALIDATION", False):
+                cached_snapshot_id = cache_metadata.get("schema_snapshot_id")
+                if not cached_snapshot_id:
+                    span.set_attribute("cache.snapshot_missing", True)
+                else:
+                    current_snapshot_id = await _get_current_schema_snapshot_id(
+                        tools, user_query, tenant_id
+                    )
+                    span.set_attribute("cache.cached_snapshot_id", cached_snapshot_id)
+                    if current_snapshot_id:
+                        span.set_attribute("cache.current_snapshot_id", current_snapshot_id)
+                        if cached_snapshot_id != current_snapshot_id:
+                            span.set_attribute("cache.snapshot_mismatch", True)
+                            logger.info(
+                                "Rejecting cache hit due to schema mismatch",
+                                extra={
+                                    "cache_id": cache_id,
+                                    "cached_snapshot_id": cached_snapshot_id,
+                                    "current_snapshot_id": current_snapshot_id,
+                                },
+                            )
+                            span.set_outputs({"hit": False, "reason": "schema_snapshot_mismatch"})
+                            return {
+                                "cached_sql": None,
+                                "from_cache": False,
+                                "cache_metadata": cache_metadata,
+                                "cache_similarity": similarity,
+                                "rejected_cache_context": {
+                                    "sql": cached_sql,
+                                    "original_query": user_query,
+                                    "reason": "schema_snapshot_mismatch",
+                                },
+                            }
 
             logger.info(f"✓ Cache hit validated by MCP. ID: {cache_id}, Sim: {similarity:.4f}")
             span.set_outputs({"hit": True, "sql": cached_sql})
@@ -73,11 +156,12 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 "current_sql": cached_sql,
                 "from_cache": True,
                 "cached_sql": cached_sql,
-                "cache_metadata": cache_data.get("metadata"),
+                "cache_metadata": cache_metadata,
                 "cache_similarity": similarity,
             }
 
         except Exception as e:
             logger.error(f"Cache lookup failed: {e}")
             span.set_attribute("error", str(e))
+            span.set_attribute("cache.hit", False)
             return {"cached_sql": None, "from_cache": False}

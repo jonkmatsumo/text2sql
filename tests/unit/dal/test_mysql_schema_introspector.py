@@ -2,7 +2,9 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from dal.mysql.schema_introspector import MysqlSchemaIntrospector
+pytest.importorskip("aiomysql")
+
+from dal.mysql.schema_introspector import MysqlSchemaIntrospector  # noqa: E402
 
 
 class _FakeConn:

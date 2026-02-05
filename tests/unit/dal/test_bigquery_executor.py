@@ -1,7 +1,11 @@
 import asyncio
+import sys
 import types
 
 import pytest
+
+if sys.version_info < (3, 10):
+    pytest.skip("BigQuery executor typing requires Python 3.10+", allow_module_level=True)
 
 from dal.async_query_executor import QueryStatus
 from dal.bigquery.executor import BigQueryAsyncQueryExecutor

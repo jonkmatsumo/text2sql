@@ -105,3 +105,47 @@ async def test_update_interaction_receives_config():
             assert config["configurable"].get("thread_id") == "thread_123"
         else:
             pytest.fail("update_tool.ainvoke was not called")
+
+
+@pytest.mark.asyncio
+async def test_interaction_logging_uses_state_schema_snapshot_id():
+    """Verify schema_snapshot_id is forwarded to create_interaction."""
+
+    async def mock_retry(func, *args, **kwargs):
+        return await func()
+
+    with (
+        patch("agent.tools.mcp_tools_context") as mock_mcp_ctx,
+        patch("agent.telemetry.telemetry") as mock_telemetry,
+        patch("agent.graph.app") as mock_app,
+        patch("agent.utils.retry.retry_with_backoff", side_effect=mock_retry),
+    ):
+        mock_create_tool = MagicMock()
+        mock_create_tool.name = "create_interaction"
+        mock_create_tool.ainvoke = AsyncMock(return_value={"id": "mock_id"})
+
+        mock_update_tool = MagicMock()
+        mock_update_tool.name = "update_interaction"
+        mock_update_tool.ainvoke = AsyncMock(return_value={"status": "updated"})
+
+        mock_mcp_ctx.return_value.__aenter__.return_value = [mock_create_tool, mock_update_tool]
+        mock_mcp_ctx.return_value.__aexit__.return_value = None
+
+        mock_telemetry.capture_context.return_value = {}
+        mock_telemetry.serialize_context.return_value = "{}"
+        mock_telemetry.get_current_span.return_value = MagicMock()
+
+        mock_app.ainvoke = AsyncMock(return_value={"messages": [], "error": None})
+
+        with patch("common.sanitization.sanitize_text") as mock_sanitize:
+            mock_sanitize.return_value.sanitized = "test question"
+
+            with patch("agent.tools.unpack_mcp_result", return_value="interaction_123"):
+                await run_agent_with_tracing(
+                    "test question",
+                    thread_id="thread_123",
+                    schema_snapshot_id="fp-1234",
+                )
+
+        call_args = mock_create_tool.ainvoke.call_args[0][0]
+        assert call_args["schema_snapshot_id"] == "fp-1234"

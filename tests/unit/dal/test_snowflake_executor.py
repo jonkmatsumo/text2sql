@@ -1,6 +1,15 @@
 """Unit tests for Snowflake executor fetch behavior."""
 
-from dal.snowflake.executor import _fetch
+import sys
+
+import pytest
+
+pytest.importorskip("snowflake")
+
+if sys.version_info < (3, 10):
+    pytest.skip("Snowflake executor typing requires Python 3.10+", allow_module_level=True)
+
+from dal.snowflake.executor import _fetch  # noqa: E402
 
 
 class _FakeCursor:

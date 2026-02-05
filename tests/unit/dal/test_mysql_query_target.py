@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from dal.mysql.query_target import MysqlQueryTargetDatabase
+pytest.importorskip("aiomysql")
+
+from dal.mysql.query_target import MysqlQueryTargetDatabase  # noqa: E402
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,11 @@ Provides exponential backoff with jitter for retrying transient failures.
 import asyncio
 import logging
 import random
-from typing import Callable, TypeVar
+from typing import Callable, Optional, TypeVar
+
+from agent.telemetry import telemetry
+from common.config.env import get_env_bool, get_env_str
+from dal.error_classification import ErrorClassification, classify_error_info
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,15 @@ TRANSIENT_ERROR_PATTERNS = {
 }
 
 
+def _classify_retryable_error(exception: Exception) -> Optional[ErrorClassification]:
+    if not get_env_bool("DAL_PROVIDER_AWARE_RETRY", True):
+        return None
+    provider = (
+        get_env_str("QUERY_TARGET_BACKEND") or get_env_str("QUERY_TARGET_PROVIDER") or "postgres"
+    )
+    return classify_error_info(provider, exception)
+
+
 def is_transient_error(exception: Exception) -> bool:
     """Check if an exception represents a transient error that is safe to retry.
 
@@ -35,6 +48,10 @@ def is_transient_error(exception: Exception) -> bool:
     Returns:
         True if the error is transient and retryable
     """
+    classification = _classify_retryable_error(exception)
+    if classification and classification.category != "unknown":
+        return classification.is_retryable
+
     error_msg = str(exception).lower()
     error_type = type(exception).__name__.lower()
 
@@ -94,8 +111,32 @@ async def retry_with_backoff(
                 **extra_context,
             }
 
+            classification = _classify_retryable_error(e)
+            span = telemetry.get_current_span()
+            if classification:
+                log_extra.update(
+                    {
+                        "retry.classified": True,
+                        "retry.error_category": classification.category,
+                        "retry.is_retryable": classification.is_retryable,
+                        "retry.provider": classification.provider,
+                    }
+                )
+                if span:
+                    span.set_attribute("retry.classified", True)
+                    span.set_attribute("retry.error_category", classification.category)
+                    span.set_attribute("retry.is_retryable", classification.is_retryable)
+                    span.set_attribute("retry.provider", classification.provider)
+            elif span:
+                span.set_attribute("retry.classified", False)
+
             # Check if error is transient
-            if not is_transient_error(e):
+            if classification and classification.category != "unknown":
+                is_retryable = classification.is_retryable
+            else:
+                is_retryable = is_transient_error(e)
+
+            if not is_retryable:
                 logger.error(
                     f"Non-transient error in {operation_name}, not retrying",
                     extra=log_extra,

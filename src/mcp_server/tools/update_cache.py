@@ -5,7 +5,7 @@ from mcp_server.services.cache import update_cache as update_cache_svc
 TOOL_NAME = "update_cache"
 
 
-async def handler(query: str, sql: str, tenant_id: int) -> str:
+async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str = None) -> str:
     """Update the semantic registry with a new confirmed query-SQL pair.
 
     Args:
@@ -16,5 +16,5 @@ async def handler(query: str, sql: str, tenant_id: int) -> str:
     Returns:
         "OK" on success.
     """
-    await update_cache_svc(query, sql, tenant_id)
+    await update_cache_svc(query, sql, tenant_id, schema_snapshot_id=schema_snapshot_id)
     return "OK"

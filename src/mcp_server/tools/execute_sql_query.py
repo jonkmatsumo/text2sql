@@ -1,5 +1,6 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
+import asyncio
 import json
 import re
 from typing import Optional
@@ -9,6 +10,8 @@ import asyncpg
 from dal.database import Database
 from dal.error_classification import emit_classified_error, maybe_classify_error
 from dal.util.column_metadata import build_column_meta
+from dal.util.row_limits import get_sync_max_rows
+from dal.util.timeouts import run_with_timeout
 
 TOOL_NAME = "execute_sql_query"
 
@@ -20,11 +23,43 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
     return [build_column_meta(key, "unknown") for key in first_row.keys()]
 
 
+def _resolve_row_limit(conn: object) -> int:
+    max_rows = getattr(conn, "max_rows", None)
+    if not max_rows:
+        max_rows = getattr(conn, "_max_rows", None)
+    if not max_rows:
+        max_rows = get_sync_max_rows()
+    return int(max_rows or 0)
+
+
+async def _cancel_best_effort(conn: object) -> None:
+    cancel_fn = getattr(conn, "cancel", None)
+    job_id = getattr(conn, "last_job_id", None) or getattr(conn, "job_id", None)
+    if callable(cancel_fn):
+        try:
+            if job_id:
+                await cancel_fn(job_id)
+            else:
+                await cancel_fn()
+        except Exception:
+            return
+    executor = getattr(conn, "executor", None)
+    if executor is None:
+        return
+    cancel_executor = getattr(executor, "cancel", None)
+    if callable(cancel_executor) and job_id:
+        try:
+            await cancel_executor(job_id)
+        except Exception:
+            return
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int] = None,
     params: Optional[list] = None,
     include_columns: bool = False,
+    timeout_seconds: Optional[float] = None,
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON.
 
@@ -39,6 +74,17 @@ async def handler(
     Returns:
         JSON array of result rows, or error message as string.
     """
+
+    def _unsupported_capability_response(required_capability: str) -> str:
+        return json.dumps(
+            {
+                "error": f"Requested capability is not supported: {required_capability}.",
+                "error_category": "unsupported_capability",
+                "required_capability": required_capability,
+            },
+            separators=(",", ":"),
+        )
+
     # Require tenant_id for RLS enforcement
     if tenant_id is None:
         error_msg = (
@@ -69,6 +115,13 @@ async def handler(
                 "Read-only access only."
             )
 
+    caps = Database.get_query_target_capabilities()
+    if include_columns and not caps.supports_column_metadata:
+        return _unsupported_capability_response("column_metadata")
+    if timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async":
+        if not caps.supports_cancel:
+            return _unsupported_capability_response("async_cancel")
+
     if Database.get_query_target_provider() == "redshift":
         from dal.redshift import validate_redshift_query
 
@@ -81,48 +134,94 @@ async def handler(
 
     try:
         columns = None
-        if include_columns:
-            query_result = await Database.fetch_query(
-                sql_query,
-                tenant_id=tenant_id,
-                params=params,
-                include_columns=True,
-            )
-            result = query_result.rows
-            columns = query_result.columns
-        else:
-            async with Database.get_connection(tenant_id, read_only=True) as conn:
-                if params:
-                    rows = await conn.fetch(sql_query, *params)
-                else:
-                    rows = await conn.fetch(sql_query)
+        last_truncated = False
+        row_limit = 0
+        async with Database.get_connection(tenant_id, read_only=True) as conn:
+            row_limit = _resolve_row_limit(conn)
 
-                result = [dict(row) for row in rows]
+            async def _fetch_rows():
+                nonlocal columns
+                if include_columns:
+                    fetch_with_columns = getattr(conn, "fetch_with_columns", None)
+                    prepare = getattr(conn, "prepare", None)
+                    supports_fetch_with_columns = (
+                        callable(fetch_with_columns) and "fetch_with_columns" in type(conn).__dict__
+                    )
+                    supports_prepare = callable(prepare) and "prepare" in type(conn).__dict__
+                    if params:
+                        if supports_fetch_with_columns:
+                            rows, columns = await fetch_with_columns(sql_query, *params)
+                        elif supports_prepare:
+                            from dal.util.column_metadata import columns_from_asyncpg_attributes
+
+                            statement = await prepare(sql_query)
+                            rows = await statement.fetch(*params)
+                            columns = columns_from_asyncpg_attributes(statement.get_attributes())
+                            rows = [dict(row) for row in rows]
+                        else:
+                            rows = await conn.fetch(sql_query, *params)
+                            rows = [dict(row) for row in rows]
+                    else:
+                        if supports_fetch_with_columns:
+                            rows, columns = await fetch_with_columns(sql_query)
+                        elif supports_prepare:
+                            from dal.util.column_metadata import columns_from_asyncpg_attributes
+
+                            statement = await prepare(sql_query)
+                            rows = await statement.fetch()
+                            columns = columns_from_asyncpg_attributes(statement.get_attributes())
+                            rows = [dict(row) for row in rows]
+                        else:
+                            rows = await conn.fetch(sql_query)
+                            rows = [dict(row) for row in rows]
+                else:
+                    if params:
+                        rows = await conn.fetch(sql_query, *params)
+                    else:
+                        rows = await conn.fetch(sql_query)
+                    rows = [dict(row) for row in rows]
+                return rows
+
+            try:
+                result = await run_with_timeout(
+                    _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
+                )
+            except asyncio.TimeoutError:
+                return json.dumps(
+                    {
+                        "error": "Execution timed out.",
+                        "error_category": "timeout",
+                    },
+                    separators=(",", ":"),
+                )
+
+            raw_last_truncated = getattr(conn, "last_truncated", False)
+            last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
 
         # Size Safety Valve
-        if len(result) > 1000:
-            error_msg = (
-                f"Result set too large ({len(result)} rows). "
-                "Please add a LIMIT clause to your query."
-            )
-            return json.dumps(
-                {
-                    "error": error_msg,
-                    "truncated_result": result[:1000],
-                },
-                default=str,
-            )
+        safety_limit = 1000
+        safety_truncated = False
+        if len(result) > safety_limit:
+            result = result[:safety_limit]
+            safety_truncated = True
+            row_limit = safety_limit
 
+        if include_columns and not columns:
+            columns = _build_columns_from_rows(result)
+
+        is_truncated = bool(last_truncated or safety_truncated)
+        payload = {
+            "rows": result,
+            "metadata": {
+                "is_truncated": is_truncated,
+                "row_limit": int(row_limit or 0),
+                "rows_returned": len(result),
+            },
+        }
         if include_columns:
-            if not columns:
-                columns = _build_columns_from_rows(result)
-            return json.dumps(
-                {"rows": result, "columns": columns},
-                default=str,
-                separators=(",", ":"),
-            )
+            payload["columns"] = columns
 
-        return json.dumps(result, default=str, separators=(",", ":"))
+        return json.dumps(payload, default=str, separators=(",", ":"))
 
     except asyncpg.PostgresError as e:
         error_message = f"Database Error: {str(e)}"

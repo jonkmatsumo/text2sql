@@ -106,6 +106,7 @@ class TestRetrieveContextNode:
         assert "table_names" in result
         assert "customer" in result["table_names"]
         assert "payment" in result["table_names"]
+        assert result["schema_snapshot_id"].startswith("fp-")
 
     @pytest.mark.asyncio
     @patch("agent.nodes.retrieve.telemetry.start_span")
@@ -268,6 +269,51 @@ class TestRetrieveContextNode:
         # Verify error is handled gracefully (returns error message in context)
         result = await retrieve_context_node(state)
         assert "Error retrieving context" in result["schema_context"]
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.retrieve.telemetry.start_span")
+    @patch("agent.nodes.retrieve.get_mcp_tools")
+    async def test_retrieve_context_node_no_prints_and_safe_logs(
+        self, mock_get_mcp_tools, mock_start_span
+    ):
+        """Ensure retrieve does not print and logs only safe metadata."""
+        self._mock_telemetry_span(mock_start_span)
+
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph"
+        mock_subgraph_tool.ainvoke = AsyncMock(
+            return_value=json.dumps({"nodes": [], "relationships": []})
+        )
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="test query")],
+            schema_context="",
+            current_sql=None,
+            query_result=None,
+            error=None,
+            retry_count=0,
+            interaction_id="interaction-123",
+        )
+
+        with (
+            patch("builtins.print") as mock_print,
+            patch("agent.nodes.retrieve.logger") as mock_logger,
+        ):
+            await retrieve_context_node(state)
+
+            mock_print.assert_not_called()
+            assert mock_logger.info.called
+            extra = mock_logger.info.call_args.kwargs.get("extra", {})
+            allowed_keys = {
+                "interaction_id",
+                "schema_source",
+                "tables_retrieved",
+                "nodes_retrieved",
+            }
+            assert set(extra.keys()).issubset(allowed_keys)
 
     @pytest.mark.asyncio
     @patch("agent.nodes.retrieve.telemetry.start_span")

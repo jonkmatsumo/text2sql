@@ -7,6 +7,7 @@ This module implements the entry point that:
 """
 
 import json
+import logging
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -18,6 +19,8 @@ from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 CONTEXTUALIZE_SYSTEM_PROMPT = """You are a helpful assistant that reformulates follow-up questions.
@@ -105,10 +108,10 @@ async def router_node(state: AgentState) -> dict:
 
                 active_query = reformulated.content
                 span.set_attribute("contextualized_query", active_query)
-                print(f"Contextualized Query: {active_query}")
+                logger.debug("Contextualized query generated.")
 
             except Exception as e:
-                print(f"Warning: Contextualization failed: {e}")
+                logger.warning("Contextualization failed: %s", e)
 
         # Store active query in span for observability
         span.set_inputs({"user_query": user_query, "active_query": active_query})
@@ -149,7 +152,7 @@ async def router_node(state: AgentState) -> dict:
             if isinstance(parsed_res, list) and len(parsed_res) > 0:
                 res_data = parsed_res[0]
         else:
-            print("Warning: resolve_ambiguity tool not found.")
+            logger.warning("resolve_ambiguity tool not found.")
 
         status = res_data.get("status", "CLEAR")
         span.set_attribute("resolution_status", status)

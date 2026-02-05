@@ -1,10 +1,14 @@
 """Context retrieval node for RAG-based schema lookup with MLflow tracing."""
 
+import logging
+
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.graph_formatter import format_graph_to_markdown
+
+logger = logging.getLogger(__name__)
 
 
 async def retrieve_context_node(state: AgentState) -> dict:
@@ -69,12 +73,10 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
                         graph_data = parse_tool_output(subgraph_json)
 
-                        print(f"DEBUG: subgraph_json type: {type(subgraph_json)}")
-                        print(f"DEBUG: parse_tool_output result type: {type(graph_data)}")
+                        logger.debug("Subgraph output type: %s", type(subgraph_json).__name__)
+                        logger.debug("Parsed subgraph output type: %s", type(graph_data).__name__)
                         if isinstance(graph_data, list):
-                            print(f"DEBUG: graph_data list len: {len(graph_data)}")
-                            if len(graph_data) > 0:
-                                print(f"DEBUG: graph_data[0] type: {type(graph_data[0])}")
+                            logger.debug("Parsed subgraph list size: %d", len(graph_data))
 
                         # Handle case where graph_data is a list with single dict
                         if isinstance(graph_data, list) and len(graph_data) > 0:
@@ -98,19 +100,16 @@ async def retrieve_context_node(state: AgentState) -> dict:
                             context_str = "No relevant tables found."
 
                     except Exception as e:
-                        print(
-                            f"Error parsing subgraph tool output: {e}, "
-                            f"Content: {str(subgraph_json)[:100]}..."
-                        )
+                        logger.exception("Error parsing subgraph tool output")
                         context_str = f"Error retrieving context: {e}"
                 else:
                     context_str = "No relevant tables found."
             else:
-                print("Warning: get_semantic_subgraph tool not found.")
+                logger.warning("get_semantic_subgraph tool not found.")
                 context_str = "Schema retrieval tool not available."
 
         except Exception as e:
-            print(f"Error during retrieval: {e}")
+            logger.exception("Error during retrieval")
             context_str = f"Error retrieving context: {e}"
 
         span.set_outputs(
@@ -121,10 +120,24 @@ async def retrieve_context_node(state: AgentState) -> dict:
             }
         )
 
+        raw_nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
+        from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+
+        schema_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
+
+        logger.info(
+            "Schema retrieval completed",
+            extra={
+                "interaction_id": state.get("interaction_id"),
+                "schema_source": "semantic_subgraph",
+                "tables_retrieved": len(table_names),
+                "nodes_retrieved": len(raw_nodes),
+            },
+        )
+
         return {
             "schema_context": context_str,
-            "raw_schema_context": (
-                graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
-            ),
+            "raw_schema_context": raw_nodes,
             "table_names": table_names,
+            "schema_snapshot_id": schema_snapshot_id,
         }

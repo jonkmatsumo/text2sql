@@ -7,6 +7,8 @@ class BackendCapabilities:
     """Capability flags for query-target backends."""
 
     execution_model: Literal["sync", "async"] = "sync"
+    supports_column_metadata: bool = True
+    supports_cancel: bool = False
     supports_arrays: bool = True
     supports_json_ops: bool = True
     supports_transactions: bool = True
@@ -36,9 +38,15 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_fk_enforcement=False,
             supports_schema_cache=True,
         )
+    if normalized == "postgres":
+        return BackendCapabilities(
+            execution_model="sync",
+            supports_cancel=True,
+        )
     if normalized == "sqlite":
         return BackendCapabilities(
             execution_model="sync",
+            supports_cancel=True,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=True,
@@ -48,6 +56,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "snowflake":
         return BackendCapabilities(
             execution_model="async",
+            supports_cancel=True,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,
@@ -56,6 +65,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "bigquery":
         return BackendCapabilities(
             execution_model="async",
+            supports_cancel=True,
             supports_arrays=True,
             supports_json_ops=False,
             supports_transactions=False,
@@ -66,6 +76,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "athena":
         return BackendCapabilities(
             execution_model="async",
+            supports_cancel=True,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,
@@ -75,6 +86,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "databricks":
         return BackendCapabilities(
             execution_model="async",
+            supports_cancel=True,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=False,
@@ -93,6 +105,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "duckdb":
         return BackendCapabilities(
             execution_model="sync",
+            supports_cancel=True,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=True,

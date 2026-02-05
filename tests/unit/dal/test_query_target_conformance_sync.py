@@ -4,7 +4,9 @@ import sqlite3
 
 import pytest
 
-from dal.sqlite import SqliteQueryTargetDatabase
+pytest.importorskip("aiosqlite")
+
+from dal.sqlite import SqliteQueryTargetDatabase  # noqa: E402
 
 
 @pytest.mark.asyncio

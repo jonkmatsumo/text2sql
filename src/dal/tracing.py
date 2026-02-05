@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 from typing import Any, Awaitable, Dict, Optional
 
 from common.config.env import get_env_bool
@@ -118,6 +119,15 @@ class TracedAsyncpgConnection:
         """Fetch a single row with tracing when enabled."""
         rows = await self.fetch(sql, *params)
         return rows[0] if rows else None
+
+    async def cancel(self) -> None:
+        """Best-effort cancellation for in-flight queries."""
+        cancel_fn = getattr(self._conn, "cancel", None)
+        if not callable(cancel_fn):
+            return
+        result = cancel_fn()
+        if inspect.isawaitable(result):
+            await result
 
     async def fetchval(self, sql: str, *params: Any) -> Any:
         """Fetch a single scalar value with tracing when enabled."""
