@@ -10,3 +10,5 @@ class QueryResult:
 
     rows: List[Dict[str, Any]]
     columns: Optional[List[ColumnMeta]] = None
+    next_page_token: Optional[str] = None
+    page_size: Optional[int] = None
