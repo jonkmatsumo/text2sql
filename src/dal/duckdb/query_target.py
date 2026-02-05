@@ -58,11 +58,17 @@ class _DuckDBConnection:
         self._max_rows = max_rows
         self._sync_max_rows = sync_max_rows
         self._last_truncated = False
+        self._last_truncated_reason: Optional[str] = None
 
     @property
     def last_truncated(self) -> bool:
         """Return True when the last fetch was truncated by row limits."""
         return self._last_truncated
+
+    @property
+    def last_truncated_reason(self) -> Optional[str]:
+        """Return the reason when the last fetch was truncated."""
+        return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
@@ -85,6 +91,7 @@ class _DuckDBConnection:
                 limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
             capped_rows, truncated = cap_rows_with_metadata(rows, limit)
             self._last_truncated = truncated
+            self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
             return capped_rows
 
         return await trace_query_operation(
@@ -105,6 +112,7 @@ class _DuckDBConnection:
                 limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
             capped_rows, truncated = cap_rows_with_metadata(rows, limit)
             self._last_truncated = truncated
+            self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
             return capped_rows, columns
 
         return await trace_query_operation(

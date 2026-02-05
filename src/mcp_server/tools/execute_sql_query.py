@@ -234,6 +234,10 @@ async def handler(
 
             raw_last_truncated = getattr(conn, "last_truncated", False)
             last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
+            raw_last_truncated_reason = getattr(conn, "last_truncated_reason", None)
+            last_truncated_reason = (
+                raw_last_truncated_reason if isinstance(raw_last_truncated_reason, str) else None
+            )
 
         # Size Safety Valve
         safety_limit = 1000
@@ -247,6 +251,11 @@ async def handler(
             columns = _build_columns_from_rows(result_rows)
 
         is_truncated = bool(last_truncated or safety_truncated)
+        partial_reason = last_truncated_reason
+        if partial_reason is None and safety_truncated:
+            partial_reason = "TRUNCATED"
+        if partial_reason is None and is_truncated:
+            partial_reason = "TRUNCATED"
         payload = {
             "rows": result_rows,
             "metadata": {
@@ -255,6 +264,7 @@ async def handler(
                 "rows_returned": len(result_rows),
                 "next_page_token": next_token,
                 "page_size": effective_page_size,
+                "partial_reason": partial_reason,
             },
         }
         if include_columns:
