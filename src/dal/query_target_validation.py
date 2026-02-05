@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from common.config.env import get_env_bool
 
@@ -134,7 +134,7 @@ def _validate_required_fields(metadata: Dict[str, Any], required: List[str]) -> 
 
 
 def _validate_allowed_keys(
-    payload: Dict[str, Any], allowed: List[str] | set[str], label: str
+    payload: Dict[str, Any], allowed: Union[List[str], Set[str]], label: str
 ) -> None:
     allowed_set = set(allowed)
     extra = [key for key in payload.keys() if key not in allowed_set]
