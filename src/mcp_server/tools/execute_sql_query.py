@@ -60,6 +60,8 @@ async def handler(
     params: Optional[list] = None,
     include_columns: bool = False,
     timeout_seconds: Optional[float] = None,
+    page_token: Optional[str] = None,
+    page_size: Optional[int] = None,
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON.
 
@@ -75,12 +77,13 @@ async def handler(
         JSON array of result rows, or error message as string.
     """
 
-    def _unsupported_capability_response(required_capability: str) -> str:
+    def _unsupported_capability_response(required_capability: str, provider_name: str) -> str:
         return json.dumps(
             {
                 "error": f"Requested capability is not supported: {required_capability}.",
                 "error_category": "unsupported_capability",
                 "required_capability": required_capability,
+                "provider": provider_name,
             },
             separators=(",", ":"),
         )
@@ -115,14 +118,30 @@ async def handler(
                 "Read-only access only."
             )
 
+    provider = Database.get_query_target_provider()
     caps = Database.get_query_target_capabilities()
     if include_columns and not caps.supports_column_metadata:
-        return _unsupported_capability_response("column_metadata")
+        return _unsupported_capability_response("column_metadata", provider)
     if timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async":
         if not caps.supports_cancel:
-            return _unsupported_capability_response("async_cancel")
+            return _unsupported_capability_response("async_cancel", provider)
+    if (page_token or page_size) and not caps.supports_pagination:
+        return _unsupported_capability_response("pagination", provider)
 
-    if Database.get_query_target_provider() == "redshift":
+    max_page_size = 1000
+    if page_size is not None:
+        if page_size <= 0:
+            return json.dumps(
+                {
+                    "error": "Invalid page_size: must be greater than zero.",
+                    "error_category": "invalid_request",
+                },
+                separators=(",", ":"),
+            )
+        if page_size > max_page_size:
+            page_size = max_page_size
+
+    if provider == "redshift":
         from dal.redshift import validate_redshift_query
 
         errors = validate_redshift_query(sql_query)
@@ -136,11 +155,29 @@ async def handler(
         columns = None
         last_truncated = False
         row_limit = 0
+        next_token = None
         async with Database.get_connection(tenant_id, read_only=True) as conn:
             row_limit = _resolve_row_limit(conn)
+            effective_page_size = page_size
+            if effective_page_size and effective_page_size > row_limit and row_limit:
+                effective_page_size = row_limit
+            if effective_page_size and effective_page_size > max_page_size:
+                effective_page_size = max_page_size
 
             async def _fetch_rows():
-                nonlocal columns
+                nonlocal columns, next_token
+                fetch_page = getattr(conn, "fetch_page", None)
+                fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
+                if (page_token or effective_page_size) and callable(fetch_page):
+                    if include_columns and callable(fetch_page_with_columns):
+                        rows, columns, next_token = await fetch_page_with_columns(
+                            sql_query, page_token, effective_page_size, *(params or [])
+                        )
+                        return rows
+                    rows, next_token = await fetch_page(
+                        sql_query, page_token, effective_page_size, *(params or [])
+                    )
+                    return rows
                 if include_columns:
                     fetch_with_columns = getattr(conn, "fetch_with_columns", None)
                     prepare = getattr(conn, "prepare", None)
@@ -183,7 +220,7 @@ async def handler(
                 return rows
 
             try:
-                result = await run_with_timeout(
+                result_rows = await run_with_timeout(
                     _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
                 )
             except asyncio.TimeoutError:
@@ -201,21 +238,23 @@ async def handler(
         # Size Safety Valve
         safety_limit = 1000
         safety_truncated = False
-        if len(result) > safety_limit:
-            result = result[:safety_limit]
+        if len(result_rows) > safety_limit:
+            result_rows = result_rows[:safety_limit]
             safety_truncated = True
             row_limit = safety_limit
 
         if include_columns and not columns:
-            columns = _build_columns_from_rows(result)
+            columns = _build_columns_from_rows(result_rows)
 
         is_truncated = bool(last_truncated or safety_truncated)
         payload = {
-            "rows": result,
+            "rows": result_rows,
             "metadata": {
                 "is_truncated": is_truncated,
                 "row_limit": int(row_limit or 0),
-                "rows_returned": len(result),
+                "rows_returned": len(result_rows),
+                "next_page_token": next_token,
+                "page_size": effective_page_size,
             },
         }
         if include_columns:
