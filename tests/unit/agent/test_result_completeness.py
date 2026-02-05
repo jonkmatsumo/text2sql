@@ -53,6 +53,7 @@ async def test_completeness_truncated_only(
     completeness = result["result_completeness"]
 
     assert completeness["is_truncated"] is True
+    assert completeness["rows_returned"] == 1
     assert completeness["partial_reason"] == "TRUNCATED"
 
 
