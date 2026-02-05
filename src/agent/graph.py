@@ -141,6 +141,10 @@ def route_after_execution(state: AgentState) -> str:
             if span:
                 span.set_attribute("retry.remaining_budget_seconds", max(0.0, remaining))
                 span.set_attribute("retry.estimated_correction_budget", estimated_correction_budget)
+                span.set_attribute("retry.budget.estimated_seconds", estimated_correction_budget)
+                span.set_attribute(
+                    "retry.budget.ema_latency_seconds", state.get("ema_llm_latency_seconds")
+                )
             if remaining < estimated_correction_budget:
                 if span:
                     span.set_attribute("retry.stopped_due_to_budget", True)
@@ -167,10 +171,13 @@ def _estimate_correction_budget_seconds(state: AgentState) -> float:
     min_budget = get_env_float("AGENT_MIN_RETRY_BUDGET_SECONDS", 3.0) or 0.0
     # Fixed overhead captures prompt assembly + orchestration costs.
     overhead_seconds = 0.5
+    ema_latency = state.get("ema_llm_latency_seconds")
     observed = state.get("latency_correct_seconds") or state.get("latency_generate_seconds")
-    if observed is None:
-        observed = min_budget or 3.0
-    estimated = float(observed) + overhead_seconds
+    if ema_latency is None and observed is not None:
+        ema_latency = observed
+    if ema_latency is None:
+        ema_latency = min_budget or 3.0
+    estimated = float(ema_latency) + overhead_seconds
     if min_budget:
         estimated = max(estimated, float(min_budget))
     return estimated

@@ -12,7 +12,8 @@ from agent.state import AgentState
 from agent.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
-from common.config.env import get_env_str
+from agent.utils.latency import update_latency_ema
+from common.config.env import get_env_float, get_env_str
 
 load_dotenv()
 
@@ -163,6 +164,13 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         )
         latency_seconds = time.monotonic() - start_time
         span.set_attribute("latency.correct_seconds", latency_seconds)
+        ema_alpha = get_env_float("AGENT_RETRY_BUDGET_EMA_ALPHA", 0.3)
+        ema_latency = update_latency_ema(
+            state.get("ema_llm_latency_seconds"), latency_seconds, ema_alpha
+        )
+        span.set_attribute("retry.budget.observed_latency_seconds", latency_seconds)
+        if ema_latency is not None:
+            span.set_attribute("retry.budget.ema_latency_seconds", ema_latency)
 
         # Capture token usage
         from agent.llm_client import extract_token_usage
@@ -196,4 +204,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "error_category": error_category,
             "correction_plan": correction_strategy,
             "latency_correct_seconds": latency_seconds,
+            "ema_llm_latency_seconds": ema_latency,
         }

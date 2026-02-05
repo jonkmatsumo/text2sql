@@ -128,6 +128,7 @@ class AgentState(TypedDict):
     # Per-node latency tracking (seconds)
     latency_generate_seconds: Optional[float]
     latency_correct_seconds: Optional[float]
+    ema_llm_latency_seconds: Optional[float]
 
     # =========================================================================
     # Cache and Metadata
