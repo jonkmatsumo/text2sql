@@ -255,7 +255,18 @@ python3 -m pytest tests/unit/agent/test_retry_observability.py
 New environment flags introduced by the P2 hardening pass:
 - `AGENT_SCHEMA_DRIFT_AUTO_REFRESH_MODE` (`off` default, `once` optional)
 - `AGENT_DRIFT_CANARY_ENABLED` (default: false)
-- `AGENT_PAGINATION_METADATA` (default: false)
+No additional flags are required for pagination; capability gating is automatic.
+
+Pagination and completeness notes:
+- `page_size` is capped at 1000 by the MCP tool.
+- Providers without pagination support fail fast with `unsupported_capability`.
+- `result_completeness.partial_reason` values are bounded: `TRUNCATED|LIMITED|PAGINATED|PROVIDER_CAP|UNKNOWN`.
+- `result_completeness.next_page_token` is opaque and should be passed back verbatim.
+
+Troubleshooting:
+- If `unsupported_capability`, verify provider support and remove pagination/column-metadata options.
+- If `partial_reason=PROVIDER_CAP`, consider narrowing filters or enabling pagination (where supported).
+- If `next_page_token` is missing but expected, confirm provider pagination support and page size bounds.
 
 Focused unit tests added in this pass can be run with:
 ```bash
