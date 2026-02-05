@@ -6,11 +6,12 @@ import socket
 import subprocess
 import uuid
 
-import aiomysql
 import pytest
 
 from dal.database import Database
 from mcp_server.tools.execute_sql_query import handler as execute_sql_query
+
+aiomysql = pytest.importorskip("aiomysql")
 
 
 def _get_free_port() -> int:

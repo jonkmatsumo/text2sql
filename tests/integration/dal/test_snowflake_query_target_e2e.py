@@ -3,10 +3,11 @@ import os
 import uuid
 
 import pytest
-import snowflake.connector
 
 from dal.database import Database
 from mcp_server.tools.execute_sql_query import handler as execute_sql_query
+
+snowflake = pytest.importorskip("snowflake.connector")
 
 
 def _required_env() -> dict:

@@ -7,7 +7,13 @@ def test_run_agent_success(monkeypatch):
     """Return a normalized success payload from the agent service."""
 
     async def fake_run_agent_with_tracing(
-        question, tenant_id, thread_id, timeout_seconds=None, deadline_ts=None
+        question,
+        tenant_id,
+        thread_id,
+        timeout_seconds=None,
+        deadline_ts=None,
+        page_token=None,
+        page_size=None,
     ):
         return {
             "current_sql": "select 1",
@@ -45,7 +51,13 @@ def test_run_agent_error(monkeypatch):
     """Return an error payload when the agent raises."""
 
     async def fake_run_agent_with_tracing(
-        question, tenant_id, thread_id, timeout_seconds=None, deadline_ts=None
+        question,
+        tenant_id,
+        thread_id,
+        timeout_seconds=None,
+        deadline_ts=None,
+        page_token=None,
+        page_size=None,
     ):
         raise RuntimeError("boom")
 
@@ -65,7 +77,13 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
     captured = {}
 
     async def fake_run_agent_with_tracing(
-        question, tenant_id, thread_id, timeout_seconds=None, deadline_ts=None
+        question,
+        tenant_id,
+        thread_id,
+        timeout_seconds=None,
+        deadline_ts=None,
+        page_token=None,
+        page_size=None,
     ):
         captured["timeout_seconds"] = timeout_seconds
         captured["deadline_ts"] = deadline_ts

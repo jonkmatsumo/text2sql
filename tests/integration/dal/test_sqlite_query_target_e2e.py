@@ -6,6 +6,8 @@ import pytest
 from dal.database import Database
 from mcp_server.tools.execute_sql_query import handler as execute_sql_query
 
+pytest.importorskip("aiosqlite")
+
 
 @pytest.mark.asyncio
 async def test_sqlite_query_target_introspection_and_exec(tmp_path, monkeypatch):
