@@ -5,6 +5,7 @@ import re
 import time
 
 from agent.state import AgentState
+from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
@@ -351,6 +352,21 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     else (len(query_result) if query_result else 0)
                 ),
                 "result_columns": result_columns,
+                "result_completeness": ResultCompleteness.from_parts(
+                    rows_returned=(
+                        result_rows_returned
+                        if result_rows_returned is not None
+                        else (len(query_result) if query_result else 0)
+                    ),
+                    is_truncated=bool(result_is_truncated),
+                    is_limited=bool(state.get("result_is_limited")),
+                    row_limit=(
+                        state.get("result_limit")
+                        if state.get("result_is_limited")
+                        else result_row_limit
+                    ),
+                    next_page_token=None,
+                ).to_dict(),
             }
 
         except Exception as e:

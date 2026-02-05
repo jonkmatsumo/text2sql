@@ -45,6 +45,7 @@ class AgentState(TypedDict):
     result_columns: Optional[List[dict]]
     result_is_limited: Optional[bool]
     result_limit: Optional[int]
+    result_completeness: Optional[dict]
 
     # Deadline propagation and budgeting
     deadline_ts: Optional[float]
