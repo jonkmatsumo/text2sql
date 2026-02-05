@@ -61,6 +61,7 @@ class AgentRunResponse(BaseModel):
     viz_reason: Optional[str] = None
     provenance: Optional[dict] = None
     result_completeness: Optional[dict] = None
+    error_metadata: Optional[dict] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -132,6 +133,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             viz_reason=state.get("viz_reason"),
             provenance=provenance,
             result_completeness=state.get("result_completeness"),
+            error_metadata=state.get("error_metadata"),
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)

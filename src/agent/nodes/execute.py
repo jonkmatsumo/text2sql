@@ -84,6 +84,8 @@ def parse_execute_tool_response(payload) -> dict:
                     "response_shape": "error",
                     "error": item.get("error"),
                     "error_category": item.get("error_category"),
+                    "required_capability": item.get("required_capability"),
+                    "provider": item.get("provider"),
                 }
             if "rows" in item and "metadata" in item:
                 return {
@@ -108,6 +110,8 @@ def parse_execute_tool_response(payload) -> dict:
                 "response_shape": "error",
                 "error": parsed.get("error"),
                 "error_category": parsed.get("error_category"),
+                "required_capability": parsed.get("required_capability"),
+                "provider": parsed.get("provider"),
             }
         response_shape = "malformed"
     else:
@@ -258,6 +262,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if parsed.get("response_shape") == "error":
                 error_msg = parsed.get("error") or "Tool returned an error."
                 error_category = parsed.get("error_category")
+                required_capability = parsed.get("required_capability")
+                provider = parsed.get("provider")
                 span.set_outputs(
                     {
                         "error": error_msg,
@@ -267,11 +273,34 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if error_category:
                     span.set_attribute("error_category", error_category)
                     span.set_attribute("timeout.triggered", error_category == "timeout")
+                if error_category == "unsupported_capability":
+                    if required_capability:
+                        error_msg = (
+                            "This backend does not support "
+                            f"{required_capability} for this request."
+                        )
+                    else:
+                        error_msg = (
+                            "This backend does not support a required capability "
+                            "for this request."
+                        )
+                    if required_capability:
+                        span.set_attribute("error.required_capability", required_capability)
+                    if provider:
+                        span.set_attribute("error.provider", provider)
                 drift_hint = _maybe_add_schema_drift(error_msg)
                 return {
                     "error": error_msg,
                     "query_result": None,
                     "error_category": error_category,
+                    "error_metadata": (
+                        {
+                            "required_capability": required_capability,
+                            "provider": provider,
+                        }
+                        if error_category == "unsupported_capability"
+                        else None
+                    ),
                     **drift_hint,
                 }
 

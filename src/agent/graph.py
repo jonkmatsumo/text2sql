@@ -127,6 +127,11 @@ def route_after_execution(state: AgentState) -> str:
         str: Next node name
     """
     if state.get("error"):
+        if state.get("error_category") == "unsupported_capability":
+            span = telemetry.get_current_span()
+            if span:
+                span.set_attribute("retry.stopped_due_to_capability", True)
+            return "failed"
         deadline_ts = state.get("deadline_ts")
         remaining = None
         estimated_correction_budget = _estimate_correction_budget_seconds(state)

@@ -60,6 +60,7 @@ class AgentState(TypedDict):
 
     # Error message from the last execution attempt (if any)
     error: Optional[str]
+    error_metadata: Optional[dict]
 
     # Counter to track retries and prevent infinite loops
     retry_count: int
