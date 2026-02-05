@@ -1,6 +1,6 @@
 import pytest
 
-from dal.capabilities import BackendCapabilities, capabilities_for_provider
+from dal.capabilities import PAGINATION_PROVIDERS, BackendCapabilities, capabilities_for_provider
 from dal.util.env import PROVIDER_ALIASES
 
 # All known providers that should be registered in capabilities
@@ -162,3 +162,14 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_fk_enforcement is False
+
+
+class TestPaginationCapability:
+    """Verify pagination capability is registered consistently."""
+
+    @pytest.mark.parametrize("provider", KNOWN_PROVIDERS)
+    def test_pagination_capability_registration(self, provider: str):
+        """Providers should report pagination support deterministically."""
+        caps = capabilities_for_provider(provider)
+        expected = provider in PAGINATION_PROVIDERS
+        assert caps.supports_pagination is expected
