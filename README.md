@@ -250,3 +250,20 @@ python3 -m pytest tests/unit/agent/test_empty_results.py
 python3 -m pytest tests/unit/agent/test_persistence_modes.py
 python3 -m pytest tests/unit/agent/test_retry_observability.py
 ```
+
+### Ops Runbook: Agent P2 Hardening Pass
+New environment flags introduced by the P2 hardening pass:
+- `AGENT_SCHEMA_DRIFT_AUTO_REFRESH_MODE` (`off` default, `once` optional)
+- `AGENT_DRIFT_CANARY_ENABLED` (default: false)
+- `AGENT_PAGINATION_METADATA` (default: false)
+
+Focused unit tests added in this pass can be run with:
+```bash
+python3 -m pytest tests/unit/agent/test_result_completeness.py
+python3 -m pytest tests/unit/mcp_server/test_execute_sql_pagination.py
+python3 -m pytest tests/unit/dal/test_pagination_tokens.py
+python3 -m pytest tests/unit/agent/test_schema_drift_active.py
+python3 -m pytest tests/unit/dal/test_cancel_matrix.py
+python3 -m pytest tests/unit/agent/test_synthesis_completeness_disclosures.py
+python3 -m pytest tests/unit/agent/test_drift_canary.py
+```
