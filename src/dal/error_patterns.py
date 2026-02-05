@@ -6,6 +6,14 @@ import re
 
 _IDENTIFIER_GROUP = "name"
 
+_GENERIC_PATTERNS = [
+    re.compile(r'relation "(?P<name>[^"]+)" does not exist', re.IGNORECASE),
+    re.compile(r'table "(?P<name>[^"]+)" does not exist', re.IGNORECASE),
+    re.compile(r'column "(?P<name>[^"]+)" does not exist', re.IGNORECASE),
+    re.compile(r"no such table: (?P<name>[\w\.]+)", re.IGNORECASE),
+    re.compile(r"no such column: (?P<name>[\w\.]+)", re.IGNORECASE),
+]
+
 _PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "postgres": [
         re.compile(r'relation "(?P<name>[^"]+)" does not exist', re.IGNORECASE),
@@ -66,7 +74,7 @@ _PATTERNS: dict[str, list[re.Pattern[str]]] = {
 def get_schema_drift_patterns(provider: str) -> list[re.Pattern[str]]:
     """Return provider-specific regex patterns for missing identifiers."""
     normalized = (provider or "").lower()
-    return _PATTERNS.get(normalized, [])
+    return _PATTERNS.get(normalized, _GENERIC_PATTERNS)
 
 
 def extract_missing_identifiers(provider: str, error_message: str) -> list[str]:

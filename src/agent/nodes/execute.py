@@ -1,7 +1,6 @@
 """SQL execution node for running validated queries with telemetry tracing."""
 
 import logging
-import re
 import time
 
 from agent.state import AgentState
@@ -11,7 +10,8 @@ from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
-from common.config.env import get_env_bool
+from common.config.env import get_env_bool, get_env_str
+from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +20,8 @@ class ToolResponseMalformedError(RuntimeError):
     """Raised when execute_sql_query returns an unexpected payload."""
 
 
-def _extract_missing_identifiers(error_text: str) -> list[str]:
-    patterns = [
-        r'relation "(?P<name>[^"]+)" does not exist',
-        r'table "(?P<name>[^"]+)" does not exist',
-        r'column "(?P<name>[^"]+)" does not exist',
-        r"no such table: (?P<name>[\w\.]+)",
-        r"unknown column (?P<name>[\w\.]+)",
-    ]
-    identifiers = []
-    for pattern in patterns:
-        for match in re.finditer(pattern, error_text, flags=re.IGNORECASE):
-            name = match.group("name")
-            if name and name not in identifiers:
-                identifiers.append(name)
-    return identifiers
-
-
-def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
-    identifiers = _extract_missing_identifiers(error_text)
+def _schema_drift_hint(error_text: str, provider: str) -> tuple[bool, list[str]]:
+    identifiers = extract_missing_identifiers(provider, error_text)
     return (len(identifiers) > 0, identifiers)
 
 
@@ -244,7 +227,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
                     return {}
-                suspected, identifiers = _schema_drift_hint(error_msg)
+                provider = get_env_str(
+                    "QUERY_TARGET_BACKEND", get_env_str("QUERY_TARGET_PROVIDER", "postgres")
+                )
+                suspected, identifiers = _schema_drift_hint(error_msg, provider)
                 if not suspected:
                     return {}
                 auto_refresh = get_env_bool("AGENT_SCHEMA_DRIFT_AUTO_REFRESH", False)
