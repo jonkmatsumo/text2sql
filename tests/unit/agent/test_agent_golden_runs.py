@@ -148,6 +148,105 @@ async def test_golden_limit_disclosure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_golden_pagination_disclosure(monkeypatch):
+    """Pagination metadata should be disclosed in final response."""
+    monkeypatch.setenv("AGENT_SYNTHESIZE_MODE", "deterministic")
+
+    tool = AsyncMock()
+    tool.name = "execute_sql_query"
+    tool.ainvoke = AsyncMock(
+        return_value=json.dumps(
+            {
+                "rows": [{"id": 1}],
+                "metadata": {
+                    "is_truncated": False,
+                    "row_limit": 0,
+                    "rows_returned": 1,
+                    "next_page_token": "next-token",
+                    "page_size": 25,
+                },
+            }
+        )
+    )
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show rows")],
+        schema_context="",
+        current_sql="SELECT * FROM items",
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    with (
+        patch("agent.nodes.execute.get_mcp_tools", AsyncMock(return_value=[tool])),
+        patch("agent.nodes.execute.PolicyEnforcer") as mock_enforcer,
+        patch("agent.nodes.execute.TenantRewriter") as mock_rewriter,
+        patch("agent.nodes.validate.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.execute.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.synthesize.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.synthesize.ChatPromptTemplate") as mock_prompt_class,
+        patch("agent.llm_client.get_llm"),
+    ):
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        _mock_llm(mock_prompt_class)
+        result = await _build_test_graph().ainvoke(state)
+
+    content = result["messages"][-1].content
+    assert "More results are available" in content
+
+
+@pytest.mark.asyncio
+async def test_golden_provider_cap_disclosure(monkeypatch):
+    """Provider caps should be disclosed distinctly from truncation."""
+    monkeypatch.setenv("AGENT_SYNTHESIZE_MODE", "deterministic")
+
+    tool = AsyncMock()
+    tool.name = "execute_sql_query"
+    tool.ainvoke = AsyncMock(
+        return_value=json.dumps(
+            {
+                "rows": [{"id": 1}],
+                "metadata": {
+                    "is_truncated": True,
+                    "row_limit": 100,
+                    "rows_returned": 100,
+                    "partial_reason": "PROVIDER_CAP",
+                },
+            }
+        )
+    )
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show rows")],
+        schema_context="",
+        current_sql="SELECT * FROM items",
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    with (
+        patch("agent.nodes.execute.get_mcp_tools", AsyncMock(return_value=[tool])),
+        patch("agent.nodes.execute.PolicyEnforcer") as mock_enforcer,
+        patch("agent.nodes.execute.TenantRewriter") as mock_rewriter,
+        patch("agent.nodes.validate.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.execute.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.synthesize.telemetry.start_span", return_value=_DummySpan()),
+        patch("agent.nodes.synthesize.ChatPromptTemplate") as mock_prompt_class,
+        patch("agent.llm_client.get_llm"),
+    ):
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        _mock_llm(mock_prompt_class)
+        result = await _build_test_graph().ainvoke(state)
+
+    content = result["messages"][-1].content
+    assert "backend capped results" in content.lower()
+
+
+@pytest.mark.asyncio
 async def test_golden_drift_hint_on_empty_results(monkeypatch):
     """Schema drift hint should appear with empty results when flagged."""
     monkeypatch.setenv("AGENT_SYNTHESIZE_MODE", "deterministic")
