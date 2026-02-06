@@ -1,10 +1,10 @@
 import pytest
 
-from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
+from tests._support.fixtures.schema_fixtures import SYNTHETIC_FIXTURE
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("schema_fixture", [PAGILA_FIXTURE, SYNTHETIC_FIXTURE], indirect=True)
+@pytest.mark.parametrize("schema_fixture", [SYNTHETIC_FIXTURE], indirect=True)
 async def test_schema_fixture_parity(schema_fixture):
     """Verify that fixtures provide necessary attributes for both datasets."""
     assert schema_fixture.valid_table
@@ -13,4 +13,4 @@ async def test_schema_fixture_parity(schema_fixture):
     assert schema_fixture.valid_table in schema_fixture.sample_query
     assert schema_fixture.tables
     assert schema_fixture.valid_table in schema_fixture.tables
-    assert schema_fixture.name in ["pagila", "synthetic"]
+    assert schema_fixture.name == "synthetic"

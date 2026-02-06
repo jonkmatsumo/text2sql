@@ -133,19 +133,6 @@ class TestValidateGoldenDatasetCLI:
         result = validate_golden_dataset_cli(dataset_mode="synthetic")
         assert result is True
 
-    def test_validate_golden_dataset_cli_missing_file(self):
-        """Test validation fails for missing golden dataset."""
-        from golden.loader import GOLDEN_DATASET_FILES
-
-        from agent.evals.run_evaluation import validate_golden_dataset_cli
-
-        if GOLDEN_DATASET_FILES["pagila"].exists():
-            pytest.skip("Pagila golden dataset exists, cannot test missing file error")
-
-        # pagila doesn't have a golden dataset file yet
-        result = validate_golden_dataset_cli(dataset_mode="pagila")
-        assert result is False
-
 
 class TestEvaluationSuiteIntegration:
     """Integration-style tests for evaluation suite."""

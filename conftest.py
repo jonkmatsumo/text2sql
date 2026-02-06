@@ -21,24 +21,13 @@ if str(src_dir) not in sys.path:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip pagila-marked tests unless RUN_PAGILA_TESTS=1."""
-    if os.getenv("RUN_PAGILA_TESTS", "0") == "1":
-        # Run all tests including pagila tests
-        run_pagila = True
-    else:
-        run_pagila = False
-
+    """Skipping integration tests unless RUN_INTEGRATION_TESTS=1."""
     run_integration = os.getenv("RUN_INTEGRATION_TESTS", "0") == "1"
 
-    skip_pagila = pytest.mark.skip(
-        reason="Skipping pagila dataset test (set RUN_PAGILA_TESTS=1 to run)"
-    )
     skip_integration = pytest.mark.skip(
         reason="Skipping integration tests (set RUN_INTEGRATION_TESTS=1 to run)"
     )
     for item in items:
-        if "dataset_pagila" in item.keywords and not run_pagila:
-            item.add_marker(skip_pagila)
         is_integration_path = f"{os.sep}tests{os.sep}integration{os.sep}" in str(item.fspath)
         if (is_integration_path or item.get_closest_marker("integration")) and not run_integration:
             item.add_marker(skip_integration)

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
+from tests._support.fixtures.schema_fixtures import SYNTHETIC_FIXTURE
 
 # Mock mcp if not available (for CI/local envs without mcp installed)
 try:
@@ -55,15 +55,7 @@ def dataset_mode():
 
 
 def _get_default_schema_fixtures():
-    """Return schema fixtures based on DATASET_MODE and manual override.
-
-    Default: SYNTHETIC_FIXTURE only
-    DATASET_MODE=pagila or RUN_PAGILA_TESTS=1: Include PAGILA_FIXTURE
-    """
-    from common.config.dataset import get_dataset_mode
-
-    if os.getenv("RUN_PAGILA_TESTS", "0") == "1" or get_dataset_mode() == "pagila":
-        return [PAGILA_FIXTURE, SYNTHETIC_FIXTURE]
+    """Return schema fixtures (Synthetic only)."""
     return [SYNTHETIC_FIXTURE]
 
 
@@ -71,23 +63,6 @@ def _get_default_schema_fixtures():
 def schema_fixture(request):
     """Fixture providing dataset-specific schema details.
 
-    Default is Synthetic. Set DATASET_MODE=pagila to include Pagila tests.
+    Default is Synthetic.
     """
     return request.param
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip pagila-marked tests unless DATASET_MODE=pagila or RUN_PAGILA_TESTS=1."""
-    from common.config.dataset import get_dataset_mode
-
-    should_run_pagila = os.getenv("RUN_PAGILA_TESTS", "0") == "1" or get_dataset_mode() == "pagila"
-
-    if should_run_pagila:
-        return
-
-    skip_pagila = pytest.mark.skip(
-        reason="Skipping pagila dataset test (set DATASET_MODE=pagila to run)"
-    )
-    for item in items:
-        if "pagila" in item.keywords or "dataset_pagila" in item.keywords:
-            item.add_marker(skip_pagila)

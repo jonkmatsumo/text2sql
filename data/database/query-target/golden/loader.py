@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 GOLDEN_DATASET_DIR = Path(__file__).parent
 GOLDEN_DATASET_FILES = {
     "synthetic": GOLDEN_DATASET_DIR / "synthetic_golden_dataset.json",
-    "pagila": GOLDEN_DATASET_DIR / "pagila_golden_dataset.json",
 }
 
 
@@ -65,10 +64,8 @@ def validate_golden_dataset(data: dict) -> List[str]:
                 tc_errors = _validate_test_case(tc, i)
                 errors.extend(tc_errors)
 
-    if "dataset_mode" in data and data["dataset_mode"] not in ("synthetic", "pagila"):
-        errors.append(
-            f"Invalid dataset_mode: {data['dataset_mode']}. Must be 'synthetic' or 'pagila'"
-        )
+    if "dataset_mode" in data and data["dataset_mode"] != "synthetic":
+        errors.append(f"Invalid dataset_mode: {data['dataset_mode']}. Must be 'synthetic'")
 
     return errors
 
@@ -117,7 +114,7 @@ def load_golden_dataset(
     """Load golden dataset for the specified dataset mode.
 
     Args:
-        dataset_mode: Either 'synthetic' or 'pagila'
+        dataset_mode: Must be 'synthetic'
         path: Optional explicit path to golden dataset file.
               If not provided, uses default path based on dataset_mode.
         validate: Whether to validate the dataset against schema.
@@ -134,9 +131,7 @@ def load_golden_dataset(
     elif dataset_mode in GOLDEN_DATASET_FILES:
         file_path = GOLDEN_DATASET_FILES[dataset_mode]
     else:
-        raise GoldenDatasetError(
-            f"Invalid dataset_mode: {dataset_mode}. Must be 'synthetic' or 'pagila'"
-        )
+        raise GoldenDatasetError(f"Invalid dataset_mode: {dataset_mode}. Must be 'synthetic'")
 
     if not file_path.exists():
         raise GoldenDatasetNotFoundError(
@@ -185,7 +180,7 @@ def load_test_cases(
     """Load and filter golden test cases.
 
     Args:
-        dataset_mode: Either 'synthetic' or 'pagila'
+        dataset_mode: Must be 'synthetic'
         category: Optional category filter.
         difficulty: Optional difficulty filter.
         include_skipped: Whether to include skipped test cases.

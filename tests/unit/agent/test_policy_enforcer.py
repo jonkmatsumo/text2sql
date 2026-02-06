@@ -122,58 +122,6 @@ class TestPolicyEnforcerFunctionBlocking:
         assert PolicyEnforcer.validate_sql(sql) is True
 
 
-@pytest.mark.dataset_pagila
-class TestPolicyEnforcerPagilaRegression:
-    """Regression tests ensuring Pagila tables still work when configured."""
-
-    def setup_method(self):
-        """Set up test with Pagila tables."""
-        # Simulate Pagila schema
-        PolicyEnforcer.set_allowed_tables(
-            {
-                "customer",
-                "rental",
-                "payment",
-                "staff",
-                "inventory",
-                "film",
-                "actor",
-                "address",
-                "city",
-                "country",
-                "category",
-                "language",
-                "film_actor",
-                "film_category",
-                "store",
-            }
-        )
-
-    def teardown_method(self):
-        """Clean up static override."""
-        PolicyEnforcer.set_allowed_tables(None)
-
-    def test_pagila_film_query(self):
-        """Test typical Pagila film query."""
-        sql = """
-            SELECT f.title, c.name as category
-            FROM film f
-            JOIN film_category fc ON f.film_id = fc.film_id
-            JOIN category c ON fc.category_id = c.category_id
-        """
-        assert PolicyEnforcer.validate_sql(sql) is True
-
-    def test_pagila_rental_query(self):
-        """Test typical Pagila rental query."""
-        sql = """
-            SELECT c.first_name, r.rental_date, p.amount
-            FROM customer c
-            JOIN rental r ON c.customer_id = r.customer_id
-            JOIN payment p ON r.rental_id = p.rental_id
-        """
-        assert PolicyEnforcer.validate_sql(sql) is True
-
-
 class TestPolicyEnforcerCTESupport:
     """Tests for CTE (Common Table Expression) support."""
 

@@ -273,13 +273,11 @@ class TestLoader:
 
     def test_load_missing_file_raises_error(self):
         """Test loading non-existent file raises clear error."""
-        from golden.loader import GOLDEN_DATASET_FILES
-
-        if GOLDEN_DATASET_FILES["pagila"].exists():
-            pytest.skip("Pagila golden dataset exists, cannot test missing file error")
-
+        # We can't easily test "missing pagila" anymore since it's hardcoded to removed.
+        # But we can test a made-up mode or path.
+        # Actually, let's just test custom path not found.
         with pytest.raises(GoldenDatasetNotFoundError) as exc_info:
-            load_golden_dataset("pagila")  # pagila doesn't have a golden dataset yet
+            load_golden_dataset("synthetic", path="/non/existent/file.json")
         assert "not found" in str(exc_info.value).lower()
 
     def test_load_custom_path(self):

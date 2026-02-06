@@ -29,7 +29,7 @@ class TestGetVectorStore:
         # Set environment variables
         os.environ["DB_HOST"] = "localhost"
         os.environ["DB_PORT"] = "5432"
-        os.environ["DB_NAME"] = "pagila"
+        os.environ["DB_NAME"] = "query_target"
         os.environ["DB_USER"] = "postgres"
         os.environ["DB_PASSWORD"] = "test_password"
 
@@ -45,7 +45,8 @@ class TestGetVectorStore:
         assert call_kwargs["collection_name"] == "schema_metadata"
         assert call_kwargs["use_jsonb"] is True
         assert (
-            "postgresql://postgres:test_password@localhost:5432/pagila" in call_kwargs["connection"]
+            "postgresql://postgres:test_password@localhost:5432/query_target"
+            in call_kwargs["connection"]
         )
 
         # Verify result is the mock store

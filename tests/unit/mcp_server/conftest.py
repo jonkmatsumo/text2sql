@@ -3,7 +3,7 @@ import os
 import pytest
 
 from dal.database import Database
-from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE
+from tests._support.fixtures.schema_fixtures import SYNTHETIC_FIXTURE
 
 
 def pytest_configure(config):
@@ -37,7 +37,7 @@ def dataset_mode():
     return get_dataset_mode()
 
 
-@pytest.fixture(params=[PAGILA_FIXTURE], ids=lambda f: f.name)
+@pytest.fixture(params=[SYNTHETIC_FIXTURE], ids=lambda f: f.name)
 def schema_fixture(request):
     """Fixture providing dataset-specific schema details."""
     return request.param

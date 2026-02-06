@@ -305,7 +305,7 @@ class Database:
                 else:
                     db_host = get_env_str("DB_HOST", "localhost")
                     db_port = get_env_int("DB_PORT", 5432)
-                    db_name = get_env_str("DB_NAME", "pagila")
+                    db_name = get_env_str("DB_NAME", "query_target")
                     # Default to the hardened mcp_reader role
                     db_user = get_env_str("DB_USER", "mcp_reader")
                     db_pass = get_env_str("DB_PASS", "mcp_secure_pass")

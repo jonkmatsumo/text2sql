@@ -28,8 +28,8 @@ ALTER ROLE mcp_reader SET default_transaction_read_only = on;
 -- 6. Clean up text2sql_ro if it was too permissive
 -- Actually, the investigation found text2sql_ro has ALL PRIVILEGES.
 -- Let's fix it to be truly read-only as well, or migrate everything to mcp_reader.
-REVOKE ALL PRIVILEGES ON DATABASE pagila FROM text2sql_ro;
-GRANT CONNECT ON DATABASE pagila TO text2sql_ro;
+REVOKE ALL PRIVILEGES ON DATABASE query_target FROM text2sql_ro;
+GRANT CONNECT ON DATABASE query_target TO text2sql_ro;
 GRANT USAGE ON SCHEMA public TO text2sql_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO text2sql_ro;
 ALTER ROLE text2sql_ro SET default_transaction_read_only = on;
