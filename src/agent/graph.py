@@ -57,6 +57,41 @@ def with_telemetry_context(node_func):
     return wrapped_node
 
 
+async def schema_refresh_node(state: AgentState) -> dict:
+    """Node to handle automatic schema refresh on drift detection."""
+    with telemetry.start_span(
+        name="schema_refresh",
+        span_type=SpanType.AGENT_NODE,
+    ) as span:
+        refresh_count = state.get("schema_refresh_count", 0)
+        span.set_attribute("schema.drift.auto_refresh_attempted", True)
+        span.set_attribute("schema.drift.refresh_count", refresh_count + 1)
+
+        # Invalidate cache for missing identifiers
+        from common.config.env import get_env_str
+        from dal.schema_cache import SCHEMA_CACHE
+
+        provider = get_env_str("QUERY_TARGET_BACKEND", "postgres")
+        missing = state.get("missing_identifiers") or []
+        span.set_attribute("schema.drift.missing_identifiers", missing)
+
+        for identifier in missing:
+            # Try to parse schema.table
+            parts = identifier.split(".")
+            if len(parts) == 2:
+                SCHEMA_CACHE.invalidate(provider=provider, schema=parts[0], table=parts[1])
+            else:
+                # Fallback: invalidate table in default schema
+                SCHEMA_CACHE.invalidate(provider=provider, table=identifier)
+
+        return {
+            "schema_refresh_count": refresh_count + 1,
+            "error": None,  # Clear error to allow re-entry into the flow
+            "schema_drift_suspected": False,
+            "retry_count": state.get("retry_count", 0),  # Preserve retry count
+        }
+
+
 def route_after_router(state: AgentState) -> str:
     """
     Conditional edge logic after router node.
@@ -132,6 +167,13 @@ def route_after_execution(state: AgentState) -> str:
             if span:
                 span.set_attribute("retry.stopped_due_to_capability", True)
             return "failed"
+
+        # Guarded Automatic Schema Refresh
+        if state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+            refresh_count = state.get("schema_refresh_count", 0)
+            if refresh_count < 1:
+                return "refresh_schema"
+
         deadline_ts = state.get("deadline_ts")
         remaining = None
         estimated_correction_budget = _estimate_correction_budget_seconds(state)
@@ -239,6 +281,7 @@ def create_workflow() -> StateGraph:
     workflow.add_node("generate", with_telemetry_context(generate_sql_node))
     workflow.add_node("validate", with_telemetry_context(validate_sql_node))
     workflow.add_node("execute", with_telemetry_context(validate_and_execute_node))
+    workflow.add_node("refresh_schema", with_telemetry_context(schema_refresh_node))
     workflow.add_node("correct", with_telemetry_context(correct_sql_node))
     workflow.add_node("visualize", with_telemetry_context(visualize_query_node))
     workflow.add_node("synthesize", with_telemetry_context(synthesize_insight_node))
@@ -294,9 +337,13 @@ def create_workflow() -> StateGraph:
         {
             "correct": "correct",
             "visualize": "visualize",
+            "refresh_schema": "refresh_schema",
             "failed": END,
         },
     )
+
+    # Refresh schema loops back to retrieve to get fresh DDLs
+    workflow.add_edge("refresh_schema", "retrieve")
 
     # Visualization feeds into synthesis
     workflow.add_edge("visualize", "synthesize")
@@ -382,6 +429,7 @@ async def run_agent_with_tracing(
             "query_result": None,
             "error": None,
             "retry_count": 0,
+            "schema_refresh_count": 0,
             # Reset state fields that shouldn't persist across turns
             "active_query": None,
             "procedural_plan": None,
