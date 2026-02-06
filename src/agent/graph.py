@@ -135,6 +135,18 @@ def route_after_execution(state: AgentState) -> str:
         deadline_ts = state.get("deadline_ts")
         remaining = None
         estimated_correction_budget = _estimate_correction_budget_seconds(state)
+        retry_count = state.get("retry_count", 0)
+
+        # Initialize or update retry_summary
+        retry_summary = state.get("retry_summary") or {"attempts": [], "budget_exhausted": False}
+        retry_summary["attempts"].append(
+            {
+                "retry_number": retry_count,
+                "error_category": state.get("error_category"),
+                "timestamp": time.monotonic(),
+            }
+        )
+
         if deadline_ts is not None:
             remaining = deadline_ts - time.monotonic()
             span = telemetry.get_current_span()
@@ -145,13 +157,28 @@ def route_after_execution(state: AgentState) -> str:
                 span.set_attribute(
                     "retry.budget.ema_latency_seconds", state.get("ema_llm_latency_seconds")
                 )
+                span.set_attribute("retry.attempt_number", retry_count)
+                # Emit structured budget_check event
+                span.add_event(
+                    "retry.budget_check",
+                    {
+                        "remaining_seconds": max(0.0, remaining),
+                        "estimated_budget_seconds": estimated_correction_budget,
+                        "ema_latency_seconds": state.get("ema_llm_latency_seconds") or 0.0,
+                        "retry_count": retry_count,
+                        "will_retry": remaining >= estimated_correction_budget and retry_count < 3,
+                    },
+                )
             if remaining < estimated_correction_budget:
                 if span:
                     span.set_attribute("retry.stopped_due_to_budget", True)
+                retry_summary["budget_exhausted"] = True
+                state["retry_summary"] = retry_summary
                 state["error"] = (
-                    "Retry budget exhausted; remaining time "
+                    f"Retry budget exhausted after {retry_count} attempts; remaining time "
                     f"{max(0.0, remaining):.2f}s is below estimated "
-                    f"{estimated_correction_budget:.2f}s."
+                    f"{estimated_correction_budget:.2f}s (EMA latency: "
+                    f"{state.get('ema_llm_latency_seconds', 0.0):.2f}s)."
                 )
                 state["error_category"] = "timeout"
                 return "failed"
@@ -159,9 +186,14 @@ def route_after_execution(state: AgentState) -> str:
         if span:
             span.set_attribute("retry.stopped_due_to_budget", False)
         if deadline_ts is not None and time.monotonic() >= deadline_ts:
+            retry_summary["budget_exhausted"] = True
+            state["retry_summary"] = retry_summary
             return "failed"  # Budget exhausted
-        if state.get("retry_count", 0) >= 3:
+        if retry_count >= 3:
+            retry_summary["max_retries_reached"] = True
+            state["retry_summary"] = retry_summary
             return "failed"  # Go to graceful failure
+        state["retry_summary"] = retry_summary
         return "correct"  # Go to self-correction
     return "visualize"  # Go to visualization (then synthesis)
 

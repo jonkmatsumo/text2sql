@@ -130,6 +130,10 @@ class AgentState(TypedDict):
     latency_correct_seconds: Optional[float]
     ema_llm_latency_seconds: Optional[float]
 
+    # Retry history for debugging and telemetry
+    # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}
+    retry_summary: Optional[dict]
+
     # =========================================================================
     # Cache and Metadata
     # =========================================================================
