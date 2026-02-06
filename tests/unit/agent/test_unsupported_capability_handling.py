@@ -37,6 +37,10 @@ async def test_execute_unsupported_capability_message(
             "error": "Requested capability is not supported: pagination.",
             "error_category": "unsupported_capability",
             "required_capability": "pagination",
+            "capability_required": "pagination",
+            "capability_supported": False,
+            "fallback_applied": False,
+            "fallback_mode": "force_limited_results",
             "provider": "postgres",
         }
     )
@@ -57,6 +61,11 @@ async def test_execute_unsupported_capability_message(
     assert "pagination" in result["error"]
     assert result["error_metadata"] == {
         "required_capability": "pagination",
+        "capability_required": "pagination",
+        "capability_supported": False,
+        "fallback_applied": False,
+        "fallback_mode": "force_limited_results",
+        "retry_after_seconds": None,
         "provider": "postgres",
     }
 

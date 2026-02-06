@@ -265,6 +265,15 @@ No additional flags are required for pagination; capability gating is automatic.
 Retry budgeting flags:
 - `AGENT_RETRY_BUDGET_EMA_ALPHA` (default: 0.3)
 - `AGENT_MIN_RETRY_BUDGET_SECONDS` (default: 3.0)
+- `AGENT_RETRY_POLICY` (`static` default, `adaptive` optional)
+- `AGENT_MAX_RETRIES` (default: 3)
+- `AGENT_CAPABILITY_FALLBACK_MODE` (`off` default, `suggest` and `apply` optional)
+- `AGENT_PROVIDER_CAP_MITIGATION` (`off` default, `safe` optional)
+- `AGENT_AUTO_PAGINATION` (`off` default, `on` optional)
+- `AGENT_AUTO_PAGINATION_MAX_PAGES` (default: 3)
+- `AGENT_AUTO_PAGINATION_MAX_ROWS` (default: 5000)
+- `AGENT_PREFETCH_NEXT_PAGE` (`off` default, `on` optional)
+- `AGENT_PREFETCH_MAX_CONCURRENCY` (default: 1)
 
 Pagination and completeness notes:
 - `page_size` is capped at 1000 by the MCP tool.
