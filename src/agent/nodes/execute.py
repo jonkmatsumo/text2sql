@@ -3,6 +3,7 @@
 import logging
 import time
 
+from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
 from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
@@ -290,6 +291,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             first_page_started_at = time.monotonic()
             prefetched_cache_key = None
             page_token = execute_payload.get("page_token")
+            replay_bundle = state.get("replay_bundle")
+
             if prefetch_enabled and page_token:
                 prefetched_cache_key = build_prefetch_cache_key(
                     sql_query=rewritten_sql,
@@ -309,10 +312,23 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     result = prefetched_payload
                     prefetch_reason = "cache_hit"
                 else:
-                    result = await executor_tool.ainvoke(execute_payload)
-                    prefetch_reason = "cache_miss"
+                    replayed_output = lookup_replay_tool_output(
+                        replay_bundle, "execute_sql_query", execute_payload
+                    )
+                    if replayed_output:
+                        result = replayed_output
+                        prefetch_reason = "replayed"
+                    else:
+                        result = await executor_tool.ainvoke(execute_payload)
+                        prefetch_reason = "cache_miss"
             else:
-                result = await executor_tool.ainvoke(execute_payload)
+                replayed_output = lookup_replay_tool_output(
+                    replay_bundle, "execute_sql_query", execute_payload
+                )
+                if replayed_output:
+                    result = replayed_output
+                else:
+                    result = await executor_tool.ainvoke(execute_payload)
             first_page_latency_seconds = max(0.0, time.monotonic() - first_page_started_at)
 
             parsed = parse_execute_tool_response(result)
@@ -505,7 +521,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "page_size": execute_payload.get("page_size") or result_page_size,
                             "timeout_seconds": page_timeout,
                         }
-                        page_result = await executor_tool.ainvoke(page_payload)
+                        replayed_page = lookup_replay_tool_output(
+                            replay_bundle, "execute_sql_query", page_payload
+                        )
+                        if replayed_page:
+                            page_result = replayed_page
+                        else:
+                            page_result = await executor_tool.ainvoke(page_payload)
                         page_parsed = parse_execute_tool_response(page_result)
                         span.add_event(
                             "pagination.auto_page_fetch",
@@ -644,7 +666,15 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                         "page_size": int(prefetch_page_size),
                                         "timeout_seconds": prefetch_timeout,
                                     }
-                                    prefetched_raw = await executor_tool.ainvoke(prefetch_payload)
+                                    replayed_prefetch = lookup_replay_tool_output(
+                                        replay_bundle, "execute_sql_query", prefetch_payload
+                                    )
+                                    if replayed_prefetch:
+                                        prefetched_raw = replayed_prefetch
+                                    else:
+                                        prefetched_raw = await executor_tool.ainvoke(
+                                            prefetch_payload
+                                        )
                                     prefetched_parsed = parse_execute_tool_response(prefetched_raw)
                                     if prefetched_parsed.get("response_shape") != "enveloped":
                                         return None
@@ -767,6 +797,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                 "result_prefetch_reason": result_prefetch_reason,
                 "retry_after_seconds": None,
+                "last_tool_output": result if isinstance(result, dict) else None,
                 "result_completeness": ResultCompleteness.from_parts(
                     rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),

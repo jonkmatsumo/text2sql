@@ -107,7 +107,30 @@ def build_replay_bundle(
         response_text = getattr(last_message, "content", str(last_message))
 
     tool_io: list[ReplayToolIO] = []
-    if state.get("current_sql"):
+    if state.get("last_tool_output"):
+        # If we have the raw last tool output, capture it (bounded)
+        last_output = state["last_tool_output"]
+        if isinstance(last_output, dict) and "rows" in last_output:
+            # Create a bounded version of the raw output
+            bounded_output = last_output.copy()
+            bounded_output["rows"] = _bounded_rows(last_output.get("rows"))
+
+            tool_io.append(
+                ReplayToolIO(
+                    name="execute_sql_query",
+                    input=_redact_recursive(
+                        {
+                            "sql_query": state.get("current_sql"),
+                            "tenant_id": request_payload.get("tenant_id"),
+                            "page_token": request_payload.get("page_token"),
+                            "page_size": request_payload.get("page_size"),
+                        }
+                    ),
+                    output=_redact_recursive(bounded_output),
+                )
+            )
+    elif state.get("current_sql"):
+        # Fallback to summary if raw output not available
         tool_io.append(
             ReplayToolIO(
                 name="execute_sql_query",
@@ -121,11 +144,13 @@ def build_replay_bundle(
                 ),
                 output=_redact_recursive(
                     {
-                        "rows_sample": _bounded_rows(state.get("query_result")),
-                        "rows_returned": len(state.get("query_result") or []),
-                        "error": state.get("error"),
-                        "error_category": state.get("error_category"),
-                        "result_completeness": state.get("result_completeness"),
+                        "rows": _bounded_rows(state.get("query_result")),
+                        "metadata": {
+                            "rows_returned": len(state.get("query_result") or []),
+                            "error": state.get("error"),
+                            "error_category": state.get("error_category"),
+                        },
+                        "response_shape": "enveloped",
                     }
                 ),
             )
@@ -197,6 +222,36 @@ def replay_response_from_bundle(
         "result_completeness": outcome.get("result_completeness"),
         "messages": [type("ReplayMessage", (), {"content": outcome.get("response") or ""})()],
     }
+
+
+def lookup_replay_tool_output(
+    bundle_data: Optional[dict[str, Any]],
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    """Look up a captured tool output in the replay bundle by name and input fingerprint."""
+    if not bundle_data:
+        return None
+
+    tool_io = bundle_data.get("tool_io", [])
+    if not tool_io:
+        return None
+
+    # Simple match: same tool name.
+    # We could refine this by fingerprinting the input, but for execute_sql_query
+    # we usually only have one main call per turn or they are sequential.
+    for io in tool_io:
+        io_name = io.get("name")
+        if io_name == tool_name:
+            # If it's execute_sql_query, we might want to check the SQL
+            if tool_name == "execute_sql_query":
+                io_input = io.get("input", {})
+                if io_input.get("sql_query") == tool_input.get("sql_query"):
+                    return io.get("output")
+            else:
+                return io.get("output")
+
+    return None
 
 
 __all__ = [

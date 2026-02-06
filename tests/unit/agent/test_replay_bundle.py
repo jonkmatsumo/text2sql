@@ -101,3 +101,28 @@ def test_replay_response_from_bundle_uses_captured_outcome():
     assert replay_state["current_sql"] == "select 1"
     assert replay_state["query_result"] == [{"id": 1}]
     assert replay_state["messages"][-1].content == "captured"
+
+
+def test_build_replay_bundle_captures_raw_tool_io():
+    """Replay bundle should prefer raw tool output if available in state."""
+    state = {
+        "current_sql": "select 1",
+        "last_tool_output": {
+            "rows": [{"one": 1}],
+            "metadata": {"rows_returned": 1},
+            "response_shape": "enveloped",
+        },
+        "messages": [type("Msg", (), {"content": "ok"})()],
+        "schema_snapshot_id": "snap-1",
+    }
+    bundle = build_replay_bundle(
+        question="q",
+        state=state,
+        request_payload={"tenant_id": 1},
+    )
+
+    assert len(bundle.tool_io) == 1
+    assert bundle.tool_io[0].name == "execute_sql_query"
+    assert bundle.tool_io[0].output["rows"] == [{"one": 1}]
+    assert bundle.tool_io[0].output["response_shape"] == "enveloped"
+    assert bundle.tool_io[0].output["metadata"]["rows_returned"] == 1

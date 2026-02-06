@@ -15,6 +15,7 @@ def test_run_agent_success(monkeypatch):
         page_token=None,
         page_size=None,
         interactive_session=False,
+        **kwargs,
     ):
         return {
             "current_sql": "select 1",
@@ -60,6 +61,7 @@ def test_run_agent_error(monkeypatch):
         page_token=None,
         page_size=None,
         interactive_session=False,
+        **kwargs,
     ):
         raise RuntimeError("boom")
 
@@ -87,6 +89,7 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
         page_token=None,
         page_size=None,
         interactive_session=False,
+        **kwargs,
     ):
         captured["timeout_seconds"] = timeout_seconds
         captured["deadline_ts"] = deadline_ts
@@ -116,6 +119,7 @@ def test_run_agent_record_mode_returns_replay_bundle(monkeypatch):
         page_token=None,
         page_size=None,
         interactive_session=False,
+        **kwargs,
     ):
         _ = question, tenant_id, thread_id, timeout_seconds, deadline_ts, page_token, page_size
         return {
@@ -144,13 +148,26 @@ def test_run_agent_record_mode_returns_replay_bundle(monkeypatch):
     assert "<password>" in body["replay_bundle"]["prompts"]["user"]
 
 
-def test_run_agent_replay_mode_uses_captured_bundle_without_external_calls(monkeypatch):
-    """Replay mode should return captured outcome without live execution by default."""
+def test_run_agent_replay_mode_re_runs_graph_with_bundle(monkeypatch):
+    """Replay mode should re-run the graph using the captured bundle for tool outputs."""
+    captured = {}
 
-    async def should_not_run(*_args, **_kwargs):
-        raise AssertionError("run_agent_with_tracing should not be called in captured replay mode")
+    async def fake_run_agent_with_tracing(
+        question,
+        tenant_id,
+        thread_id,
+        replay_bundle=None,
+        **kwargs,
+    ):
+        captured["replay_bundle"] = replay_bundle
+        return {
+            "current_sql": "select 1",
+            "query_result": [{"one": 1}],
+            "messages": [type("Msg", (), {"content": "captured response"})()],
+            "error": None,
+        }
 
-    monkeypatch.setattr(agent_app, "run_agent_with_tracing", should_not_run)
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
     monkeypatch.setenv("AGENT_REPLAY_MODE", "replay")
 
     replay_bundle = {
@@ -189,7 +206,8 @@ def test_run_agent_replay_mode_uses_captured_bundle_without_external_calls(monke
     assert body["result"] == [{"one": 1}]
     assert body["response"] == "captured response"
     assert body["replay_metadata"]["mode"] == "replay"
-    assert body["replay_metadata"]["execution"] == "captured_only"
+    assert captured["replay_bundle"] is not None
+    assert captured["replay_bundle"]["version"] == "1.0"
 
 
 def test_run_agent_replay_mode_validates_bundle(monkeypatch):

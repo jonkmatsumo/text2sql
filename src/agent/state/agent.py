@@ -189,3 +189,13 @@ class AgentState(TypedDict):
 
     # Reason for generating (or skipping) visualization
     viz_reason: Optional[str]
+
+    # =========================================================================
+    # Reproducibility Fields
+    # =========================================================================
+
+    # Raw output from the last tool invocation (for replay capture)
+    last_tool_output: Optional[dict]
+
+    # Replay bundle for deterministic execution
+    replay_bundle: Optional[dict]

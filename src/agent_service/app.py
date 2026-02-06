@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 from agent.replay_bundle import (
     ValidationError,
     build_replay_bundle,
-    replay_response_from_bundle,
     serialize_replay_bundle,
     validate_replay_bundle,
 )
@@ -100,7 +99,9 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         if replay_mode not in {"off", "record", "replay"}:
             replay_mode = "off"
 
-        async def _run_live_agent(question: str) -> dict[str, Any]:
+        async def _run_live_agent(
+            question: str, bundle: Optional[dict[str, Any]] = None
+        ) -> dict[str, Any]:
             return await asyncio.wait_for(
                 run_agent_with_tracing(
                     question=question,
@@ -111,6 +112,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     page_token=request.page_token,
                     page_size=request.page_size,
                     interactive_session=True,
+                    replay_bundle=bundle,
                 ),
                 timeout=timeout_seconds,
             )
@@ -141,14 +143,17 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             replay_bundle_json = serialize_replay_bundle(replay_bundle)
             if request.replay_allow_external_calls:
                 replay_question = str(replay_bundle.prompts.get("user") or request.question)
-                state = await _run_live_agent(replay_question)
+                # Hybrid replay: Live LLM, but still pass bundle for potentially offline tools
+                state = await _run_live_agent(replay_question, bundle=replay_bundle_payload)
                 replay_metadata = {
                     "mode": "replay",
                     "execution": "external_calls",
                     "source": "captured_prompt",
                 }
             else:
-                state = replay_response_from_bundle(replay_bundle, allow_external_calls=False)
+                # Preferred offline replay: re-run the graph with the bundle
+                replay_question = str(replay_bundle.prompts.get("user") or request.question)
+                state = await _run_live_agent(replay_question, bundle=replay_bundle_payload)
                 replay_metadata = {
                     "mode": "replay",
                     "execution": "captured_only",
@@ -169,6 +174,20 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     "execution": "external_calls",
                     "captured": True,
                 }
+
+            # Optional file export for replay bundle
+            export_dir = get_env_str("AGENT_REPLAY_EXPORT_DIR")
+            if export_dir and replay_bundle_json:
+                import os
+
+                os.makedirs(export_dir, exist_ok=True)
+                export_path = os.path.join(
+                    export_dir, f"replay_{thread_id}_{int(time.time())}.json"
+                )
+                with open(export_path, "w") as f:
+                    f.write(replay_bundle_json)
+                if replay_metadata:
+                    replay_metadata["export_path"] = export_path
 
         response_text = None
         if state.get("messages"):

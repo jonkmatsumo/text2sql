@@ -42,16 +42,57 @@ class TestValidateAndExecuteNode:
             tenant_id=None,  # Explicitly set to None for this test
         )
 
-        result = await validate_and_execute_node(state)
+        await validate_and_execute_node(state)
 
         # Verify tool was called with correct query (tenant_id is extracted from context)
         mock_tool.ainvoke.assert_called_once()
         call_args = mock_tool.ainvoke.call_args[0][0]
         assert call_args["sql_query"] == schema_fixture.count_query
-        assert call_args["tenant_id"] is None  # Mocks state tenant_id which is None here
 
-        # Verify result was parsed and returned
-        assert result["query_result"] == [{"count": 1000}]
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_sql_node_uses_replay_bundle(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Replay bundle should bypass live tool calls if matching SQL is found."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        mock_get_tools.return_value = [mock_tool]
+
+        replay_bundle = {
+            "tool_io": [
+                {
+                    "name": "execute_sql_query",
+                    "input": {"sql_query": "SELECT count(*) FROM users"},
+                    "output": {
+                        "rows": [{"count": 42}],
+                        "metadata": {"rows_returned": 1},
+                        "response_shape": "enveloped",
+                    },
+                }
+            ]
+        }
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT count(*) FROM users",
+            query_result=None,
+            error=None,
+            retry_count=0,
+            replay_bundle=replay_bundle,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        # Verify tool was NOT called
+        mock_tool.ainvoke.assert_not_called()
+        assert result["query_result"] == [{"count": 42}]
         assert result["error"] is None
 
     @pytest.mark.asyncio

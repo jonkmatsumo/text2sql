@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import uuid
+from typing import Any, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -451,6 +452,7 @@ async def run_agent_with_tracing(
     page_token: str = None,
     page_size: int = None,
     interactive_session: bool = False,
+    replay_bundle: Optional[dict[str, Any]] = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
@@ -480,6 +482,9 @@ async def run_agent_with_tracing(
         "version": "2.0.0",
         "thread_id": thread_id,
     }
+    if replay_bundle:
+        base_metadata["replay_mode"] = "active"
+
     if session_id:
         base_metadata["telemetry.session_id"] = session_id
     if user_id:
@@ -521,6 +526,7 @@ async def run_agent_with_tracing(
             "page_token": page_token,
             "page_size": page_size,
             "interactive_session": interactive_session,
+            "replay_bundle": replay_bundle,
         }
 
         # Config with thread_id for checkpointer
