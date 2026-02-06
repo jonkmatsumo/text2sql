@@ -57,7 +57,14 @@ def classify_error_info(provider: str, exc: Exception) -> ErrorClassification:
     ):
         return _classification("connectivity", provider, retry_after)
     if _matches_any(
-        message, ("permission denied", "not authorized", "access denied", "unauthorized")
+        message,
+        (
+            "permission denied",
+            "not authorized",
+            "access denied",
+            "unauthorized",
+            "insufficient privileges",
+        ),
     ):
         return _classification("auth", provider, retry_after)
     if _matches_any(
@@ -87,6 +94,21 @@ def classify_error_info(provider: str, exc: Exception) -> ErrorClassification:
         message, ("too many requests", "service unavailable", "temporarily unavailable")
     ):
         return _classification("transient", provider, retry_after)
+
+    # Validation / Generic fallbacks
+    if _matches_any(
+        message, ("too many requests", "concurrency limit", "rate limit", "throttling")
+    ):
+        return _classification("throttling", provider, retry_after)
+
+    if _matches_any(
+        message,
+        ("disk full", "out of memory", "resource limit", "resources exceeded", "disk is full"),
+    ):
+        return _classification("resource_exhausted", provider, retry_after)
+
+    if _matches_any(message, ("query execution limit exceeded", "execution time limit")):
+        return _classification("timeout", provider, retry_after)
 
     if module_name.startswith("asyncpg") and "syntax" in class_name:
         return _classification("syntax", provider, retry_after)
