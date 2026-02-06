@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/traces/aggregations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Trace Aggregations
+         * @description Return aggregated trace counts and histogram metadata.
+         */
+        get: operations["api_trace_aggregations_api_v1_traces_aggregations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/traces/{trace_id}": {
         parameters: {
             query?: never;
@@ -188,6 +208,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * DurationHistogramBin
+         * @description Histogram bin for duration distribution.
+         */
+        DurationHistogramBin: {
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Count */
+            count: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -295,6 +327,8 @@ export interface components {
             end_time: string;
             /** Duration Ms */
             duration_ms: number;
+            /** Self Time Ms */
+            self_time_ms?: number | null;
             /** Span Attributes */
             span_attributes?: {
                 [key: string]: unknown;
@@ -343,6 +377,8 @@ export interface components {
             end_time: string;
             /** Duration Ms */
             duration_ms: number;
+            /** Self Time Ms */
+            self_time_ms?: number | null;
             /** Span Attributes */
             span_attributes?: {
                 [key: string]: unknown;
@@ -351,6 +387,85 @@ export interface components {
             events?: {
                 [key: string]: unknown;
             }[] | null;
+        };
+        /**
+         * TraceAggregationFacets
+         * @description Facet counts returned from trace aggregations.
+         */
+        TraceAggregationFacets: {
+            /** Service */
+            service: {
+                [key: string]: number;
+            };
+            /** Status */
+            status: {
+                [key: string]: number;
+            };
+            /** Error */
+            error: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * TraceAggregationPercentiles
+         * @description Duration percentiles for traces.
+         */
+        TraceAggregationPercentiles: {
+            /** P50 Ms */
+            p50_ms?: number | null;
+            /** P95 Ms */
+            p95_ms?: number | null;
+            /** P99 Ms */
+            p99_ms?: number | null;
+        };
+        /**
+         * TraceAggregationSampling
+         * @description Sampling metadata for aggregations.
+         */
+        TraceAggregationSampling: {
+            /**
+             * Is Sampled
+             * @default false
+             */
+            is_sampled: boolean;
+            /** Sample Rate */
+            sample_rate?: number | null;
+        };
+        /**
+         * TraceAggregationTruncation
+         * @description Truncation metadata for aggregations.
+         */
+        TraceAggregationTruncation: {
+            /**
+             * Is Truncated
+             * @default false
+             */
+            is_truncated: boolean;
+            /** Limit */
+            limit?: number | null;
+        };
+        /**
+         * TraceAggregationsResponse
+         * @description Aggregated trace search metadata.
+         */
+        TraceAggregationsResponse: {
+            /** Total Count */
+            total_count: number;
+            facet_counts: components["schemas"]["TraceAggregationFacets"];
+            /** Duration Histogram */
+            duration_histogram: components["schemas"]["DurationHistogramBin"][];
+            percentiles: components["schemas"]["TraceAggregationPercentiles"];
+            sampling: components["schemas"]["TraceAggregationSampling"];
+            truncation: components["schemas"]["TraceAggregationTruncation"];
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Window Start */
+            window_start?: string | null;
+            /** Window End */
+            window_end?: string | null;
         };
         /**
          * TraceDetail
@@ -491,6 +606,10 @@ export interface operations {
                 start_time_gte?: string | null;
                 /** @description Start time less than or equal to */
                 start_time_lte?: string | null;
+                /** @description Minimum duration in ms */
+                duration_min_ms?: number | null;
+                /** @description Maximum duration in ms */
+                duration_max_ms?: number | null;
                 limit?: number;
                 offset?: number;
                 order?: string;
@@ -508,6 +627,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedTracesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_trace_aggregations_api_v1_traces_aggregations_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by service name */
+                service?: string | null;
+                /** @description Exact trace ID lookup */
+                trace_id?: string | null;
+                /** @description Filter by status */
+                status?: string | null;
+                /** @description Filter by error presence */
+                has_errors?: string | null;
+                /** @description Start time greater than or equal to */
+                start_time_gte?: string | null;
+                /** @description Start time less than or equal to */
+                start_time_lte?: string | null;
+                /** @description Minimum duration in ms */
+                duration_min_ms?: number | null;
+                /** @description Maximum duration in ms */
+                duration_max_ms?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceAggregationsResponse"];
                 };
             };
             /** @description Validation Error */

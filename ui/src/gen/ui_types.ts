@@ -4,6 +4,358 @@
  */
 
 export interface paths {
+    "/settings/query-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Query Target Settings
+         * @description Return active/pending query-target config.
+         */
+        get: operations["get_query_target_settings_settings_query_target_get"];
+        put?: never;
+        /**
+         * Upsert Query Target Settings
+         * @description Create or update a query-target config (inactive).
+         */
+        post: operations["upsert_query_target_settings_settings_query_target_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/query-target/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Query Target History
+         * @description Return recent query-target configuration history.
+         */
+        get: operations["get_query_target_history_settings_query_target_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/query-target/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Query Target Settings
+         * @description Mark a query-target config as pending activation.
+         */
+        post: operations["activate_query_target_settings_settings_query_target_activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/query-target/test-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Query Target Settings
+         * @description Test query-target connection for provided settings.
+         */
+        post: operations["test_query_target_settings_settings_query_target_test_connection_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/synth/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Synthetic Data
+         * @description Trigger synthetic data generation as a background job.
+         */
+        post: operations["generate_synthetic_data_ops_synth_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/synth/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Synth Runs
+         * @description List recent synthetic generation runs.
+         */
+        get: operations["list_synth_runs_ops_synth_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/synth/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Synth Run
+         * @description Get detailed information for a specific synthetic generation run.
+         */
+        get: operations["get_synth_run_ops_synth_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ingestion Templates
+         * @description List all ingestion configuration templates.
+         */
+        get: operations["list_ingestion_templates_ops_ingestion_templates_get"];
+        put?: never;
+        /**
+         * Create Ingestion Template
+         * @description Create a new ingestion configuration template.
+         */
+        post: operations["create_ingestion_template_ops_ingestion_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Ingestion Template
+         * @description Update an existing ingestion configuration template.
+         */
+        put: operations["update_ingestion_template_ops_ingestion_templates__template_id__put"];
+        post?: never;
+        /**
+         * Delete Ingestion Template
+         * @description Delete an ingestion configuration template.
+         */
+        delete: operations["delete_ingestion_template_ops_ingestion_templates__template_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ingestion Metrics
+         * @description Get aggregated metrics for ingestion runs over a time window.
+         */
+        get: operations["get_ingestion_metrics_ops_ingestion_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ingestion Runs
+         * @description List recent ingestion runs.
+         */
+        get: operations["list_ingestion_runs_ops_ingestion_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ingestion Run
+         * @description Get detailed information for a specific ingestion run.
+         */
+        get: operations["get_ingestion_run_ops_ingestion_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/runs/{run_id}/patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Run Patterns
+         * @description List all patterns associated with an ingestion run.
+         */
+        get: operations["list_run_patterns_ops_ingestion_runs__run_id__patterns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/runs/{run_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rollback Run
+         * @description Roll back patterns created by a specific ingestion run.
+         */
+        post: operations["rollback_run_ops_ingestion_runs__run_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Source
+         * @description Analyze database for pattern candidates.
+         */
+        post: operations["analyze_source_ops_ingestion_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/enrich": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enrich Candidates
+         * @description Trigger enrichment suggestions for selected candidates as a background job.
+         */
+        post: operations["enrich_candidates_ops_ingestion_enrich_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/ingestion/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Commit Ingestion
+         * @description Commit patterns to DB and trigger hydration.
+         */
+        post: operations["commit_ingestion_ops_ingestion_commit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/schema-hydrate": {
         parameters: {
             query?: never;
@@ -252,6 +604,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Llm Models
+         * @description List available LLM models for a provider.
+         */
+        get: operations["list_llm_models_llm_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/patterns/generate": {
         parameters: {
             query?: never;
@@ -266,6 +638,26 @@ export interface paths {
          * @description Trigger pattern generation via MCP tool.
          */
         post: operations["generate_patterns_ops_patterns_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/patterns/generate/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Generate Patterns
+         * @description Stream pattern generation logs as Server-Sent Events.
+         */
+        get: operations["stream_generate_patterns_ops_patterns_generate_stream_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -317,6 +709,36 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AnalyzeRequest
+         * @description Request payload for analyzing database for pattern candidates.
+         */
+        AnalyzeRequest: {
+            /** Target Tables */
+            target_tables?: string[] | null;
+            /** Template Id */
+            template_id?: string | null;
+        };
+        /**
+         * AnalyzeResponse
+         * @description Response payload for analysis result.
+         */
+        AnalyzeResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Candidates */
+            candidates: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /**
          * ApproveInteractionRequest
          * @description Request payload for approving an interaction.
          */
@@ -327,6 +749,65 @@ export interface components {
             original_sql: string;
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * CommitRequest
+         * @description Request payload for committing patterns.
+         */
+        CommitRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Approved Patterns */
+            approved_patterns: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * CommitResponse
+         * @description Response payload for commit operation.
+         */
+        CommitResponse: {
+            /** Inserted Count */
+            inserted_count: number;
+            /**
+             * Hydration Job Id
+             * Format: uuid
+             */
+            hydration_job_id: string;
+        };
+        /**
+         * EnrichAsyncResponse
+         * @description Response payload for async enrichment trigger.
+         */
+        EnrichAsyncResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+        };
+        /**
+         * EnrichRequest
+         * @description Request payload for enriching selected candidates.
+         */
+        EnrichRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Selected Candidates */
+            selected_candidates: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * FeedbackRequest
@@ -344,6 +825,139 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * IngestionMetrics
+         * @description Aggregated metrics for ingestion runs.
+         */
+        IngestionMetrics: {
+            /** Total Runs */
+            total_runs: number;
+            /** Total Patterns Generated */
+            total_patterns_generated: number;
+            /** Total Patterns Accepted */
+            total_patterns_accepted: number;
+            /** Avg Acceptance Rate */
+            avg_acceptance_rate: number;
+            /** Runs By Day */
+            runs_by_day: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * IngestionRunResponse
+         * @description Detailed response for an ingestion run.
+         */
+        IngestionRunResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Status */
+            status: string;
+            /** Target Table */
+            target_table?: string | null;
+            /** Config Snapshot */
+            config_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Error Message */
+            error_message?: string | null;
+        };
+        /**
+         * IngestionRunSummary
+         * @description Summary of an ingestion run.
+         */
+        IngestionRunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Status */
+            status: string;
+            /** Target Table */
+            target_table?: string | null;
+        };
+        /**
+         * IngestionTemplate
+         * @description Detailed response for an ingestion template.
+         */
+        IngestionTemplate: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * IngestionTemplateCreate
+         * @description Payload for creating or updating an ingestion template.
+         */
+        IngestionTemplateCreate: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * LLMModelOption
+         * @description LLM model option payload.
+         */
+        LLMModelOption: {
+            /** Value */
+            value: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * LLMModelsResponse
+         * @description Response payload for available LLM models.
+         */
+        LLMModelsResponse: {
+            /** Models */
+            models: components["schemas"]["LLMModelOption"][];
         };
         /**
          * OpsJobResponse
@@ -422,6 +1036,122 @@ export interface components {
             limit: number;
         };
         /**
+         * QueryTargetActivatePayload
+         * @description Payload for activating a pending query-target config.
+         */
+        QueryTargetActivatePayload: {
+            /**
+             * Config Id
+             * Format: uuid
+             */
+            config_id: string;
+        };
+        /**
+         * QueryTargetConfigHistoryEntry
+         * @description History entry for query-target configuration events.
+         */
+        QueryTargetConfigHistoryEntry: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Config Id
+             * Format: uuid
+             */
+            config_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Snapshot */
+            snapshot: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
+         * QueryTargetConfigPayload
+         * @description Payload for query-target settings.
+         */
+        QueryTargetConfigPayload: {
+            /** Provider */
+            provider: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Auth */
+            auth?: {
+                [key: string]: unknown;
+            };
+            /** Guardrails */
+            guardrails?: {
+                [key: string]: unknown;
+            };
+            /** Config Id */
+            config_id?: string | null;
+        };
+        /**
+         * QueryTargetConfigResponse
+         * @description Response for persisted query-target config.
+         */
+        QueryTargetConfigResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider */
+            provider: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Auth */
+            auth: {
+                [key: string]: unknown;
+            };
+            /** Guardrails */
+            guardrails: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string;
+            /** Last Tested At */
+            last_tested_at?: string | null;
+            /** Last Test Status */
+            last_test_status?: string | null;
+            /** Last Error Code */
+            last_error_code?: string | null;
+            /** Last Error Message */
+            last_error_message?: string | null;
+            /** Last Error Category */
+            last_error_category?: string | null;
+        };
+        /**
+         * QueryTargetSettingsResponse
+         * @description Response containing active/pending query-target configs.
+         */
+        QueryTargetSettingsResponse: {
+            active?: components["schemas"]["QueryTargetConfigResponse"] | null;
+            pending?: components["schemas"]["QueryTargetConfigResponse"] | null;
+        };
+        /**
+         * QueryTargetTestResponse
+         * @description Response for query-target connection tests.
+         */
+        QueryTargetTestResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Error Category */
+            error_category?: string | null;
+        };
+        /**
          * RecommendationRequest
          * @description Request payload for recommendation playground.
          */
@@ -454,6 +1184,110 @@ export interface components {
             /** Notes */
             notes?: string | null;
         };
+        /**
+         * RollbackRequest
+         * @description Payload for rolling back an ingestion run.
+         */
+        RollbackRequest: {
+            /** Patterns */
+            patterns?: {
+                [key: string]: string;
+            }[] | null;
+            /** Confirm Run Id */
+            confirm_run_id: string;
+        };
+        /**
+         * SynthGenerateRequest
+         * @description Request payload for starting a synthetic data generation job.
+         */
+        SynthGenerateRequest: {
+            /** Preset */
+            preset?: string | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Output Path */
+            output_path?: string | null;
+            /** Only */
+            only?: string[] | null;
+        };
+        /**
+         * SynthGenerateResponse
+         * @description Response payload for synthetic data generation trigger.
+         */
+        SynthGenerateResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+        };
+        /**
+         * SynthRunResponse
+         * @description Detailed response for a synthetic data generation run.
+         */
+        SynthRunResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Status */
+            status: string;
+            /** Config Snapshot */
+            config_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Output Path */
+            output_path?: string | null;
+            /** Manifest */
+            manifest?: {
+                [key: string]: unknown;
+            } | null;
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Error Message */
+            error_message?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+        };
+        /**
+         * SynthRunSummary
+         * @description Summary of a synthetic data generation run.
+         */
+        SynthRunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Status */
+            status: string;
+            /** Job Id */
+            job_id?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -472,6 +1306,631 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_query_target_settings_settings_query_target_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryTargetSettingsResponse"];
+                };
+            };
+        };
+    };
+    upsert_query_target_settings_settings_query_target_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryTargetConfigPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryTargetConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_query_target_history_settings_query_target_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryTargetConfigHistoryEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_query_target_settings_settings_query_target_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryTargetActivatePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryTargetConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_query_target_settings_settings_query_target_test_connection_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryTargetConfigPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueryTargetTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_synthetic_data_ops_synth_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SynthGenerateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SynthGenerateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_synth_runs_ops_synth_runs_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SynthRunSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_synth_run_ops_synth_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SynthRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_ingestion_templates_ops_ingestion_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionTemplate"][];
+                };
+            };
+        };
+    };
+    create_ingestion_template_ops_ingestion_templates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestionTemplateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionTemplate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_ingestion_template_ops_ingestion_templates__template_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestionTemplateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionTemplate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_ingestion_template_ops_ingestion_templates__template_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ingestion_metrics_ops_ingestion_metrics_get: {
+        parameters: {
+            query?: {
+                window?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionMetrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_ingestion_runs_ops_ingestion_runs_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionRunSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ingestion_run_ops_ingestion_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestionRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_run_patterns_ops_ingestion_runs__run_id__patterns_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_run_ops_ingestion_runs__run_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_source_ops_ingestion_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyzeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enrich_candidates_ops_ingestion_enrich_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrichRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichAsyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_ingestion_ops_ingestion_commit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_schema_hydration_ops_schema_hydrate_post: {
         parameters: {
             query?: never;
@@ -909,6 +2368,37 @@ export interface operations {
             };
         };
     };
+    list_llm_models_llm_models_get: {
+        parameters: {
+            query: {
+                provider: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMModelsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     generate_patterns_ops_patterns_generate_post: {
         parameters: {
             query?: never;
@@ -921,6 +2411,37 @@ export interface operations {
                 "application/json": components["schemas"]["PatternGenerateRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_generate_patterns_ops_patterns_generate_stream_get: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
