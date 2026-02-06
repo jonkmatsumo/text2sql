@@ -249,6 +249,8 @@ python3 -m pytest tests/unit/dal/test_async_cancel_contract.py
 python3 -m pytest tests/unit/agent/test_empty_results.py
 python3 -m pytest tests/unit/agent/test_persistence_modes.py
 python3 -m pytest tests/unit/agent/test_retry_observability.py
+python3 -m pytest tests/unit/agent/nodes/test_execute_schema_drift.py
+python3 -m pytest tests/unit/agent/test_retry_budget_estimator.py
 ```
 
 ### Ops Runbook: Agent P2 Hardening Pass
