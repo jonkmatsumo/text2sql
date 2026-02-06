@@ -278,33 +278,51 @@ def get_schema_introspector() -> SchemaIntrospector:
 
             SCHEMA_INTROSPECTOR_PROVIDERS["postgres"] = PostgresSchemaIntrospector
         if "sqlite" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.sqlite import SqliteSchemaIntrospector
+            try:
+                from dal.sqlite import SqliteSchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["sqlite"] = SqliteSchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["sqlite"] = SqliteSchemaIntrospector
+            except ImportError:
+                logger.debug("SQLite schema introspector unavailable (missing deps)")
         if "mysql" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.mysql import MysqlSchemaIntrospector
+            try:
+                from dal.mysql import MysqlSchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["mysql"] = MysqlSchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["mysql"] = MysqlSchemaIntrospector
+            except ImportError:
+                logger.debug("MySQL schema introspector unavailable (missing deps)")
         if "snowflake" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.snowflake import SnowflakeSchemaIntrospector
+            try:
+                from dal.snowflake import SnowflakeSchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["snowflake"] = SnowflakeSchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["snowflake"] = SnowflakeSchemaIntrospector
+            except ImportError:
+                logger.debug("Snowflake schema introspector unavailable (missing deps)")
         if "redshift" not in SCHEMA_INTROSPECTOR_PROVIDERS:
             from dal.redshift import RedshiftSchemaIntrospector
 
             SCHEMA_INTROSPECTOR_PROVIDERS["redshift"] = RedshiftSchemaIntrospector
         if "bigquery" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.bigquery import BigQuerySchemaIntrospector
+            try:
+                from dal.bigquery import BigQuerySchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["bigquery"] = BigQuerySchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["bigquery"] = BigQuerySchemaIntrospector
+            except ImportError:
+                logger.debug("BigQuery schema introspector unavailable (missing deps)")
         if "athena" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.athena import AthenaSchemaIntrospector
+            try:
+                from dal.athena import AthenaSchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["athena"] = AthenaSchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["athena"] = AthenaSchemaIntrospector
+            except ImportError:
+                logger.debug("Athena schema introspector unavailable (missing deps)")
         if "databricks" not in SCHEMA_INTROSPECTOR_PROVIDERS:
-            from dal.databricks import DatabricksSchemaIntrospector
+            try:
+                from dal.databricks import DatabricksSchemaIntrospector
 
-            SCHEMA_INTROSPECTOR_PROVIDERS["databricks"] = DatabricksSchemaIntrospector
+                SCHEMA_INTROSPECTOR_PROVIDERS["databricks"] = DatabricksSchemaIntrospector
+            except ImportError:
+                logger.debug("Databricks schema introspector unavailable (missing deps)")
         if "cockroachdb" not in SCHEMA_INTROSPECTOR_PROVIDERS:
             from dal.postgres import PostgresSchemaIntrospector
 

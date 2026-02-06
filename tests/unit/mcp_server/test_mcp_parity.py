@@ -1,10 +1,10 @@
 import pytest
 
 from mcp_server.services.cache.sql_constraint_validator import extract_limit_from_sql
-from tests._support.fixtures.schema_fixtures import PAGILA_FIXTURE, SYNTHETIC_FIXTURE
+from tests._support.fixtures.schema_fixtures import SYNTHETIC_FIXTURE
 
 
-@pytest.mark.parametrize("schema_fixture", [PAGILA_FIXTURE, SYNTHETIC_FIXTURE], indirect=True)
+@pytest.mark.parametrize("schema_fixture", [SYNTHETIC_FIXTURE], indirect=True)
 def test_sql_limit_extraction_parity(schema_fixture):
     """Verify limit extraction works for both schemas."""
     # Synthetic table

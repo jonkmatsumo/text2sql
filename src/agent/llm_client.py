@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableLambda
 
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_str
 
 load_dotenv()
 
@@ -73,6 +73,7 @@ def get_llm_client(
     model: Optional[str] = None,
     temperature: float = 0,
     use_light_model: bool = False,
+    seed: Optional[int] = None,
 ) -> BaseChatModel:
     """Get an LLM client for the specified provider.
 
@@ -82,6 +83,8 @@ def get_llm_client(
         model: Model name. Defaults to LLM_MODEL env var or provider default.
         temperature: Temperature for generation. Defaults to 0 (deterministic).
         use_light_model: If True, uses LLM_MODEL_LIGHT env var if available.
+        seed: Random seed for reproducibility (OpenAI only, best-effort).
+              Defaults to AGENT_LLM_SEED env var if set.
 
     Returns:
         BaseChatModel: LangChain chat model instance.
@@ -122,7 +125,13 @@ def get_llm_client(
                 "Please update your .env file with a valid OpenAI API key."
             )
 
-        return ChatOpenAI(model=resolved_model, temperature=temperature)
+        # Resolve seed from env or arg
+        resolved_seed = seed if seed is not None else get_env_int("AGENT_LLM_SEED", None)
+        model_kwargs = {}
+        if resolved_seed is not None:
+            model_kwargs["seed"] = resolved_seed
+
+        return ChatOpenAI(model=resolved_model, temperature=temperature, model_kwargs=model_kwargs)
 
     elif resolved_provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -171,6 +180,7 @@ def get_llm(
     model: Optional[str] = None,
     temperature: float = 0,
     use_light_model: bool = False,
+    seed: Optional[int] = None,
 ) -> BaseChatModel:
     """
     Lazy accessor for LLM clients.
@@ -188,7 +198,9 @@ def get_llm(
     Returns:
         BaseChatModel: The configured chat model
     """
-    key = (provider, model, temperature, use_light_model)
+    # Resolve seed for cache key
+    resolved_seed = seed if seed is not None else get_env_int("AGENT_LLM_SEED", None)
+    key = (provider, model, temperature, use_light_model, resolved_seed)
 
     if key not in _LLM_CACHE:
         llm = get_llm_client(
@@ -196,9 +208,10 @@ def get_llm(
             model=model,
             temperature=temperature,
             use_light_model=use_light_model,
+            seed=resolved_seed,
         )
         # Apply strict telemetry parity wrapper
-        telemetric_llm = _wrap_llm(llm)
+        telemetric_llm = _wrap_llm(llm, resolved_seed)
 
         # Apply sanitization wrapper exactly once at invocation boundary
         _LLM_CACHE[key] = RunnableLambda(_sanitize_llm_input) | telemetric_llm
@@ -229,7 +242,7 @@ def _extract_prompts(input_data: Any) -> tuple[Optional[str], Optional[str]]:
     return system_prompt, user_prompt
 
 
-def _wrap_llm(llm: BaseChatModel):
+def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
     """Wrap an LLM with strict telemetry parity."""
     import logging
 
@@ -251,6 +264,8 @@ def _wrap_llm(llm: BaseChatModel):
             span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.LLM_CALL)
             span.set_attribute(TelemetryKeys.EVENT_NAME, "llm_generation")
             span.set_attribute(TelemetryKeys.LLM_MODEL, model_name)
+            if seed is not None:
+                span.set_attribute("generation.seed", seed)
 
             if sys_prompt:
                 sys_trunc, _, _, _ = truncate_json(sys_prompt)
@@ -287,6 +302,8 @@ def _wrap_llm(llm: BaseChatModel):
             span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.LLM_CALL)
             span.set_attribute(TelemetryKeys.EVENT_NAME, "llm_generation")
             span.set_attribute(TelemetryKeys.LLM_MODEL, model_name)
+            if seed is not None:
+                span.set_attribute("generation.seed", seed)
 
             if sys_prompt:
                 sys_trunc, _, _, _ = truncate_json(sys_prompt)

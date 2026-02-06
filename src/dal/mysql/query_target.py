@@ -93,11 +93,17 @@ class _MysqlConnection:
         self._conn = conn
         self._max_rows = max_rows
         self._last_truncated = False
+        self._last_truncated_reason: Optional[str] = None
 
     @property
     def last_truncated(self) -> bool:
         """Return True when the last fetch was truncated by row limits."""
         return self._last_truncated
+
+    @property
+    def last_truncated_reason(self) -> Optional[str]:
+        """Return the reason when the last fetch was truncated."""
+        return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql = translate_double_quotes_to_backticks(sql)
@@ -126,6 +132,7 @@ class _MysqlConnection:
                 rows = await cursor.fetchall()
                 capped_rows, truncated = cap_rows_with_metadata(list(rows), self._max_rows)
                 self._last_truncated = truncated
+                self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
                 return capped_rows
 
         return await trace_query_operation(
@@ -149,6 +156,7 @@ class _MysqlConnection:
                 rows = await cursor.fetchall()
                 capped_rows, truncated = cap_rows_with_metadata(list(rows), self._max_rows)
                 self._last_truncated = truncated
+                self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
                 columns = columns_from_cursor_description(cursor.description, provider="mysql")
                 return capped_rows, columns
 
@@ -167,8 +175,10 @@ class _MysqlConnection:
         async def _run():
             async with self._conn.cursor() as cursor:
                 await cursor.execute(sql, bound_params)
-                self._last_truncated = False
-                return await cursor.fetchone()
+                row = await cursor.fetchone()
+            self._last_truncated = False
+            self._last_truncated_reason = None
+            return row
 
         return await trace_query_operation(
             "dal.query.execute",

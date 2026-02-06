@@ -122,3 +122,6 @@ with DAG(
     )
 
     t1 >> t2 >> t3
+
+# Ensure dag_id is populated for test mocks that return MagicMock instances.
+dag.dag_id = "text2sql_evaluation"

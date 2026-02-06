@@ -51,11 +51,17 @@ class _SqliteConnection:
         self._conn = conn
         self._max_rows = max_rows
         self._last_truncated = False
+        self._last_truncated_reason: Optional[str] = None
 
     @property
     def last_truncated(self) -> bool:
         """Return True when the last fetch was truncated by row limits."""
         return self._last_truncated
+
+    @property
+    def last_truncated_reason(self) -> Optional[str]:
+        """Return the reason when the last fetch was truncated."""
+        return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
@@ -82,6 +88,7 @@ class _SqliteConnection:
                 [dict(row) for row in rows], self._max_rows
             )
             self._last_truncated = truncated
+            self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
             return capped_rows
 
         return await trace_query_operation(
@@ -105,6 +112,7 @@ class _SqliteConnection:
                 [dict(row) for row in rows], self._max_rows
             )
             self._last_truncated = truncated
+            self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
             columns = columns_from_cursor_description(cursor.description, provider="sqlite")
             return capped_rows, columns
 

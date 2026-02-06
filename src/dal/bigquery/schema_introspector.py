@@ -1,5 +1,5 @@
 import asyncio
-from typing import List
+from typing import Dict, List, Optional
 
 from common.interfaces.schema_introspector import SchemaIntrospector
 from dal.bigquery.config import BigQueryConfig
@@ -63,7 +63,9 @@ def _get_config() -> BigQueryConfig:
     return BigQueryQueryTargetDatabase._config or BigQueryConfig.from_env()
 
 
-async def _run_query(sql: str, location: str | None, parameters: dict | None = None) -> List[dict]:
+async def _run_query(
+    sql: str, location: Optional[str], parameters: Optional[Dict] = None
+) -> List[dict]:
     from google.cloud import bigquery
 
     def _execute():

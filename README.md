@@ -239,6 +239,10 @@ New environment flags introduced by the remaining hardening pass:
 - `AGENT_EMPTY_RESULT_SANITY_CHECK` (default: false)
 - `AGENT_INTERACTION_PERSISTENCE_MODE` (`best_effort` default, `strict` optional)
 - `AGENT_CACHE_SCHEMA_VALIDATION` (default: false)
+- `AGENT_CORRECTION_SIMILARITY_ENFORCE` (default: false)
+- `AGENT_CORRECTION_SIMILARITY_MIN_SCORE` (default: 0.8)
+- `AGENT_SCHEMA_BINDING_VALIDATION` (default: false)
+- `AGENT_SCHEMA_SNAPSHOT_CACHE_BACKEND` (default: memory)
 
 Focused unit tests added in this pass can be run with:
 ```bash
@@ -249,4 +253,37 @@ python3 -m pytest tests/unit/dal/test_async_cancel_contract.py
 python3 -m pytest tests/unit/agent/test_empty_results.py
 python3 -m pytest tests/unit/agent/test_persistence_modes.py
 python3 -m pytest tests/unit/agent/test_retry_observability.py
+python3 -m pytest tests/unit/agent/nodes/test_execute_schema_drift.py
+python3 -m pytest tests/unit/agent/test_retry_budget_estimator.py
+```
+
+### Ops Runbook: Agent P2 Hardening Pass
+New environment flags introduced by the P2 hardening pass:
+- `AGENT_SCHEMA_DRIFT_AUTO_REFRESH_MODE` (`off` default, `once` optional)
+- `AGENT_DRIFT_CANARY_ENABLED` (default: false)
+No additional flags are required for pagination; capability gating is automatic.
+Retry budgeting flags:
+- `AGENT_RETRY_BUDGET_EMA_ALPHA` (default: 0.3)
+- `AGENT_MIN_RETRY_BUDGET_SECONDS` (default: 3.0)
+
+Pagination and completeness notes:
+- `page_size` is capped at 1000 by the MCP tool.
+- Providers without pagination support fail fast with `unsupported_capability`.
+- `result_completeness.partial_reason` values are bounded: `TRUNCATED|LIMITED|PAGINATED|PROVIDER_CAP|UNKNOWN`.
+- `result_completeness.next_page_token` is opaque and should be passed back verbatim.
+
+Troubleshooting:
+- If `unsupported_capability`, verify provider support and remove pagination/column-metadata options.
+- If `partial_reason=PROVIDER_CAP`, consider narrowing filters or enabling pagination (where supported).
+- If `next_page_token` is missing but expected, confirm provider pagination support and page size bounds.
+
+Focused unit tests added in this pass can be run with:
+```bash
+python3 -m pytest tests/unit/agent/test_result_completeness.py
+python3 -m pytest tests/unit/mcp_server/test_execute_sql_pagination.py
+python3 -m pytest tests/unit/dal/test_pagination_tokens.py
+python3 -m pytest tests/unit/agent/test_schema_drift_active.py
+python3 -m pytest tests/unit/dal/test_cancel_matrix.py
+python3 -m pytest tests/unit/agent/test_synthesis_completeness_disclosures.py
+python3 -m pytest tests/unit/agent/test_drift_canary.py
 ```

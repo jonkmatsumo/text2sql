@@ -7,6 +7,7 @@ import os
 import threading
 from collections import deque
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import create_engine, text
 
@@ -16,7 +17,29 @@ from otel_worker.storage.minio import upload_span_payload_blob
 logger = logging.getLogger(__name__)
 
 # Using a single engine for simplicity in the worker
-engine = create_engine(settings.POSTGRES_URL)
+_engine = None
+
+
+class _LazyEngine:
+    """Proxy that initializes the engine on first attribute access."""
+
+    def __getattr__(self, name):
+        return getattr(get_engine(), name)
+
+
+# Lazy engine initialization to avoid import-time failures in tests.
+def get_engine():
+    """Return the SQLAlchemy engine, initializing it lazily when needed."""
+    global _engine
+    if _engine is None:
+        if engine is not None and not isinstance(engine, _LazyEngine):
+            return engine
+        _engine = create_engine(settings.POSTGRES_URL)
+    return _engine
+
+
+engine = _LazyEngine()
+
 
 # Get target schema from environment, default to 'otel'
 TARGET_SCHEMA = os.getenv("OTEL_DB_SCHEMA", "otel")
@@ -83,7 +106,7 @@ class SafeIngestQueue:
 safe_queue = SafeIngestQueue()
 
 
-def _decode_trace_id(trace_id: str | None) -> str | None:
+def _decode_trace_id(trace_id: Optional[str]) -> Optional[str]:
     """Decode base64 OTLP trace IDs to hex when possible."""
     if not trace_id:
         return None
@@ -106,7 +129,7 @@ def init_db():
     """Validate that the schema and tables exist via migrations."""
     table_name = get_table_name("traces")
     try:
-        with engine.connect() as conn:
+        with get_engine().connect() as conn:
             # Check for one of the core tables
             conn.execute(text(f"SELECT 1 FROM {table_name} LIMIT 1;"))
         logger.info(f"OTEL database table '{table_name}' validated")
@@ -128,7 +151,7 @@ def save_traces_batch(trace_units: list[dict]):
     span_links_table = get_table_name("span_links")
     span_payloads_table = get_table_name("span_payloads")
 
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         for unit in trace_units:
             trace_id = unit["trace_id"]
             summaries = unit["summaries"]
@@ -246,7 +269,7 @@ def save_traces_batch(trace_units: list[dict]):
                 )
 
                 # Skip span detail tables for lightweight SQLite test environment
-                if engine.dialect.name == "sqlite":
+                if get_engine().dialect.name == "sqlite":
                     continue
 
                 # Span events
@@ -378,6 +401,27 @@ def save_traces_batch(trace_units: list[dict]):
     logger.info(f"Batched saved {len(trace_units)} traces to Postgres")
 
 
+def save_trace_and_spans(
+    trace_id: str,
+    resource_attributes: Optional[dict],
+    summaries: list[dict],
+    raw_blob_url: str,
+) -> None:
+    """Save a single trace unit and its spans."""
+    if summaries:
+        for summary in summaries:
+            summary.setdefault("resource_attributes", resource_attributes or {})
+    save_traces_batch(
+        [
+            {
+                "trace_id": trace_id,
+                "summaries": summaries,
+                "raw_blob_url": raw_blob_url,
+            }
+        ]
+    )
+
+
 def list_traces(
     service: str = None,
     trace_id: str = None,
@@ -421,7 +465,7 @@ def list_traces(
     query += f" ORDER BY start_time {order.upper()}"
     query += " LIMIT :limit OFFSET :offset"
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         result = conn.execute(text(query), params)
         return [dict(row._mapping) for row in result]
 
@@ -522,7 +566,7 @@ def compute_trace_aggregations(
         duration_max_ms=duration_max_ms,
     )
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         total_row = conn.execute(
             text(
                 f"""
@@ -616,7 +660,7 @@ def get_trace(trace_id: str, include_attributes: bool = False):
         FROM {traces_table}
         WHERE trace_id = :trace_id
     """
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         result = conn.execute(text(query), {"trace_id": trace_id})
         row = result.fetchone()
         if not row:
@@ -639,7 +683,7 @@ def get_trace(trace_id: str, include_attributes: bool = False):
         return data
 
 
-def _to_ms(value: datetime) -> int | None:
+def _to_ms(value: datetime) -> Optional[int]:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -724,7 +768,7 @@ def list_spans_for_trace(
     """
     params = {"trace_id": trace_id, "limit": limit, "offset": offset}
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         self_time_map = _load_self_time_map(conn, trace_id)
         result = conn.execute(text(query), params)
         spans = []
@@ -748,7 +792,7 @@ def list_spans_for_trace(
         return spans
 
 
-def resolve_trace_id_by_interaction(interaction_id: str) -> str | None:
+def resolve_trace_id_by_interaction(interaction_id: str) -> Optional[str]:
     """Resolve a trace ID by interaction_id if available."""
     traces_table = get_table_name("traces")
     query = f"""
@@ -758,19 +802,19 @@ def resolve_trace_id_by_interaction(interaction_id: str) -> str | None:
         ORDER BY start_time DESC
         LIMIT 1
     """
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         row = conn.execute(text(query), {"interaction_id": interaction_id}).fetchone()
         return row[0] if row else None
 
 
-def get_span_detail(trace_id: str, span_id: str) -> dict | None:
+def get_span_detail(trace_id: str, span_id: str) -> Optional[dict]:
     """Fetch a span and its related events/links/payloads."""
     spans_table = get_table_name("spans")
     events_table = get_table_name("span_events")
     links_table = get_table_name("span_links")
     payloads_table = get_table_name("span_payloads")
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         self_time_map = _load_self_time_map(conn, trace_id)
         row = conn.execute(
             text(
@@ -801,7 +845,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
         data["links"] = []
         data["payloads"] = []
 
-        if engine.dialect.name == "sqlite":
+        if get_engine().dialect.name == "sqlite":
             return data
 
         try:
@@ -880,7 +924,7 @@ def get_span_detail(trace_id: str, span_id: str) -> dict | None:
 def get_queue_depth() -> int:
     """Get the current number of pending items in the ingestion queue."""
     queue_table = get_table_name("ingestion_queue")
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         result = conn.execute(text(f"SELECT count(*) FROM {queue_table} WHERE status = 'pending'"))
         return result.scalar()
 
@@ -888,7 +932,7 @@ def get_queue_depth() -> int:
 def enqueue_ingestion_direct(payload_json: dict, trace_id: str = None) -> int:
     """Write the raw OTLP payload directly to the DB queue table."""
     queue_table = get_table_name("ingestion_queue")
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         result = conn.execute(
             text(
                 f"""
@@ -911,7 +955,7 @@ def poll_ingestion_queue(limit: int = 10) -> list[dict]:
     """Fetch pending items from the ingestion queue and mark them as processing."""
     queue_table = get_table_name("ingestion_queue")
     # Atomic claim: update status to 'processing' and return the rows
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         query = f"""
             UPDATE {queue_table}
             SET status = 'processing', attempts = attempts + 1
@@ -938,7 +982,7 @@ def poll_ingestion_queue(limit: int = 10) -> list[dict]:
 def update_ingestion_status(item_id: int, status: str, error: str = None):
     """Update the status of an ingestion item after processing."""
     queue_table = get_table_name("ingestion_queue")
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         if status == "complete":
             conn.execute(
                 text(f"UPDATE {queue_table} SET status = 'complete' WHERE id = :id"),
@@ -973,7 +1017,7 @@ def get_metrics_preview(window_minutes: int, service: str = None):
 
     # Summary query
     # Percentile is Postgres specific, fallback for SQLite
-    if engine.dialect.name == "postgresql":
+    if get_engine().dialect.name == "postgresql":
         p95_expr = "PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)"
     else:
         p95_expr = "AVG(duration_ms)"  # Fallback
@@ -992,7 +1036,7 @@ def get_metrics_preview(window_minutes: int, service: str = None):
 
     # Timeseries query
     # date_trunc is Postgres specific, fallback for SQLite
-    if engine.dialect.name == "postgresql":
+    if get_engine().dialect.name == "postgresql":
         interval = "1 minute" if window_minutes <= 60 else "1 hour"
         bucket_expr = f"date_trunc('{interval.split()[1]}', start_time)"
     else:
@@ -1011,7 +1055,7 @@ def get_metrics_preview(window_minutes: int, service: str = None):
         ts_query += " AND service_name = :service"
     ts_query += " GROUP BY 1 ORDER BY 1 ASC"
 
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         s_row = conn.execute(text(summary_query), params).fetchone()
         summary = (
             dict(s_row._mapping)

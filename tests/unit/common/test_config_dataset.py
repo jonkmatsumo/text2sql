@@ -20,22 +20,12 @@ class TestGetDatasetMode:
 
         assert get_dataset_mode() == "synthetic"
 
-    def test_explicit_pagila(self, monkeypatch):
-        """Explicit DATASET_MODE=pagila should work."""
-        monkeypatch.setenv("DATASET_MODE", "pagila")
-        from common.config.dataset import get_dataset_mode
-
-        assert get_dataset_mode() == "pagila"
-
     def test_case_insensitive(self, monkeypatch):
         """DATASET_MODE should be case-insensitive."""
         monkeypatch.setenv("DATASET_MODE", "SYNTHETIC")
         from common.config.dataset import get_dataset_mode
 
         assert get_dataset_mode() == "synthetic"
-
-        monkeypatch.setenv("DATASET_MODE", "Pagila")
-        assert get_dataset_mode() == "pagila"
 
     def test_invalid_mode_raises(self, monkeypatch):
         """Invalid DATASET_MODE should raise ValueError."""
@@ -55,13 +45,6 @@ class TestGetDefaultDbName:
         from common.config.dataset import get_default_db_name
 
         assert get_default_db_name() == "query_target"
-
-    def test_pagila_mode_returns_pagila(self, monkeypatch):
-        """Pagila mode should return 'pagila' as db name."""
-        monkeypatch.setenv("DATASET_MODE", "pagila")
-        from common.config.dataset import get_default_db_name
-
-        assert get_default_db_name() == "pagila"
 
     def test_default_returns_synthetic(self, monkeypatch):
         """Default (no DATASET_MODE) should return 'query_target'."""

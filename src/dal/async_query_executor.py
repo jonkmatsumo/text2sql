@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Union, runtime_checkable
 
 
 class QueryStatus(str, Enum):
@@ -15,7 +15,9 @@ class QueryStatus(str, Enum):
 class AsyncQueryExecutor(Protocol):
     """Protocol for async/job-style query execution."""
 
-    async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
+    async def submit(
+        self, sql: str, params: Optional[Union[Dict[str, Any], List[Any]]] = None
+    ) -> str:
         """Submit a query for asynchronous execution and return a job ID."""
         ...
 

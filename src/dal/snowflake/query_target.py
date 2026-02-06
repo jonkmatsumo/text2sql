@@ -87,6 +87,23 @@ class _SnowflakeConnection:
         self._max_rows = max_rows
         self._warn_after_seconds = warn_after_seconds
         self._executor = SnowflakeAsyncQueryExecutor(conn)
+        self._last_truncated = False
+        self._last_truncated_reason: Optional[str] = None
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
+
+    @property
+    def last_truncated_reason(self) -> Optional[str]:
+        """Return the reason when the last fetch was truncated."""
+        return self._last_truncated_reason
+
+    def _set_truncation(self, row_count: int) -> None:
+        truncated = bool(self._max_rows and row_count >= self._max_rows)
+        self._last_truncated = truncated
+        self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
 
     @property
     def executor(self) -> SnowflakeAsyncQueryExecutor:
@@ -109,7 +126,7 @@ class _SnowflakeConnection:
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
-        return await trace_query_operation(
+        rows = await trace_query_operation(
             "dal.query.execute",
             provider="snowflake",
             execution_model="async",
@@ -124,11 +141,13 @@ class _SnowflakeConnection:
                 warn_after_seconds=self._warn_after_seconds,
             ),
         )
+        self._set_truncation(len(rows))
+        return rows
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
-        return await trace_query_operation(
+        rows, columns = await trace_query_operation(
             "dal.query.execute",
             provider="snowflake",
             execution_model="async",
@@ -143,6 +162,8 @@ class _SnowflakeConnection:
                 warn_after_seconds=self._warn_after_seconds,
             ),
         )
+        self._set_truncation(len(rows))
+        return rows, columns
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)

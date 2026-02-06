@@ -12,26 +12,6 @@ class TestGetRatingPatterns:
         patterns = get_rating_patterns()
         assert patterns == []
 
-    def test_pagila_mode_returns_rating_patterns(self, monkeypatch):
-        """Pagila mode should return film rating patterns."""
-        monkeypatch.setenv("DATASET_MODE", "pagila")
-        from mcp_server.services.canonicalization.dependency_patterns import (
-            RATING_PATTERNS,
-            get_rating_patterns,
-        )
-
-        patterns = get_rating_patterns()
-        assert patterns == RATING_PATTERNS
-        assert len(patterns) > 0
-
-    def test_default_returns_empty(self, monkeypatch):
-        """Default mode (no DATASET_MODE) should return empty patterns."""
-        monkeypatch.delenv("DATASET_MODE", raising=False)
-        from mcp_server.services.canonicalization.dependency_patterns import get_rating_patterns
-
-        patterns = get_rating_patterns()
-        assert patterns == []
-
 
 class TestGetEntityPatterns:
     """Tests for get_entity_patterns function."""
@@ -47,14 +27,6 @@ class TestGetEntityPatterns:
         patterns = get_entity_patterns()
         assert len(patterns) == 1
         assert patterns[0] == ENTITY_PATTERN_FINANCIAL
-
-    def test_pagila_mode_returns_all_entities(self, monkeypatch):
-        """Pagila mode should return film, actor, and financial patterns."""
-        monkeypatch.setenv("DATASET_MODE", "pagila")
-        from mcp_server.services.canonicalization.dependency_patterns import get_entity_patterns
-
-        patterns = get_entity_patterns()
-        assert len(patterns) == 3
 
 
 class TestGetAllPatterns:
@@ -78,9 +50,5 @@ class TestGetAllPatterns:
         )
 
         monkeypatch.setenv("DATASET_MODE", "synthetic")
-        result = get_all_patterns()
-        assert result["limit"] == LIMIT_PATTERNS
-
-        monkeypatch.setenv("DATASET_MODE", "pagila")
         result = get_all_patterns()
         assert result["limit"] == LIMIT_PATTERNS

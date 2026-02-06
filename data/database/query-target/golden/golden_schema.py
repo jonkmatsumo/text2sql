@@ -22,7 +22,7 @@ GOLDEN_DATASET_SCHEMA = {
         },
         "dataset_mode": {
             "type": "string",
-            "enum": ["synthetic", "pagila"],
+            "enum": ["synthetic"],
             "description": "Dataset this golden set is designed for",
         },
         "test_cases": {
@@ -154,7 +154,7 @@ class GoldenDataset:
     """Container for a set of golden test cases."""
 
     version: str
-    dataset_mode: Literal["synthetic", "pagila"]
+    dataset_mode: Literal["synthetic"]
     test_cases: List[GoldenTestCase]
 
     @classmethod

@@ -3,6 +3,7 @@
 Enhanced with error taxonomy for targeted correction strategies.
 """
 
+import logging
 import time
 
 from dotenv import load_dotenv
@@ -12,7 +13,10 @@ from agent.state import AgentState
 from agent.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
-from common.config.env import get_env_str
+from agent.utils.latency import update_latency_ema
+from common.config.env import get_env_bool, get_env_float, get_env_str
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -146,40 +150,108 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         )
 
         from agent.llm_client import get_llm
+        from agent.utils.sql_similarity import compute_sql_similarity
 
-        chain = prompt | get_llm(temperature=0)
+        # Internal loop for drift detection
+        max_drift_retries = 1
+        drift_attempts = 0
 
-        start_time = time.monotonic()
-        response = chain.invoke(
-            {
-                "correction_strategy": correction_strategy,
-                "taxonomy_context": taxonomy_context,
-                "plan_context": plan_context,
-                "ast_context": ast_context,
-                "schema_context": schema_context,
-                "bad_query": current_sql,
-                "error_msg": error,
-            }
-        )
-        latency_seconds = time.monotonic() - start_time
+        # Initial context
+
+        current_error_msg = error or ""
+
+        while True:
+            # Re-construct prompt with potentially updated context (if drifting)
+            # We reuse the static contexts (taxonomy, plan, ast) but error_msg might change
+
+            # If we are retrying due to drift, append warning.
+            # Ideally we append to system or user. Append to user prompt for visibility.
+
+            chain = prompt | get_llm(temperature=0)
+
+            start_time = time.monotonic()
+            response = chain.invoke(
+                {
+                    "correction_strategy": correction_strategy,
+                    "taxonomy_context": taxonomy_context,
+                    "plan_context": plan_context,
+                    "ast_context": ast_context,
+                    "schema_context": schema_context,
+                    "bad_query": current_sql,
+                    "error_msg": current_error_msg,
+                }
+            )
+            latency_seconds = time.monotonic() - start_time
+
+            # Capture token usage
+            from agent.llm_client import extract_token_usage
+
+            usage_stats = extract_token_usage(response)
+            if usage_stats:
+                span.set_attributes(usage_stats)
+
+            # Extract SQL
+            corrected_sql = response.content.strip()
+            if corrected_sql.startswith("```sql"):
+                corrected_sql = corrected_sql[6:]
+            if corrected_sql.startswith("```"):
+                corrected_sql = corrected_sql[3:]
+            if corrected_sql.endswith("```"):
+                corrected_sql = corrected_sql[:-3]
+            corrected_sql = corrected_sql.strip()
+
+            # Similarity Check
+            should_enforce = get_env_bool("AGENT_CORRECTION_SIMILARITY_ENFORCE", False)
+            if should_enforce and current_sql:
+                min_score = get_env_float("AGENT_CORRECTION_SIMILARITY_MIN_SCORE", 0.5)
+                similarity = compute_sql_similarity(current_sql, corrected_sql)
+                span.set_attribute("correction.similarity.score", similarity)
+
+                if similarity < min_score:
+                    span.set_attribute("correction.similarity.rejected", True)
+                    logger.warning(f"Correction rejected due to drift. Sim: {similarity}")
+
+                    if drift_attempts < max_drift_retries:
+                        drift_attempts += 1
+                        current_error_msg = (
+                            "Previous correction rejected due to structural drift "
+                            f"(sim {similarity:.2f} < {min_score}). "
+                            "Keep table references/structure close to original."
+                        )
+                        continue  # Retry
+                    else:
+                        # Retries exhausted, return drift error or just fail?
+                        # Request says "reject correction attempt and return a targeted violation".
+                        # If we return the drifted SQL, it will execute and likely fail or be wrong.
+                        # If we return original SQL, validation fails.
+                        # Return original SQL + error category.
+                        msg = (
+                            "Correction failed: Structural drift detected "
+                            f"(score {similarity:.2f})"
+                        )
+                        return {
+                            "current_sql": current_sql,
+                            "retry_count": retry,
+                            "error": msg,
+                            "error_category": "correction_drift",
+                            "correction_plan": correction_strategy,
+                            "latency_correct_seconds": latency_seconds,
+                            "ema_llm_latency_seconds": None,  # Don't update EMA on fail
+                        }
+                else:
+                    span.set_attribute("correction.similarity.rejected", False)
+
+            # Success path (no enforcement or passed check)
+            break
+
         span.set_attribute("latency.correct_seconds", latency_seconds)
-
-        # Capture token usage
-        from agent.llm_client import extract_token_usage
-
-        usage_stats = extract_token_usage(response)
-        if usage_stats:
-            span.set_attributes(usage_stats)
-
-        # Extract SQL from response (remove markdown code blocks if present)
-        corrected_sql = response.content.strip()
-        if corrected_sql.startswith("```sql"):
-            corrected_sql = corrected_sql[6:]
-        if corrected_sql.startswith("```"):
-            corrected_sql = corrected_sql[3:]
-        if corrected_sql.endswith("```"):
-            corrected_sql = corrected_sql[:-3]
-        corrected_sql = corrected_sql.strip()
+        ema_alpha = get_env_float("AGENT_RETRY_BUDGET_EMA_ALPHA", 0.3)
+        ema_latency = update_latency_ema(
+            state.get("ema_llm_latency_seconds"), latency_seconds, ema_alpha
+        )
+        span.set_attribute("retry.budget.observed_latency_seconds", latency_seconds)
+        if ema_latency is not None:
+            span.set_attribute("retry.budget.ema_latency_seconds", ema_latency)
 
         span.set_outputs(
             {
@@ -196,4 +268,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "error_category": error_category,
             "correction_plan": correction_strategy,
             "latency_correct_seconds": latency_seconds,
+            "ema_llm_latency_seconds": ema_latency,
         }

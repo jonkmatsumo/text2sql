@@ -67,6 +67,23 @@ class _AthenaConnection:
         self._query_timeout_seconds = query_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._max_rows = max_rows
+        self._last_truncated = False
+        self._last_truncated_reason: Optional[str] = None
+
+    @property
+    def last_truncated(self) -> bool:
+        """Return True when the last fetch was truncated by row limits."""
+        return self._last_truncated
+
+    @property
+    def last_truncated_reason(self) -> Optional[str]:
+        """Return the reason when the last fetch was truncated."""
+        return self._last_truncated_reason
+
+    def _set_truncation(self, row_count: int) -> None:
+        truncated = bool(self._max_rows and row_count >= self._max_rows)
+        self._last_truncated = truncated
+        self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
 
     async def execute(self, sql: str, *params: Any) -> str:
         sql, query_params = translate_postgres_params_to_athena(sql, list(params))
@@ -91,7 +108,7 @@ class _AthenaConnection:
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         sql, query_params = translate_postgres_params_to_athena(sql, list(params))
-        return await trace_query_operation(
+        rows = await trace_query_operation(
             "dal.query.execute",
             provider="athena",
             execution_model="async",
@@ -105,11 +122,13 @@ class _AthenaConnection:
                 max_rows=self._max_rows,
             ),
         )
+        self._set_truncation(len(rows))
+        return rows
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
         sql, query_params = translate_postgres_params_to_athena(sql, list(params))
-        return await trace_query_operation(
+        rows, columns = await trace_query_operation(
             "dal.query.execute",
             provider="athena",
             execution_model="async",
@@ -123,6 +142,8 @@ class _AthenaConnection:
                 max_rows=self._max_rows,
             ),
         )
+        self._set_truncation(len(rows))
+        return rows, columns
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
         rows = await self.fetch(sql, *params)

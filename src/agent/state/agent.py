@@ -45,6 +45,11 @@ class AgentState(TypedDict):
     result_columns: Optional[List[dict]]
     result_is_limited: Optional[bool]
     result_limit: Optional[int]
+    result_completeness: Optional[dict]
+
+    # Pagination inputs for executing subsequent pages
+    page_token: Optional[str]
+    page_size: Optional[int]
 
     # Deadline propagation and budgeting
     deadline_ts: Optional[float]
@@ -55,6 +60,7 @@ class AgentState(TypedDict):
 
     # Error message from the last execution attempt (if any)
     error: Optional[str]
+    error_metadata: Optional[dict]
 
     # Counter to track retries and prevent infinite loops
     retry_count: int
@@ -122,6 +128,11 @@ class AgentState(TypedDict):
     # Per-node latency tracking (seconds)
     latency_generate_seconds: Optional[float]
     latency_correct_seconds: Optional[float]
+    ema_llm_latency_seconds: Optional[float]
+
+    # Retry history for debugging and telemetry
+    # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}
+    retry_summary: Optional[dict]
 
     # =========================================================================
     # Cache and Metadata

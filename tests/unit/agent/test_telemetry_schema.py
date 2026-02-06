@@ -157,3 +157,112 @@ class TestPayloadMetadata:
 
         error = json.loads(calls["telemetry.error_json"])
         assert error["error"] == "test_error"
+
+
+class TestSpanContract:
+    """Test suite for SpanContract validation."""
+
+    def test_span_contract_validate_all_present(self):
+        """Test that validation passes when all required attributes are present."""
+        from agent.telemetry_schema import SpanContract
+
+        contract = SpanContract(
+            name="test",
+            required=frozenset({"attr.a", "attr.b"}),
+        )
+
+        missing = contract.validate({"attr.a": 1, "attr.b": 2, "attr.c": 3})
+        assert missing == []
+
+    def test_span_contract_validate_missing_required(self):
+        """Test that validation returns missing required attributes."""
+        from agent.telemetry_schema import SpanContract
+
+        contract = SpanContract(
+            name="test",
+            required=frozenset({"attr.a", "attr.b"}),
+        )
+
+        missing = contract.validate({"attr.a": 1})
+        assert "attr.b" in missing
+        assert "attr.a" not in missing
+
+    def test_span_contract_validate_required_on_error(self):
+        """Test that required_on_error attributes are checked when has_error=True."""
+        from agent.telemetry_schema import SpanContract
+
+        contract = SpanContract(
+            name="test",
+            required=frozenset({"attr.a"}),
+            required_on_error=frozenset({"error.category"}),
+        )
+
+        # Without error - only required checked
+        missing_no_error = contract.validate({"attr.a": 1}, has_error=False)
+        assert missing_no_error == []
+
+        # With error - required_on_error also checked
+        missing_with_error = contract.validate({"attr.a": 1}, has_error=True)
+        assert "error.category" in missing_with_error
+
+    def test_get_span_contract_returns_contract(self):
+        """Test that get_span_contract returns correct contract."""
+        from agent.telemetry_schema import get_span_contract
+
+        contract = get_span_contract("execute_sql")
+        assert contract is not None
+        assert contract.name == "execute_sql"
+        assert "result.is_truncated" in contract.required
+
+    def test_get_span_contract_returns_none_for_unknown(self):
+        """Test that get_span_contract returns None for unknown spans."""
+        from agent.telemetry_schema import get_span_contract
+
+        contract = get_span_contract("unknown_span_name")
+        assert contract is None
+
+    def test_span_contracts_are_frozen(self):
+        """Test that SpanContract instances are immutable."""
+        from agent.telemetry_schema import SpanContract
+
+        contract = SpanContract(
+            name="test",
+            required=frozenset({"attr.a"}),
+        )
+
+        # Should raise error when trying to modify frozen dataclass
+        try:
+            contract.name = "modified"
+            assert False, "Should have raised FrozenInstanceError"
+        except Exception:
+            pass  # Expected
+
+    def test_otel_span_tracks_attributes(self):
+        """Test that OTELTelemetrySpan tracks set attributes."""
+        from unittest.mock import MagicMock
+
+        from agent.telemetry import OTELTelemetrySpan
+
+        mock_span = MagicMock()
+        otel_span = OTELTelemetrySpan(mock_span)
+
+        otel_span.set_attribute("result.is_truncated", True)
+        otel_span.set_attribute("result.rows_returned", 100)
+
+        tracked = otel_span.get_tracked_attributes()
+        assert tracked["result.is_truncated"] is True
+        assert tracked["result.rows_returned"] == 100
+
+    def test_otel_span_detects_error(self):
+        """Test that OTELTelemetrySpan detects error conditions."""
+        from unittest.mock import MagicMock
+
+        from agent.telemetry import OTELTelemetrySpan
+
+        mock_span = MagicMock()
+        otel_span = OTELTelemetrySpan(mock_span)
+
+        assert not otel_span.has_error()
+
+        otel_span.set_attribute("error.category", "timeout")
+        assert otel_span.has_error()

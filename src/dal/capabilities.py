@@ -9,6 +9,7 @@ class BackendCapabilities:
     execution_model: Literal["sync", "async"] = "sync"
     supports_column_metadata: bool = True
     supports_cancel: bool = False
+    supports_pagination: bool = False
     supports_arrays: bool = True
     supports_json_ops: bool = True
     supports_transactions: bool = True
@@ -17,12 +18,17 @@ class BackendCapabilities:
     supports_schema_cache: bool = False
 
 
+PAGINATION_PROVIDERS: set[str] = set()
+
+
 def capabilities_for_provider(provider: str) -> BackendCapabilities:
     """Return capability flags for a given query-target provider."""
     normalized = provider.lower()
+    supports_pagination = normalized in PAGINATION_PROVIDERS
     if normalized == "redshift":
         return BackendCapabilities(
             execution_model="sync",
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,
@@ -32,6 +38,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "mysql":
         return BackendCapabilities(
             execution_model="sync",
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=True,
@@ -42,11 +49,13 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="sync",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
         )
     if normalized == "sqlite":
         return BackendCapabilities(
             execution_model="sync",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=True,
@@ -57,6 +66,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="async",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,
@@ -66,6 +76,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="async",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=True,
             supports_json_ops=False,
             supports_transactions=False,
@@ -77,6 +88,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="async",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,
@@ -87,6 +99,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="async",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=False,
@@ -96,6 +109,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "cockroachdb":
         return BackendCapabilities(
             execution_model="sync",
+            supports_pagination=supports_pagination,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=False,
@@ -106,6 +120,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         return BackendCapabilities(
             execution_model="sync",
             supports_cancel=True,
+            supports_pagination=supports_pagination,
             supports_arrays=True,
             supports_json_ops=True,
             supports_transactions=True,
@@ -115,6 +130,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
     if normalized == "clickhouse":
         return BackendCapabilities(
             execution_model="sync",
+            supports_pagination=supports_pagination,
             supports_arrays=False,
             supports_json_ops=False,
             supports_transactions=False,

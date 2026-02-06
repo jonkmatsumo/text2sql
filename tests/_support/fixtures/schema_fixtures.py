@@ -19,16 +19,6 @@ class DatasetSchemaFixture:
     count_query: str
 
 
-# Concrete implementation for Pagila (Legacy/Default)
-PAGILA_FIXTURE = DatasetSchemaFixture(
-    name="pagila",
-    valid_table="film",
-    invalid_table="non_existent_table",
-    tables=["film", "actor", "customer", "rental", "payment"],
-    sample_query="SELECT * FROM film LIMIT 1",
-    count_query="SELECT COUNT(*) as count FROM film",
-)
-
 # Concrete implementation for Synthetic (New/Target)
 SYNTHETIC_FIXTURE = DatasetSchemaFixture(
     name="synthetic",

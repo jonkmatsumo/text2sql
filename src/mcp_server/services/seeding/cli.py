@@ -107,7 +107,7 @@ async def main():
 
     try:
         # We need two connections:
-        # 1. Main DB (Pagila) for reading schema info
+        # 1. Main DB (Query Target) for reading schema info
         # 2. Control DB for writing embeddings/examples
 
         # Primary/Main Connection

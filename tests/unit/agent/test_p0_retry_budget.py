@@ -7,6 +7,7 @@ import pytest
 from agent.graph import _estimate_correction_budget_seconds, route_after_execution
 from agent.nodes.correct import correct_sql_node
 from agent.state import AgentState
+from agent.utils.latency import update_latency_ema
 
 
 def test_estimate_uses_observed_latency_with_overhead(monkeypatch):
@@ -17,6 +18,32 @@ def test_estimate_uses_observed_latency_with_overhead(monkeypatch):
     estimate = _estimate_correction_budget_seconds(state)
 
     assert estimate >= 1.7
+
+
+def test_estimate_uses_generate_latency_when_ema_missing(monkeypatch):
+    """Generate latency should warm-start the estimate when EMA is missing."""
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "0")
+    state = {"latency_generate_seconds": 1.0}
+
+    estimate = _estimate_correction_budget_seconds(state)
+
+    assert estimate >= 1.5
+
+
+def test_estimate_uses_ema_when_present(monkeypatch):
+    """EMA latency should take precedence over observed latency."""
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "0")
+    state = {"ema_llm_latency_seconds": 2.0, "latency_generate_seconds": 0.5}
+
+    estimate = _estimate_correction_budget_seconds(state)
+
+    assert estimate >= 2.5
+
+
+def test_latency_ema_update_math():
+    """EMA should update deterministically based on alpha."""
+    ema = update_latency_ema(2.0, 4.0, 0.25)
+    assert ema == pytest.approx(2.5)
 
 
 def test_estimate_respects_min_budget(monkeypatch):

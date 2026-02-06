@@ -1,16 +1,17 @@
 """SQL execution node for running validated queries with telemetry tracing."""
 
 import logging
-import re
 import time
 
 from agent.state import AgentState
+from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
-from common.config.env import get_env_bool
+from common.config.env import get_env_bool, get_env_str
+from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -19,25 +20,8 @@ class ToolResponseMalformedError(RuntimeError):
     """Raised when execute_sql_query returns an unexpected payload."""
 
 
-def _extract_missing_identifiers(error_text: str) -> list[str]:
-    patterns = [
-        r'relation "(?P<name>[^"]+)" does not exist',
-        r'table "(?P<name>[^"]+)" does not exist',
-        r'column "(?P<name>[^"]+)" does not exist',
-        r"no such table: (?P<name>[\w\.]+)",
-        r"unknown column (?P<name>[\w\.]+)",
-    ]
-    identifiers = []
-    for pattern in patterns:
-        for match in re.finditer(pattern, error_text, flags=re.IGNORECASE):
-            name = match.group("name")
-            if name and name not in identifiers:
-                identifiers.append(name)
-    return identifiers
-
-
-def _schema_drift_hint(error_text: str) -> tuple[bool, list[str]]:
-    identifiers = _extract_missing_identifiers(error_text)
+def _schema_drift_hint(error_text: str, provider: str) -> tuple[bool, list[str]]:
+    identifiers = extract_missing_identifiers(provider, error_text)
     return (len(identifiers) > 0, identifiers)
 
 
@@ -83,6 +67,8 @@ def parse_execute_tool_response(payload) -> dict:
                     "response_shape": "error",
                     "error": item.get("error"),
                     "error_category": item.get("error_category"),
+                    "required_capability": item.get("required_capability"),
+                    "provider": item.get("provider"),
                 }
             if "rows" in item and "metadata" in item:
                 return {
@@ -107,6 +93,8 @@ def parse_execute_tool_response(payload) -> dict:
                 "response_shape": "error",
                 "error": parsed.get("error"),
                 "error_category": parsed.get("error_category"),
+                "required_capability": parsed.get("required_capability"),
+                "provider": parsed.get("provider"),
             }
         response_shape = "malformed"
     else:
@@ -179,8 +167,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
         except Exception as e:
             error = f"Policy Enforcement Failed: {e}"
-            logger.error(f"Rewriting failed for: {original_sql} | Error: {e}")
+            logger.error(
+                f"Rewriting failed for: {original_sql} | Error: {e}",
+                extra={"error_type": type(e).__name__},
+            )
             span.set_outputs({"error": error})
+            span.set_attribute("error.type", type(e).__name__)
             return {"error": error, "query_result": None}
 
         try:
@@ -194,6 +186,20 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "error": error,
                     "query_result": None,
                 }
+
+            # Pre-execution schema validation hook
+            from agent.utils.schema_fingerprint import validate_sql_against_schema
+
+            schema_context = state.get("raw_schema_context") or []
+            pre_exec_passed, missing_tables, pre_exec_warning = validate_sql_against_schema(
+                rewritten_sql, schema_context
+            )
+            span.set_attribute("validation.pre_exec_check_passed", pre_exec_passed)
+            if not pre_exec_passed:
+                span.set_attribute("validation.pre_exec_missing_tables", len(missing_tables))
+                if pre_exec_warning:
+                    logger.warning(pre_exec_warning)
+                    span.add_event("validation.pre_exec_warning", {"message": pre_exec_warning})
 
             # Execute via MCP Tool
             # Pass params only if the rewritten SQL contains placeholders (e.g. $1)
@@ -222,6 +228,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "params": execute_params,
                     "include_columns": True,
                     "timeout_seconds": remaining,
+                    "page_token": state.get("page_token"),
+                    "page_size": state.get("page_size"),
                 }
             )
 
@@ -230,11 +238,17 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_row_limit = None
             result_rows_returned = None
             result_columns = None
+            result_next_page_token = None
+            result_page_size = None
+            result_partial_reason = None
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
                     return {}
-                suspected, identifiers = _schema_drift_hint(error_msg)
+                provider = get_env_str(
+                    "QUERY_TARGET_BACKEND", get_env_str("QUERY_TARGET_PROVIDER", "postgres")
+                )
+                suspected, identifiers = _schema_drift_hint(error_msg, provider)
                 if not suspected:
                     return {}
                 auto_refresh = get_env_bool("AGENT_SCHEMA_DRIFT_AUTO_REFRESH", False)
@@ -252,6 +266,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if parsed.get("response_shape") == "error":
                 error_msg = parsed.get("error") or "Tool returned an error."
                 error_category = parsed.get("error_category")
+                required_capability = parsed.get("required_capability")
+                provider = parsed.get("provider")
                 span.set_outputs(
                     {
                         "error": error_msg,
@@ -261,11 +277,34 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if error_category:
                     span.set_attribute("error_category", error_category)
                     span.set_attribute("timeout.triggered", error_category == "timeout")
+                if error_category == "unsupported_capability":
+                    if required_capability:
+                        error_msg = (
+                            "This backend does not support "
+                            f"{required_capability} for this request."
+                        )
+                    else:
+                        error_msg = (
+                            "This backend does not support a required capability "
+                            "for this request."
+                        )
+                    if required_capability:
+                        span.set_attribute("error.required_capability", required_capability)
+                    if provider:
+                        span.set_attribute("error.provider", provider)
                 drift_hint = _maybe_add_schema_drift(error_msg)
                 return {
                     "error": error_msg,
                     "query_result": None,
                     "error_category": error_category,
+                    "error_metadata": (
+                        {
+                            "required_capability": required_capability,
+                            "provider": provider,
+                        }
+                        if error_category == "unsupported_capability"
+                        else None
+                    ),
                     **drift_hint,
                 }
 
@@ -298,6 +337,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_is_truncated = metadata.get("is_truncated")
                 result_row_limit = metadata.get("row_limit")
                 result_rows_returned = metadata.get("rows_returned")
+                result_next_page_token = metadata.get("next_page_token")
+                result_page_size = metadata.get("page_size")
+                result_partial_reason = metadata.get("partial_reason")
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -315,8 +357,16 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("result.row_limit", result_row_limit)
             if result_rows_returned is not None:
                 span.set_attribute("result.rows_returned", result_rows_returned)
+            else:
+                # Ensure rows_returned is always set (contract requirement)
+                span.set_attribute("result.rows_returned", len(query_result) if query_result else 0)
             span.set_attribute("result.columns_available", bool(result_columns))
             span.set_attribute("timeout.triggered", False)
+            # Truncation contract: always set partial_reason for debugging
+            if result_partial_reason:
+                span.set_attribute("result.partial_reason", result_partial_reason)
+            is_limited = bool(state.get("result_is_limited"))
+            span.set_attribute("result.is_limited", is_limited)
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -340,22 +390,36 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 except Exception:
                     logger.warning("Cache update failed", exc_info=True)
 
+            rows_returned = (
+                result_rows_returned
+                if result_rows_returned is not None
+                else (len(query_result) if query_result else 0)
+            )
+            is_limited = bool(state.get("result_is_limited"))
+            query_limit = state.get("result_limit") if is_limited else None
             return {
                 "query_result": query_result,
                 "error": error,
                 "result_is_truncated": result_is_truncated or False,
                 "result_row_limit": result_row_limit,
-                "result_rows_returned": (
-                    result_rows_returned
-                    if result_rows_returned is not None
-                    else (len(query_result) if query_result else 0)
-                ),
+                "result_rows_returned": (rows_returned),
                 "result_columns": result_columns,
+                "result_completeness": ResultCompleteness.from_parts(
+                    rows_returned=rows_returned,
+                    is_truncated=bool(result_is_truncated),
+                    is_limited=is_limited,
+                    row_limit=result_row_limit,
+                    query_limit=query_limit,
+                    next_page_token=result_next_page_token,
+                    page_size=result_page_size,
+                    partial_reason=result_partial_reason,
+                ).to_dict(),
             }
 
         except Exception as e:
             error = str(e)
             span.set_outputs({"error": error})
+            span.set_attribute("error.type", type(e).__name__)
             return {
                 "error": error,
                 "query_result": None,

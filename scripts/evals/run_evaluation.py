@@ -392,7 +392,7 @@ async def run_evaluation_suite(
         tenant_id: Tenant ID for multi-tenant isolation.
         category: Filter by category.
         difficulty: Filter by difficulty.
-        dataset_mode: Dataset mode (synthetic/pagila). If None, uses DATASET_MODE env var.
+        dataset_mode: Dataset mode (default: synthetic). If None, uses DATASET_MODE env var.
         golden_only: If True, load from file-based golden dataset instead of DB.
         dry_run: If True, validate without running agent.
     """

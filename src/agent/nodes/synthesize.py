@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from agent.config import get_synthesize_temperature
 from agent.llm_client import get_llm
 from agent.state import AgentState
+from agent.state.result_completeness import PartialReason, ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from common.config.env import get_env_bool
@@ -20,18 +21,37 @@ load_dotenv()
 
 
 def _sanity_check_enabled() -> bool:
-    return get_env_bool("AGENT_EMPTY_RESULT_SANITY_CHECK", False) is True
+    return get_env_bool("AGENT_EMPTY_RESULT_SANITY_CHECK", True) is True
 
 
 def _question_implies_existence(question: str) -> bool:
+    """Check if the question implies that data should exist.
+
+    Returns True for queries that use superlatives, rankings, or specific entity
+    references that would typically be expected to return results.
+    """
     if not question:
         return False
-    return bool(
-        re.search(
-            r"\b(top|latest|most|highest|lowest|newest|recent|last|biggest|best)\b",
-            question.lower(),
-        )
+    q = question.lower()
+
+    # Superlatives and ranking terms
+    superlative_patterns = (
+        r"\b(top|latest|most|highest|lowest|newest|recent|last|"
+        r"biggest|best|worst|oldest|first|maximum|minimum)\b"
     )
+    if re.search(superlative_patterns, q):
+        return True
+
+    # Aggregation terms that imply data exists
+    if re.search(r"\b(average|total|sum|count|how many|how much)\b", q):
+        return True
+
+    # Specific entity references (names, IDs, etc.)
+    entity_terms = r"\b(named|called|id number|customer|user|order|product)\b"
+    if re.search(entity_terms, q):
+        return True
+
+    return False
 
 
 def synthesize_insight_node(state: AgentState) -> dict:
@@ -59,6 +79,31 @@ def synthesize_insight_node(state: AgentState) -> dict:
         result_columns = state.get("result_columns")
         result_is_limited = state.get("result_is_limited")
         result_limit = state.get("result_limit")
+        completeness_payload = state.get("result_completeness")
+        if isinstance(completeness_payload, dict):
+            completeness = ResultCompleteness(
+                rows_returned=int(completeness_payload.get("rows_returned", 0)),
+                is_truncated=bool(completeness_payload.get("is_truncated", False)),
+                is_limited=bool(completeness_payload.get("is_limited", False)),
+                row_limit=completeness_payload.get("row_limit"),
+                query_limit=completeness_payload.get("query_limit"),
+                next_page_token=completeness_payload.get("next_page_token"),
+                page_size=completeness_payload.get("page_size"),
+                partial_reason=completeness_payload.get("partial_reason"),
+            )
+        else:
+            completeness = ResultCompleteness.from_parts(
+                rows_returned=int(
+                    result_rows_returned
+                    if result_rows_returned is not None
+                    else (len(query_result) if query_result else 0)
+                ),
+                is_truncated=bool(result_is_truncated),
+                is_limited=bool(result_is_limited),
+                row_limit=result_row_limit,
+                query_limit=result_limit if result_is_limited else None,
+                next_page_token=None,
+            )
 
         # Get the original question from the LAST user message (not first)
         # This is important because checkpointer accumulates messages across turns
@@ -78,14 +123,13 @@ def synthesize_insight_node(state: AgentState) -> dict:
                 "result_count": len(query_result) if query_result else 0,
             }
         )
-        span.set_attribute("result.is_truncated", bool(result_is_truncated))
-        if result_row_limit is not None:
-            span.set_attribute("result.row_limit", result_row_limit)
-        if result_rows_returned is not None:
-            span.set_attribute("result.rows_returned", result_rows_returned)
-        span.set_attribute("result.is_limited", bool(result_is_limited))
-        if result_limit is not None:
-            span.set_attribute("result.limit", result_limit)
+        span.set_attribute("result.is_truncated", bool(completeness.is_truncated))
+        if completeness.row_limit is not None:
+            span.set_attribute("result.row_limit", completeness.row_limit)
+        span.set_attribute("result.rows_returned", completeness.rows_returned)
+        span.set_attribute("result.is_limited", bool(completeness.is_limited))
+        if completeness.query_limit is not None:
+            span.set_attribute("result.limit", completeness.query_limit)
 
         if query_result is None:
             response_content = "I couldn't retrieve any results for your query."
@@ -106,6 +150,7 @@ def synthesize_insight_node(state: AgentState) -> dict:
                     "The schema may have changed; consider refreshing schema context and retrying."
                 )
             if _sanity_check_enabled() and _question_implies_existence(original_question):
+                span.set_attribute("result.sanity_check_triggered", True)
                 response_lines.append(
                     "If you expected results, double-check filters or try a broader query."
                 )
@@ -176,21 +221,32 @@ Be concise but informative. Use numbers and data from the results.
 
         response_content = response.content
         warnings = []
-        if result_is_truncated:
-            warning = "Note: Results are truncated"
-            if result_row_limit:
-                warning += f" to {result_row_limit} rows"
-            if result_rows_returned is not None:
-                warning += f" (showing {result_rows_returned})"
-            warning += "."
-            warnings.append(warning)
-        if result_is_limited:
-            if result_limit is not None:
+        if completeness.is_truncated:
+            if completeness.partial_reason == PartialReason.PROVIDER_CAP.value:
+                if completeness.row_limit is not None:
+                    warnings.append(
+                        f"Note: The backend capped results at {completeness.row_limit} rows."
+                    )
+                else:
+                    warnings.append("Note: The backend capped results.")
+            else:
+                warning = "Note: Results are truncated"
+                if completeness.row_limit:
+                    warning += f" to {completeness.row_limit} rows"
+                if completeness.rows_returned is not None:
+                    warning += f" (showing {completeness.rows_returned})"
+                warning += "."
+                warnings.append(warning)
+        if completeness.is_limited:
+            if completeness.query_limit is not None:
                 warnings.append(
-                    f"Note: This query is limited to the top {result_limit} rows (ORDER BY/LIMIT)."
+                    "Note: This query is limited to the top "
+                    f"{completeness.query_limit} rows (ORDER BY/LIMIT)."
                 )
             else:
                 warnings.append("Note: This query is limited (ORDER BY/LIMIT).")
+        if completeness.next_page_token:
+            warnings.append("Note: More results are available; request the next page to continue.")
         if warnings:
             warning_block = "\n".join(warnings)
             response_content = f"{warning_block}\n\n{response_content}"

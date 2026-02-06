@@ -175,6 +175,8 @@ class OTELTelemetrySpan(TelemetrySpan):
     def __init__(self, otel_span):
         """Initialize with an OTEL span object."""
         self._span = otel_span
+        self._tracked_attributes: Dict[str, Any] = {}
+        self._has_error = False
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
         """Set span inputs with redaction, truncation, and metadata."""
@@ -198,6 +200,7 @@ class OTELTelemetrySpan(TelemetrySpan):
         # Check for error in outputs
         error = outputs.get("error")
         if error:
+            self._has_error = True
             error_json, _, _, _ = truncate_json({"error": str(error), "type": type(error).__name__})
             self._span.set_attribute(TelemetryKeys.ERROR, error_json)
             self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
@@ -205,14 +208,84 @@ class OTELTelemetrySpan(TelemetrySpan):
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
         self._span.set_attribute(key, value)
+        self._tracked_attributes[key] = value
+        if key in ("error", "error.category", "error.type"):
+            self._has_error = True
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
         self._span.set_attributes(attributes)
+        self._tracked_attributes.update(attributes)
+        if any(k in attributes for k in ("error", "error.category", "error.type")):
+            self._has_error = True
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
         self._span.add_event(name, attributes or {})
+
+    def get_tracked_attributes(self) -> Dict[str, Any]:
+        """Return attributes that were tracked for contract validation."""
+        return self._tracked_attributes.copy()
+
+    def has_error(self) -> bool:
+        """Return whether this span has recorded an error."""
+        return self._has_error
+
+
+# Contract enforcement mode: "warn" | "error" | "off"
+_CONTRACT_ENFORCE_MODE: Optional[str] = None
+
+
+def _get_contract_enforce_mode() -> str:
+    """Get the contract enforcement mode from environment."""
+    global _CONTRACT_ENFORCE_MODE
+    if _CONTRACT_ENFORCE_MODE is None:
+        _CONTRACT_ENFORCE_MODE = get_env_str("AGENT_TELEMETRY_CONTRACT_ENFORCE", "warn")
+    return _CONTRACT_ENFORCE_MODE
+
+
+def validate_span_contract(
+    span_name: str, span: OTELTelemetrySpan, otel_span: Optional[Any] = None
+) -> None:
+    """Validate span attributes against the contract and emit violations.
+
+    Args:
+        span_name: Name of the span to look up contract for.
+        span: The OTELTelemetrySpan instance with tracked attributes.
+        otel_span: Optional OTEL span object for adding violation events.
+    """
+    enforce_mode = _get_contract_enforce_mode()
+    if enforce_mode == "off":
+        return
+
+    from agent.telemetry_schema import get_span_contract
+
+    contract = get_span_contract(span_name)
+    if contract is None:
+        return
+
+    attributes = span.get_tracked_attributes()
+    missing = contract.validate(attributes, has_error=span.has_error())
+
+    if missing:
+        violation_msg = f"Span contract violation for '{span_name}': missing {missing}"
+        logger.warning(violation_msg)
+
+        # Emit violation event on the span
+        if otel_span is not None and hasattr(otel_span, "add_event"):
+            otel_span.add_event(
+                "telemetry.contract_violation",
+                {
+                    "span_name": span_name,
+                    "missing_attributes": ", ".join(missing),
+                    "enforce_mode": enforce_mode,
+                },
+            )
+
+        if enforce_mode == "error":
+            # In error mode, we still don't raise (to avoid breaking the flow)
+            # but we log at error level
+            logger.error(violation_msg)
 
 
 class OTELTelemetryBackend(TelemetryBackend):
@@ -259,7 +332,11 @@ class OTELTelemetryBackend(TelemetryBackend):
             span = OTELTelemetrySpan(otel_span)
             if inputs:
                 span.set_inputs(inputs)
-            yield span
+            try:
+                yield span
+            finally:
+                # Validate contract before span ends
+                validate_span_contract(name, span, otel_span)
 
     def update_current_trace(self, metadata: Dict[str, Any]) -> None:
         """Update the current active span with metadata (best effort)."""

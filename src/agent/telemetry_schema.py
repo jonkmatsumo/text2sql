@@ -7,6 +7,7 @@ It includes utilities for payload safety (redaction/truncation).
 
 import hashlib
 import json
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Tuple
 
@@ -102,3 +103,77 @@ def truncate_json(
         return truncated, True, size, sha256
 
     return json_str, False, size, sha256
+
+
+# --- Span Contract Enforcement ---
+
+
+@dataclass(frozen=True)
+class SpanContract:
+    """Contract defining required and optional attributes for a span type.
+
+    Required attributes must be set before the span ends; violations are logged.
+    Optional attributes are recommended but not enforced.
+    """
+
+    name: str  # Contract name (e.g., "execute_sql")
+    required: frozenset[str]  # Must be set before span ends
+    optional: frozenset[str] = frozenset()  # Recommended but not enforced
+    required_on_error: frozenset[str] = frozenset()  # Required only if error occurred
+
+    def validate(self, attributes: dict, has_error: bool = False) -> list[str]:
+        """Validate attributes against the contract.
+
+        Returns:
+            List of missing required attribute names.
+        """
+        missing = []
+        for attr in self.required:
+            if attr not in attributes:
+                missing.append(attr)
+        if has_error:
+            for attr in self.required_on_error:
+                if attr not in attributes:
+                    missing.append(attr)
+        return missing
+
+
+# Predefined contracts for agent nodes
+SPAN_CONTRACTS: dict[str, SpanContract] = {
+    "execute_sql": SpanContract(
+        name="execute_sql",
+        required=frozenset({"result.is_truncated", "result.rows_returned"}),
+        optional=frozenset({"result.row_limit", "result.partial_reason"}),
+        required_on_error=frozenset({"error.category"}),
+    ),
+    "validate_sql": SpanContract(
+        name="validate_sql",
+        required=frozenset({"validation.is_valid"}),
+        optional=frozenset({"validation.violation_count", "validation.schema_bound_enabled"}),
+    ),
+    "cache_lookup": SpanContract(
+        name="cache_lookup",
+        required=frozenset({"cache.hit"}),
+        optional=frozenset({"cache.snapshot_mismatch", "cache.cache_id"}),
+    ),
+    "generate_sql": SpanContract(
+        name="generate_sql",
+        required=frozenset({"from_cache"}),
+        optional=frozenset({"generation.model", "generation.latency_seconds"}),
+    ),
+    "synthesize_insight": SpanContract(
+        name="synthesize_insight",
+        required=frozenset({"result.is_truncated", "result.rows_returned"}),
+        optional=frozenset({"result.is_limited"}),
+    ),
+    "retrieve_context": SpanContract(
+        name="retrieve_context",
+        required=frozenset(),
+        optional=frozenset({"retrieval.node_count", "retrieval.table_count"}),
+    ),
+}
+
+
+def get_span_contract(span_name: str) -> Optional[SpanContract]:
+    """Get the contract for a span name, if one exists."""
+    return SPAN_CONTRACTS.get(span_name)

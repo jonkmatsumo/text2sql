@@ -10,6 +10,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
+from agent.utils.latency import update_latency_ema
+from common.config.env import get_env_float
 
 load_dotenv()
 
@@ -357,6 +359,13 @@ Rules:
         )
         latency_seconds = time.monotonic() - start_time
         span.set_attribute("latency.generate_seconds", latency_seconds)
+        ema_alpha = get_env_float("AGENT_RETRY_BUDGET_EMA_ALPHA", 0.3)
+        ema_latency = update_latency_ema(
+            state.get("ema_llm_latency_seconds"), latency_seconds, ema_alpha
+        )
+        span.set_attribute("retry.budget.observed_latency_seconds", latency_seconds)
+        if ema_latency is not None:
+            span.set_attribute("retry.budget.ema_latency_seconds", ema_latency)
 
         # Extract SQL from response (remove markdown code blocks if present)
         sql = response.content.strip()
@@ -386,4 +395,5 @@ Rules:
             "current_sql": sql,
             "from_cache": False,
             "latency_generate_seconds": latency_seconds,
+            "ema_llm_latency_seconds": ema_latency,
         }

@@ -117,7 +117,10 @@ async def validate_sql_node(state: AgentState) -> dict:
         if limit_value is not None:
             span.set_attribute("result.limit", limit_value)
 
-        schema_binding_enabled = get_env_bool("AGENT_SCHEMA_BINDING_VALIDATION", False) is True
+        schema_binding_enabled = get_env_bool("AGENT_SCHEMA_BINDING_VALIDATION", True) is True
+        schema_binding_soft_mode = get_env_bool("AGENT_SCHEMA_BINDING_SOFT_MODE", False) is True
+        span.set_attribute("validation.schema_bound_enabled", schema_binding_enabled)
+        span.set_attribute("validation.schema_bound_soft_mode", schema_binding_soft_mode)
         if schema_binding_enabled:
             raw_schema_context = state.get("raw_schema_context") or []
             schema_map = (
@@ -136,6 +139,8 @@ async def validate_sql_node(state: AgentState) -> dict:
                 span.set_attribute("validation.schema_bound", True)
                 span.set_attribute("validation.missing_tables", ",".join(missing_tables[:20]))
                 span.set_attribute("validation.missing_columns", ",".join(missing_columns[:20]))
+                span.set_attribute("validation.missing_tables_count", len(missing_tables))
+                span.set_attribute("validation.missing_columns_count", len(missing_columns))
                 if missing_tables or missing_columns:
                     error_parts = []
                     if missing_tables:
@@ -143,14 +148,28 @@ async def validate_sql_node(state: AgentState) -> dict:
                     if missing_columns:
                         error_parts.append(f"missing columns: {', '.join(missing_columns)}")
                     error_msg = "Schema validation failed; " + "; ".join(error_parts)
-                    span.set_outputs({"error": error_msg, "schema_bound": True})
-                    return {
-                        "error": error_msg,
-                        "error_category": "schema_binding",
-                        "ast_validation_result": {"is_valid": False},
-                        "result_is_limited": is_limited,
-                        "result_limit": limit_value,
-                    }
+
+                    if schema_binding_soft_mode:
+                        # Soft mode: log warning but allow execution to proceed
+                        span.set_attribute("validation.schema_bound_blocked", False)
+                        span.add_event(
+                            "schema_binding.soft_violation",
+                            {"message": error_msg, "tables": ",".join(missing_tables[:10])},
+                        )
+                    else:
+                        # Hard mode: block execution
+                        span.set_attribute("validation.schema_bound_blocked", True)
+                        span.set_attribute("validation.is_valid", False)
+                        span.set_outputs({"error": error_msg, "schema_bound": True})
+                        return {
+                            "error": error_msg,
+                            "error_category": "schema_binding",
+                            "ast_validation_result": {"is_valid": False},
+                            "result_is_limited": is_limited,
+                            "result_limit": limit_value,
+                        }
+                else:
+                    span.set_attribute("validation.schema_bound_blocked", False)
             else:
                 span.set_attribute("validation.schema_bound", False)
 
@@ -159,6 +178,7 @@ async def validate_sql_node(state: AgentState) -> dict:
 
         # Log validation result
         span.set_attribute("is_valid", str(result.is_valid))
+        span.set_attribute("validation.is_valid", result.is_valid)
         span.set_attribute("violation_count", str(len(result.violations)))
 
         if result.metadata:

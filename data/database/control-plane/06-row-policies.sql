@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS row_policies (
 -- We enforce these on the agent connection, but we also document them here.
 -- Note: 'tenants', 'api_keys', etc.
 
--- Seed policies for the Pagila (Query Target) schema
+-- Seed policies for the Query Target schema
 -- These mirror the logic previously enforced by database RLS in 05-multi-tenancy.sql
 INSERT INTO row_policies (table_name, tenant_column, policy_expression)
 VALUES

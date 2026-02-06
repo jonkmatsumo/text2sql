@@ -7,7 +7,6 @@ This directory contains the schema, data, and queries for the **Target Database*
 The default dataset is **synthetic** (financial transactions domain). This is controlled by the `DATASET_MODE` environment variable:
 
 - `DATASET_MODE=synthetic` (default): Uses the synthetic financial dataset with tables like `dim_customer`, `fact_transaction`, `dim_merchant`, etc.
-- `DATASET_MODE=pagila` (DEPRECATED): Uses the Pagila film rental dataset. Maintained for legacy verification only.
 
 ## Required Files
 
@@ -17,7 +16,6 @@ To run the system, you must populate this directory with:
     *   `01-schema.sql`: DDL for the target database.
     *   `02-data.sql`: DML/Data for the target database.
     *   For synthetic data: Run `scripts/data/generate_synthetic_artifacts.sh` to generate schema and data.
-    *   For legacy Pagila (DEPRECATED): Run `./download_data.sh` to fetch the Pagila dataset (requires `DATASET_MODE=pagila`).
 
 > [!IMPORTANT]
 > **FK Constraints**: Foreign key constraints in your schema are **optional but strongly recommended**.
