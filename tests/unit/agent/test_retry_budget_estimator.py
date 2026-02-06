@@ -19,8 +19,7 @@ def base_state():
 
 def test_estimate_budget_fallback_default(base_state, monkeypatch):
     """Test fallback when no latency history is available."""
-    # Mock env vars to defaults
-    monkeypatch.setattr("agent.graph.get_env_float", lambda *args, **kwargs: 3.0)
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "3.0")
 
     # No EMA, no observed latency
     budget = _estimate_correction_budget_seconds(base_state)
@@ -34,7 +33,7 @@ def test_estimate_budget_fallback_default(base_state, monkeypatch):
 
 def test_estimate_budget_warm_start_generate(base_state, monkeypatch):
     """Test warm start from generate latency."""
-    monkeypatch.setattr("agent.graph.get_env_float", lambda *args, **kwargs: 3.0)
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "3.0")
 
     base_state["latency_generate_seconds"] = 10.0
 
@@ -47,7 +46,7 @@ def test_estimate_budget_warm_start_generate(base_state, monkeypatch):
 
 def test_estimate_budget_warm_start_correct(base_state, monkeypatch):
     """Test warm start from correct latency (preferred if available?)."""
-    monkeypatch.setattr("agent.graph.get_env_float", lambda *args, **kwargs: 3.0)
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "3.0")
 
     base_state["latency_generate_seconds"] = 5.0
     base_state["latency_correct_seconds"] = 8.0  # later observation
@@ -62,7 +61,7 @@ def test_estimate_budget_warm_start_correct(base_state, monkeypatch):
 
 def test_estimate_budget_use_ema(base_state, monkeypatch):
     """Test using existing EMA value."""
-    monkeypatch.setattr("agent.graph.get_env_float", lambda *args, **kwargs: 3.0)
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "3.0")
 
     base_state["ema_llm_latency_seconds"] = 12.0
     base_state["latency_generate_seconds"] = 20.0  # Ignored if EMA present
@@ -75,7 +74,7 @@ def test_estimate_budget_use_ema(base_state, monkeypatch):
 
 def test_estimate_budget_enforce_min(base_state, monkeypatch):
     """Test that minimum budget floor is enforced."""
-    monkeypatch.setattr("agent.graph.get_env_float", lambda *args, **kwargs: 5.0)  # High min
+    monkeypatch.setenv("AGENT_MIN_RETRY_BUDGET_SECONDS", "5.0")  # High min
 
     base_state["ema_llm_latency_seconds"] = 1.0  # Fast previous query
 
