@@ -200,6 +200,15 @@ def route_after_execution(state: AgentState) -> str:
         span = telemetry.get_current_span()
         if span:
             span.set_attribute("retry.stopped_due_to_capability", True)
+            span.add_event(
+                "retry.decision",
+                {
+                    "category": "unsupported_capability",
+                    "is_retryable": False,
+                    "reason_code": "UNSUPPORTED_CAPABILITY",
+                    "will_retry": False,
+                },
+            )
         return "failed"
 
     # Guarded Automatic Schema Refresh
@@ -238,25 +247,48 @@ def route_after_execution(state: AgentState) -> str:
 
     bounded_retry_after = 0.0
     required_budget = estimated_correction_budget
+    retry_decision = {
+        "category": error_category or "unknown",
+        "policy": retry_policy,
+        "retry_count": retry_count,
+        "max_retries": max_retries,
+        "remaining_budget": max(0.0, remaining) if remaining is not None else None,
+    }
+
     if retry_policy == "adaptive":
         is_retryable = _adaptive_is_retryable(error_category)
         retry_summary["is_retryable"] = is_retryable
+        retry_decision["is_retryable"] = is_retryable
         if span:
             span.set_attribute("retry.is_retryable", is_retryable)
         if not is_retryable:
             retry_summary["stopped_non_retryable"] = True
             state["retry_summary"] = retry_summary
+            retry_decision["reason_code"] = "NON_RETRYABLE_CATEGORY"
+            retry_decision["will_retry"] = False
+            if span:
+                span.add_event("retry.decision", retry_decision)
             return "failed"
 
         if retry_after_seconds is not None and float(retry_after_seconds) > 0:
+            retry_decision["retry_after_raw"] = float(retry_after_seconds)
             if remaining is None:
                 bounded_retry_after = float(retry_after_seconds)
+                retry_decision["retry_after_applied"] = True
             else:
                 bounded_retry_after = min(float(retry_after_seconds), max(0.0, remaining))
-            if bounded_retry_after <= 0.0:
+                retry_decision["retry_after_applied"] = bounded_retry_after > 0
+                if bounded_retry_after < float(retry_after_seconds):
+                    retry_decision["retry_after_capped"] = True
+
+            if bounded_retry_after <= 0.0 and remaining is not None and remaining <= 0:
                 retry_summary["budget_exhausted"] = True
                 state["retry_summary"] = retry_summary
                 state["error_category"] = "timeout"
+                retry_decision["reason_code"] = "BUDGET_EXHAUSTED_RETRY_AFTER"
+                retry_decision["will_retry"] = False
+                if span:
+                    span.add_event("retry.decision", retry_decision)
                 return "failed"
             state["retry_after_seconds"] = bounded_retry_after
             retry_summary["retry_after_seconds"] = bounded_retry_after
@@ -267,8 +299,10 @@ def route_after_execution(state: AgentState) -> str:
             state["retry_after_seconds"] = None
     else:
         state["retry_after_seconds"] = None
+        retry_decision["is_retryable"] = True  # Static policy treats all as retryable until max
 
     if deadline_ts is not None:
+        retry_decision["required_budget"] = required_budget
         if span:
             span.set_attribute("retry.remaining_budget_seconds", max(0.0, remaining))
             span.set_attribute("retry.estimated_correction_budget", estimated_correction_budget)
@@ -276,17 +310,7 @@ def route_after_execution(state: AgentState) -> str:
             span.set_attribute(
                 "retry.budget.ema_latency_seconds", state.get("ema_llm_latency_seconds")
             )
-            span.add_event(
-                "retry.budget_check",
-                {
-                    "remaining_seconds": max(0.0, remaining),
-                    "estimated_budget_seconds": required_budget,
-                    "ema_latency_seconds": state.get("ema_llm_latency_seconds") or 0.0,
-                    "retry_count": retry_count,
-                    "retry_after_seconds": bounded_retry_after,
-                    "will_retry": remaining >= required_budget and retry_count < max_retries,
-                },
-            )
+
         if remaining < required_budget:
             if span:
                 span.set_attribute("retry.stopped_due_to_budget", True)
@@ -295,23 +319,41 @@ def route_after_execution(state: AgentState) -> str:
             state["error"] = (
                 f"Retry budget exhausted after {retry_count} attempts; remaining time "
                 f"{max(0.0, remaining):.2f}s is below estimated required "
-                f"{required_budget:.2f}s (EMA latency: "
-                f"{state.get('ema_llm_latency_seconds', 0.0):.2f}s)."
+                f"{required_budget:.2f}s."
             )
             state["error_category"] = "timeout"
+            retry_decision["reason_code"] = "INSUFFICIENT_BUDGET"
+            retry_decision["will_retry"] = False
+            if span:
+                span.add_event("retry.decision", retry_decision)
             return "failed"
 
     if span:
         span.set_attribute("retry.stopped_due_to_budget", False)
+
     if deadline_ts is not None and time.monotonic() >= deadline_ts:
         retry_summary["budget_exhausted"] = True
         state["retry_summary"] = retry_summary
+        retry_decision["reason_code"] = "DEADLINE_EXCEEDED"
+        retry_decision["will_retry"] = False
+        if span:
+            span.add_event("retry.decision", retry_decision)
         return "failed"
+
     if retry_count >= max_retries:
         retry_summary["max_retries_reached"] = True
         state["retry_summary"] = retry_summary
+        retry_decision["reason_code"] = "MAX_RETRIES_REACHED"
+        retry_decision["will_retry"] = False
+        if span:
+            span.add_event("retry.decision", retry_decision)
         return "failed"
+
     state["retry_summary"] = retry_summary
+    retry_decision["reason_code"] = "PROCEED_TO_CORRECTION"
+    retry_decision["will_retry"] = True
+    if span:
+        span.add_event("retry.decision", retry_decision)
     return "correct"  # Go to self-correction
 
 
