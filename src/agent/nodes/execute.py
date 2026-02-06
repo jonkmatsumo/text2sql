@@ -187,6 +187,20 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "query_result": None,
                 }
 
+            # Pre-execution schema validation hook
+            from agent.utils.schema_fingerprint import validate_sql_against_schema
+
+            schema_context = state.get("raw_schema_context") or []
+            pre_exec_passed, missing_tables, pre_exec_warning = validate_sql_against_schema(
+                rewritten_sql, schema_context
+            )
+            span.set_attribute("validation.pre_exec_check_passed", pre_exec_passed)
+            if not pre_exec_passed:
+                span.set_attribute("validation.pre_exec_missing_tables", len(missing_tables))
+                if pre_exec_warning:
+                    logger.warning(pre_exec_warning)
+                    span.add_event("validation.pre_exec_warning", {"message": pre_exec_warning})
+
             # Execute via MCP Tool
             # Pass params only if the rewritten SQL contains placeholders (e.g. $1)
             # This prevents "server expects 0 arguments" errors for queries on public tables
