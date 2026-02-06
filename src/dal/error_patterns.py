@@ -1,4 +1,4 @@
-"""Provider-specific error patterns for schema drift detection."""
+"""Provider-specific error patterns for schema drift detection and identifier extraction."""
 
 from __future__ import annotations
 
