@@ -129,14 +129,18 @@ export function extractOperatorSignals(
   const capabilitySupported = readBool(attrs, "capability.supported");
   const fallbackApplied = readBool(attrs, "capability.fallback_applied");
   const fallbackMode = readString(attrs, "capability.fallback_mode");
+  const fallbackPolicy = readString(attrs, "capability.fallback_policy");
   if (
     capabilityRequired !== null ||
     capabilitySupported !== null ||
     fallbackApplied !== null ||
-    fallbackMode !== null
+    fallbackMode !== null ||
+    fallbackPolicy !== null
   ) {
+    const isSuggest = fallbackPolicy === "suggest";
     const capabilityTone: OperatorSignalTone =
-      fallbackApplied === true ? "warn" : capabilitySupported === false ? "error" : "info";
+      fallbackApplied === true ? "warn" : capabilitySupported === false ? (isSuggest ? "info" : "error") : "info";
+
     sections.push({
       id: "capability",
       title: "Capability Fallback",
@@ -145,6 +149,7 @@ export function extractOperatorSignals(
       items: [
         { label: "Required Capability", value: capabilityRequired ?? "—" },
         { label: "Capability Supported", value: boolText(capabilitySupported) },
+        { label: "Fallback Policy", value: (fallbackPolicy ?? "—") + (isSuggest ? " (Advisory)" : "") },
         { label: "Fallback Applied", value: boolText(fallbackApplied) },
         { label: "Fallback Mode", value: fallbackMode ?? "—" }
       ]

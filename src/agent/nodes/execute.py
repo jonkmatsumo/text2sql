@@ -108,6 +108,7 @@ def parse_execute_tool_response(payload) -> dict:
                     "required_capability": item.get("required_capability"),
                     "capability_required": item.get("capability_required"),
                     "capability_supported": item.get("capability_supported"),
+                    "fallback_policy": item.get("fallback_policy"),
                     "fallback_applied": item.get("fallback_applied"),
                     "fallback_mode": item.get("fallback_mode"),
                     "provider": item.get("provider"),
@@ -139,6 +140,7 @@ def parse_execute_tool_response(payload) -> dict:
                 "required_capability": parsed.get("required_capability"),
                 "capability_required": parsed.get("capability_required"),
                 "capability_supported": parsed.get("capability_supported"),
+                "fallback_policy": parsed.get("fallback_policy"),
                 "fallback_applied": parsed.get("fallback_applied"),
                 "fallback_mode": parsed.get("fallback_mode"),
                 "provider": parsed.get("provider"),
@@ -341,6 +343,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_partial_reason = None
             result_capability_required = None
             result_capability_supported = None
+            result_fallback_policy = None
             result_fallback_applied = None
             result_fallback_mode = None
             result_cap_detected = None
@@ -381,6 +384,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 required_capability = parsed.get("required_capability")
                 capability_required = parsed.get("capability_required")
                 capability_supported = parsed.get("capability_supported")
+                fallback_policy = parsed.get("fallback_policy")
                 fallback_applied = parsed.get("fallback_applied")
                 fallback_mode = parsed.get("fallback_mode")
                 provider = parsed.get("provider")
@@ -412,6 +416,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         span.set_attribute("error.required_capability", required_capability)
                     if capability_supported is not None:
                         span.set_attribute("error.capability_supported", bool(capability_supported))
+                    if fallback_policy:
+                        span.set_attribute("error.fallback_policy", str(fallback_policy))
                     if fallback_applied is not None:
                         span.set_attribute("error.fallback_applied", bool(fallback_applied))
                     if fallback_mode:
@@ -429,6 +435,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "required_capability": required_capability,
                             "capability_required": capability_required,
                             "capability_supported": capability_supported,
+                            "fallback_policy": fallback_policy,
                             "fallback_applied": fallback_applied,
                             "fallback_mode": fallback_mode,
                             "retry_after_seconds": retry_after_seconds,
@@ -474,6 +481,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_partial_reason = metadata.get("partial_reason")
                 result_capability_required = metadata.get("capability_required")
                 result_capability_supported = metadata.get("capability_supported")
+                result_fallback_policy = metadata.get("fallback_policy")
                 result_fallback_applied = metadata.get("fallback_applied")
                 result_fallback_mode = metadata.get("fallback_mode")
                 result_cap_detected = metadata.get("cap_detected")
@@ -576,6 +584,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         page_capability_supported = page_metadata.get("capability_supported")
                         if page_capability_supported is not None:
                             result_capability_supported = page_capability_supported
+
+                        page_fallback_policy = page_metadata.get("fallback_policy")
+                        if page_fallback_policy is not None:
+                            result_fallback_policy = page_fallback_policy
 
                         page_fallback_applied = page_metadata.get("fallback_applied")
                         if page_fallback_applied is not None:
@@ -727,6 +739,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("capability.required", result_capability_required)
             if result_capability_supported is not None:
                 span.set_attribute("capability.supported", bool(result_capability_supported))
+            if result_fallback_policy:
+                span.set_attribute("capability.fallback_policy", str(result_fallback_policy))
             if result_fallback_applied is not None:
                 span.set_attribute("capability.fallback_applied", bool(result_fallback_applied))
             if result_fallback_mode:
@@ -787,6 +801,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_row_limit": result_row_limit,
                 "result_rows_returned": (rows_returned),
                 "result_columns": result_columns,
+                "result_capability_required": result_capability_required,
+                "result_capability_supported": result_capability_supported,
+                "result_fallback_policy": result_fallback_policy,
+                "result_fallback_applied": bool(result_fallback_applied),
+                "result_fallback_mode": result_fallback_mode,
                 "result_cap_detected": bool(result_cap_detected),
                 "result_cap_mitigation_applied": bool(result_cap_mitigation_applied),
                 "result_cap_mitigation_mode": result_cap_mitigation_mode,

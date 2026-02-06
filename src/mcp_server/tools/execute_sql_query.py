@@ -97,6 +97,7 @@ async def handler(
             negotiation.capability_required if negotiation else required_capability
         )
         capability_supported = negotiation.capability_supported if negotiation else False
+        fallback_policy = negotiation.fallback_policy if negotiation else "off"
         fallback_applied = negotiation.fallback_applied if negotiation else False
         fallback_mode = negotiation.fallback_mode if negotiation else "none"
         return json.dumps(
@@ -106,6 +107,7 @@ async def handler(
                 "required_capability": required_capability,
                 "capability_required": capability_required,
                 "capability_supported": capability_supported,
+                "fallback_policy": fallback_policy,
                 "fallback_applied": fallback_applied,
                 "fallback_mode": fallback_mode,
                 "provider": provider_name,

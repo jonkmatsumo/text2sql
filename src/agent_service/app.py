@@ -72,6 +72,7 @@ class AgentRunResponse(BaseModel):
     result_completeness: Optional[dict] = None
     error_metadata: Optional[dict] = None
     retry_summary: Optional[dict] = None
+    capability_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
     empty_result_guidance: Optional[str] = None
     replay_bundle: Optional[dict[str, Any]] = None
@@ -240,6 +241,13 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             result_completeness=state.get("result_completeness"),
             error_metadata=state.get("error_metadata"),
             retry_summary=state.get("retry_summary"),
+            capability_summary={
+                "required": state.get("result_capability_required"),
+                "supported": state.get("result_capability_supported"),
+                "fallback_policy": state.get("result_fallback_policy"),
+                "fallback_applied": state.get("result_fallback_applied"),
+                "fallback_mode": state.get("result_fallback_mode"),
+            },
             validation_summary={
                 "ast_valid": state.get("ast_validation_result", {}).get("is_valid"),
                 "schema_drift_suspected": state.get("schema_drift_suspected"),
