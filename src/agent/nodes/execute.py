@@ -167,8 +167,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
         except Exception as e:
             error = f"Policy Enforcement Failed: {e}"
-            logger.error(f"Rewriting failed for: {original_sql} | Error: {e}")
+            logger.error(
+                f"Rewriting failed for: {original_sql} | Error: {e}",
+                extra={"error_type": type(e).__name__},
+            )
             span.set_outputs({"error": error})
+            span.set_attribute("error.type", type(e).__name__)
             return {"error": error, "query_result": None}
 
         try:
@@ -393,6 +397,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         except Exception as e:
             error = str(e)
             span.set_outputs({"error": error})
+            span.set_attribute("error.type", type(e).__name__)
             return {
                 "error": error,
                 "query_result": None,

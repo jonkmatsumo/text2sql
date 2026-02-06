@@ -42,7 +42,8 @@ async def _cancel_best_effort(conn: object) -> None:
             else:
                 await cancel_fn()
         except Exception:
-            return
+            # Best effort cancellation, suppress errors but log if needed
+            pass
     executor = getattr(conn, "executor", None)
     if executor is None:
         return
@@ -51,7 +52,7 @@ async def _cancel_best_effort(conn: object) -> None:
         try:
             await cancel_executor(job_id)
         except Exception:
-            return
+            pass
 
 
 async def handler(
@@ -283,7 +284,10 @@ async def handler(
         return json.dumps(payload)
     except Exception as e:
         error_message = f"Execution Error: {str(e)}"
-        payload = {"error": error_message}
+        payload = {
+            "error": error_message,
+            "error_type": type(e).__name__,
+        }
         provider = Database.get_query_target_provider()
         category = maybe_classify_error(provider, e)
         if category:

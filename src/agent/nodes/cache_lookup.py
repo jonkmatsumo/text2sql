@@ -34,8 +34,12 @@ async def _get_current_schema_snapshot_id(
         payload["tenant_id"] = tenant_id
     try:
         raw_subgraph = await subgraph_tool.ainvoke(payload)
-    except Exception:
-        logger.warning("Schema snapshot fetch failed", exc_info=True)
+    except Exception as e:
+        logger.warning(
+            "Schema snapshot fetch failed",
+            extra={"error_type": type(e).__name__, "error": str(e)},
+            exc_info=True,
+        )
         return None
 
     parsed = parse_tool_output(raw_subgraph)
@@ -161,7 +165,12 @@ async def cache_lookup_node(state: AgentState) -> dict:
             }
 
         except Exception as e:
-            logger.error(f"Cache lookup failed: {e}")
+            logger.error(
+                f"Cache lookup failed: {e}",
+                extra={"error_type": type(e).__name__, "error": str(e)},
+                exc_info=True,
+            )
             span.set_attribute("error", str(e))
+            span.set_attribute("error.type", type(e).__name__)
             span.set_attribute("cache.hit", False)
             return {"cached_sql": None, "from_cache": False}

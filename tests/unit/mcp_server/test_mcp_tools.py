@@ -49,7 +49,22 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
+        mock_caps = MagicMock()
+        mock_caps.supports_column_metadata = True
+        mock_caps.execution_model = "sync"
+        mock_caps.supports_pagination = True
+
+        with (
+            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
+            patch.object(
+                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
+            ),
+            patch.object(
+                execute_sql_query_mod.Database,
+                "get_query_target_capabilities",
+                return_value=mock_caps,
+            ),
+        ):
 
             result = await execute_sql_query("SELECT COUNT(*) as count FROM film", tenant_id=1)
 
@@ -73,7 +88,22 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
+        mock_caps = MagicMock()
+        mock_caps.supports_column_metadata = True
+        mock_caps.execution_model = "sync"
+        mock_caps.supports_pagination = True
+
+        with (
+            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
+            patch.object(
+                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
+            ),
+            patch.object(
+                execute_sql_query_mod.Database,
+                "get_query_target_capabilities",
+                return_value=mock_caps,
+            ),
+        ):
 
             result = await execute_sql_query("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
@@ -95,7 +125,22 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
+        mock_caps = MagicMock()
+        mock_caps.supports_column_metadata = True
+        mock_caps.execution_model = "sync"
+        mock_caps.supports_pagination = True
+
+        with (
+            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
+            patch.object(
+                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
+            ),
+            patch.object(
+                execute_sql_query_mod.Database,
+                "get_query_target_capabilities",
+                return_value=mock_caps,
+            ),
+        ):
 
             result = await execute_sql_query("SELECT * FROM film", tenant_id=1)
 
@@ -150,7 +195,21 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch.object(execute_sql_query_mod.Database, "get_connection", mock_get):
+        mock_caps = MagicMock()
+        mock_caps.supports_column_metadata = True
+        mock_caps.execution_model = "sync"
+
+        with (
+            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
+            patch.object(
+                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
+            ),
+            patch.object(
+                execute_sql_query_mod.Database,
+                "get_query_target_capabilities",
+                return_value=mock_caps,
+            ),
+        ):
 
             result = await execute_sql_query("SELECT * FROM nonexistent", tenant_id=1)
 
