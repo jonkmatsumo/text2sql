@@ -136,6 +136,8 @@ async def validate_sql_node(state: AgentState) -> dict:
                 span.set_attribute("validation.schema_bound", True)
                 span.set_attribute("validation.missing_tables", ",".join(missing_tables[:20]))
                 span.set_attribute("validation.missing_columns", ",".join(missing_columns[:20]))
+                span.set_attribute("validation.missing_tables_count", len(missing_tables))
+                span.set_attribute("validation.missing_columns_count", len(missing_columns))
                 if missing_tables or missing_columns:
                     error_parts = []
                     if missing_tables:
