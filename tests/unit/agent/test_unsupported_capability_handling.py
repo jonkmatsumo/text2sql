@@ -65,6 +65,7 @@ async def test_execute_unsupported_capability_message(
         "capability_supported": False,
         "fallback_applied": False,
         "fallback_mode": "force_limited_results",
+        "retry_after_seconds": None,
         "provider": "postgres",
     }
 
