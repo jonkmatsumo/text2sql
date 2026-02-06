@@ -2108,6 +2108,91 @@ body {
   text-transform: uppercase;
 }
 
+.operator-signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.operator-signal-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 8px 10px;
+}
+
+.operator-signal-card[open] {
+  border-color: var(--accent);
+}
+
+.operator-signal-card__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 0.82rem;
+  list-style: none;
+}
+
+.operator-signal-card__summary::-webkit-details-marker {
+  display: none;
+}
+
+.operator-signal-card__grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.operator-signal-card__item span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.operator-signal-card__item strong {
+  font-size: 0.8rem;
+}
+
+.operator-signal-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.operator-signal-badge--ok {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.operator-signal-badge--warn {
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.operator-signal-badge--error {
+  border-color: var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+.operator-signal-badge--info {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, white);
+}
+
 .trace-event-list {
   display: flex;
   flex-direction: column;
