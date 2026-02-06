@@ -46,6 +46,7 @@ class AgentState(TypedDict):
     result_is_limited: Optional[bool]
     result_limit: Optional[int]
     result_completeness: Optional[dict]
+    empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages
     page_token: Optional[str]
@@ -124,6 +125,7 @@ class AgentState(TypedDict):
     schema_drift_suspected: Optional[bool]
     missing_identifiers: Optional[List[str]]
     schema_drift_auto_refresh: Optional[bool]
+    schema_refresh_count: int
 
     # Per-node latency tracking (seconds)
     latency_generate_seconds: Optional[float]

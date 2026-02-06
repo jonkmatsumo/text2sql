@@ -42,6 +42,12 @@ export interface components {
             tenant_id: number;
             /** Thread Id */
             thread_id?: string | null;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+            /** Page Token */
+            page_token?: string | null;
+            /** Page Size */
+            page_size?: number | null;
         };
         /**
          * AgentRunResponse
@@ -61,6 +67,8 @@ export interface components {
              * @default false
              */
             from_cache: boolean;
+            /** Cache Similarity */
+            cache_similarity?: number | null;
             /** Interaction Id */
             interaction_id?: string | null;
             /** Trace Id */
@@ -71,6 +79,28 @@ export interface components {
             } | null;
             /** Viz Reason */
             viz_reason?: string | null;
+            /** Provenance */
+            provenance?: {
+                [key: string]: unknown;
+            } | null;
+            /** Result Completeness */
+            result_completeness?: {
+                [key: string]: unknown;
+            } | null;
+            /** Error Metadata */
+            error_metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Retry Summary */
+            retry_summary?: {
+                [key: string]: unknown;
+            } | null;
+            /** Validation Summary */
+            validation_summary?: {
+                [key: string]: unknown;
+            } | null;
+            /** Empty Result Guidance */
+            empty_result_guidance?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

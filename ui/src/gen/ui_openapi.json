@@ -5,6 +5,839 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/settings/query-target": {
+      "get": {
+        "summary": "Get Query Target Settings",
+        "description": "Return active/pending query-target config.",
+        "operationId": "get_query_target_settings_settings_query_target_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryTargetSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Upsert Query Target Settings",
+        "description": "Create or update a query-target config (inactive).",
+        "operationId": "upsert_query_target_settings_settings_query_target_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryTargetConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryTargetConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/query-target/history": {
+      "get": {
+        "summary": "Get Query Target History",
+        "description": "Return recent query-target configuration history.",
+        "operationId": "get_query_target_history_settings_query_target_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueryTargetConfigHistoryEntry"
+                  },
+                  "title": "Response Get Query Target History Settings Query Target History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/query-target/activate": {
+      "post": {
+        "summary": "Activate Query Target Settings",
+        "description": "Mark a query-target config as pending activation.",
+        "operationId": "activate_query_target_settings_settings_query_target_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryTargetActivatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryTargetConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/query-target/test-connection": {
+      "post": {
+        "summary": "Test Query Target Settings",
+        "description": "Test query-target connection for provided settings.",
+        "operationId": "test_query_target_settings_settings_query_target_test_connection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryTargetConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryTargetTestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/synth/generate": {
+      "post": {
+        "summary": "Generate Synthetic Data",
+        "description": "Trigger synthetic data generation as a background job.",
+        "operationId": "generate_synthetic_data_ops_synth_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SynthGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthGenerateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/synth/runs": {
+      "get": {
+        "summary": "List Synth Runs",
+        "description": "List recent synthetic generation runs.",
+        "operationId": "list_synth_runs_ops_synth_runs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SynthRunSummary"
+                  },
+                  "title": "Response List Synth Runs Ops Synth Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/synth/runs/{run_id}": {
+      "get": {
+        "summary": "Get Synth Run",
+        "description": "Get detailed information for a specific synthetic generation run.",
+        "operationId": "get_synth_run_ops_synth_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SynthRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/templates": {
+      "get": {
+        "summary": "List Ingestion Templates",
+        "description": "List all ingestion configuration templates.",
+        "operationId": "list_ingestion_templates_ops_ingestion_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IngestionTemplate"
+                  },
+                  "type": "array",
+                  "title": "Response List Ingestion Templates Ops Ingestion Templates Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Ingestion Template",
+        "description": "Create a new ingestion configuration template.",
+        "operationId": "create_ingestion_template_ops_ingestion_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestionTemplateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionTemplate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/templates/{template_id}": {
+      "put": {
+        "summary": "Update Ingestion Template",
+        "description": "Update an existing ingestion configuration template.",
+        "operationId": "update_ingestion_template_ops_ingestion_templates__template_id__put",
+        "parameters": [
+          {
+            "name": "template_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Template Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestionTemplateCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionTemplate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Ingestion Template",
+        "description": "Delete an ingestion configuration template.",
+        "operationId": "delete_ingestion_template_ops_ingestion_templates__template_id__delete",
+        "parameters": [
+          {
+            "name": "template_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Template Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/metrics": {
+      "get": {
+        "summary": "Get Ingestion Metrics",
+        "description": "Get aggregated metrics for ingestion runs over a time window.",
+        "operationId": "get_ingestion_metrics_ops_ingestion_metrics_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "7d",
+              "title": "Window"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionMetrics"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/runs": {
+      "get": {
+        "summary": "List Ingestion Runs",
+        "description": "List recent ingestion runs.",
+        "operationId": "list_ingestion_runs_ops_ingestion_runs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestionRunSummary"
+                  },
+                  "title": "Response List Ingestion Runs Ops Ingestion Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/runs/{run_id}": {
+      "get": {
+        "summary": "Get Ingestion Run",
+        "description": "Get detailed information for a specific ingestion run.",
+        "operationId": "get_ingestion_run_ops_ingestion_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestionRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/runs/{run_id}/patterns": {
+      "get": {
+        "summary": "List Run Patterns",
+        "description": "List all patterns associated with an ingestion run.",
+        "operationId": "list_run_patterns_ops_ingestion_runs__run_id__patterns_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/runs/{run_id}/rollback": {
+      "post": {
+        "summary": "Rollback Run",
+        "description": "Roll back patterns created by a specific ingestion run.",
+        "operationId": "rollback_run_ops_ingestion_runs__run_id__rollback_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/analyze": {
+      "post": {
+        "summary": "Analyze Source",
+        "description": "Analyze database for pattern candidates.",
+        "operationId": "analyze_source_ops_ingestion_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/enrich": {
+      "post": {
+        "summary": "Enrich Candidates",
+        "description": "Trigger enrichment suggestions for selected candidates as a background job.",
+        "operationId": "enrich_candidates_ops_ingestion_enrich_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrichRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichAsyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/ingestion/commit": {
+      "post": {
+        "summary": "Commit Ingestion",
+        "description": "Commit patterns to DB and trigger hydration.",
+        "operationId": "commit_ingestion_ops_ingestion_commit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ops/schema-hydrate": {
       "post": {
         "summary": "Trigger Schema Hydration",
@@ -626,6 +1459,46 @@
         }
       }
     },
+    "/llm/models": {
+      "get": {
+        "summary": "List Llm Models",
+        "description": "List available LLM models for a provider.",
+        "operationId": "list_llm_models_llm_models_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMModelsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ops/patterns/generate": {
       "post": {
         "summary": "Generate Patterns",
@@ -648,6 +1521,47 @@
               "application/json": {
                 "schema": {
                   "title": "Response Generate Patterns Ops Patterns Generate Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/patterns/generate/stream": {
+      "get": {
+        "summary": "Stream Generate Patterns",
+        "description": "Stream pattern generation logs as Server-Sent Events.",
+        "operationId": "stream_generate_patterns_ops_patterns_generate_stream_get",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Dry Run"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Stream Generate Patterns Ops Patterns Generate Stream Get"
                 }
               }
             }
@@ -726,6 +1640,71 @@
   },
   "components": {
     "schemas": {
+      "AnalyzeRequest": {
+        "properties": {
+          "target_tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Tables"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          }
+        },
+        "type": "object",
+        "title": "AnalyzeRequest",
+        "description": "Request payload for analyzing database for pattern candidates."
+      },
+      "AnalyzeResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "candidates"
+        ],
+        "title": "AnalyzeResponse",
+        "description": "Response payload for analysis result."
+      },
       "ApproveInteractionRequest": {
         "properties": {
           "corrected_sql": {
@@ -755,6 +1734,95 @@
         ],
         "title": "ApproveInteractionRequest",
         "description": "Request payload for approving an interaction."
+      },
+      "CommitRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "approved_patterns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Approved Patterns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "approved_patterns"
+        ],
+        "title": "CommitRequest",
+        "description": "Request payload for committing patterns."
+      },
+      "CommitResponse": {
+        "properties": {
+          "inserted_count": {
+            "type": "integer",
+            "title": "Inserted Count"
+          },
+          "hydration_job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Hydration Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inserted_count",
+          "hydration_job_id"
+        ],
+        "title": "CommitResponse",
+        "description": "Response payload for commit operation."
+      },
+      "EnrichAsyncResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "job_id"
+        ],
+        "title": "EnrichAsyncResponse",
+        "description": "Response payload for async enrichment trigger."
+      },
+      "EnrichRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "selected_candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Selected Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "selected_candidates"
+        ],
+        "title": "EnrichRequest",
+        "description": "Request payload for enriching selected candidates."
       },
       "FeedbackRequest": {
         "properties": {
@@ -798,6 +1866,281 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IngestionMetrics": {
+        "properties": {
+          "total_runs": {
+            "type": "integer",
+            "title": "Total Runs"
+          },
+          "total_patterns_generated": {
+            "type": "integer",
+            "title": "Total Patterns Generated"
+          },
+          "total_patterns_accepted": {
+            "type": "integer",
+            "title": "Total Patterns Accepted"
+          },
+          "avg_acceptance_rate": {
+            "type": "number",
+            "title": "Avg Acceptance Rate"
+          },
+          "runs_by_day": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Runs By Day"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_runs",
+          "total_patterns_generated",
+          "total_patterns_accepted",
+          "avg_acceptance_rate",
+          "runs_by_day"
+        ],
+        "title": "IngestionMetrics",
+        "description": "Aggregated metrics for ingestion runs."
+      },
+      "IngestionRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "target_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Table"
+          },
+          "config_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config Snapshot"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "started_at",
+          "status",
+          "config_snapshot",
+          "metrics"
+        ],
+        "title": "IngestionRunResponse",
+        "description": "Detailed response for an ingestion run."
+      },
+      "IngestionRunSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "target_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Table"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "started_at",
+          "status"
+        ],
+        "title": "IngestionRunSummary",
+        "description": "Summary of an ingestion run."
+      },
+      "IngestionTemplate": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "config",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IngestionTemplate",
+        "description": "Detailed response for an ingestion template."
+      },
+      "IngestionTemplateCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "config"
+        ],
+        "title": "IngestionTemplateCreate",
+        "description": "Payload for creating or updating an ingestion template."
+      },
+      "LLMModelOption": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "LLMModelOption",
+        "description": "LLM model option payload."
+      },
+      "LLMModelsResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LLMModelOption"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models"
+        ],
+        "title": "LLMModelsResponse",
+        "description": "Response payload for available LLM models."
       },
       "OpsJobResponse": {
         "properties": {
@@ -967,6 +2310,277 @@
         "title": "PublishApprovedRequest",
         "description": "Request payload for publishing approved interactions."
       },
+      "QueryTargetActivatePayload": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id"
+        ],
+        "title": "QueryTargetActivatePayload",
+        "description": "Payload for activating a pending query-target config."
+      },
+      "QueryTargetConfigHistoryEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Snapshot"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "config_id",
+          "event_type",
+          "snapshot"
+        ],
+        "title": "QueryTargetConfigHistoryEntry",
+        "description": "History entry for query-target configuration events."
+      },
+      "QueryTargetConfigPayload": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "auth": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Auth"
+          },
+          "guardrails": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Guardrails"
+          },
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "QueryTargetConfigPayload",
+        "description": "Payload for query-target settings."
+      },
+      "QueryTargetConfigResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "auth": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Auth"
+          },
+          "guardrails": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Guardrails"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "last_tested_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tested At"
+          },
+          "last_test_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test Status"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "last_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Message"
+          },
+          "last_error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "metadata",
+          "auth",
+          "guardrails",
+          "status"
+        ],
+        "title": "QueryTargetConfigResponse",
+        "description": "Response for persisted query-target config."
+      },
+      "QueryTargetSettingsResponse": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryTargetConfigResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryTargetConfigResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "QueryTargetSettingsResponse",
+        "description": "Response containing active/pending query-target configs."
+      },
+      "QueryTargetTestResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "title": "QueryTargetTestResponse",
+        "description": "Response for query-target connection tests."
+      },
       "RecommendationRequest": {
         "properties": {
           "query": {
@@ -1026,6 +2640,259 @@
         "type": "object",
         "title": "RejectInteractionRequest",
         "description": "Request payload for rejecting an interaction."
+      },
+      "RollbackRequest": {
+        "properties": {
+          "patterns": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patterns"
+          },
+          "confirm_run_id": {
+            "type": "string",
+            "title": "Confirm Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm_run_id"
+        ],
+        "title": "RollbackRequest",
+        "description": "Payload for rolling back an ingestion run."
+      },
+      "SynthGenerateRequest": {
+        "properties": {
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Path"
+          },
+          "only": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Only"
+          }
+        },
+        "type": "object",
+        "title": "SynthGenerateRequest",
+        "description": "Request payload for starting a synthetic data generation job."
+      },
+      "SynthGenerateResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "job_id"
+        ],
+        "title": "SynthGenerateResponse",
+        "description": "Response payload for synthetic data generation trigger."
+      },
+      "SynthRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "config_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config Snapshot"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Path"
+          },
+          "manifest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "started_at",
+          "status",
+          "config_snapshot",
+          "metrics"
+        ],
+        "title": "SynthRunResponse",
+        "description": "Detailed response for a synthetic data generation run."
+      },
+      "SynthRunSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "started_at",
+          "status"
+        ],
+        "title": "SynthRunSummary",
+        "description": "Summary of a synthetic data generation run."
       },
       "ValidationError": {
         "properties": {

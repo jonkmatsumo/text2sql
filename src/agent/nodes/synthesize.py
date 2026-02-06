@@ -145,21 +145,27 @@ def synthesize_insight_node(state: AgentState) -> dict:
                 "I couldn't find any rows matching your query.",
                 "Try widening your filters or adjusting the time range.",
             ]
+            guidance_lines = []
             if state.get("schema_drift_suspected"):
-                response_lines.append(
+                msg = (
                     "The schema may have changed; consider refreshing schema context and retrying."
                 )
+                response_lines.append(msg)
+                guidance_lines.append(msg)
+
             if _sanity_check_enabled() and _question_implies_existence(original_question):
                 span.set_attribute("result.sanity_check_triggered", True)
-                response_lines.append(
-                    "If you expected results, double-check filters or try a broader query."
-                )
+                msg = "If you expected results, double-check filters or try a broader query."
+                response_lines.append(msg)
+                guidance_lines.append(msg)
+
             response_content = " ".join(response_lines)
             span.set_outputs({"response": response_content})
             return {
                 "messages": [
                     AIMessage(content=response_content),
-                ]
+                ],
+                "empty_result_guidance": " ".join(guidance_lines) if guidance_lines else None,
             }
 
         # Format result as JSON string for LLM

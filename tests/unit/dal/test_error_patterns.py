@@ -25,8 +25,17 @@ from dal.error_patterns import extract_missing_identifiers
             "Table or view not found: analytics.events",
             ["analytics.events"],
         ),
+        (
+            "databricks",
+            "[TABLE_OR_VIEW_NOT_FOUND] The table or view `main.default.missing` cannot be found",
+            ["main.default.missing"],
+        ),
         ("athena", "Column 'user_id' cannot be resolved", ["user_id"]),
         ("clickhouse", "DB::Exception: Table db.table doesn't exist", ["db.table"]),
+        ("mysql", "Table 'my_db.missing_table' doesn't exist", ["my_db.missing_table"]),
+        ("mysql", "Unknown column 'secret_col' in 'field list'", ["secret_col"]),
+        ("duckdb", "Table with name missing_table does not exist", ["missing_table"]),
+        ("duckdb", 'Referenced column "missing_col" not found', ["missing_col"]),
     ],
 )
 def test_extract_missing_identifiers_positive(provider, message, expected):

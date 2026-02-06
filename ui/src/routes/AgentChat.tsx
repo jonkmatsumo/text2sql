@@ -21,6 +21,10 @@ interface Message {
   cacheSimilarity?: number;
   vizSpec?: any;
   traceId?: string;
+  resultCompleteness?: any;
+  retrySummary?: any;
+  validationSummary?: any;
+  emptyResultGuidance?: string;
 }
 
 const LLM_PROVIDERS = [
@@ -90,6 +94,95 @@ function ResultsTable({ rows }: { rows: any[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ValidationSummaryBadge({ summary }: { summary: any }) {
+  if (!summary) return null;
+
+  const { ast_valid, schema_drift_suspected, missing_identifiers } = summary;
+
+  return (
+    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+      {ast_valid === false && (
+        <span className="pill" style={{ background: "rgba(220, 53, 69, 0.1)", color: "var(--error)", border: "1px solid rgba(220, 53, 69, 0.2)" }}>
+          AST Validation Failed
+        </span>
+      )}
+      {schema_drift_suspected && (
+        <span className="pill" style={{ background: "rgba(255, 193, 7, 0.1)", color: "#856404", border: "1px solid rgba(255, 193, 7, 0.2)" }}>
+          Schema Drift Suspected
+          {missing_identifiers && missing_identifiers.length > 0 && ` (${missing_identifiers.length} missing)`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RetrySummaryBadge({ summary }: { summary: any }) {
+  if (!summary || !summary.attempts || summary.attempts.length === 0) {
+    return null;
+  }
+
+  const count = summary.attempts.length;
+  const isExhausted = summary.budget_exhausted || summary.max_retries_reached;
+
+  return (
+    <div className="retry-badge" style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "6px",
+      fontSize: "0.75rem",
+      color: isExhausted ? "var(--error)" : "var(--muted)",
+      marginTop: "8px",
+      fontWeight: 500
+    }}>
+      <span style={{
+        width: "8px",
+        height: "8px",
+        borderRadius: "50%",
+        background: isExhausted ? "var(--error)" : "#28a745"
+      }} />
+      {count} {count === 1 ? "retry attempt" : "retry attempts"}
+      {isExhausted && " (Budget exhausted)"}
+    </div>
+  );
+}
+
+function ResultCompletenessBanner({ completeness }: { completeness: any }) {
+  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token)) {
+    return null;
+  }
+
+  const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
+
+  let message = "";
+  let type: "warning" | "info" = "info";
+
+  if (is_truncated) {
+    type = "warning";
+    message = `Results truncated. Showing ${rows_returned} of ${row_limit}+ rows.`;
+    if (partial_reason === "PROVIDER_CAP") {
+      message += " (Backend limit reached)";
+    }
+  } else if (is_limited) {
+    message = `Query limited to ${query_limit} rows.`;
+  } else if (completeness.next_page_token) {
+    message = `Showing first ${rows_returned} results. More data available.`;
+  }
+
+  return (
+    <div className={`completeness-banner ${type}`} style={{
+      fontSize: "0.8rem",
+      padding: "6px 10px",
+      borderRadius: "6px",
+      marginTop: "8px",
+      background: type === "warning" ? "rgba(255, 193, 7, 0.15)" : "rgba(13, 110, 253, 0.1)",
+      borderLeft: `3px solid ${type === "warning" ? "#ffc107" : "#0d6efd"}`,
+      color: type === "warning" ? "#856404" : "#084298"
+    }}>
+      {message}
     </div>
   );
 }
@@ -188,7 +281,11 @@ export default function AgentChat() {
           fromCache: result.from_cache,
           cacheSimilarity: result.cache_similarity,
           vizSpec: result.viz_spec,
-          traceId: result.trace_id ?? undefined
+          traceId: result.trace_id ?? undefined,
+          resultCompleteness: result.result_completeness,
+          retrySummary: result.retry_summary,
+          validationSummary: result.validation_summary,
+          emptyResultGuidance: result.empty_result_guidance ?? undefined
         }
       ]);
     } catch (err: any) {
@@ -408,6 +505,32 @@ export default function AgentChat() {
                   {msg.result && !Array.isArray(msg.result) && (
                     <pre className="result-block">{formatValue(msg.result)}</pre>
                   )}
+
+                  {msg.emptyResultGuidance && (
+                    <div className="guidance-callout" style={{
+                      marginTop: "12px",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      background: "rgba(255, 193, 7, 0.05)",
+                      border: "1px solid rgba(255, 193, 7, 0.2)",
+                      fontSize: "0.9rem",
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "flex-start"
+                    }}>
+                      <span style={{ fontSize: "1.2rem" }}>💡</span>
+                      <div>
+                        <strong style={{ display: "block", marginBottom: "4px", color: "#856404" }}>Note</strong>
+                        <span style={{ color: "#856404" }}>{msg.emptyResultGuidance}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <ResultCompletenessBanner completeness={msg.resultCompleteness} />
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                    <RetrySummaryBadge summary={msg.retrySummary} />
+                    <ValidationSummaryBadge summary={msg.validationSummary} />
+                  </div>
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>

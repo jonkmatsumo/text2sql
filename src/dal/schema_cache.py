@@ -2,7 +2,7 @@ import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Protocol, Tuple, runtime_checkable
 
 from common.config.env import get_env_int
 from common.interfaces.schema_introspector import SchemaIntrospector
@@ -16,21 +16,41 @@ class CacheEntry:
     expires_at: float
 
 
-class SchemaCache:
-    """In-memory read-through cache for schema introspection."""
+@runtime_checkable
+class SchemaCacheBackend(Protocol):
+    """Protocol for schema cache storage backends (In-memory, Redis, etc.)."""
 
-    def __init__(self, ttl_seconds: int = 300, max_entries: Optional[int] = None) -> None:
-        """Initialize cache with TTL and optional size limits."""
-        self._ttl_seconds = ttl_seconds
-        if max_entries is None:
-            max_entries = get_env_int("DAL_SCHEMA_CACHE_MAX_ENTRIES", 1000)
-        self._max_entries = max_entries if max_entries and max_entries > 0 else 0
+    def get(self, key: Tuple[str, str, str, Optional[str], str]) -> Optional[Any]:
+        """Fetch a cached entry."""
+        ...
+
+    def set(self, key: Tuple[str, str, str, Optional[str], str], value: Any, ttl: int) -> None:
+        """Store a cached entry."""
+        ...
+
+    def clear(
+        self,
+        provider: Optional[str] = None,
+        schema: Optional[str] = None,
+        table: Optional[str] = None,
+    ) -> None:
+        """Invalidate entries by scope."""
+        ...
+
+
+class InMemorySchemaCacheBackend:
+    """Default in-memory implementation of SchemaCacheBackend."""
+
+    def __init__(self, max_entries: int = 1000) -> None:
+        """Initialize with max entries."""
+        self._max_entries = max_entries
         self._cache: "OrderedDict[Tuple[str, str, str, Optional[str], str], CacheEntry]" = (
             OrderedDict()
         )
+        self._logger = logging.getLogger(__name__)
 
     def get(self, key: Tuple[str, str, str, Optional[str], str]) -> Optional[Any]:
-        """Fetch a cached entry if it is still valid."""
+        """Get entry from in-memory dict."""
         entry = self._cache.get(key)
         if entry is None:
             return None
@@ -40,36 +60,101 @@ class SchemaCache:
         self._cache.move_to_end(key)
         return entry.value
 
-    def set(self, key: Tuple[str, str, str, Optional[str], str], value: Any) -> None:
-        """Store a cached entry with TTL."""
-        self._prune_expired()
+    def set(self, key: Tuple[str, str, str, Optional[str], str], value: Any, ttl: int) -> None:
+        """Set entry in in-memory dict."""
         if key in self._cache:
             self._cache.pop(key, None)
-        self._cache[key] = CacheEntry(value=value, expires_at=time.time() + self._ttl_seconds)
+        self._cache[key] = CacheEntry(value=value, expires_at=time.time() + ttl)
         self._cache.move_to_end(key)
         self._evict_if_needed()
 
+    def clear(
+        self,
+        provider: Optional[str] = None,
+        schema: Optional[str] = None,
+        table: Optional[str] = None,
+    ) -> None:
+        """Clear entries by scope."""
+        if provider is None:
+            self._cache.clear()
+            return
+
+        # Filter based on scope
+        if schema is None:
+            keys_to_remove = [k for k in self._cache.keys() if k[0] == provider]
+        elif table is None:
+            keys_to_remove = [k for k in self._cache.keys() if (k[0], k[2]) == (provider, schema)]
+        else:
+            keys_to_remove = [
+                k for k in self._cache.keys() if (k[0], k[2], k[3]) == (provider, schema, table)
+            ]
+
+        for k in keys_to_remove:
+            self._cache.pop(k, None)
+
+    def _evict_if_needed(self) -> None:
+        if self._max_entries <= 0:
+            return
+        while len(self._cache) > self._max_entries:
+            key, _ = self._cache.popitem(last=False)
+            self._logger.info("schema_cache_evict provider=%s key=%s", key[0], key)
+
+    def __len__(self) -> int:
+        """Return number of entries."""
+        return len(self._cache)
+
+
+class SchemaCache:
+    """In-memory read-through cache for schema introspection."""
+
+    def __init__(
+        self,
+        ttl_seconds: Optional[int] = None,
+        max_entries: Optional[int] = None,
+        backend: Optional[SchemaCacheBackend] = None,
+    ) -> None:
+        """Initialize cache with TTL and optional size limits or custom backend."""
+        if ttl_seconds is None:
+            ttl_seconds = get_env_int("DAL_SCHEMA_CACHE_TTL_SECONDS", 300)
+        self._default_ttl = ttl_seconds
+
+        if max_entries is None:
+            max_entries = get_env_int("DAL_SCHEMA_CACHE_MAX_ENTRIES", 1000)
+
+        self._backend = backend or InMemorySchemaCacheBackend(max_entries=max_entries or 1000)
+        self._logger = logging.getLogger(__name__)
+
+    def _get_ttl_for_provider(self, provider: str) -> int:
+        """Get TTL for a specific provider from env or default."""
+        env_key = f"DAL_SCHEMA_CACHE_TTL_{provider.upper()}"
+        return get_env_int(env_key, self._default_ttl)
+
+    def get(self, key: Tuple[str, str, str, Optional[str], str]) -> Optional[Any]:
+        """Fetch a cached entry if it is still valid."""
+        return self._backend.get(key)
+
+    def set(self, key: Tuple[str, str, str, Optional[str], str], value: Any) -> None:
+        """Store a cached entry with TTL."""
+        ttl = self._get_ttl_for_provider(key[0])
+        self._backend.set(key, value, ttl)
+
     def clear_all(self) -> None:
         """Clear all cached entries."""
-        self._cache.clear()
+        self._logger.info("schema_cache_clear_all")
+        self._backend.clear()
 
     def clear_provider(self, provider: str) -> None:
         """Clear cached entries for a provider."""
-        self._cache = OrderedDict((k, v) for k, v in self._cache.items() if k[0] != provider)
+        self._logger.info("schema_cache_clear_provider provider=%s", provider)
+        self._backend.clear(provider=provider)
 
     def clear_schema(self, provider: str, schema: str) -> None:
         """Clear cached entries for a provider+schema."""
-        self._cache = OrderedDict(
-            (k, v) for k, v in self._cache.items() if (k[0], k[2]) != (provider, schema)
-        )
+        self._backend.clear(provider=provider, schema=schema)
 
     def clear_table(self, provider: str, schema: str, table: str) -> None:
         """Clear cached entries for a provider+schema+table."""
-        self._cache = OrderedDict(
-            (k, v)
-            for k, v in self._cache.items()
-            if (k[0], k[2], k[3]) != (provider, schema, table)
-        )
+        self._backend.clear(provider=provider, schema=schema, table=table)
 
     def invalidate(
         self,
@@ -78,28 +163,7 @@ class SchemaCache:
         table: Optional[str] = None,
     ) -> None:
         """Invalidate cached entries based on scope."""
-        if provider is None:
-            self.clear_all()
-            return
-        if schema is None:
-            self.clear_provider(provider)
-            return
-        if table is None:
-            self.clear_schema(provider, schema)
-            return
-        self.clear_table(provider, schema, table)
-
-    def _prune_expired(self) -> None:
-        now = time.time()
-        expired = [key for key, entry in self._cache.items() if now >= entry.expires_at]
-        for key in expired:
-            self._cache.pop(key, None)
-
-    def _evict_if_needed(self) -> None:
-        if self._max_entries <= 0:
-            return
-        while len(self._cache) > self._max_entries:
-            self._cache.popitem(last=False)
+        self._backend.clear(provider=provider, schema=schema, table=table)
 
 
 class CachedSchemaIntrospector(SchemaIntrospector):

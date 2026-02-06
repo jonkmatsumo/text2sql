@@ -32,6 +32,30 @@ class SanitizationResult:
     errors: List[str]
 
 
+def redact_sensitive_info(text: str) -> str:
+    """Redact potentially sensitive information from strings.
+
+    Targets:
+    - Connection string credentials (e.g. postgresql://user:pass@host)
+    - Bearer tokens
+    - API keys (heuristic-based)
+    """
+    if not text:
+        return text
+
+    # Redact credentials in connection strings/URLs
+    # Matches: protocol://user:pass@host
+    res = re.sub(r"([a-zA-Z0-9+.-]+://)([^:/@]+):([^/@]+)@", r"\1<user>:<password>@", text)
+
+    # Redact potential Bearer tokens
+    res = re.sub(r"(?i)bearer\s+[a-zA-Z0-9._~+/-]+", "Bearer <redacted>", res)
+
+    # Redact potential API keys (e.g. sk-..., key-...)
+    res = re.sub(r"\b(sk-[a-zA-Z0-9]{20,})\b", "<api-key>", res)
+
+    return res
+
+
 def sanitize_text(
     text: str,
     min_len: int = DEFAULT_MIN_LEN,
