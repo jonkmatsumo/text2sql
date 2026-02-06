@@ -10,7 +10,7 @@ from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
-from common.config.env import get_env_bool, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,25 @@ class ToolResponseMalformedError(RuntimeError):
 def _schema_drift_hint(error_text: str, provider: str) -> tuple[bool, list[str]]:
     identifiers = extract_missing_identifiers(provider, error_text)
     return (len(identifiers) > 0, identifiers)
+
+
+def _safe_env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        parsed = get_env_int(name, default)
+    except ValueError:
+        logger.warning("Invalid %s; using default %s", name, default)
+        return default
+    if parsed is None:
+        return default
+    return max(minimum, int(parsed))
+
+
+def _auto_pagination_config() -> tuple[bool, int, int]:
+    mode = (get_env_str("AGENT_AUTO_PAGINATION", "off") or "off").strip().lower()
+    enabled = mode == "on"
+    max_pages = _safe_env_int("AGENT_AUTO_PAGINATION_MAX_PAGES", default=3, minimum=1)
+    max_rows = _safe_env_int("AGENT_AUTO_PAGINATION_MAX_ROWS", default=5000, minimum=1)
+    return enabled, max_pages, max_rows
 
 
 def parse_execute_tool_response(payload) -> dict:
@@ -229,17 +248,16 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "query_result": None,
                     }
 
-            result = await executor_tool.ainvoke(
-                {
-                    "sql_query": rewritten_sql,
-                    "tenant_id": tenant_id,
-                    "params": execute_params,
-                    "include_columns": True,
-                    "timeout_seconds": remaining,
-                    "page_token": state.get("page_token"),
-                    "page_size": state.get("page_size"),
-                }
-            )
+            execute_payload = {
+                "sql_query": rewritten_sql,
+                "tenant_id": tenant_id,
+                "params": execute_params,
+                "include_columns": True,
+                "timeout_seconds": remaining,
+                "page_token": state.get("page_token"),
+                "page_size": state.get("page_size"),
+            }
+            result = await executor_tool.ainvoke(execute_payload)
 
             parsed = parse_execute_tool_response(result)
             result_is_truncated = None
@@ -256,6 +274,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_cap_detected = None
             result_cap_mitigation_applied = None
             result_cap_mitigation_mode = None
+            result_auto_paginated = False
+            result_pages_fetched = 1
+            result_auto_pagination_stopped_reason = "disabled"
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
@@ -378,6 +399,141 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_cap_detected = metadata.get("cap_detected")
                 result_cap_mitigation_applied = metadata.get("cap_mitigation_applied")
                 result_cap_mitigation_mode = metadata.get("cap_mitigation_mode")
+                auto_pagination_enabled, auto_max_pages, auto_max_rows = _auto_pagination_config()
+                if auto_pagination_enabled:
+                    result_auto_pagination_stopped_reason = "no_next_page"
+                if auto_pagination_enabled and len(query_result) > auto_max_rows:
+                    query_result = query_result[:auto_max_rows]
+                    result_is_truncated = True
+                    if not result_partial_reason:
+                        result_partial_reason = "LIMITED"
+                    result_rows_returned = len(query_result)
+                    result_auto_pagination_stopped_reason = "max_rows"
+                elif (
+                    auto_pagination_enabled
+                    and result_next_page_token
+                    and not (
+                        result_capability_required == "pagination"
+                        and result_capability_supported is False
+                    )
+                ):
+                    result_auto_paginated = True
+                    aggregated_rows = list(query_result)
+                    next_page_token = result_next_page_token
+                    while next_page_token:
+                        if result_pages_fetched >= auto_max_pages:
+                            result_auto_pagination_stopped_reason = "max_pages"
+                            break
+                        if len(aggregated_rows) >= auto_max_rows:
+                            result_auto_pagination_stopped_reason = "max_rows"
+                            break
+
+                        page_timeout = None
+                        if deadline_ts is not None:
+                            page_timeout = max(0.0, deadline_ts - time.monotonic())
+                            if page_timeout <= 0.0:
+                                result_auto_pagination_stopped_reason = "budget_exhausted"
+                                break
+
+                        page_payload = {
+                            **execute_payload,
+                            "page_token": next_page_token,
+                            "page_size": execute_payload.get("page_size") or result_page_size,
+                            "timeout_seconds": page_timeout,
+                        }
+                        page_result = await executor_tool.ainvoke(page_payload)
+                        page_parsed = parse_execute_tool_response(page_result)
+                        span.add_event(
+                            "pagination.auto_page_fetch",
+                            {
+                                "page_number": result_pages_fetched + 1,
+                                "has_next_page_token": bool(next_page_token),
+                                "max_pages": auto_max_pages,
+                                "max_rows": auto_max_rows,
+                            },
+                        )
+                        if page_parsed.get("response_shape") != "enveloped":
+                            result_auto_pagination_stopped_reason = "non_enveloped_response"
+                            break
+
+                        page_rows = page_parsed.get("rows") or []
+                        page_metadata = page_parsed.get("metadata") or {}
+                        aggregated_rows.extend(page_rows)
+                        result_pages_fetched += 1
+
+                        next_page_token = page_metadata.get("next_page_token")
+                        result_next_page_token = next_page_token
+                        result_is_truncated = bool(result_is_truncated) or bool(
+                            page_metadata.get("is_truncated")
+                        )
+
+                        page_row_limit = page_metadata.get("row_limit")
+                        if page_row_limit is not None:
+                            result_row_limit = page_row_limit
+
+                        page_rows_returned = page_metadata.get("rows_returned")
+                        if page_rows_returned is not None:
+                            result_rows_returned = page_rows_returned
+
+                        page_page_size = page_metadata.get("page_size")
+                        if page_page_size is not None:
+                            result_page_size = page_page_size
+
+                        page_partial_reason = page_metadata.get("partial_reason")
+                        if page_partial_reason:
+                            result_partial_reason = page_partial_reason
+
+                        page_capability_required = page_metadata.get("capability_required")
+                        if page_capability_required is not None:
+                            result_capability_required = page_capability_required
+
+                        page_capability_supported = page_metadata.get("capability_supported")
+                        if page_capability_supported is not None:
+                            result_capability_supported = page_capability_supported
+
+                        page_fallback_applied = page_metadata.get("fallback_applied")
+                        if page_fallback_applied is not None:
+                            result_fallback_applied = page_fallback_applied
+
+                        page_fallback_mode = page_metadata.get("fallback_mode")
+                        if page_fallback_mode:
+                            result_fallback_mode = page_fallback_mode
+
+                        page_cap_detected = page_metadata.get("cap_detected")
+                        if page_cap_detected is not None:
+                            result_cap_detected = bool(result_cap_detected) or bool(
+                                page_cap_detected
+                            )
+
+                        page_cap_mitigation_applied = page_metadata.get("cap_mitigation_applied")
+                        if page_cap_mitigation_applied is not None:
+                            result_cap_mitigation_applied = bool(
+                                result_cap_mitigation_applied
+                            ) or bool(page_cap_mitigation_applied)
+
+                        page_cap_mitigation_mode = page_metadata.get("cap_mitigation_mode")
+                        if page_cap_mitigation_mode:
+                            result_cap_mitigation_mode = page_cap_mitigation_mode
+
+                        if len(aggregated_rows) >= auto_max_rows:
+                            aggregated_rows = aggregated_rows[:auto_max_rows]
+                            result_is_truncated = True
+                            if not result_partial_reason:
+                                result_partial_reason = "LIMITED"
+                            result_auto_pagination_stopped_reason = "max_rows"
+                            break
+                        if not next_page_token:
+                            result_auto_pagination_stopped_reason = "no_next_page"
+
+                    query_result = aggregated_rows
+                    result_rows_returned = len(query_result)
+                    result_auto_paginated = result_pages_fetched > 1
+                elif (
+                    auto_pagination_enabled
+                    and result_capability_required == "pagination"
+                    and result_capability_supported is False
+                ):
+                    result_auto_pagination_stopped_reason = "unsupported_capability"
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -421,6 +577,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 )
             if result_cap_mitigation_mode:
                 span.set_attribute("result.cap_mitigation_mode", str(result_cap_mitigation_mode))
+            span.set_attribute("pagination.auto_paginated", bool(result_auto_paginated))
+            span.set_attribute("pagination.pages_fetched", int(result_pages_fetched))
+            if result_auto_pagination_stopped_reason:
+                span.set_attribute(
+                    "pagination.auto_stopped_reason", str(result_auto_pagination_stopped_reason)
+                )
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -461,6 +623,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_cap_detected": bool(result_cap_detected),
                 "result_cap_mitigation_applied": bool(result_cap_mitigation_applied),
                 "result_cap_mitigation_mode": result_cap_mitigation_mode,
+                "result_auto_paginated": bool(result_auto_paginated),
+                "result_pages_fetched": int(result_pages_fetched),
+                "result_auto_pagination_stopped_reason": result_auto_pagination_stopped_reason,
                 "result_completeness": ResultCompleteness.from_parts(
                     rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),
@@ -473,6 +638,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     cap_detected=bool(result_cap_detected),
                     cap_mitigation_applied=bool(result_cap_mitigation_applied),
                     cap_mitigation_mode=result_cap_mitigation_mode,
+                    auto_paginated=bool(result_auto_paginated),
+                    pages_fetched=int(result_pages_fetched),
+                    auto_pagination_stopped_reason=result_auto_pagination_stopped_reason,
                 ).to_dict(),
             }
 

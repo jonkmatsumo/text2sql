@@ -49,6 +49,9 @@ class AgentState(TypedDict):
     result_cap_detected: Optional[bool]
     result_cap_mitigation_applied: Optional[bool]
     result_cap_mitigation_mode: Optional[str]
+    result_auto_paginated: Optional[bool]
+    result_pages_fetched: Optional[int]
+    result_auto_pagination_stopped_reason: Optional[str]
     empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages

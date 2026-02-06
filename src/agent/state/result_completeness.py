@@ -28,6 +28,9 @@ class ResultCompleteness:
     cap_detected: bool = False
     cap_mitigation_applied: bool = False
     cap_mitigation_mode: Optional[str] = None
+    auto_paginated: bool = False
+    pages_fetched: int = 1
+    auto_pagination_stopped_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-serializable dict."""
@@ -46,6 +49,9 @@ class ResultCompleteness:
         cap_detected: bool = False,
         cap_mitigation_applied: bool = False,
         cap_mitigation_mode: Optional[str] = None,
+        auto_paginated: bool = False,
+        pages_fetched: int = 1,
+        auto_pagination_stopped_reason: Optional[str] = None,
     ) -> "ResultCompleteness":
         """Construct a completeness model from raw metadata."""
         reason = None
@@ -75,4 +81,7 @@ class ResultCompleteness:
             cap_detected=bool(cap_detected),
             cap_mitigation_applied=bool(cap_mitigation_applied),
             cap_mitigation_mode=cap_mitigation_mode,
+            auto_paginated=bool(auto_paginated),
+            pages_fetched=max(1, int(pages_fetched)),
+            auto_pagination_stopped_reason=auto_pagination_stopped_reason,
         )
