@@ -508,6 +508,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     result_auto_paginated = True
                     aggregated_rows = list(query_result)
                     next_page_token = result_next_page_token
+                    seen_tokens = {str(result_next_page_token)}
+
                     while next_page_token:
                         if result_pages_fetched >= auto_max_pages:
                             result_auto_pagination_stopped_reason = "max_pages"
@@ -519,7 +521,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         page_timeout = None
                         if deadline_ts is not None:
                             page_timeout = max(0.0, deadline_ts - time.monotonic())
-                            if page_timeout <= 0.0:
+                            if page_timeout <= 0.5:  # Grace period
                                 result_auto_pagination_stopped_reason = "budget_exhausted"
                                 break
 
@@ -529,99 +531,134 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "page_size": execute_payload.get("page_size") or result_page_size,
                             "timeout_seconds": page_timeout,
                         }
-                        replayed_page = lookup_replay_tool_output(
-                            replay_bundle, "execute_sql_query", page_payload
-                        )
-                        if replayed_page:
-                            page_result = replayed_page
-                        else:
-                            page_result = await executor_tool.ainvoke(page_payload)
-                        page_parsed = parse_execute_tool_response(page_result)
-                        span.add_event(
-                            "pagination.auto_page_fetch",
-                            {
-                                "page_number": result_pages_fetched + 1,
-                                "has_next_page_token": bool(next_page_token),
-                                "max_pages": auto_max_pages,
-                                "max_rows": auto_max_rows,
-                            },
-                        )
-                        if page_parsed.get("response_shape") != "enveloped":
-                            result_auto_pagination_stopped_reason = "non_enveloped_response"
-                            break
 
-                        page_rows = page_parsed.get("rows") or []
-                        page_metadata = page_parsed.get("metadata") or {}
-                        aggregated_rows.extend(page_rows)
-                        result_pages_fetched += 1
+                        try:
+                            replayed_page = lookup_replay_tool_output(
+                                replay_bundle, "execute_sql_query", page_payload
+                            )
+                            if replayed_page:
+                                page_result = replayed_page
+                            else:
+                                page_result = await executor_tool.ainvoke(page_payload)
 
-                        next_page_token = page_metadata.get("next_page_token")
-                        result_next_page_token = next_page_token
-                        result_is_truncated = bool(result_is_truncated) or bool(
-                            page_metadata.get("is_truncated")
-                        )
+                            page_parsed = parse_execute_tool_response(page_result)
 
-                        page_row_limit = page_metadata.get("row_limit")
-                        if page_row_limit is not None:
-                            result_row_limit = page_row_limit
-
-                        page_rows_returned = page_metadata.get("rows_returned")
-                        if page_rows_returned is not None:
-                            result_rows_returned = page_rows_returned
-
-                        page_page_size = page_metadata.get("page_size")
-                        if page_page_size is not None:
-                            result_page_size = page_page_size
-
-                        page_partial_reason = page_metadata.get("partial_reason")
-                        if page_partial_reason:
-                            result_partial_reason = page_partial_reason
-
-                        page_capability_required = page_metadata.get("capability_required")
-                        if page_capability_required is not None:
-                            result_capability_required = page_capability_required
-
-                        page_capability_supported = page_metadata.get("capability_supported")
-                        if page_capability_supported is not None:
-                            result_capability_supported = page_capability_supported
-
-                        page_fallback_policy = page_metadata.get("fallback_policy")
-                        if page_fallback_policy is not None:
-                            result_fallback_policy = page_fallback_policy
-
-                        page_fallback_applied = page_metadata.get("fallback_applied")
-                        if page_fallback_applied is not None:
-                            result_fallback_applied = page_fallback_applied
-
-                        page_fallback_mode = page_metadata.get("fallback_mode")
-                        if page_fallback_mode:
-                            result_fallback_mode = page_fallback_mode
-
-                        page_cap_detected = page_metadata.get("cap_detected")
-                        if page_cap_detected is not None:
-                            result_cap_detected = bool(result_cap_detected) or bool(
-                                page_cap_detected
+                            span.add_event(
+                                "pagination.auto_page_fetch",
+                                {
+                                    "page_number": result_pages_fetched + 1,
+                                    "has_next_page_token": bool(next_page_token),
+                                    "max_pages": auto_max_pages,
+                                    "max_rows": auto_max_rows,
+                                },
                             )
 
-                        page_cap_mitigation_applied = page_metadata.get("cap_mitigation_applied")
-                        if page_cap_mitigation_applied is not None:
-                            result_cap_mitigation_applied = bool(
-                                result_cap_mitigation_applied
-                            ) or bool(page_cap_mitigation_applied)
+                            if page_parsed.get("response_shape") == "error":
+                                result_auto_pagination_stopped_reason = "fetch_error"
+                                break
 
-                        page_cap_mitigation_mode = page_metadata.get("cap_mitigation_mode")
-                        if page_cap_mitigation_mode:
-                            result_cap_mitigation_mode = page_cap_mitigation_mode
+                            if page_parsed.get("response_shape") != "enveloped":
+                                result_auto_pagination_stopped_reason = "non_enveloped_response"
+                                break
 
-                        if len(aggregated_rows) >= auto_max_rows:
-                            aggregated_rows = aggregated_rows[:auto_max_rows]
-                            result_is_truncated = True
-                            if not result_partial_reason:
-                                result_partial_reason = "LIMITED"
-                            result_auto_pagination_stopped_reason = "max_rows"
+                            page_rows = page_parsed.get("rows") or []
+                            page_metadata = page_parsed.get("metadata") or {}
+
+                            # Progress check: empty page with token is suspicious
+                            if not page_rows and page_metadata.get("next_page_token"):
+                                if result_auto_pagination_stopped_reason == "empty_page_with_token":
+                                    # Already saw an empty page once, stop now to prevent spinning
+                                    result_auto_pagination_stopped_reason = (
+                                        "pathological_empty_pages"
+                                    )
+                                    break
+                                result_auto_pagination_stopped_reason = "empty_page_with_token"
+
+                            aggregated_rows.extend(page_rows)
+                            result_pages_fetched += 1
+
+                            next_page_token = page_metadata.get("next_page_token")
+
+                            if next_page_token:
+                                token_str = str(next_page_token)
+                                if token_str in seen_tokens:
+                                    result_auto_pagination_stopped_reason = "token_repeat"
+                                    next_page_token = None
+                                    break
+                                seen_tokens.add(token_str)
+
+                            result_next_page_token = next_page_token
+                            result_is_truncated = bool(result_is_truncated) or bool(
+                                page_metadata.get("is_truncated")
+                            )
+
+                            page_row_limit = page_metadata.get("row_limit")
+                            if page_row_limit is not None:
+                                result_row_limit = page_row_limit
+
+                            page_rows_returned = page_metadata.get("rows_returned")
+                            if page_rows_returned is not None:
+                                result_rows_returned = page_rows_returned
+
+                            page_page_size = page_metadata.get("page_size")
+                            if page_page_size is not None:
+                                result_page_size = page_page_size
+
+                            page_partial_reason = page_metadata.get("partial_reason")
+                            if page_partial_reason:
+                                result_partial_reason = page_partial_reason
+
+                            page_capability_required = page_metadata.get("capability_required")
+                            if page_capability_required is not None:
+                                result_capability_required = page_capability_required
+
+                            page_capability_supported = page_metadata.get("capability_supported")
+                            if page_capability_supported is not None:
+                                result_capability_supported = page_capability_supported
+
+                            page_fallback_policy = page_metadata.get("fallback_policy")
+                            if page_fallback_policy is not None:
+                                result_fallback_policy = page_fallback_policy
+
+                            page_fallback_applied = page_metadata.get("fallback_applied")
+                            if page_fallback_applied is not None:
+                                result_fallback_applied = page_fallback_applied
+
+                            page_fallback_mode = page_metadata.get("fallback_mode")
+                            if page_fallback_mode:
+                                result_fallback_mode = page_fallback_mode
+
+                            page_cap_detected = page_metadata.get("cap_detected")
+                            if page_cap_detected is not None:
+                                result_cap_detected = bool(result_cap_detected) or bool(
+                                    page_cap_detected
+                                )
+
+                            page_cap_mitigation_applied = page_metadata.get(
+                                "cap_mitigation_applied"
+                            )
+                            if page_cap_mitigation_applied is not None:
+                                result_cap_mitigation_applied = bool(
+                                    result_cap_mitigation_applied
+                                ) or bool(page_cap_mitigation_applied)
+
+                            page_cap_mitigation_mode = page_metadata.get("cap_mitigation_mode")
+                            if page_cap_mitigation_mode:
+                                result_cap_mitigation_mode = page_cap_mitigation_mode
+
+                            if len(aggregated_rows) >= auto_max_rows:
+                                aggregated_rows = aggregated_rows[:auto_max_rows]
+                                result_is_truncated = True
+                                if not result_partial_reason:
+                                    result_partial_reason = "LIMITED"
+                                result_auto_pagination_stopped_reason = "max_rows"
+                                break
+                            if not next_page_token:
+                                result_auto_pagination_stopped_reason = "no_next_page"
+                        except Exception as e:
+                            logger.warning(f"Auto-pagination page fetch failed: {e}")
+                            result_auto_pagination_stopped_reason = "fetch_exception"
                             break
-                        if not next_page_token:
-                            result_auto_pagination_stopped_reason = "no_next_page"
 
                     query_result = aggregated_rows
                     result_rows_returned = len(query_result)
