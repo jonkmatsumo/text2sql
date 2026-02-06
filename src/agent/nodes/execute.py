@@ -673,7 +673,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if prefetch_enabled:
                     if result_prefetch_reason == "cache_hit":
                         pass
+                    elif result_auto_paginated:
+                        result_prefetch_reason = "auto_pagination_active"
                     elif auto_pagination_enabled:
+                        # Even if not active for this turn, skip if enabled globally
+                        # to avoid mixing manual prefetch with auto loop potential
                         result_prefetch_reason = "auto_pagination_enabled"
                     elif not result_next_page_token:
                         result_prefetch_reason = "no_next_page"
@@ -691,12 +695,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         else:
                             prefetch_timeout = None
                             if deadline_ts is not None:
+                                # Tight prefetch timeout to avoid blocking next turn
                                 prefetch_timeout = max(
                                     0.0, min(2.0, deadline_ts - time.monotonic())
                                 )
-                                if prefetch_timeout <= 0.0:
-                                    result_prefetch_reason = "budget_exhausted"
-                            if result_prefetch_reason != "budget_exhausted":
+                                if prefetch_timeout <= 0.5:
+                                    result_prefetch_reason = "low_budget"
+                            if result_prefetch_reason not in {"low_budget", "not_cheap"}:
                                 next_page_token_for_prefetch = str(result_next_page_token)
                                 prefetch_key = build_prefetch_cache_key(
                                     sql_query=rewritten_sql,
@@ -745,6 +750,17 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     result_prefetch_reason = "scheduled"
                                 else:
                                     result_prefetch_reason = "already_cached_or_inflight"
+
+                # Emit event if prefetch was enabled but not scheduled (and not cache hit)
+                if (
+                    prefetch_enabled
+                    and not result_prefetch_scheduled
+                    and result_prefetch_reason != "cache_hit"
+                ):
+                    span.add_event(
+                        "pagination.prefetch_suppressed", {"reason": str(result_prefetch_reason)}
+                    )
+
                 result_columns = parsed.get("columns")
                 error = None
             else:
