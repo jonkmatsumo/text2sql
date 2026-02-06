@@ -253,6 +253,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_capability_supported = None
             result_fallback_applied = None
             result_fallback_mode = None
+            result_cap_detected = None
+            result_cap_mitigation_applied = None
+            result_cap_mitigation_mode = None
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
@@ -372,6 +375,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_capability_supported = metadata.get("capability_supported")
                 result_fallback_applied = metadata.get("fallback_applied")
                 result_fallback_mode = metadata.get("fallback_mode")
+                result_cap_detected = metadata.get("cap_detected")
+                result_cap_mitigation_applied = metadata.get("cap_mitigation_applied")
+                result_cap_mitigation_mode = metadata.get("cap_mitigation_mode")
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -407,6 +413,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("capability.fallback_applied", bool(result_fallback_applied))
             if result_fallback_mode:
                 span.set_attribute("capability.fallback_mode", str(result_fallback_mode))
+            if result_cap_detected is not None:
+                span.set_attribute("result.cap_detected", bool(result_cap_detected))
+            if result_cap_mitigation_applied is not None:
+                span.set_attribute(
+                    "result.cap_mitigation_applied", bool(result_cap_mitigation_applied)
+                )
+            if result_cap_mitigation_mode:
+                span.set_attribute("result.cap_mitigation_mode", str(result_cap_mitigation_mode))
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -444,6 +458,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_row_limit": result_row_limit,
                 "result_rows_returned": (rows_returned),
                 "result_columns": result_columns,
+                "result_cap_detected": bool(result_cap_detected),
+                "result_cap_mitigation_applied": bool(result_cap_mitigation_applied),
+                "result_cap_mitigation_mode": result_cap_mitigation_mode,
                 "result_completeness": ResultCompleteness.from_parts(
                     rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),
@@ -453,6 +470,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     next_page_token=result_next_page_token,
                     page_size=result_page_size,
                     partial_reason=result_partial_reason,
+                    cap_detected=bool(result_cap_detected),
+                    cap_mitigation_applied=bool(result_cap_mitigation_applied),
+                    cap_mitigation_mode=result_cap_mitigation_mode,
                 ).to_dict(),
             }
 

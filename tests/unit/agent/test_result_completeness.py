@@ -223,3 +223,52 @@ async def test_completeness_legacy_defaults(
 
     assert completeness["rows_returned"] == 2
     assert completeness["partial_reason"] is None
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_completeness_provider_cap_mitigation_metadata(
+    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+):
+    """Cap mitigation metadata should flow into result_completeness."""
+    _mock_span_ctx(mock_start_span)
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    payload = json.dumps(
+        {
+            "rows": [{"id": 1}],
+            "metadata": {
+                "is_truncated": True,
+                "row_limit": 100,
+                "rows_returned": 1,
+                "partial_reason": "PROVIDER_CAP",
+                "cap_detected": True,
+                "cap_mitigation_applied": True,
+                "cap_mitigation_mode": "limited_view",
+            },
+        }
+    )
+    mock_tool.ainvoke = AsyncMock(return_value=payload)
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql=schema_fixture.sample_query,
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    result = await validate_and_execute_node(state)
+    completeness = result["result_completeness"]
+
+    assert completeness["cap_detected"] is True
+    assert completeness["cap_mitigation_applied"] is True
+    assert completeness["cap_mitigation_mode"] == "limited_view"

@@ -46,6 +46,9 @@ class AgentState(TypedDict):
     result_is_limited: Optional[bool]
     result_limit: Optional[int]
     result_completeness: Optional[dict]
+    result_cap_detected: Optional[bool]
+    result_cap_mitigation_applied: Optional[bool]
+    result_cap_mitigation_mode: Optional[str]
     empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages

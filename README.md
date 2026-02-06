@@ -266,6 +266,7 @@ Retry budgeting flags:
 - `AGENT_RETRY_BUDGET_EMA_ALPHA` (default: 0.3)
 - `AGENT_MIN_RETRY_BUDGET_SECONDS` (default: 3.0)
 - `AGENT_CAPABILITY_FALLBACK_MODE` (`off` default, `suggest` and `apply` optional)
+- `AGENT_PROVIDER_CAP_MITIGATION` (`off` default, `safe` optional)
 
 Pagination and completeness notes:
 - `page_size` is capped at 1000 by the MCP tool.

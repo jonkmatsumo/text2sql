@@ -150,6 +150,10 @@ async def handler(
         "fallback_applied": False,
         "fallback_mode": "none",
     }
+    cap_mitigation_setting = (get_env_str("AGENT_PROVIDER_CAP_MITIGATION", "off") or "off").strip()
+    cap_mitigation_setting = cap_mitigation_setting.lower()
+    if cap_mitigation_setting not in {"off", "safe"}:
+        cap_mitigation_setting = "off"
     force_result_limit = None
 
     def _negotiate_if_required(
@@ -347,6 +351,21 @@ async def handler(
             partial_reason = "TRUNCATED"
         if partial_reason is None and is_truncated:
             partial_reason = "TRUNCATED"
+        cap_detected = partial_reason == "PROVIDER_CAP"
+        cap_mitigation_applied = False
+        cap_mitigation_mode = "none"
+        if cap_detected and cap_mitigation_setting == "safe":
+            if caps.supports_pagination:
+                if next_token:
+                    cap_mitigation_applied = True
+                    cap_mitigation_mode = "pagination_continuation"
+                else:
+                    cap_mitigation_mode = "pagination_unavailable"
+            else:
+                cap_mitigation_applied = True
+                cap_mitigation_mode = "limited_view"
+                if row_limit <= 0:
+                    row_limit = len(result_rows)
         payload = {
             "rows": result_rows,
             "metadata": {
@@ -356,6 +375,9 @@ async def handler(
                 "next_page_token": next_token,
                 "page_size": effective_page_size,
                 "partial_reason": partial_reason,
+                "cap_detected": cap_detected,
+                "cap_mitigation_applied": cap_mitigation_applied,
+                "cap_mitigation_mode": cap_mitigation_mode,
                 **capability_metadata,
             },
         }
