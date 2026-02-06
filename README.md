@@ -239,6 +239,10 @@ New environment flags introduced by the remaining hardening pass:
 - `AGENT_EMPTY_RESULT_SANITY_CHECK` (default: false)
 - `AGENT_INTERACTION_PERSISTENCE_MODE` (`best_effort` default, `strict` optional)
 - `AGENT_CACHE_SCHEMA_VALIDATION` (default: false)
+- `AGENT_CORRECTION_SIMILARITY_ENFORCE` (default: false)
+- `AGENT_CORRECTION_SIMILARITY_MIN_SCORE` (default: 0.8)
+- `AGENT_SCHEMA_BINDING_VALIDATION` (default: false)
+- `AGENT_SCHEMA_SNAPSHOT_CACHE_BACKEND` (default: memory)
 
 Focused unit tests added in this pass can be run with:
 ```bash

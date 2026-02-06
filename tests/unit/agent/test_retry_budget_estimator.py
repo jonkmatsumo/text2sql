@@ -75,7 +75,7 @@ def test_estimate_budget_use_ema(base_state, mocker):
 
 def test_estimate_budget_enforce_min(base_state, mocker):
     """Test that minimum budget floor is enforced."""
-    mocker.patch("agent.graph.get_env_float", return_value=5.0)  # High min
+    mocker.patch("common.config.env.get_env_float", return_value=5.0)  # High min
 
     base_state["ema_llm_latency_seconds"] = 1.0  # Fast previous query
 

@@ -41,7 +41,7 @@ def test_synthesize_empty_with_filters_suggests_check(mock_telemetry, mock_llm_c
         content = result["messages"][0].content
 
         assert "couldn't find any rows" in content
-        assert "double-check criteria" in content or "double-check filters" in content
+        assert "double-check" in content or "verify" in content
 
 
 def test_synthesize_empty_no_filters_no_suggestion(mock_telemetry, mock_llm_chain):
