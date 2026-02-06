@@ -21,18 +21,37 @@ load_dotenv()
 
 
 def _sanity_check_enabled() -> bool:
-    return get_env_bool("AGENT_EMPTY_RESULT_SANITY_CHECK", False) is True
+    return get_env_bool("AGENT_EMPTY_RESULT_SANITY_CHECK", True) is True
 
 
 def _question_implies_existence(question: str) -> bool:
+    """Check if the question implies that data should exist.
+
+    Returns True for queries that use superlatives, rankings, or specific entity
+    references that would typically be expected to return results.
+    """
     if not question:
         return False
-    return bool(
-        re.search(
-            r"\b(top|latest|most|highest|lowest|newest|recent|last|biggest|best)\b",
-            question.lower(),
-        )
+    q = question.lower()
+
+    # Superlatives and ranking terms
+    superlative_patterns = (
+        r"\b(top|latest|most|highest|lowest|newest|recent|last|"
+        r"biggest|best|worst|oldest|first|maximum|minimum)\b"
     )
+    if re.search(superlative_patterns, q):
+        return True
+
+    # Aggregation terms that imply data exists
+    if re.search(r"\b(average|total|sum|count|how many|how much)\b", q):
+        return True
+
+    # Specific entity references (names, IDs, etc.)
+    entity_terms = r"\b(named|called|id number|customer|user|order|product)\b"
+    if re.search(entity_terms, q):
+        return True
+
+    return False
 
 
 def synthesize_insight_node(state: AgentState) -> dict:
@@ -131,6 +150,7 @@ def synthesize_insight_node(state: AgentState) -> dict:
                     "The schema may have changed; consider refreshing schema context and retrying."
                 )
             if _sanity_check_enabled() and _question_implies_existence(original_question):
+                span.set_attribute("result.sanity_check_triggered", True)
                 response_lines.append(
                     "If you expected results, double-check filters or try a broader query."
                 )
