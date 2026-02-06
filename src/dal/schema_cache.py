@@ -19,15 +19,26 @@ class CacheEntry:
 class SchemaCache:
     """In-memory read-through cache for schema introspection."""
 
-    def __init__(self, ttl_seconds: int = 300, max_entries: Optional[int] = None) -> None:
+    def __init__(
+        self, ttl_seconds: Optional[int] = None, max_entries: Optional[int] = None
+    ) -> None:
         """Initialize cache with TTL and optional size limits."""
-        self._ttl_seconds = ttl_seconds
+        if ttl_seconds is None:
+            ttl_seconds = get_env_int("DAL_SCHEMA_CACHE_TTL_SECONDS", 300)
+        self._default_ttl = ttl_seconds
+
         if max_entries is None:
             max_entries = get_env_int("DAL_SCHEMA_CACHE_MAX_ENTRIES", 1000)
         self._max_entries = max_entries if max_entries and max_entries > 0 else 0
         self._cache: "OrderedDict[Tuple[str, str, str, Optional[str], str], CacheEntry]" = (
             OrderedDict()
         )
+        self._logger = logging.getLogger(__name__)
+
+    def _get_ttl_for_provider(self, provider: str) -> int:
+        """Get TTL for a specific provider from env or default."""
+        env_key = f"DAL_SCHEMA_CACHE_TTL_{provider.upper()}"
+        return get_env_int(env_key, self._default_ttl)
 
     def get(self, key: Tuple[str, str, str, Optional[str], str]) -> Optional[Any]:
         """Fetch a cached entry if it is still valid."""
@@ -35,6 +46,7 @@ class SchemaCache:
         if entry is None:
             return None
         if time.time() >= entry.expires_at:
+            self._logger.info("schema_cache_expire provider=%s key=%s", key[0], key)
             self._cache.pop(key, None)
             return None
         self._cache.move_to_end(key)
@@ -45,17 +57,26 @@ class SchemaCache:
         self._prune_expired()
         if key in self._cache:
             self._cache.pop(key, None)
-        self._cache[key] = CacheEntry(value=value, expires_at=time.time() + self._ttl_seconds)
+
+        ttl = self._get_ttl_for_provider(key[0])
+        self._cache[key] = CacheEntry(value=value, expires_at=time.time() + ttl)
         self._cache.move_to_end(key)
         self._evict_if_needed()
 
     def clear_all(self) -> None:
         """Clear all cached entries."""
+        self._logger.info("schema_cache_clear_all count=%d", len(self._cache))
         self._cache.clear()
 
     def clear_provider(self, provider: str) -> None:
         """Clear cached entries for a provider."""
+        before = len(self._cache)
         self._cache = OrderedDict((k, v) for k, v in self._cache.items() if k[0] != provider)
+        self._logger.info(
+            "schema_cache_clear_provider provider=%s removed=%d",
+            provider,
+            before - len(self._cache),
+        )
 
     def clear_schema(self, provider: str, schema: str) -> None:
         """Clear cached entries for a provider+schema."""
@@ -99,7 +120,8 @@ class SchemaCache:
         if self._max_entries <= 0:
             return
         while len(self._cache) > self._max_entries:
-            self._cache.popitem(last=False)
+            key, _ = self._cache.popitem(last=False)
+            self._logger.info("schema_cache_evict provider=%s key=%s", key[0], key)
 
 
 class CachedSchemaIntrospector(SchemaIntrospector):

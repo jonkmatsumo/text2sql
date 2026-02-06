@@ -112,3 +112,30 @@ def test_schema_cache_lru_eviction():
     assert cache.get(key_b) is None
     assert cache.get(key_a) == ["users"]
     assert cache.get(key_c) == {"name": "orders"}
+
+
+def test_schema_cache_provider_specific_ttl(monkeypatch):
+    """Cache uses provider-specific TTL when configured."""
+
+    def mock_get_env_int(key, default):
+        if key == "DAL_SCHEMA_CACHE_TTL_SNOWFLAKE":
+            return 10
+        return default
+
+    monkeypatch.setattr("dal.schema_cache.get_env_int", mock_get_env_int)
+
+    cache = SchemaCache(ttl_seconds=60)
+    current = {"now": 0}
+    monkeypatch.setattr("dal.schema_cache.time.time", lambda: current["now"])
+
+    # Default TTL (60)
+    key_pg = ("postgres", "schema", "public", None, "list_table_names")
+    cache.set(key_pg, ["users"])
+
+    # Provider TTL (10)
+    key_sf = ("snowflake", "schema", "public", None, "list_table_names")
+    cache.set(key_sf, ["users"])
+
+    current["now"] = 15
+    assert cache.get(key_pg) == ["users"]
+    assert cache.get(key_sf) is None
