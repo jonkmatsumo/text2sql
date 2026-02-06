@@ -33,6 +33,7 @@ _PATTERNS: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"Not found: Table (?P<name>[\w\-\.\:]+)", re.IGNORECASE),
         re.compile(r"Not found: Dataset (?P<name>[\w\-\.\:]+)", re.IGNORECASE),
         re.compile(r"Unrecognized name: (?P<name>[\w\.\-]+)", re.IGNORECASE),
+        re.compile(r"Column (?P<name>[\w\.\-]+) not found", re.IGNORECASE),
     ],
     "snowflake": [
         re.compile(
@@ -40,10 +41,25 @@ _PATTERNS: dict[str, list[re.Pattern[str]]] = {
             re.IGNORECASE,
         ),
         re.compile(r"SQL compilation error: Unknown column '(?P<name>[^']+)'", re.IGNORECASE),
+        re.compile(r"invalid identifier '(?P<name>[^']+)'", re.IGNORECASE),
     ],
     "databricks": [
         re.compile(r"Table or view not found: (?P<name>[\w\.\-]+)", re.IGNORECASE),
         re.compile(r"cannot resolve '`?(?P<name>[^`']+)`?'", re.IGNORECASE),
+        re.compile(
+            r"\[TABLE_OR_VIEW_NOT_FOUND\] The table or view `(?P<name>[^`]+)` cannot be found",
+            re.IGNORECASE,
+        ),
+    ],
+    "mysql": [
+        re.compile(r"Table '(?P<name>[^']+)' doesn't exist", re.IGNORECASE),
+        re.compile(r"Unknown column '(?P<name>[^']+)' in 'field list'", re.IGNORECASE),
+        re.compile(r"Unknown column '(?P<name>[^']+)' in 'where clause'", re.IGNORECASE),
+    ],
+    "duckdb": [
+        re.compile(r"Table with name (?P<name>[^ ]+) does not exist", re.IGNORECASE),
+        re.compile(r"Column with name (?P<name>[^ ]+) not found", re.IGNORECASE),
+        re.compile(r"Referenced column \"(?P<name>[^\"]+)\" not found", re.IGNORECASE),
     ],
     "spark": [
         re.compile(r"Table or view not found: (?P<name>[\w\.\-]+)", re.IGNORECASE),
