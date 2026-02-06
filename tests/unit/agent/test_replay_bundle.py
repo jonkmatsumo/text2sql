@@ -3,6 +3,7 @@
 import pytest
 
 from agent.replay_bundle import (
+    REPLAY_BUNDLE_VERSION,
     ReplayBundle,
     build_replay_bundle,
     replay_response_from_bundle,
@@ -51,28 +52,40 @@ def test_serialize_replay_bundle_is_deterministic():
     assert one.startswith("{")
 
 
-def test_validate_replay_bundle_schema():
-    """Replay payload should validate against schema model."""
+def test_validate_replay_bundle_rejects_invalid_payload():
+    """Missing required fields should raise validation errors."""
+    with pytest.raises(ValueError, match="Replay bundle is missing 'version' field"):
+        validate_replay_bundle({})
+
+    with pytest.raises(ValueError, match="Unsupported replay bundle version"):
+        validate_replay_bundle({"version": "0.1"})
+
+
+def test_validate_replay_bundle_checks_required_fields():
+    """Ensure all required top-level fields are present."""
     payload = {
-        "version": "1.0",
-        "captured_at": "2026-01-01T00:00:00+00:00",
+        "version": REPLAY_BUNDLE_VERSION,
+        "captured_at": "2026-01-01T00:00:00Z",
+        # missing model, prompts, etc.
+    }
+    with pytest.raises(ValueError, match="Replay bundle is missing required fields"):
+        validate_replay_bundle(payload)
+
+
+def test_validate_replay_bundle_schema_full():
+    """Full schema validation via Pydantic."""
+    payload = {
+        "version": REPLAY_BUNDLE_VERSION,
+        "captured_at": "2026-01-01T00:00:00Z",
         "model": {"provider": "openai", "model_id": "gpt-4o"},
-        "seed": 9,
-        "prompts": {"user": "q"},
+        "prompts": {"user": "hi", "assistant": "ok"},
         "schema_context": {"schema_snapshot_id": "snap-1", "fingerprint": "snap-1"},
         "flags": {},
         "tool_io": [],
         "outcome": {"sql": "select 1", "result": []},
     }
-
     bundle = validate_replay_bundle(payload)
-    assert bundle.version == "1.0"
-
-
-def test_validate_replay_bundle_rejects_invalid_payload():
-    """Missing required fields should raise validation errors."""
-    with pytest.raises(Exception):
-        validate_replay_bundle({"version": "1.0"})
+    assert bundle.version == REPLAY_BUNDLE_VERSION
 
 
 def test_replay_response_from_bundle_uses_captured_outcome():

@@ -145,6 +145,7 @@ def test_run_agent_record_mode_returns_replay_bundle(monkeypatch):
     assert body["replay_bundle"] is not None
     assert body["replay_bundle_json"] is not None
     assert body["replay_metadata"]["mode"] == "record"
+    assert body["replay_metadata"]["execution_mode"] == "live"
     assert "<password>" in body["replay_bundle"]["prompts"]["user"]
 
 
@@ -206,6 +207,7 @@ def test_run_agent_replay_mode_re_runs_graph_with_bundle(monkeypatch):
     assert body["result"] == [{"one": 1}]
     assert body["response"] == "captured response"
     assert body["replay_metadata"]["mode"] == "replay"
+    assert body["replay_metadata"]["execution_mode"] == "replay"
     assert captured["replay_bundle"] is not None
     assert captured["replay_bundle"]["version"] == "1.0"
 

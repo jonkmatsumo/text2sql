@@ -128,15 +128,23 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 return AgentRunResponse(
                     error="Replay mode requires a replay_bundle payload.",
                     trace_id=None,
-                    replay_metadata={"mode": "replay", "execution": "captured_only"},
+                    replay_metadata={
+                        "mode": "replay",
+                        "execution": "captured_only",
+                        "execution_mode": "replay",
+                    },
                 )
             try:
                 replay_bundle = validate_replay_bundle(request.replay_bundle)
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
                 return AgentRunResponse(
                     error=redact_sensitive_info(f"Invalid replay bundle: {exc}"),
                     trace_id=None,
-                    replay_metadata={"mode": "replay", "execution": "captured_only"},
+                    replay_metadata={
+                        "mode": "replay",
+                        "execution": "captured_only",
+                        "execution_mode": "replay",
+                    },
                 )
 
             replay_bundle_payload = replay_bundle.model_dump(mode="json")
@@ -148,6 +156,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 replay_metadata = {
                     "mode": "replay",
                     "execution": "external_calls",
+                    "execution_mode": "replay",
                     "source": "captured_prompt",
                 }
             else:
@@ -157,6 +166,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 replay_metadata = {
                     "mode": "replay",
                     "execution": "captured_only",
+                    "execution_mode": "replay",
                     "external_calls": False,
                 }
         else:
@@ -172,6 +182,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 replay_metadata = {
                     "mode": "record",
                     "execution": "external_calls",
+                    "execution_mode": "live",
                     "captured": True,
                 }
 
