@@ -253,6 +253,30 @@
               }
             ],
             "title": "Error Metadata"
+          },
+          "retry_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Summary"
+          },
+          "validation_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Summary"
           }
         },
         "type": "object",

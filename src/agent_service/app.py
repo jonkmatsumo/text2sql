@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
+from common.sanitization.text import redact_sensitive_info
 
 try:
     from agent.graph import run_agent_with_tracing
@@ -62,6 +63,8 @@ class AgentRunResponse(BaseModel):
     provenance: Optional[dict] = None
     result_completeness: Optional[dict] = None
     error_metadata: Optional[dict] = None
+    retry_summary: Optional[dict] = None
+    validation_summary: Optional[dict] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -124,7 +127,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             sql=state.get("current_sql"),
             result=state.get("query_result"),
             response=response_text,
-            error=state.get("error"),
+            error=redact_sensitive_info(state.get("error")) if state.get("error") else None,
             from_cache=state.get("from_cache", False),
             cache_similarity=state.get("cache_similarity"),
             interaction_id=state.get("interaction_id"),
@@ -134,8 +137,16 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             provenance=provenance,
             result_completeness=state.get("result_completeness"),
             error_metadata=state.get("error_metadata"),
+            retry_summary=state.get("retry_summary"),
+            validation_summary={
+                "ast_valid": state.get("ast_validation_result", {}).get("is_valid"),
+                "schema_drift_suspected": state.get("schema_drift_suspected"),
+                "missing_identifiers": state.get("missing_identifiers"),
+            },
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)
     except Exception as exc:
-        return AgentRunResponse(error=str(exc), trace_id=None)
+        from common.sanitization.text import redact_sensitive_info as _redact
+
+        return AgentRunResponse(error=_redact(str(exc)), trace_id=None)

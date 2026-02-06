@@ -91,6 +91,14 @@ export interface components {
             error_metadata?: {
                 [key: string]: unknown;
             } | null;
+            /** Retry Summary */
+            retry_summary?: {
+                [key: string]: unknown;
+            } | null;
+            /** Validation Summary */
+            validation_summary?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
