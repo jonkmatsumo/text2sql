@@ -144,6 +144,44 @@
             "description": "Start time less than or equal to"
           },
           {
+            "name": "duration_min_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum duration in ms",
+              "title": "Duration Min Ms"
+            },
+            "description": "Minimum duration in ms"
+          },
+          {
+            "name": "duration_max_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum duration in ms",
+              "title": "Duration Max Ms"
+            },
+            "description": "Maximum duration in ms"
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -185,6 +223,186 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PaginatedTracesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/traces/aggregations": {
+      "get": {
+        "summary": "Api Trace Aggregations",
+        "description": "Return aggregated trace counts and histogram metadata.",
+        "operationId": "api_trace_aggregations_api_v1_traces_aggregations_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by service name",
+              "title": "Service"
+            },
+            "description": "Filter by service name"
+          },
+          {
+            "name": "trace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact trace ID lookup",
+              "title": "Trace Id"
+            },
+            "description": "Exact trace ID lookup"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by status",
+              "title": "Status"
+            },
+            "description": "Filter by status"
+          },
+          {
+            "name": "has_errors",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(yes|no)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by error presence",
+              "title": "Has Errors"
+            },
+            "description": "Filter by error presence"
+          },
+          {
+            "name": "start_time_gte",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start time greater than or equal to",
+              "title": "Start Time Gte"
+            },
+            "description": "Start time greater than or equal to"
+          },
+          {
+            "name": "start_time_lte",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start time less than or equal to",
+              "title": "Start Time Lte"
+            },
+            "description": "Start time less than or equal to"
+          },
+          {
+            "name": "duration_min_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum duration in ms",
+              "title": "Duration Min Ms"
+            },
+            "description": "Minimum duration in ms"
+          },
+          {
+            "name": "duration_max_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum duration in ms",
+              "title": "Duration Max Ms"
+            },
+            "description": "Maximum duration in ms"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceAggregationsResponse"
                 }
               }
             }
@@ -503,6 +721,30 @@
   },
   "components": {
     "schemas": {
+      "DurationHistogramBin": {
+        "properties": {
+          "start_ms": {
+            "type": "integer",
+            "title": "Start Ms"
+          },
+          "end_ms": {
+            "type": "integer",
+            "title": "End Ms"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_ms",
+          "end_ms",
+          "count"
+        ],
+        "title": "DurationHistogramBin",
+        "description": "Histogram bin for duration distribution."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -749,6 +991,17 @@
             "type": "integer",
             "title": "Duration Ms"
           },
+          "self_time_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Self Time Ms"
+          },
           "span_attributes": {
             "anyOf": [
               {
@@ -879,6 +1132,17 @@
             "type": "integer",
             "title": "Duration Ms"
           },
+          "self_time_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Self Time Ms"
+          },
           "span_attributes": {
             "anyOf": [
               {
@@ -920,6 +1184,193 @@
         ],
         "title": "SpanSummary",
         "description": "Summary representation of a span."
+      },
+      "TraceAggregationFacets": {
+        "properties": {
+          "service": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Service"
+          },
+          "status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status"
+          },
+          "error": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "status",
+          "error"
+        ],
+        "title": "TraceAggregationFacets",
+        "description": "Facet counts returned from trace aggregations."
+      },
+      "TraceAggregationPercentiles": {
+        "properties": {
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "p99_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99 Ms"
+          }
+        },
+        "type": "object",
+        "title": "TraceAggregationPercentiles",
+        "description": "Duration percentiles for traces."
+      },
+      "TraceAggregationSampling": {
+        "properties": {
+          "is_sampled": {
+            "type": "boolean",
+            "title": "Is Sampled",
+            "default": false
+          },
+          "sample_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Rate"
+          }
+        },
+        "type": "object",
+        "title": "TraceAggregationSampling",
+        "description": "Sampling metadata for aggregations."
+      },
+      "TraceAggregationTruncation": {
+        "properties": {
+          "is_truncated": {
+            "type": "boolean",
+            "title": "Is Truncated",
+            "default": false
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "title": "TraceAggregationTruncation",
+        "description": "Truncation metadata for aggregations."
+      },
+      "TraceAggregationsResponse": {
+        "properties": {
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "facet_counts": {
+            "$ref": "#/components/schemas/TraceAggregationFacets"
+          },
+          "duration_histogram": {
+            "items": {
+              "$ref": "#/components/schemas/DurationHistogramBin"
+            },
+            "type": "array",
+            "title": "Duration Histogram"
+          },
+          "percentiles": {
+            "$ref": "#/components/schemas/TraceAggregationPercentiles"
+          },
+          "sampling": {
+            "$ref": "#/components/schemas/TraceAggregationSampling"
+          },
+          "truncation": {
+            "$ref": "#/components/schemas/TraceAggregationTruncation"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          },
+          "window_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_count",
+          "facet_counts",
+          "duration_histogram",
+          "percentiles",
+          "sampling",
+          "truncation",
+          "as_of"
+        ],
+        "title": "TraceAggregationsResponse",
+        "description": "Aggregated trace search metadata."
       },
       "TraceDetail": {
         "properties": {

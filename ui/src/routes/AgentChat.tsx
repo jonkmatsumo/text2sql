@@ -21,6 +21,7 @@ interface Message {
   cacheSimilarity?: number;
   vizSpec?: any;
   traceId?: string;
+  resultCompleteness?: any;
 }
 
 const LLM_PROVIDERS = [
@@ -90,6 +91,43 @@ function ResultsTable({ rows }: { rows: any[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ResultCompletenessBanner({ completeness }: { completeness: any }) {
+  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token)) {
+    return null;
+  }
+
+  const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
+
+  let message = "";
+  let type: "warning" | "info" = "info";
+
+  if (is_truncated) {
+    type = "warning";
+    message = `Results truncated. Showing ${rows_returned} of ${row_limit}+ rows.`;
+    if (partial_reason === "PROVIDER_CAP") {
+      message += " (Backend limit reached)";
+    }
+  } else if (is_limited) {
+    message = `Query limited to ${query_limit} rows.`;
+  } else if (completeness.next_page_token) {
+    message = `Showing first ${rows_returned} results. More data available.`;
+  }
+
+  return (
+    <div className={`completeness-banner ${type}`} style={{
+      fontSize: "0.8rem",
+      padding: "6px 10px",
+      borderRadius: "6px",
+      marginTop: "8px",
+      background: type === "warning" ? "rgba(255, 193, 7, 0.15)" : "rgba(13, 110, 253, 0.1)",
+      borderLeft: `3px solid ${type === "warning" ? "#ffc107" : "#0d6efd"}`,
+      color: type === "warning" ? "#856404" : "#084298"
+    }}>
+      {message}
     </div>
   );
 }
@@ -188,7 +226,8 @@ export default function AgentChat() {
           fromCache: result.from_cache,
           cacheSimilarity: result.cache_similarity,
           vizSpec: result.viz_spec,
-          traceId: result.trace_id ?? undefined
+          traceId: result.trace_id ?? undefined,
+          resultCompleteness: result.result_completeness
         }
       ]);
     } catch (err: any) {
@@ -408,6 +447,8 @@ export default function AgentChat() {
                   {msg.result && !Array.isArray(msg.result) && (
                     <pre className="result-block">{formatValue(msg.result)}</pre>
                   )}
+
+                  <ResultCompletenessBanner completeness={msg.resultCompleteness} />
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>

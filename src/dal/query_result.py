@@ -12,3 +12,6 @@ class QueryResult:
     columns: Optional[List[ColumnMeta]] = None
     next_page_token: Optional[str] = None
     page_size: Optional[int] = None
+    is_truncated: bool = False
+    is_limited: bool = False
+    partial_reason: Optional[str] = None

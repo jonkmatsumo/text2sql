@@ -722,29 +722,39 @@ class Database:
             supports_prepare = (
                 include_columns and callable(prepare) and "prepare" in type(conn).__dict__
             )
+
+            result = None
             if params:
                 if supports_fetch_with_columns:
                     rows, columns = await fetch_with_columns(sql, *params)
-                    return QueryResult(rows=rows, columns=columns)
-                if supports_prepare:
+                    result = QueryResult(rows=rows, columns=columns)
+                elif supports_prepare:
                     from dal.util.column_metadata import columns_from_asyncpg_attributes
 
                     statement = await prepare(sql)
                     rows = await statement.fetch(*params)
                     columns = columns_from_asyncpg_attributes(statement.get_attributes())
-                    return QueryResult(rows=[dict(row) for row in rows], columns=columns)
-                rows = await conn.fetch(sql, *params)
+                    result = QueryResult(rows=[dict(row) for row in rows], columns=columns)
+                else:
+                    rows = await conn.fetch(sql, *params)
+                    result = QueryResult(rows=rows, columns=None)
             else:
                 if supports_fetch_with_columns:
                     rows, columns = await fetch_with_columns(sql)
-                    return QueryResult(rows=rows, columns=columns)
-                if supports_prepare:
+                    result = QueryResult(rows=rows, columns=columns)
+                elif supports_prepare:
                     from dal.util.column_metadata import columns_from_asyncpg_attributes
 
                     statement = await prepare(sql)
                     rows = await statement.fetch()
                     columns = columns_from_asyncpg_attributes(statement.get_attributes())
-                    return QueryResult(rows=[dict(row) for row in rows], columns=columns)
-                rows = await conn.fetch(sql)
+                    result = QueryResult(rows=[dict(row) for row in rows], columns=columns)
+                else:
+                    rows = await conn.fetch(sql)
+                    result = QueryResult(rows=rows, columns=None)
 
-        return QueryResult(rows=rows, columns=None)
+            if result and hasattr(conn, "last_truncated"):
+                result.is_truncated = conn.last_truncated
+                result.partial_reason = getattr(conn, "last_truncated_reason", None)
+
+            return result
