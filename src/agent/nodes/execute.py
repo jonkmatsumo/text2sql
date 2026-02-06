@@ -108,6 +108,7 @@ def parse_execute_tool_response(payload) -> dict:
                     "required_capability": item.get("required_capability"),
                     "capability_required": item.get("capability_required"),
                     "capability_supported": item.get("capability_supported"),
+                    "fallback_policy": item.get("fallback_policy"),
                     "fallback_applied": item.get("fallback_applied"),
                     "fallback_mode": item.get("fallback_mode"),
                     "provider": item.get("provider"),
@@ -139,6 +140,7 @@ def parse_execute_tool_response(payload) -> dict:
                 "required_capability": parsed.get("required_capability"),
                 "capability_required": parsed.get("capability_required"),
                 "capability_supported": parsed.get("capability_supported"),
+                "fallback_policy": parsed.get("fallback_policy"),
                 "fallback_applied": parsed.get("fallback_applied"),
                 "fallback_mode": parsed.get("fallback_mode"),
                 "provider": parsed.get("provider"),
@@ -341,6 +343,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_partial_reason = None
             result_capability_required = None
             result_capability_supported = None
+            result_fallback_policy = None
             result_fallback_applied = None
             result_fallback_mode = None
             result_cap_detected = None
@@ -381,6 +384,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 required_capability = parsed.get("required_capability")
                 capability_required = parsed.get("capability_required")
                 capability_supported = parsed.get("capability_supported")
+                fallback_policy = parsed.get("fallback_policy")
                 fallback_applied = parsed.get("fallback_applied")
                 fallback_mode = parsed.get("fallback_mode")
                 provider = parsed.get("provider")
@@ -412,6 +416,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         span.set_attribute("error.required_capability", required_capability)
                     if capability_supported is not None:
                         span.set_attribute("error.capability_supported", bool(capability_supported))
+                    if fallback_policy:
+                        span.set_attribute("error.fallback_policy", str(fallback_policy))
                     if fallback_applied is not None:
                         span.set_attribute("error.fallback_applied", bool(fallback_applied))
                     if fallback_mode:
@@ -429,6 +435,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "required_capability": required_capability,
                             "capability_required": capability_required,
                             "capability_supported": capability_supported,
+                            "fallback_policy": fallback_policy,
                             "fallback_applied": fallback_applied,
                             "fallback_mode": fallback_mode,
                             "retry_after_seconds": retry_after_seconds,
@@ -474,6 +481,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_partial_reason = metadata.get("partial_reason")
                 result_capability_required = metadata.get("capability_required")
                 result_capability_supported = metadata.get("capability_supported")
+                result_fallback_policy = metadata.get("fallback_policy")
                 result_fallback_applied = metadata.get("fallback_applied")
                 result_fallback_mode = metadata.get("fallback_mode")
                 result_cap_detected = metadata.get("cap_detected")
@@ -500,6 +508,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     result_auto_paginated = True
                     aggregated_rows = list(query_result)
                     next_page_token = result_next_page_token
+                    seen_tokens = {str(result_next_page_token)}
+
                     while next_page_token:
                         if result_pages_fetched >= auto_max_pages:
                             result_auto_pagination_stopped_reason = "max_pages"
@@ -511,7 +521,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         page_timeout = None
                         if deadline_ts is not None:
                             page_timeout = max(0.0, deadline_ts - time.monotonic())
-                            if page_timeout <= 0.0:
+                            if page_timeout <= 0.5:  # Grace period
                                 result_auto_pagination_stopped_reason = "budget_exhausted"
                                 break
 
@@ -521,95 +531,134 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "page_size": execute_payload.get("page_size") or result_page_size,
                             "timeout_seconds": page_timeout,
                         }
-                        replayed_page = lookup_replay_tool_output(
-                            replay_bundle, "execute_sql_query", page_payload
-                        )
-                        if replayed_page:
-                            page_result = replayed_page
-                        else:
-                            page_result = await executor_tool.ainvoke(page_payload)
-                        page_parsed = parse_execute_tool_response(page_result)
-                        span.add_event(
-                            "pagination.auto_page_fetch",
-                            {
-                                "page_number": result_pages_fetched + 1,
-                                "has_next_page_token": bool(next_page_token),
-                                "max_pages": auto_max_pages,
-                                "max_rows": auto_max_rows,
-                            },
-                        )
-                        if page_parsed.get("response_shape") != "enveloped":
-                            result_auto_pagination_stopped_reason = "non_enveloped_response"
-                            break
 
-                        page_rows = page_parsed.get("rows") or []
-                        page_metadata = page_parsed.get("metadata") or {}
-                        aggregated_rows.extend(page_rows)
-                        result_pages_fetched += 1
+                        try:
+                            replayed_page = lookup_replay_tool_output(
+                                replay_bundle, "execute_sql_query", page_payload
+                            )
+                            if replayed_page:
+                                page_result = replayed_page
+                            else:
+                                page_result = await executor_tool.ainvoke(page_payload)
 
-                        next_page_token = page_metadata.get("next_page_token")
-                        result_next_page_token = next_page_token
-                        result_is_truncated = bool(result_is_truncated) or bool(
-                            page_metadata.get("is_truncated")
-                        )
+                            page_parsed = parse_execute_tool_response(page_result)
 
-                        page_row_limit = page_metadata.get("row_limit")
-                        if page_row_limit is not None:
-                            result_row_limit = page_row_limit
-
-                        page_rows_returned = page_metadata.get("rows_returned")
-                        if page_rows_returned is not None:
-                            result_rows_returned = page_rows_returned
-
-                        page_page_size = page_metadata.get("page_size")
-                        if page_page_size is not None:
-                            result_page_size = page_page_size
-
-                        page_partial_reason = page_metadata.get("partial_reason")
-                        if page_partial_reason:
-                            result_partial_reason = page_partial_reason
-
-                        page_capability_required = page_metadata.get("capability_required")
-                        if page_capability_required is not None:
-                            result_capability_required = page_capability_required
-
-                        page_capability_supported = page_metadata.get("capability_supported")
-                        if page_capability_supported is not None:
-                            result_capability_supported = page_capability_supported
-
-                        page_fallback_applied = page_metadata.get("fallback_applied")
-                        if page_fallback_applied is not None:
-                            result_fallback_applied = page_fallback_applied
-
-                        page_fallback_mode = page_metadata.get("fallback_mode")
-                        if page_fallback_mode:
-                            result_fallback_mode = page_fallback_mode
-
-                        page_cap_detected = page_metadata.get("cap_detected")
-                        if page_cap_detected is not None:
-                            result_cap_detected = bool(result_cap_detected) or bool(
-                                page_cap_detected
+                            span.add_event(
+                                "pagination.auto_page_fetch",
+                                {
+                                    "page_number": result_pages_fetched + 1,
+                                    "has_next_page_token": bool(next_page_token),
+                                    "max_pages": auto_max_pages,
+                                    "max_rows": auto_max_rows,
+                                },
                             )
 
-                        page_cap_mitigation_applied = page_metadata.get("cap_mitigation_applied")
-                        if page_cap_mitigation_applied is not None:
-                            result_cap_mitigation_applied = bool(
-                                result_cap_mitigation_applied
-                            ) or bool(page_cap_mitigation_applied)
+                            if page_parsed.get("response_shape") == "error":
+                                result_auto_pagination_stopped_reason = "fetch_error"
+                                break
 
-                        page_cap_mitigation_mode = page_metadata.get("cap_mitigation_mode")
-                        if page_cap_mitigation_mode:
-                            result_cap_mitigation_mode = page_cap_mitigation_mode
+                            if page_parsed.get("response_shape") != "enveloped":
+                                result_auto_pagination_stopped_reason = "non_enveloped_response"
+                                break
 
-                        if len(aggregated_rows) >= auto_max_rows:
-                            aggregated_rows = aggregated_rows[:auto_max_rows]
-                            result_is_truncated = True
-                            if not result_partial_reason:
-                                result_partial_reason = "LIMITED"
-                            result_auto_pagination_stopped_reason = "max_rows"
+                            page_rows = page_parsed.get("rows") or []
+                            page_metadata = page_parsed.get("metadata") or {}
+
+                            # Progress check: empty page with token is suspicious
+                            if not page_rows and page_metadata.get("next_page_token"):
+                                if result_auto_pagination_stopped_reason == "empty_page_with_token":
+                                    # Already saw an empty page once, stop now to prevent spinning
+                                    result_auto_pagination_stopped_reason = (
+                                        "pathological_empty_pages"
+                                    )
+                                    break
+                                result_auto_pagination_stopped_reason = "empty_page_with_token"
+
+                            aggregated_rows.extend(page_rows)
+                            result_pages_fetched += 1
+
+                            next_page_token = page_metadata.get("next_page_token")
+
+                            if next_page_token:
+                                token_str = str(next_page_token)
+                                if token_str in seen_tokens:
+                                    result_auto_pagination_stopped_reason = "token_repeat"
+                                    next_page_token = None
+                                    break
+                                seen_tokens.add(token_str)
+
+                            result_next_page_token = next_page_token
+                            result_is_truncated = bool(result_is_truncated) or bool(
+                                page_metadata.get("is_truncated")
+                            )
+
+                            page_row_limit = page_metadata.get("row_limit")
+                            if page_row_limit is not None:
+                                result_row_limit = page_row_limit
+
+                            page_rows_returned = page_metadata.get("rows_returned")
+                            if page_rows_returned is not None:
+                                result_rows_returned = page_rows_returned
+
+                            page_page_size = page_metadata.get("page_size")
+                            if page_page_size is not None:
+                                result_page_size = page_page_size
+
+                            page_partial_reason = page_metadata.get("partial_reason")
+                            if page_partial_reason:
+                                result_partial_reason = page_partial_reason
+
+                            page_capability_required = page_metadata.get("capability_required")
+                            if page_capability_required is not None:
+                                result_capability_required = page_capability_required
+
+                            page_capability_supported = page_metadata.get("capability_supported")
+                            if page_capability_supported is not None:
+                                result_capability_supported = page_capability_supported
+
+                            page_fallback_policy = page_metadata.get("fallback_policy")
+                            if page_fallback_policy is not None:
+                                result_fallback_policy = page_fallback_policy
+
+                            page_fallback_applied = page_metadata.get("fallback_applied")
+                            if page_fallback_applied is not None:
+                                result_fallback_applied = page_fallback_applied
+
+                            page_fallback_mode = page_metadata.get("fallback_mode")
+                            if page_fallback_mode:
+                                result_fallback_mode = page_fallback_mode
+
+                            page_cap_detected = page_metadata.get("cap_detected")
+                            if page_cap_detected is not None:
+                                result_cap_detected = bool(result_cap_detected) or bool(
+                                    page_cap_detected
+                                )
+
+                            page_cap_mitigation_applied = page_metadata.get(
+                                "cap_mitigation_applied"
+                            )
+                            if page_cap_mitigation_applied is not None:
+                                result_cap_mitigation_applied = bool(
+                                    result_cap_mitigation_applied
+                                ) or bool(page_cap_mitigation_applied)
+
+                            page_cap_mitigation_mode = page_metadata.get("cap_mitigation_mode")
+                            if page_cap_mitigation_mode:
+                                result_cap_mitigation_mode = page_cap_mitigation_mode
+
+                            if len(aggregated_rows) >= auto_max_rows:
+                                aggregated_rows = aggregated_rows[:auto_max_rows]
+                                result_is_truncated = True
+                                if not result_partial_reason:
+                                    result_partial_reason = "LIMITED"
+                                result_auto_pagination_stopped_reason = "max_rows"
+                                break
+                            if not next_page_token:
+                                result_auto_pagination_stopped_reason = "no_next_page"
+                        except Exception as e:
+                            logger.warning(f"Auto-pagination page fetch failed: {e}")
+                            result_auto_pagination_stopped_reason = "fetch_exception"
                             break
-                        if not next_page_token:
-                            result_auto_pagination_stopped_reason = "no_next_page"
 
                     query_result = aggregated_rows
                     result_rows_returned = len(query_result)
@@ -624,7 +673,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if prefetch_enabled:
                     if result_prefetch_reason == "cache_hit":
                         pass
+                    elif result_auto_paginated:
+                        result_prefetch_reason = "auto_pagination_active"
                     elif auto_pagination_enabled:
+                        # Even if not active for this turn, skip if enabled globally
+                        # to avoid mixing manual prefetch with auto loop potential
                         result_prefetch_reason = "auto_pagination_enabled"
                     elif not result_next_page_token:
                         result_prefetch_reason = "no_next_page"
@@ -642,12 +695,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         else:
                             prefetch_timeout = None
                             if deadline_ts is not None:
+                                # Tight prefetch timeout to avoid blocking next turn
                                 prefetch_timeout = max(
                                     0.0, min(2.0, deadline_ts - time.monotonic())
                                 )
-                                if prefetch_timeout <= 0.0:
-                                    result_prefetch_reason = "budget_exhausted"
-                            if result_prefetch_reason != "budget_exhausted":
+                                if prefetch_timeout <= 0.5:
+                                    result_prefetch_reason = "low_budget"
+                            if result_prefetch_reason not in {"low_budget", "not_cheap"}:
                                 next_page_token_for_prefetch = str(result_next_page_token)
                                 prefetch_key = build_prefetch_cache_key(
                                     sql_query=rewritten_sql,
@@ -696,6 +750,17 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     result_prefetch_reason = "scheduled"
                                 else:
                                     result_prefetch_reason = "already_cached_or_inflight"
+
+                # Emit event if prefetch was enabled but not scheduled (and not cache hit)
+                if (
+                    prefetch_enabled
+                    and not result_prefetch_scheduled
+                    and result_prefetch_reason != "cache_hit"
+                ):
+                    span.add_event(
+                        "pagination.prefetch_suppressed", {"reason": str(result_prefetch_reason)}
+                    )
+
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -727,6 +792,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("capability.required", result_capability_required)
             if result_capability_supported is not None:
                 span.set_attribute("capability.supported", bool(result_capability_supported))
+            if result_fallback_policy:
+                span.set_attribute("capability.fallback_policy", str(result_fallback_policy))
             if result_fallback_applied is not None:
                 span.set_attribute("capability.fallback_applied", bool(result_fallback_applied))
             if result_fallback_mode:
@@ -787,6 +854,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_row_limit": result_row_limit,
                 "result_rows_returned": (rows_returned),
                 "result_columns": result_columns,
+                "result_capability_required": result_capability_required,
+                "result_capability_supported": result_capability_supported,
+                "result_fallback_policy": result_fallback_policy,
+                "result_fallback_applied": bool(result_fallback_applied),
+                "result_fallback_mode": result_fallback_mode,
                 "result_cap_detected": bool(result_cap_detected),
                 "result_cap_mitigation_applied": bool(result_cap_mitigation_applied),
                 "result_cap_mitigation_mode": result_cap_mitigation_mode,

@@ -52,6 +52,11 @@ def build_prefetch_cache_key(
     completeness_hint: Optional[str],
 ) -> str:
     """Build a stable cache key for prefetch payloads."""
+    # Only include flags that affect tool behavior/results
+    relevant_flags = {
+        "fallback_mode": get_env_str("AGENT_CAPABILITY_FALLBACK_MODE"),
+        "cap_mitigation": get_env_str("AGENT_PROVIDER_CAP_MITIGATION"),
+    }
     payload = {
         "sql_query": sql_query,
         "tenant_id": tenant_id,
@@ -60,6 +65,7 @@ def build_prefetch_cache_key(
         "schema_snapshot_id": schema_snapshot_id,
         "seed": seed,
         "completeness_hint": completeness_hint,
+        "flags": relevant_flags,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

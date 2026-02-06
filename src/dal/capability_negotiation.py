@@ -28,6 +28,7 @@ class CapabilityNegotiationResult:
 
     capability_required: Optional[str]
     capability_supported: bool
+    fallback_policy: str
     fallback_applied: bool
     fallback_mode: str
     include_columns: bool
@@ -41,6 +42,7 @@ class CapabilityNegotiationResult:
         return {
             "capability_required": self.capability_required,
             "capability_supported": self.capability_supported,
+            "fallback_policy": self.fallback_policy,
             "fallback_applied": self.fallback_applied,
             "fallback_mode": self.fallback_mode,
         }
@@ -87,6 +89,7 @@ def negotiate_capability_request(
         return CapabilityNegotiationResult(
             capability_required=None,
             capability_supported=True,
+            fallback_policy=fallback_policy.value,
             fallback_applied=False,
             fallback_mode=CapabilityFallbackMode.NONE.value,
             include_columns=include_columns,
@@ -104,6 +107,7 @@ def negotiate_capability_request(
         return CapabilityNegotiationResult(
             capability_required=capability_required,
             capability_supported=False,
+            fallback_policy=fallback_policy.value,
             fallback_applied=False,
             fallback_mode=fallback_mode.value,
             include_columns=include_columns,
@@ -132,6 +136,7 @@ def negotiate_capability_request(
     return CapabilityNegotiationResult(
         capability_required=capability_required,
         capability_supported=False,
+        fallback_policy=fallback_policy.value,
         fallback_applied=True,
         fallback_mode=fallback_mode.value,
         include_columns=adjusted_include_columns,

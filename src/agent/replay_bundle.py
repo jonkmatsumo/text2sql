@@ -198,8 +198,38 @@ def serialize_replay_bundle(bundle: ReplayBundle) -> str:
 
 
 def validate_replay_bundle(bundle_payload: dict[str, Any]) -> ReplayBundle:
-    """Validate replay bundle payload using schema model."""
-    return ReplayBundle.model_validate(bundle_payload)
+    """Validate replay bundle payload using schema model and version checks."""
+    if not isinstance(bundle_payload, dict):
+        raise ValidationError.from_exception_data(
+            "Replay bundle must be a dictionary object", line_errors=[]
+        )
+
+    version = bundle_payload.get("version")
+    if not version:
+        raise ValueError("Replay bundle is missing 'version' field")
+
+    if version != REPLAY_BUNDLE_VERSION:
+        raise ValueError(
+            f"Unsupported replay bundle version: {version}. " f"Expected: {REPLAY_BUNDLE_VERSION}"
+        )
+
+    # Required top-level fields check (beyond what Pydantic might do if we want explicit messages)
+    required_fields = ["captured_at", "model", "prompts", "schema_context", "tool_io", "outcome"]
+    missing = [f for f in required_fields if f not in bundle_payload]
+    if missing:
+        raise ValueError(f"Replay bundle is missing required fields: {', '.join(missing)}")
+
+    try:
+        bundle = ReplayBundle.model_validate(bundle_payload)
+    except ValidationError as e:
+        raise ValueError(f"Replay bundle schema validation failed: {e}") from e
+
+    # Invariant checks: redaction
+    # We can't easily prove EVERYTHING is redacted, but we can check the prompts/outcome
+    # for common leak patterns if we wanted to be extremely strict.
+    # For now, we'll trust the capture logic but we could add a sanity check here.
+
+    return bundle
 
 
 def replay_response_from_bundle(

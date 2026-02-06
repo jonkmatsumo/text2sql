@@ -39,11 +39,13 @@ async def test_execute_unsupported_capability_message(
             "required_capability": "pagination",
             "capability_required": "pagination",
             "capability_supported": False,
+            "fallback_policy": "off",
             "fallback_applied": False,
             "fallback_mode": "force_limited_results",
             "provider": "postgres",
         }
     )
+
     mock_tool.ainvoke = AsyncMock(return_value=payload)
     mock_get_tools.return_value = [mock_tool]
 
@@ -63,6 +65,7 @@ async def test_execute_unsupported_capability_message(
         "required_capability": "pagination",
         "capability_required": "pagination",
         "capability_supported": False,
+        "fallback_policy": "off",
         "fallback_applied": False,
         "fallback_mode": "force_limited_results",
         "retry_after_seconds": None,
