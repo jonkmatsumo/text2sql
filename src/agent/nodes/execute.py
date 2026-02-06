@@ -343,8 +343,16 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("result.row_limit", result_row_limit)
             if result_rows_returned is not None:
                 span.set_attribute("result.rows_returned", result_rows_returned)
+            else:
+                # Ensure rows_returned is always set (contract requirement)
+                span.set_attribute("result.rows_returned", len(query_result) if query_result else 0)
             span.set_attribute("result.columns_available", bool(result_columns))
             span.set_attribute("timeout.triggered", False)
+            # Truncation contract: always set partial_reason for debugging
+            if result_partial_reason:
+                span.set_attribute("result.partial_reason", result_partial_reason)
+            is_limited = bool(state.get("result_is_limited"))
+            span.set_attribute("result.is_limited", is_limited)
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
