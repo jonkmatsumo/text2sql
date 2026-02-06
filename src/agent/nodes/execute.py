@@ -103,6 +103,7 @@ def parse_execute_tool_response(payload) -> dict:
                     "response_shape": "error",
                     "error": item.get("error"),
                     "error_category": item.get("error_category"),
+                    "retry_after_seconds": item.get("retry_after_seconds"),
                     "required_capability": item.get("required_capability"),
                     "capability_required": item.get("capability_required"),
                     "capability_supported": item.get("capability_supported"),
@@ -133,6 +134,7 @@ def parse_execute_tool_response(payload) -> dict:
                 "response_shape": "error",
                 "error": parsed.get("error"),
                 "error_category": parsed.get("error_category"),
+                "retry_after_seconds": parsed.get("retry_after_seconds"),
                 "required_capability": parsed.get("required_capability"),
                 "capability_required": parsed.get("capability_required"),
                 "capability_supported": parsed.get("capability_supported"),
@@ -359,6 +361,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if parsed.get("response_shape") == "error":
                 error_msg = parsed.get("error") or "Tool returned an error."
                 error_category = parsed.get("error_category")
+                retry_after_seconds = parsed.get("retry_after_seconds")
                 required_capability = parsed.get("required_capability")
                 capability_required = parsed.get("capability_required")
                 capability_supported = parsed.get("capability_supported")
@@ -374,6 +377,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if error_category:
                     span.set_attribute("error_category", error_category)
                     span.set_attribute("timeout.triggered", error_category == "timeout")
+                if retry_after_seconds is not None:
+                    span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
                 if error_category == "unsupported_capability":
                     if capability_required and not required_capability:
                         required_capability = capability_required
@@ -402,6 +407,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "error": error_msg,
                     "query_result": None,
                     "error_category": error_category,
+                    "retry_after_seconds": retry_after_seconds,
                     "error_metadata": (
                         {
                             "required_capability": required_capability,
@@ -409,6 +415,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "capability_supported": capability_supported,
                             "fallback_applied": fallback_applied,
                             "fallback_mode": fallback_mode,
+                            "retry_after_seconds": retry_after_seconds,
                             "provider": provider,
                         }
                         if error_category == "unsupported_capability"
@@ -759,6 +766,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_prefetch_enabled": bool(result_prefetch_enabled),
                 "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                 "result_prefetch_reason": result_prefetch_reason,
+                "retry_after_seconds": None,
                 "result_completeness": ResultCompleteness.from_parts(
                     rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),

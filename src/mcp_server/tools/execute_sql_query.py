@@ -14,7 +14,11 @@ from dal.capability_negotiation import (
     parse_capability_fallback_policy,
 )
 from dal.database import Database
-from dal.error_classification import emit_classified_error, maybe_classify_error
+from dal.error_classification import (
+    classify_error_info,
+    emit_classified_error,
+    maybe_classify_error,
+)
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
@@ -393,6 +397,9 @@ async def handler(
         category = maybe_classify_error(provider, e)
         if category:
             payload["error_category"] = category
+            classification = classify_error_info(provider, e)
+            if classification.retry_after_seconds is not None:
+                payload["retry_after_seconds"] = classification.retry_after_seconds
             emit_classified_error(provider, "execute_sql_query", category, e)
         return json.dumps(payload)
     except Exception as e:
@@ -405,5 +412,8 @@ async def handler(
         category = maybe_classify_error(provider, e)
         if category:
             payload["error_category"] = category
+            classification = classify_error_info(provider, e)
+            if classification.retry_after_seconds is not None:
+                payload["retry_after_seconds"] = classification.retry_after_seconds
             emit_classified_error(provider, "execute_sql_query", category, e)
         return json.dumps(payload)

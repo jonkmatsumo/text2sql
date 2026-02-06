@@ -131,3 +131,56 @@ class TestRetryWithBackoff:
         mock_logger.error.assert_called()
         call_args = mock_logger.error.call_args
         assert "exhausted" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_adaptive_policy_uses_retry_after_delay(self, monkeypatch):
+        """Adaptive policy should honor retry_after_seconds when classified."""
+        monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+        monkeypatch.setenv("QUERY_TARGET_BACKEND", "bigquery")
+
+        attempts = 0
+
+        async def flaky_op():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise Exception("Too many requests. Retry after 3")
+            return "ok"
+
+        with patch("agent.utils.retry.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            result = await retry_with_backoff(
+                flaky_op,
+                "adaptive_retry_after",
+                max_attempts=2,
+                max_delay=10.0,
+            )
+
+        assert result == "ok"
+        mock_sleep.assert_awaited_once_with(3.0)
+
+    @pytest.mark.asyncio
+    async def test_adaptive_policy_bounds_retry_after_by_budget(self, monkeypatch):
+        """retry_after delay should be capped by remaining budget."""
+        monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+        monkeypatch.setenv("QUERY_TARGET_BACKEND", "bigquery")
+
+        attempts = 0
+
+        async def flaky_op():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise Exception("Too many requests. Retry after 5")
+            return "ok"
+
+        with patch("agent.utils.retry.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            result = await retry_with_backoff(
+                flaky_op,
+                "adaptive_retry_budget",
+                max_attempts=2,
+                max_delay=10.0,
+                remaining_budget_seconds=1.0,
+            )
+
+        assert result == "ok"
+        mock_sleep.assert_awaited_once_with(1.0)

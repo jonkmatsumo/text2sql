@@ -50,6 +50,7 @@ def correct_sql_node(state: AgentState) -> dict:
         current_sql = state.get("current_sql")
         schema_context = state.get("schema_context", "")
         retry_count = state.get("retry_count", 0)
+        retry_after_seconds = state.get("retry_after_seconds")
         procedural_plan = state.get("procedural_plan", "")
         ast_validation_result = state.get("ast_validation_result")
 
@@ -62,6 +63,16 @@ def correct_sql_node(state: AgentState) -> dict:
         )
 
         retry = retry_count + 1
+
+        if retry_after_seconds is not None and float(retry_after_seconds) > 0:
+            sleep_seconds = float(retry_after_seconds)
+            deadline_ts = state.get("deadline_ts")
+            if deadline_ts is not None:
+                sleep_seconds = min(sleep_seconds, max(0.0, deadline_ts - time.monotonic()))
+            if sleep_seconds > 0:
+                span.set_attribute("retry.retry_after_seconds", sleep_seconds)
+                span.add_event("retry.retry_after_sleep", {"sleep_seconds": sleep_seconds})
+                time.sleep(sleep_seconds)
 
         # Classify the error using taxonomy
         error_category, category_info = classify_error(error or "")
@@ -237,6 +248,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "correction_plan": correction_strategy,
                             "latency_correct_seconds": latency_seconds,
                             "ema_llm_latency_seconds": None,  # Don't update EMA on fail
+                            "retry_after_seconds": None,
                         }
                 else:
                     span.set_attribute("correction.similarity.rejected", False)
@@ -269,4 +281,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "correction_plan": correction_strategy,
             "latency_correct_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,
+            "retry_after_seconds": None,
         }

@@ -23,7 +23,7 @@ from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
 from agent.state import AgentState
 from agent.telemetry import SpanType, telemetry
-from common.config.env import get_env_bool, get_env_float, get_env_str
+from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 
 logger = logging.getLogger(__name__)
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -146,6 +146,36 @@ def route_after_validation(state: AgentState) -> str:
     return "execute"
 
 
+def _retry_policy_mode() -> str:
+    mode = (get_env_str("AGENT_RETRY_POLICY", "static") or "static").strip().lower()
+    if mode == "adaptive":
+        return "adaptive"
+    return "static"
+
+
+def _max_retry_attempts() -> int:
+    try:
+        configured = get_env_int("AGENT_MAX_RETRIES", 3)
+    except ValueError:
+        logger.warning("Invalid AGENT_MAX_RETRIES value; defaulting to 3")
+        configured = 3
+    if configured is None:
+        configured = 3
+    return max(1, int(configured))
+
+
+def _adaptive_is_retryable(error_category: str | None) -> bool:
+    non_retryable = {
+        "unsupported_capability",
+        "auth",
+        "invalid_request",
+        "tool_response_malformed",
+    }
+    if not error_category:
+        return True
+    return error_category not in non_retryable
+
+
 def route_after_execution(state: AgentState) -> str:
     """
     Conditional edge logic after SQL execution.
@@ -161,83 +191,127 @@ def route_after_execution(state: AgentState) -> str:
     Returns:
         str: Next node name
     """
-    if state.get("error"):
-        if state.get("error_category") == "unsupported_capability":
-            span = telemetry.get_current_span()
-            if span:
-                span.set_attribute("retry.stopped_due_to_capability", True)
-            return "failed"
+    if not state.get("error"):
+        return "visualize"  # Go to visualization (then synthesis)
 
-        # Guarded Automatic Schema Refresh
-        if state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
-            refresh_count = state.get("schema_refresh_count", 0)
-            if refresh_count < 1:
-                return "refresh_schema"
-
-        deadline_ts = state.get("deadline_ts")
-        remaining = None
-        estimated_correction_budget = _estimate_correction_budget_seconds(state)
-        retry_count = state.get("retry_count", 0)
-
-        # Initialize or update retry_summary
-        retry_summary = state.get("retry_summary") or {"attempts": [], "budget_exhausted": False}
-        retry_summary["attempts"].append(
-            {
-                "retry_number": retry_count,
-                "error_category": state.get("error_category"),
-                "timestamp": time.monotonic(),
-            }
-        )
-
-        if deadline_ts is not None:
-            remaining = deadline_ts - time.monotonic()
-            span = telemetry.get_current_span()
-            if span:
-                span.set_attribute("retry.remaining_budget_seconds", max(0.0, remaining))
-                span.set_attribute("retry.estimated_correction_budget", estimated_correction_budget)
-                span.set_attribute("retry.budget.estimated_seconds", estimated_correction_budget)
-                span.set_attribute(
-                    "retry.budget.ema_latency_seconds", state.get("ema_llm_latency_seconds")
-                )
-                span.set_attribute("retry.attempt_number", retry_count)
-                # Emit structured budget_check event
-                span.add_event(
-                    "retry.budget_check",
-                    {
-                        "remaining_seconds": max(0.0, remaining),
-                        "estimated_budget_seconds": estimated_correction_budget,
-                        "ema_latency_seconds": state.get("ema_llm_latency_seconds") or 0.0,
-                        "retry_count": retry_count,
-                        "will_retry": remaining >= estimated_correction_budget and retry_count < 3,
-                    },
-                )
-            if remaining < estimated_correction_budget:
-                if span:
-                    span.set_attribute("retry.stopped_due_to_budget", True)
-                retry_summary["budget_exhausted"] = True
-                state["retry_summary"] = retry_summary
-                state["error"] = (
-                    f"Retry budget exhausted after {retry_count} attempts; remaining time "
-                    f"{max(0.0, remaining):.2f}s is below estimated "
-                    f"{estimated_correction_budget:.2f}s (EMA latency: "
-                    f"{state.get('ema_llm_latency_seconds', 0.0):.2f}s)."
-                )
-                state["error_category"] = "timeout"
-                return "failed"
+    error_category = state.get("error_category")
+    if error_category == "unsupported_capability":
         span = telemetry.get_current_span()
         if span:
-            span.set_attribute("retry.stopped_due_to_budget", False)
-        if deadline_ts is not None and time.monotonic() >= deadline_ts:
+            span.set_attribute("retry.stopped_due_to_capability", True)
+        return "failed"
+
+    # Guarded Automatic Schema Refresh
+    if state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+        refresh_count = state.get("schema_refresh_count", 0)
+        if refresh_count < 1:
+            return "refresh_schema"
+
+    deadline_ts = state.get("deadline_ts")
+    remaining = None
+    estimated_correction_budget = _estimate_correction_budget_seconds(state)
+    retry_count = state.get("retry_count", 0)
+    max_retries = _max_retry_attempts()
+    retry_policy = _retry_policy_mode()
+    retry_after_seconds = state.get("retry_after_seconds")
+
+    # Initialize or update retry_summary
+    retry_summary = state.get("retry_summary") or {"attempts": [], "budget_exhausted": False}
+    retry_summary["policy"] = retry_policy
+    retry_summary["attempts"].append(
+        {
+            "retry_number": retry_count,
+            "error_category": error_category,
+            "timestamp": time.monotonic(),
+        }
+    )
+
+    span = telemetry.get_current_span()
+    if span:
+        span.set_attribute("retry.policy", retry_policy)
+        span.set_attribute("retry.max_retries", max_retries)
+        span.set_attribute("retry.attempt_number", retry_count)
+
+    if deadline_ts is not None:
+        remaining = deadline_ts - time.monotonic()
+
+    bounded_retry_after = 0.0
+    required_budget = estimated_correction_budget
+    if retry_policy == "adaptive":
+        is_retryable = _adaptive_is_retryable(error_category)
+        retry_summary["is_retryable"] = is_retryable
+        if span:
+            span.set_attribute("retry.is_retryable", is_retryable)
+        if not is_retryable:
+            retry_summary["stopped_non_retryable"] = True
+            state["retry_summary"] = retry_summary
+            return "failed"
+
+        if retry_after_seconds is not None and float(retry_after_seconds) > 0:
+            if remaining is None:
+                bounded_retry_after = float(retry_after_seconds)
+            else:
+                bounded_retry_after = min(float(retry_after_seconds), max(0.0, remaining))
+            if bounded_retry_after <= 0.0:
+                retry_summary["budget_exhausted"] = True
+                state["retry_summary"] = retry_summary
+                state["error_category"] = "timeout"
+                return "failed"
+            state["retry_after_seconds"] = bounded_retry_after
+            retry_summary["retry_after_seconds"] = bounded_retry_after
+            required_budget += bounded_retry_after
+            if span:
+                span.set_attribute("retry.retry_after_seconds", bounded_retry_after)
+        else:
+            state["retry_after_seconds"] = None
+    else:
+        state["retry_after_seconds"] = None
+
+    if deadline_ts is not None:
+        if span:
+            span.set_attribute("retry.remaining_budget_seconds", max(0.0, remaining))
+            span.set_attribute("retry.estimated_correction_budget", estimated_correction_budget)
+            span.set_attribute("retry.budget.estimated_seconds", required_budget)
+            span.set_attribute(
+                "retry.budget.ema_latency_seconds", state.get("ema_llm_latency_seconds")
+            )
+            span.add_event(
+                "retry.budget_check",
+                {
+                    "remaining_seconds": max(0.0, remaining),
+                    "estimated_budget_seconds": required_budget,
+                    "ema_latency_seconds": state.get("ema_llm_latency_seconds") or 0.0,
+                    "retry_count": retry_count,
+                    "retry_after_seconds": bounded_retry_after,
+                    "will_retry": remaining >= required_budget and retry_count < max_retries,
+                },
+            )
+        if remaining < required_budget:
+            if span:
+                span.set_attribute("retry.stopped_due_to_budget", True)
             retry_summary["budget_exhausted"] = True
             state["retry_summary"] = retry_summary
-            return "failed"  # Budget exhausted
-        if retry_count >= 3:
-            retry_summary["max_retries_reached"] = True
-            state["retry_summary"] = retry_summary
-            return "failed"  # Go to graceful failure
+            state["error"] = (
+                f"Retry budget exhausted after {retry_count} attempts; remaining time "
+                f"{max(0.0, remaining):.2f}s is below estimated required "
+                f"{required_budget:.2f}s (EMA latency: "
+                f"{state.get('ema_llm_latency_seconds', 0.0):.2f}s)."
+            )
+            state["error_category"] = "timeout"
+            return "failed"
+
+    if span:
+        span.set_attribute("retry.stopped_due_to_budget", False)
+    if deadline_ts is not None and time.monotonic() >= deadline_ts:
+        retry_summary["budget_exhausted"] = True
         state["retry_summary"] = retry_summary
-        return "correct"  # Go to self-correction
-    return "visualize"  # Go to visualization (then synthesis)
+        return "failed"
+    if retry_count >= max_retries:
+        retry_summary["max_retries_reached"] = True
+        state["retry_summary"] = retry_summary
+        return "failed"
+    state["retry_summary"] = retry_summary
+    return "correct"  # Go to self-correction
 
 
 def _estimate_correction_budget_seconds(state: AgentState) -> float:
@@ -429,6 +503,7 @@ async def run_agent_with_tracing(
             "current_sql": None,
             "query_result": None,
             "error": None,
+            "retry_after_seconds": None,
             "retry_count": 0,
             "schema_refresh_count": 0,
             # Reset state fields that shouldn't persist across turns

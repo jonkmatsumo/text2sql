@@ -39,6 +39,13 @@ def _classify_retryable_error(exception: Exception) -> Optional[ErrorClassificat
     return classify_error_info(provider, exception)
 
 
+def _retry_policy_mode() -> str:
+    mode = (get_env_str("AGENT_RETRY_POLICY", "static") or "static").strip().lower()
+    if mode == "adaptive":
+        return "adaptive"
+    return "static"
+
+
 def is_transient_error(exception: Exception) -> bool:
     """Check if an exception represents a transient error that is safe to retry.
 
@@ -75,6 +82,7 @@ async def retry_with_backoff(
     base_delay: float = 0.1,
     max_delay: float = 2.0,
     extra_context: dict = None,
+    remaining_budget_seconds: Optional[float] = None,
 ) -> T:
     """Retry an async operation with exponential backoff and jitter.
 
@@ -94,6 +102,7 @@ async def retry_with_backoff(
     """
     extra_context = extra_context or {}
     last_exception = None
+    retry_policy = _retry_policy_mode()
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -154,13 +163,32 @@ async def retry_with_backoff(
                 raise
 
             # Calculate delay with exponential backoff and jitter
-            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-            jitter = random.uniform(0, delay * 0.5)
-            total_delay = delay + jitter
+            delay_source = "exponential_backoff"
+            if (
+                retry_policy == "adaptive"
+                and classification
+                and classification.retry_after_seconds is not None
+                and classification.retry_after_seconds > 0
+            ):
+                total_delay = min(float(classification.retry_after_seconds), max_delay)
+                delay_source = "retry_after_seconds"
+            else:
+                delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                jitter = random.uniform(0, delay * 0.5)
+                total_delay = delay + jitter
+
+            if remaining_budget_seconds is not None:
+                total_delay = min(total_delay, max(0.0, float(remaining_budget_seconds)))
+                if total_delay <= 0:
+                    logger.error(
+                        "Retry delay exceeds remaining budget; aborting retries",
+                        extra={**log_extra, "remaining_budget_seconds": remaining_budget_seconds},
+                    )
+                    raise
 
             logger.warning(
                 f"Transient error in {operation_name}, retrying in {total_delay:.3f}s",
-                extra={**log_extra, "delay_seconds": total_delay},
+                extra={**log_extra, "delay_seconds": total_delay, "delay_source": delay_source},
             )
 
             await asyncio.sleep(total_delay)
