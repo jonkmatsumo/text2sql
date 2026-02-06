@@ -99,6 +99,8 @@ export interface components {
             validation_summary?: {
                 [key: string]: unknown;
             } | null;
+            /** Empty Result Guidance */
+            empty_result_guidance?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

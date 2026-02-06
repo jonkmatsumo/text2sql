@@ -277,6 +277,17 @@
               }
             ],
             "title": "Validation Summary"
+          },
+          "empty_result_guidance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Empty Result Guidance"
           }
         },
         "type": "object",

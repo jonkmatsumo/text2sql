@@ -65,6 +65,7 @@ class AgentRunResponse(BaseModel):
     error_metadata: Optional[dict] = None
     retry_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
+    empty_result_guidance: Optional[str] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -143,6 +144,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "schema_drift_suspected": state.get("schema_drift_suspected"),
                 "missing_identifiers": state.get("missing_identifiers"),
             },
+            empty_result_guidance=state.get("empty_result_guidance"),
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)

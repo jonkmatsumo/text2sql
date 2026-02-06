@@ -24,6 +24,7 @@ interface Message {
   resultCompleteness?: any;
   retrySummary?: any;
   validationSummary?: any;
+  emptyResultGuidance?: string;
 }
 
 const LLM_PROVIDERS = [
@@ -283,7 +284,8 @@ export default function AgentChat() {
           traceId: result.trace_id ?? undefined,
           resultCompleteness: result.result_completeness,
           retrySummary: result.retry_summary,
-          validationSummary: result.validation_summary
+          validationSummary: result.validation_summary,
+          emptyResultGuidance: result.empty_result_guidance ?? undefined
         }
       ]);
     } catch (err: any) {
@@ -502,6 +504,26 @@ export default function AgentChat() {
                   {Array.isArray(msg.result) && <ResultsTable rows={msg.result} />}
                   {msg.result && !Array.isArray(msg.result) && (
                     <pre className="result-block">{formatValue(msg.result)}</pre>
+                  )}
+
+                  {msg.emptyResultGuidance && (
+                    <div className="guidance-callout" style={{
+                      marginTop: "12px",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      background: "rgba(255, 193, 7, 0.05)",
+                      border: "1px solid rgba(255, 193, 7, 0.2)",
+                      fontSize: "0.9rem",
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "flex-start"
+                    }}>
+                      <span style={{ fontSize: "1.2rem" }}>💡</span>
+                      <div>
+                        <strong style={{ display: "block", marginBottom: "4px", color: "#856404" }}>Note</strong>
+                        <span style={{ color: "#856404" }}>{msg.emptyResultGuidance}</span>
+                      </div>
+                    </div>
                   )}
 
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
