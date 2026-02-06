@@ -94,6 +94,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 deadline_ts=deadline_ts,
                 page_token=request.page_token,
                 page_size=request.page_size,
+                interactive_session=True,
             ),
             timeout=timeout_seconds,
         )

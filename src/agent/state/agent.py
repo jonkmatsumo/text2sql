@@ -52,6 +52,9 @@ class AgentState(TypedDict):
     result_auto_paginated: Optional[bool]
     result_pages_fetched: Optional[int]
     result_auto_pagination_stopped_reason: Optional[str]
+    result_prefetch_enabled: Optional[bool]
+    result_prefetch_scheduled: Optional[bool]
+    result_prefetch_reason: Optional[str]
     empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages
@@ -61,6 +64,7 @@ class AgentState(TypedDict):
     # Deadline propagation and budgeting
     deadline_ts: Optional[float]
     timeout_seconds: Optional[float]
+    interactive_session: Optional[bool]
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]

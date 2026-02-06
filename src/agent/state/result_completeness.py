@@ -31,6 +31,9 @@ class ResultCompleteness:
     auto_paginated: bool = False
     pages_fetched: int = 1
     auto_pagination_stopped_reason: Optional[str] = None
+    prefetch_enabled: bool = False
+    prefetch_scheduled: bool = False
+    prefetch_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-serializable dict."""
@@ -52,6 +55,9 @@ class ResultCompleteness:
         auto_paginated: bool = False,
         pages_fetched: int = 1,
         auto_pagination_stopped_reason: Optional[str] = None,
+        prefetch_enabled: bool = False,
+        prefetch_scheduled: bool = False,
+        prefetch_reason: Optional[str] = None,
     ) -> "ResultCompleteness":
         """Construct a completeness model from raw metadata."""
         reason = None
@@ -84,4 +90,7 @@ class ResultCompleteness:
             auto_paginated=bool(auto_paginated),
             pages_fetched=max(1, int(pages_fetched)),
             auto_pagination_stopped_reason=auto_pagination_stopped_reason,
+            prefetch_enabled=bool(prefetch_enabled),
+            prefetch_scheduled=bool(prefetch_scheduled),
+            prefetch_reason=prefetch_reason,
         )

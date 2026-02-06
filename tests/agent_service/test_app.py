@@ -14,6 +14,7 @@ def test_run_agent_success(monkeypatch):
         deadline_ts=None,
         page_token=None,
         page_size=None,
+        interactive_session=False,
     ):
         return {
             "current_sql": "select 1",
@@ -58,6 +59,7 @@ def test_run_agent_error(monkeypatch):
         deadline_ts=None,
         page_token=None,
         page_size=None,
+        interactive_session=False,
     ):
         raise RuntimeError("boom")
 
@@ -84,9 +86,11 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
         deadline_ts=None,
         page_token=None,
         page_size=None,
+        interactive_session=False,
     ):
         captured["timeout_seconds"] = timeout_seconds
         captured["deadline_ts"] = deadline_ts
+        captured["interactive_session"] = interactive_session
         return {"messages": [], "error": None}
 
     monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
@@ -97,3 +101,4 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
     assert resp.status_code == 200
     assert captured["timeout_seconds"] == 30.0
     assert captured["deadline_ts"] is not None
+    assert captured["interactive_session"] is True

@@ -8,6 +8,12 @@ from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
+from agent.utils.pagination_prefetch import (
+    build_prefetch_cache_key,
+    get_prefetch_config,
+    pop_prefetched_page,
+    start_prefetch_task,
+)
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
 from common.config.env import get_env_bool, get_env_int, get_env_str
@@ -42,6 +48,17 @@ def _auto_pagination_config() -> tuple[bool, int, int]:
     max_pages = _safe_env_int("AGENT_AUTO_PAGINATION_MAX_PAGES", default=3, minimum=1)
     max_rows = _safe_env_int("AGENT_AUTO_PAGINATION_MAX_ROWS", default=5000, minimum=1)
     return enabled, max_pages, max_rows
+
+
+def _is_prefetch_candidate(latency_seconds: float, rows_returned: int, page_size: int) -> bool:
+    """Conservative guard to keep prefetch cost predictable."""
+    if latency_seconds > 1.0:
+        return False
+    if page_size <= 0:
+        return False
+    if rows_returned > page_size * 2:
+        return False
+    return True
 
 
 def parse_execute_tool_response(payload) -> dict:
@@ -257,7 +274,44 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "page_token": state.get("page_token"),
                 "page_size": state.get("page_size"),
             }
-            result = await executor_tool.ainvoke(execute_payload)
+            interactive_session = bool(state.get("interactive_session"))
+            prefetch_enabled, prefetch_max_concurrency, prefetch_reason = get_prefetch_config(
+                interactive_session
+            )
+            seed_value = state.get("seed")
+            seed = seed_value if isinstance(seed_value, int) else None
+            existing_completeness = state.get("result_completeness")
+            completeness_hint = None
+            if isinstance(existing_completeness, dict):
+                completeness_hint = existing_completeness.get("partial_reason")
+
+            first_page_started_at = time.monotonic()
+            prefetched_cache_key = None
+            page_token = execute_payload.get("page_token")
+            if prefetch_enabled and page_token:
+                prefetched_cache_key = build_prefetch_cache_key(
+                    sql_query=rewritten_sql,
+                    tenant_id=tenant_id,
+                    page_token=str(page_token),
+                    page_size=execute_payload.get("page_size"),
+                    schema_snapshot_id=state.get("schema_snapshot_id"),
+                    seed=seed,
+                    completeness_hint=completeness_hint,
+                )
+                prefetched_payload = pop_prefetched_page(prefetched_cache_key)
+                if prefetched_payload is not None:
+                    span.add_event(
+                        "pagination.prefetch_cache_hit",
+                        {"cache_key": prefetched_cache_key[:12]},
+                    )
+                    result = prefetched_payload
+                    prefetch_reason = "cache_hit"
+                else:
+                    result = await executor_tool.ainvoke(execute_payload)
+                    prefetch_reason = "cache_miss"
+            else:
+                result = await executor_tool.ainvoke(execute_payload)
+            first_page_latency_seconds = max(0.0, time.monotonic() - first_page_started_at)
 
             parsed = parse_execute_tool_response(result)
             result_is_truncated = None
@@ -277,6 +331,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_auto_paginated = False
             result_pages_fetched = 1
             result_auto_pagination_stopped_reason = "disabled"
+            result_prefetch_enabled = prefetch_enabled
+            result_prefetch_scheduled = False
+            result_prefetch_reason = prefetch_reason
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
@@ -534,6 +591,74 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     and result_capability_supported is False
                 ):
                     result_auto_pagination_stopped_reason = "unsupported_capability"
+
+                if prefetch_enabled:
+                    if result_prefetch_reason == "cache_hit":
+                        pass
+                    elif auto_pagination_enabled:
+                        result_prefetch_reason = "auto_pagination_enabled"
+                    elif not result_next_page_token:
+                        result_prefetch_reason = "no_next_page"
+                    else:
+                        prefetch_page_size = execute_payload.get("page_size") or result_page_size
+                        if prefetch_page_size is None:
+                            prefetch_page_size = 0
+                        first_page_rows = int(result_rows_returned or len(query_result))
+                        if not _is_prefetch_candidate(
+                            first_page_latency_seconds,
+                            first_page_rows,
+                            int(prefetch_page_size),
+                        ):
+                            result_prefetch_reason = "not_cheap"
+                        else:
+                            prefetch_timeout = None
+                            if deadline_ts is not None:
+                                prefetch_timeout = max(
+                                    0.0, min(2.0, deadline_ts - time.monotonic())
+                                )
+                                if prefetch_timeout <= 0.0:
+                                    result_prefetch_reason = "budget_exhausted"
+                            if result_prefetch_reason != "budget_exhausted":
+                                next_page_token_for_prefetch = str(result_next_page_token)
+                                prefetch_key = build_prefetch_cache_key(
+                                    sql_query=rewritten_sql,
+                                    tenant_id=tenant_id,
+                                    page_token=next_page_token_for_prefetch,
+                                    page_size=int(prefetch_page_size),
+                                    schema_snapshot_id=state.get("schema_snapshot_id"),
+                                    seed=seed,
+                                    completeness_hint=result_partial_reason,
+                                )
+
+                                async def _fetch_prefetched_page() -> dict | None:
+                                    prefetch_payload = {
+                                        **execute_payload,
+                                        "page_token": next_page_token_for_prefetch,
+                                        "page_size": int(prefetch_page_size),
+                                        "timeout_seconds": prefetch_timeout,
+                                    }
+                                    prefetched_raw = await executor_tool.ainvoke(prefetch_payload)
+                                    prefetched_parsed = parse_execute_tool_response(prefetched_raw)
+                                    if prefetched_parsed.get("response_shape") != "enveloped":
+                                        return None
+                                    page_payload = {
+                                        "rows": prefetched_parsed.get("rows") or [],
+                                        "metadata": prefetched_parsed.get("metadata") or {},
+                                    }
+                                    columns = prefetched_parsed.get("columns")
+                                    if columns is not None:
+                                        page_payload["columns"] = columns
+                                    return page_payload
+
+                                result_prefetch_scheduled = start_prefetch_task(
+                                    prefetch_key,
+                                    _fetch_prefetched_page,
+                                    max_concurrency=prefetch_max_concurrency,
+                                )
+                                if result_prefetch_scheduled:
+                                    result_prefetch_reason = "scheduled"
+                                else:
+                                    result_prefetch_reason = "already_cached_or_inflight"
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -583,6 +708,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute(
                     "pagination.auto_stopped_reason", str(result_auto_pagination_stopped_reason)
                 )
+            span.set_attribute("prefetch.enabled", bool(result_prefetch_enabled))
+            span.set_attribute("prefetch.scheduled", bool(result_prefetch_scheduled))
+            span.set_attribute("prefetch.max_concurrency", int(prefetch_max_concurrency))
+            if result_prefetch_reason:
+                span.set_attribute("prefetch.reason", str(result_prefetch_reason))
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)
@@ -626,6 +756,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "result_auto_paginated": bool(result_auto_paginated),
                 "result_pages_fetched": int(result_pages_fetched),
                 "result_auto_pagination_stopped_reason": result_auto_pagination_stopped_reason,
+                "result_prefetch_enabled": bool(result_prefetch_enabled),
+                "result_prefetch_scheduled": bool(result_prefetch_scheduled),
+                "result_prefetch_reason": result_prefetch_reason,
                 "result_completeness": ResultCompleteness.from_parts(
                     rows_returned=rows_returned,
                     is_truncated=bool(result_is_truncated),
@@ -641,6 +774,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     auto_paginated=bool(result_auto_paginated),
                     pages_fetched=int(result_pages_fetched),
                     auto_pagination_stopped_reason=result_auto_pagination_stopped_reason,
+                    prefetch_enabled=bool(result_prefetch_enabled),
+                    prefetch_scheduled=bool(result_prefetch_scheduled),
+                    prefetch_reason=result_prefetch_reason,
                 ).to_dict(),
             }
 

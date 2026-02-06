@@ -270,6 +270,8 @@ Retry budgeting flags:
 - `AGENT_AUTO_PAGINATION` (`off` default, `on` optional)
 - `AGENT_AUTO_PAGINATION_MAX_PAGES` (default: 3)
 - `AGENT_AUTO_PAGINATION_MAX_ROWS` (default: 5000)
+- `AGENT_PREFETCH_NEXT_PAGE` (`off` default, `on` optional)
+- `AGENT_PREFETCH_MAX_CONCURRENCY` (default: 1)
 
 Pagination and completeness notes:
 - `page_size` is capped at 1000 by the MCP tool.
