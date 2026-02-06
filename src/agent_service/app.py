@@ -11,6 +11,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from agent.replay_bundle import (
+    ValidationError,
+    build_replay_bundle,
+    replay_response_from_bundle,
+    serialize_replay_bundle,
+    validate_replay_bundle,
+)
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
 from common.sanitization.text import redact_sensitive_info
@@ -45,6 +52,8 @@ class AgentRunRequest(BaseModel):
     timeout_seconds: Optional[float] = Field(default=None, gt=0)
     page_token: Optional[str] = None
     page_size: Optional[int] = Field(default=None, gt=0)
+    replay_bundle: Optional[dict[str, Any]] = None
+    replay_allow_external_calls: bool = False
 
 
 class AgentRunResponse(BaseModel):
@@ -66,6 +75,9 @@ class AgentRunResponse(BaseModel):
     retry_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
     empty_result_guidance: Optional[str] = None
+    replay_bundle: Optional[dict[str, Any]] = None
+    replay_bundle_json: Optional[str] = None
+    replay_metadata: Optional[dict[str, Any]] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -84,20 +96,79 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
         timeout_seconds = request.timeout_seconds or 30.0
         deadline_ts = time.monotonic() + timeout_seconds
+        replay_mode = (get_env_str("AGENT_REPLAY_MODE", "off") or "off").strip().lower()
+        if replay_mode not in {"off", "record", "replay"}:
+            replay_mode = "off"
 
-        state = await asyncio.wait_for(
-            run_agent_with_tracing(
-                question=request.question,
-                tenant_id=request.tenant_id,
-                thread_id=thread_id,
-                timeout_seconds=timeout_seconds,
-                deadline_ts=deadline_ts,
-                page_token=request.page_token,
-                page_size=request.page_size,
-                interactive_session=True,
-            ),
-            timeout=timeout_seconds,
-        )
+        async def _run_live_agent(question: str) -> dict[str, Any]:
+            return await asyncio.wait_for(
+                run_agent_with_tracing(
+                    question=question,
+                    tenant_id=request.tenant_id,
+                    thread_id=thread_id,
+                    timeout_seconds=timeout_seconds,
+                    deadline_ts=deadline_ts,
+                    page_token=request.page_token,
+                    page_size=request.page_size,
+                    interactive_session=True,
+                ),
+                timeout=timeout_seconds,
+            )
+
+        replay_bundle_payload = None
+        replay_bundle_json = None
+        replay_metadata = None
+        trace_id = None
+        provenance = None
+
+        if replay_mode == "replay":
+            if not request.replay_bundle:
+                return AgentRunResponse(
+                    error="Replay mode requires a replay_bundle payload.",
+                    trace_id=None,
+                    replay_metadata={"mode": "replay", "execution": "captured_only"},
+                )
+            try:
+                replay_bundle = validate_replay_bundle(request.replay_bundle)
+            except ValidationError as exc:
+                return AgentRunResponse(
+                    error=redact_sensitive_info(f"Invalid replay bundle: {exc}"),
+                    trace_id=None,
+                    replay_metadata={"mode": "replay", "execution": "captured_only"},
+                )
+
+            replay_bundle_payload = replay_bundle.model_dump(mode="json")
+            replay_bundle_json = serialize_replay_bundle(replay_bundle)
+            if request.replay_allow_external_calls:
+                replay_question = str(replay_bundle.prompts.get("user") or request.question)
+                state = await _run_live_agent(replay_question)
+                replay_metadata = {
+                    "mode": "replay",
+                    "execution": "external_calls",
+                    "source": "captured_prompt",
+                }
+            else:
+                state = replay_response_from_bundle(replay_bundle, allow_external_calls=False)
+                replay_metadata = {
+                    "mode": "replay",
+                    "execution": "captured_only",
+                    "external_calls": False,
+                }
+        else:
+            state = await _run_live_agent(request.question)
+            if replay_mode == "record":
+                replay_bundle = build_replay_bundle(
+                    question=request.question,
+                    state=state,
+                    request_payload=request.model_dump(mode="json"),
+                )
+                replay_bundle_payload = replay_bundle.model_dump(mode="json")
+                replay_bundle_json = serialize_replay_bundle(replay_bundle)
+                replay_metadata = {
+                    "mode": "record",
+                    "execution": "external_calls",
+                    "captured": True,
+                }
 
         response_text = None
         if state.get("messages"):
@@ -105,12 +176,11 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         if state.get("clarification_question"):
             response_text = state["clarification_question"]
 
-        trace_id = telemetry.get_current_trace_id()
-        if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
-            trace_id = None
-
-        provenance = None
-        if get_env_bool("AGENT_RESPONSE_PROVENANCE_METADATA", False):
+        if replay_mode != "replay" or request.replay_allow_external_calls:
+            trace_id = telemetry.get_current_trace_id()
+            if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
+                trace_id = None
+        if get_env_bool("AGENT_RESPONSE_PROVENANCE_METADATA", False) and isinstance(state, dict):
             provider = get_env_str("QUERY_TARGET_BACKEND", "postgres")
             executed_at = datetime.now(timezone.utc).isoformat()
             rows_returned = state.get("result_rows_returned")
@@ -146,6 +216,9 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "missing_identifiers": state.get("missing_identifiers"),
             },
             empty_result_guidance=state.get("empty_result_guidance"),
+            replay_bundle=replay_bundle_payload,
+            replay_bundle_json=replay_bundle_json,
+            replay_metadata=replay_metadata,
         )
     except asyncio.TimeoutError:
         return AgentRunResponse(error="Request timed out.", trace_id=None)
