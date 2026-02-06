@@ -68,6 +68,10 @@ def parse_execute_tool_response(payload) -> dict:
                     "error": item.get("error"),
                     "error_category": item.get("error_category"),
                     "required_capability": item.get("required_capability"),
+                    "capability_required": item.get("capability_required"),
+                    "capability_supported": item.get("capability_supported"),
+                    "fallback_applied": item.get("fallback_applied"),
+                    "fallback_mode": item.get("fallback_mode"),
                     "provider": item.get("provider"),
                 }
             if "rows" in item and "metadata" in item:
@@ -94,6 +98,10 @@ def parse_execute_tool_response(payload) -> dict:
                 "error": parsed.get("error"),
                 "error_category": parsed.get("error_category"),
                 "required_capability": parsed.get("required_capability"),
+                "capability_required": parsed.get("capability_required"),
+                "capability_supported": parsed.get("capability_supported"),
+                "fallback_applied": parsed.get("fallback_applied"),
+                "fallback_mode": parsed.get("fallback_mode"),
                 "provider": parsed.get("provider"),
             }
         response_shape = "malformed"
@@ -241,6 +249,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_next_page_token = None
             result_page_size = None
             result_partial_reason = None
+            result_capability_required = None
+            result_capability_supported = None
+            result_fallback_applied = None
+            result_fallback_mode = None
 
             def _maybe_add_schema_drift(error_msg: str) -> dict:
                 if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
@@ -267,6 +279,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 error_msg = parsed.get("error") or "Tool returned an error."
                 error_category = parsed.get("error_category")
                 required_capability = parsed.get("required_capability")
+                capability_required = parsed.get("capability_required")
+                capability_supported = parsed.get("capability_supported")
+                fallback_applied = parsed.get("fallback_applied")
+                fallback_mode = parsed.get("fallback_mode")
                 provider = parsed.get("provider")
                 span.set_outputs(
                     {
@@ -278,6 +294,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_attribute("error_category", error_category)
                     span.set_attribute("timeout.triggered", error_category == "timeout")
                 if error_category == "unsupported_capability":
+                    if capability_required and not required_capability:
+                        required_capability = capability_required
                     if required_capability:
                         error_msg = (
                             "This backend does not support "
@@ -290,6 +308,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         )
                     if required_capability:
                         span.set_attribute("error.required_capability", required_capability)
+                    if capability_supported is not None:
+                        span.set_attribute("error.capability_supported", bool(capability_supported))
+                    if fallback_applied is not None:
+                        span.set_attribute("error.fallback_applied", bool(fallback_applied))
+                    if fallback_mode:
+                        span.set_attribute("error.fallback_mode", str(fallback_mode))
                     if provider:
                         span.set_attribute("error.provider", provider)
                 drift_hint = _maybe_add_schema_drift(error_msg)
@@ -300,6 +324,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "error_metadata": (
                         {
                             "required_capability": required_capability,
+                            "capability_required": capability_required,
+                            "capability_supported": capability_supported,
+                            "fallback_applied": fallback_applied,
+                            "fallback_mode": fallback_mode,
                             "provider": provider,
                         }
                         if error_category == "unsupported_capability"
@@ -340,6 +368,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_next_page_token = metadata.get("next_page_token")
                 result_page_size = metadata.get("page_size")
                 result_partial_reason = metadata.get("partial_reason")
+                result_capability_required = metadata.get("capability_required")
+                result_capability_supported = metadata.get("capability_supported")
+                result_fallback_applied = metadata.get("fallback_applied")
+                result_fallback_mode = metadata.get("fallback_mode")
                 result_columns = parsed.get("columns")
                 error = None
             else:
@@ -367,6 +399,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("result.partial_reason", result_partial_reason)
             is_limited = bool(state.get("result_is_limited"))
             span.set_attribute("result.is_limited", is_limited)
+            if result_capability_required:
+                span.set_attribute("capability.required", result_capability_required)
+            if result_capability_supported is not None:
+                span.set_attribute("capability.supported", bool(result_capability_supported))
+            if result_fallback_applied is not None:
+                span.set_attribute("capability.fallback_applied", bool(result_fallback_applied))
+            if result_fallback_mode:
+                span.set_attribute("capability.fallback_mode", str(result_fallback_mode))
 
             # Cache successful SQL generation (if not from cache and tenant_id exists)
             # We cache even if result is empty, as long as execution was successful (no error)

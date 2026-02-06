@@ -39,7 +39,44 @@ async def test_execute_sql_query_pagination_rejects_unsupported():
     result = json.loads(payload)
     assert result["error_category"] == "unsupported_capability"
     assert result["required_capability"] == "pagination"
+    assert result["capability_required"] == "pagination"
+    assert result["capability_supported"] is False
+    assert result["fallback_applied"] is False
+    assert result["fallback_mode"] == "force_limited_results"
     assert result["provider"] == "postgres"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_pagination_suggests_fallback(monkeypatch):
+    """Suggest mode should disclose fallback without changing behavior."""
+    monkeypatch.setenv("AGENT_CAPABILITY_FALLBACK_MODE", "suggest")
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+    ):
+        payload = await handler(
+            "SELECT 1",
+            tenant_id=1,
+            page_token="token",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error_category"] == "unsupported_capability"
+    assert result["fallback_applied"] is False
+    assert result["fallback_mode"] == "force_limited_results"
 
 
 @pytest.mark.asyncio
@@ -180,3 +217,45 @@ async def test_execute_sql_query_pagination_backcompat():
     result = json.loads(payload)
     assert result["rows"] == [{"id": 2}]
     assert result["metadata"]["next_page_token"] is None
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_pagination_apply_mode_forces_limited_results(monkeypatch):
+    """Apply mode should return an explicit limited view when pagination is unsupported."""
+    monkeypatch.setenv("AGENT_CAPABILITY_FALLBACK_MODE", "apply")
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}, {"id": 2}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+    ):
+        payload = await handler("SELECT 1", tenant_id=1, page_size=1)
+
+    result = json.loads(payload)
+    assert result["rows"] == [{"id": 1}]
+    assert result["metadata"]["is_truncated"] is True
+    assert result["metadata"]["partial_reason"] == "LIMITED"
+    assert result["metadata"]["capability_required"] == "pagination"
+    assert result["metadata"]["capability_supported"] is False
+    assert result["metadata"]["fallback_applied"] is True
+    assert result["metadata"]["fallback_mode"] == "force_limited_results"

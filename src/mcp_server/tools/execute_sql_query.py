@@ -7,6 +7,12 @@ from typing import Optional
 
 import asyncpg
 
+from common.config.env import get_env_str
+from dal.capability_negotiation import (
+    CapabilityNegotiationResult,
+    negotiate_capability_request,
+    parse_capability_fallback_policy,
+)
 from dal.database import Database
 from dal.error_classification import emit_classified_error, maybe_classify_error
 from dal.util.column_metadata import build_column_meta
@@ -78,12 +84,26 @@ async def handler(
         JSON array of result rows, or error message as string.
     """
 
-    def _unsupported_capability_response(required_capability: str, provider_name: str) -> str:
+    def _unsupported_capability_response(
+        required_capability: str,
+        provider_name: str,
+        negotiation: Optional[CapabilityNegotiationResult] = None,
+    ) -> str:
+        capability_required = (
+            negotiation.capability_required if negotiation else required_capability
+        )
+        capability_supported = negotiation.capability_supported if negotiation else False
+        fallback_applied = negotiation.fallback_applied if negotiation else False
+        fallback_mode = negotiation.fallback_mode if negotiation else "none"
         return json.dumps(
             {
                 "error": f"Requested capability is not supported: {required_capability}.",
                 "error_category": "unsupported_capability",
                 "required_capability": required_capability,
+                "capability_required": capability_required,
+                "capability_supported": capability_supported,
+                "fallback_applied": fallback_applied,
+                "fallback_mode": fallback_mode,
                 "provider": provider_name,
             },
             separators=(",", ":"),
@@ -121,13 +141,72 @@ async def handler(
 
     provider = Database.get_query_target_provider()
     caps = Database.get_query_target_capabilities()
-    if include_columns and not caps.supports_column_metadata:
-        return _unsupported_capability_response("column_metadata", provider)
-    if timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async":
-        if not caps.supports_cancel:
-            return _unsupported_capability_response("async_cancel", provider)
-    if (page_token or page_size) and not caps.supports_pagination:
-        return _unsupported_capability_response("pagination", provider)
+    fallback_policy = parse_capability_fallback_policy(
+        get_env_str("AGENT_CAPABILITY_FALLBACK_MODE")
+    )
+    capability_metadata = {
+        "capability_required": None,
+        "capability_supported": True,
+        "fallback_applied": False,
+        "fallback_mode": "none",
+    }
+    force_result_limit = None
+
+    def _negotiate_if_required(
+        required_capability: str,
+        required: bool,
+        supported: bool,
+    ) -> Optional[str]:
+        nonlocal include_columns
+        nonlocal timeout_seconds
+        nonlocal page_token
+        nonlocal page_size
+        nonlocal capability_metadata
+        nonlocal force_result_limit
+
+        if not required:
+            return None
+        decision = negotiate_capability_request(
+            capability_required=required_capability,
+            capability_supported=supported,
+            fallback_policy=fallback_policy,
+            include_columns=include_columns,
+            timeout_seconds=timeout_seconds,
+            page_token=page_token,
+            page_size=page_size,
+        )
+        capability_metadata = decision.to_metadata()
+        include_columns = decision.include_columns
+        timeout_seconds = decision.timeout_seconds
+        page_token = decision.page_token
+        page_size = decision.page_size
+        if decision.force_result_limit is not None:
+            force_result_limit = decision.force_result_limit
+        if not decision.capability_supported and not decision.fallback_applied:
+            return _unsupported_capability_response(required_capability, provider, decision)
+        return None
+
+    unsupported_response = _negotiate_if_required(
+        "column_metadata",
+        include_columns,
+        caps.supports_column_metadata,
+    )
+    if unsupported_response is not None:
+        return unsupported_response
+    unsupported_response = _negotiate_if_required(
+        "async_cancel",
+        bool(timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async"),
+        caps.supports_cancel,
+    )
+    if unsupported_response is not None:
+        return unsupported_response
+    unsupported_response = _negotiate_if_required(
+        "pagination",
+        bool(page_token or page_size),
+        caps.supports_pagination,
+    )
+    if unsupported_response is not None:
+        return unsupported_response
 
     max_page_size = 1000
     if page_size is not None:
@@ -247,12 +326,23 @@ async def handler(
             result_rows = result_rows[:safety_limit]
             safety_truncated = True
             row_limit = safety_limit
+        forced_limited = False
+        if (
+            force_result_limit is not None
+            and force_result_limit > 0
+            and len(result_rows) > force_result_limit
+        ):
+            result_rows = result_rows[:force_result_limit]
+            forced_limited = True
+            row_limit = force_result_limit
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
 
-        is_truncated = bool(last_truncated or safety_truncated)
+        is_truncated = bool(last_truncated or safety_truncated or forced_limited)
         partial_reason = last_truncated_reason
+        if partial_reason is None and forced_limited:
+            partial_reason = "LIMITED"
         if partial_reason is None and safety_truncated:
             partial_reason = "TRUNCATED"
         if partial_reason is None and is_truncated:
@@ -266,6 +356,7 @@ async def handler(
                 "next_page_token": next_token,
                 "page_size": effective_page_size,
                 "partial_reason": partial_reason,
+                **capability_metadata,
             },
         }
         if include_columns:
