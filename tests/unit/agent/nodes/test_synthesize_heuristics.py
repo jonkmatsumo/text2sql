@@ -9,17 +9,20 @@ from agent.state import AgentState
 
 
 @pytest.fixture
-def mock_telemetry(mocker):
+def mock_telemetry(monkeypatch):
     """Mock telemetry to prevent emission."""
-    return mocker.patch("agent.nodes.synthesize.telemetry")
+    mock = MagicMock()
+    monkeypatch.setattr("agent.nodes.synthesize.telemetry", mock)
+    return mock
 
 
 @pytest.fixture
-def mock_llm_chain(mocker):
+def mock_llm_chain(monkeypatch):
     """Mock LLM chain."""
     # Mock get_llm to prevent real LLM calls
     mock_llm = MagicMock()
-    mocker.patch("agent.nodes.synthesize.get_llm", return_value=mock_llm)
+    # Path get_llm to return the mock_llm
+    monkeypatch.setattr("agent.nodes.synthesize.get_llm", MagicMock(return_value=mock_llm))
     return mock_llm
 
 
@@ -41,7 +44,7 @@ def test_synthesize_empty_with_filters_suggests_check(mock_telemetry, mock_llm_c
         content = result["messages"][0].content
 
         assert "couldn't find any rows" in content
-        assert "double-check" in content or "verify" in content
+        assert "widening your filters" in content or "adjusting the time range" in content
 
 
 def test_synthesize_empty_no_filters_no_suggestion(mock_telemetry, mock_llm_chain):

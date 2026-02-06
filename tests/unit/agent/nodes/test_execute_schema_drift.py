@@ -1,6 +1,6 @@
 """Tests for schema drift detection in the execute node."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -37,19 +37,24 @@ def base_state():
 
 
 @pytest.mark.asyncio
-async def test_drift_detected_postgres(base_state, mock_executor_tool, mocker):
+async def test_drift_detected_postgres(base_state, mock_executor_tool, monkeypatch):
     """Test that schema drift is detected for Postgres errors."""
-    mocker.patch("agent.nodes.execute.get_mcp_tools", return_value=[mock_executor_tool])
-    mocker.patch(
-        "agent.nodes.execute.get_env_str",
-        side_effect=lambda k, d=None: "postgres" if k == "QUERY_TARGET_BACKEND" else d,
+    mock_get_tools = AsyncMock(return_value=[mock_executor_tool])
+    monkeypatch.setattr("agent.nodes.execute.get_mcp_tools", mock_get_tools)
+
+    mock_get_env_str = MagicMock(
+        side_effect=lambda k, d=None: "postgres" if k == "QUERY_TARGET_BACKEND" else d
     )
-    mocker.patch("agent.nodes.execute.get_env_bool", return_value=True)  # AGENT_SCHEMA_DRIFT_HINTS
-    mocker.patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql")
-    mocker.patch(
-        "agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql",
-        return_value="SELECT * FROM users",
-    )
+    monkeypatch.setattr("agent.nodes.execute.get_env_str", mock_get_env_str)
+
+    monkeypatch.setattr(
+        "agent.nodes.execute.get_env_bool", MagicMock(return_value=True)
+    )  # AGENT_SCHEMA_DRIFT_HINTS
+    monkeypatch.setattr("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", MagicMock())
+
+    # Rewrite SQL is async
+    mock_rewrite = AsyncMock(return_value="SELECT * FROM users")
+    monkeypatch.setattr("agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql", mock_rewrite)
 
     # Simulate Postgres error
     mock_executor_tool.ainvoke.return_value = {
@@ -66,19 +71,21 @@ async def test_drift_detected_postgres(base_state, mock_executor_tool, mocker):
 
 
 @pytest.mark.asyncio
-async def test_drift_detected_bigquery(base_state, mock_executor_tool, mocker):
+async def test_drift_detected_bigquery(base_state, mock_executor_tool, monkeypatch):
     """Test that schema drift is detected for BigQuery errors."""
-    mocker.patch("agent.nodes.execute.get_mcp_tools", return_value=[mock_executor_tool])
-    mocker.patch(
-        "agent.nodes.execute.get_env_str",
-        side_effect=lambda k, d=None: "bigquery" if k == "QUERY_TARGET_BACKEND" else d,
+    mock_get_tools = AsyncMock(return_value=[mock_executor_tool])
+    monkeypatch.setattr("agent.nodes.execute.get_mcp_tools", mock_get_tools)
+
+    mock_get_env_str = MagicMock(
+        side_effect=lambda k, d=None: "bigquery" if k == "QUERY_TARGET_BACKEND" else d
     )
-    mocker.patch("agent.nodes.execute.get_env_bool", return_value=True)
-    mocker.patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql")
-    mocker.patch(
-        "agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql",
-        return_value="SELECT * FROM dataset.table",
-    )
+    monkeypatch.setattr("agent.nodes.execute.get_env_str", mock_get_env_str)
+
+    monkeypatch.setattr("agent.nodes.execute.get_env_bool", MagicMock(return_value=True))
+    monkeypatch.setattr("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", MagicMock())
+
+    mock_rewrite = AsyncMock(return_value="SELECT * FROM dataset.table")
+    monkeypatch.setattr("agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql", mock_rewrite)
 
     # Simulate BigQuery error
     mock_executor_tool.ainvoke.return_value = {
@@ -93,15 +100,16 @@ async def test_drift_detected_bigquery(base_state, mock_executor_tool, mocker):
 
 
 @pytest.mark.asyncio
-async def test_no_drift_permission_error(base_state, mock_executor_tool, mocker):
+async def test_no_drift_permission_error(base_state, mock_executor_tool, monkeypatch):
     """Test that permission errors do not trigger schema drift."""
-    mocker.patch("agent.nodes.execute.get_mcp_tools", return_value=[mock_executor_tool])
-    mocker.patch("agent.nodes.execute.get_env_str", return_value="postgres")
-    mocker.patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql")
-    mocker.patch(
-        "agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql",
-        return_value="SELECT * FROM secret",
-    )
+    mock_get_tools = AsyncMock(return_value=[mock_executor_tool])
+    monkeypatch.setattr("agent.nodes.execute.get_mcp_tools", mock_get_tools)
+
+    monkeypatch.setattr("agent.nodes.execute.get_env_str", MagicMock(return_value="postgres"))
+    monkeypatch.setattr("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", MagicMock())
+
+    mock_rewrite = AsyncMock(return_value="SELECT * FROM secret")
+    monkeypatch.setattr("agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql", mock_rewrite)
 
     mock_executor_tool.ainvoke.return_value = {
         "error": "permission denied for relation secret",
@@ -115,17 +123,18 @@ async def test_no_drift_permission_error(base_state, mock_executor_tool, mocker)
 
 
 @pytest.mark.asyncio
-async def test_drift_detection_disabled(base_state, mock_executor_tool, mocker):
+async def test_drift_detection_disabled(base_state, mock_executor_tool, monkeypatch):
     """Test that drift detection is skipped if disabled via env var."""
-    mocker.patch("agent.nodes.execute.get_mcp_tools", return_value=[mock_executor_tool])
-    mocker.patch(
-        "agent.nodes.execute.get_env_bool", return_value=False
+    mock_get_tools = AsyncMock(return_value=[mock_executor_tool])
+    monkeypatch.setattr("agent.nodes.execute.get_mcp_tools", mock_get_tools)
+
+    monkeypatch.setattr(
+        "agent.nodes.execute.get_env_bool", MagicMock(return_value=False)
     )  # AGENT_SCHEMA_DRIFT_HINTS=False
-    mocker.patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql")
-    mocker.patch(
-        "agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql",
-        return_value="SELECT * FROM users",
-    )
+    monkeypatch.setattr("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", MagicMock())
+
+    mock_rewrite = AsyncMock(return_value="SELECT * FROM users")
+    monkeypatch.setattr("agent.validation.tenant_rewriter.TenantRewriter.rewrite_sql", mock_rewrite)
 
     mock_executor_tool.ainvoke.return_value = {
         "error": 'relation "users" does not exist',

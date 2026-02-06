@@ -11,7 +11,7 @@ from agent.state import AgentState
 @patch("agent.nodes.correct.get_env_bool")
 @patch("agent.utils.sql_similarity.compute_sql_similarity")
 @patch("agent.llm_client.get_llm")
-def test_correct_enforces_similarity_success(mock_get_llm, mock_sim, mock_env_bool, mocker):
+def test_correct_enforces_similarity_success(mock_get_llm, mock_sim, mock_env_bool):
     """Test that correction passes if similarity is high enough."""
     mock_env_bool.return_value = True
     mock_sim.return_value = 0.9  # High similarity
@@ -52,7 +52,7 @@ def test_correct_enforces_similarity_success(mock_get_llm, mock_sim, mock_env_bo
 @patch("agent.nodes.correct.get_env_bool")
 @patch("agent.utils.sql_similarity.compute_sql_similarity")
 @patch("agent.llm_client.get_llm")
-def test_correct_rejects_drift(mock_get_llm, mock_sim, mock_env_bool, mocker):
+def test_correct_rejects_drift(mock_get_llm, mock_sim, mock_env_bool):
     """Test that correction is rejected if similarity is low, then original returned on fallback."""
     mock_env_bool.return_value = True
     # First attempt low similarity (0.1)
@@ -97,7 +97,7 @@ def test_correct_rejects_drift(mock_get_llm, mock_sim, mock_env_bool, mocker):
 @patch("agent.nodes.correct.get_env_bool")
 @patch("agent.utils.sql_similarity.compute_sql_similarity")
 @patch("agent.llm_client.get_llm")
-def test_correct_retry_succeeds(mock_get_llm, mock_sim, mock_env_bool, mocker):
+def test_correct_retry_succeeds(mock_get_llm, mock_sim, mock_env_bool):
     """Test that correction succeeds on retry."""
     mock_env_bool.return_value = True
     # First call 0.1 (fail), Second call 0.9 (success)

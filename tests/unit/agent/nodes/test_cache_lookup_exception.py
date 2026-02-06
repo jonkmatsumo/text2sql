@@ -1,6 +1,6 @@
 """Tests for cache_lookup node exception handling."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,18 +9,23 @@ from agent.state import AgentState
 
 
 @pytest.fixture
-def mock_logger(mocker):
+def mock_logger(monkeypatch):
     """Mock the logger."""
-    return mocker.patch("agent.nodes.cache_lookup.logger")
+    mock = MagicMock()
+    monkeypatch.setattr("agent.nodes.cache_lookup.logger", mock)
+    return mock
 
 
 @pytest.fixture
-def mock_tools(mocker):
+def mock_tools(monkeypatch):
     """Mock the MCP tools."""
     tools = [AsyncMock(name="lookup_cache"), AsyncMock(name="get_semantic_subgraph")]
     tools[0].name = "lookup_cache"
     tools[1].name = "get_semantic_subgraph"
-    mocker.patch("agent.nodes.cache_lookup.get_mcp_tools", return_value=tools)
+
+    # get_mcp_tools is awaited
+    mock_get = AsyncMock(return_value=tools)
+    monkeypatch.setattr("agent.nodes.cache_lookup.get_mcp_tools", mock_get)
     return tools
 
 

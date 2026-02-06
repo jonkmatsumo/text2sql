@@ -1,7 +1,7 @@
 """Tests for execution node timeout propagation."""
 
 import time
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,33 +10,46 @@ from agent.state import AgentState
 
 
 @pytest.fixture
-def mock_telemetry(mocker):
+def mock_telemetry(monkeypatch):
     """Fixture to mock telemetry module."""
-    return mocker.patch("agent.nodes.execute.telemetry")
+    mock = MagicMock()
+    monkeypatch.setattr("agent.nodes.execute.telemetry", mock)
+    return mock
 
 
 @pytest.fixture
-def mock_policy_enforcer(mocker):
+def mock_policy_enforcer(monkeypatch):
     """Fixture to mock PolicyEnforcer class."""
-    return mocker.patch("agent.nodes.execute.PolicyEnforcer")
+    mock = MagicMock()
+    monkeypatch.setattr("agent.nodes.execute.PolicyEnforcer", mock)
+    return mock
 
 
 @pytest.fixture
-def mock_tenant_rewriter(mocker):
+def mock_tenant_rewriter(monkeypatch):
     """Fixture to mock TenantRewriter class."""
-    rewriter = mocker.patch("agent.nodes.execute.TenantRewriter")
+    mock = MagicMock()
+    monkeypatch.setattr("agent.nodes.execute.TenantRewriter", mock)
+
+    # TenantRewriter.rewrite_sql is called as a class method/static method on the class itself
+    # So we attach the AsyncMock directly to the mock object (which replaces the class)
+    mock.rewrite_sql = AsyncMock()
 
     async def echo(sql, tenant):
         return sql
 
-    rewriter.rewrite_sql.side_effect = echo
-    return rewriter
+    mock.rewrite_sql.side_effect = echo
+
+    return mock
 
 
 @pytest.fixture
-def mock_mcp_tools(mocker):
+def mock_mcp_tools(monkeypatch):
     """Fixture to mock get_mcp_tools function."""
-    return mocker.patch("agent.nodes.execute.get_mcp_tools")
+    # get_mcp_tools is awaited, so it should return a coroutine or be an AsyncMock
+    mock = AsyncMock()
+    monkeypatch.setattr("agent.nodes.execute.get_mcp_tools", mock)
+    return mock
 
 
 @pytest.mark.asyncio
