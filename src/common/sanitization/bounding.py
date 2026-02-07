@@ -14,11 +14,11 @@ def redact_recursive(value: Any) -> Any:
         return [redact_recursive(item) for item in value]
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
+        sensitive_tokens = {"token", "password", "secret", "api_key", "auth", "credential"}
         for key, item in value.items():
-            lowered = key.lower()
-            if any(
-                token in lowered for token in ("token", "password", "secret", "api_key", "auth")
-            ):
+            lowered_key = key.lower()
+            match = any(token in lowered_key for token in sensitive_tokens)
+            if match:
                 redacted[key] = "<redacted>"
             else:
                 redacted[key] = redact_recursive(item)

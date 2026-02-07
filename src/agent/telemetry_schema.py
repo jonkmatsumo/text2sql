@@ -60,6 +60,53 @@ class TelemetryKeys(str, Enum):
 
 MAX_PAYLOAD_SIZE = 32 * 1024  # 32KB hard limit for attributes
 
+# Keys that are known to contain large text or high-cardinality data
+HIGH_CARDINALITY_KEYS = {
+    "schema_context",
+    "raw_schema_context",
+    "procedural_plan",
+    "query_result",
+    "last_tool_output",
+}
+
+# Keys that contain SQL or other sensitive text that should be hashed + summarized
+SENSITIVE_TEXT_KEYS = {
+    "current_sql",
+    "rewritten_sql",
+    "sql",
+    "original_sql",
+}
+
+
+def bound_attribute(key: str, value: Any) -> Any:
+    """Apply cardinality and safety guardrails to a single attribute."""
+    if value is None:
+        return None
+
+    # Handle Sensitive Text (SQL, etc.)
+    if key in SENSITIVE_TEXT_KEYS and isinstance(value, str):
+        val_hash = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        summary = value[:500] + "..." if len(value) > 500 else value
+        return f"hash:{val_hash} | {summary}"
+
+    # Handle High Cardinality / Large Objects
+    if key in HIGH_CARDINALITY_KEYS:
+        from common.sanitization.bounding import bound_payload
+
+        # Bound collections to a safe size
+        bounded = bound_payload(value, max_items=20)
+        # Serialize to string if it's still a complex object for OTEL compatibility
+        if isinstance(bounded, (dict, list)):
+            json_str, _, _, _ = truncate_json(bounded, max_len=2048)
+            return json_str
+        return bounded
+
+    # General Bounding for all strings
+    if isinstance(value, str) and len(value) > 2048:
+        return value[:2045] + "..."
+
+    return value
+
 
 def truncate_json(
     obj: Any, max_len: int = MAX_PAYLOAD_SIZE
