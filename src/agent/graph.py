@@ -571,6 +571,7 @@ async def run_agent_with_tracing(
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
             "page_size": page_size,
+            "seed": get_env_int("AGENT_LLM_SEED", None),
             "interactive_session": interactive_session,
             "replay_bundle": replay_bundle,
         }

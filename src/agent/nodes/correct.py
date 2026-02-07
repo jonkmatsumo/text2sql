@@ -178,7 +178,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             # If we are retrying due to drift, append warning.
             # Ideally we append to system or user. Append to user prompt for visibility.
 
-            chain = prompt | get_llm(temperature=0)
+            chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
             start_time = time.monotonic()
             response = chain.invoke(

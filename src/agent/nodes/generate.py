@@ -347,7 +347,7 @@ Rules:
 
         from agent.llm_client import get_llm
 
-        chain = prompt | get_llm(temperature=0)
+        chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
         # Generate SQL (MLflow autolog will capture token usage)
         start_time = time.monotonic()

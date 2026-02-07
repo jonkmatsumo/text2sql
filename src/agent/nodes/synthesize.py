@@ -208,7 +208,7 @@ Be concise but informative. Use numbers and data from the results.
             ]
         )
 
-        chain = prompt | get_llm(temperature=get_synthesize_temperature())
+        chain = prompt | get_llm(temperature=get_synthesize_temperature(), seed=state.get("seed"))
 
         response = chain.invoke(
             {
