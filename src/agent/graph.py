@@ -937,12 +937,10 @@ async def run_agent_with_tracing(
                     logger.error("update_interaction tool missing!")
                     result["interaction_persisted"] = False
 
-                # Metadata is already handled early and made sticky via telemetry_context
+        # Metadata is already handled early and made sticky via telemetry_context
 
-                # 3. Final Flush (Control-plane safety)
+        # 3. Final Flush (Control-plane safety)
+        # Ensure traces are sent before returning to avoid loss on rapid process exit
+        telemetry.flush(timeout_ms=500)
 
-                # Ensure traces are sent before returning to avoid loss on rapid process exit
-
-                telemetry.flush(timeout_ms=500)
-
-                return result
+        return result

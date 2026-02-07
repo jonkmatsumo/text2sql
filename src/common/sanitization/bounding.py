@@ -18,7 +18,7 @@ def redact_recursive(value: Any) -> Any:
         for key, item in value.items():
             lowered_key = key.lower()
             match = any(token in lowered_key for token in sensitive_tokens)
-            if match:
+            if match and "token_usage" not in lowered_key:
                 redacted[key] = "<redacted>"
             else:
                 redacted[key] = redact_recursive(item)

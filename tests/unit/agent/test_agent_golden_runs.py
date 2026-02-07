@@ -34,6 +34,9 @@ class _DummySpan:
     def set_attributes(self, *_args, **_kwargs):
         return None
 
+    def add_event(self, *_args, **_kwargs):
+        return None
+
 
 def _build_test_graph():
     workflow = StateGraph(AgentState)
