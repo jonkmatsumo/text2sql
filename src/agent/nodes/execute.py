@@ -24,11 +24,7 @@ from common.constants.reason_codes import (
     PaginationStopReason,
     PrefetchSuppressionReason,
 )
-from common.models.tool_envelopes import (
-    ExecuteSQLQueryMetadata,
-    ExecuteSQLQueryResponseEnvelope,
-    parse_execute_sql_response,
-)
+from common.models.tool_envelopes import parse_execute_sql_response
 from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
@@ -36,53 +32,6 @@ logger = logging.getLogger(__name__)
 
 class ToolResponseMalformedError(RuntimeError):
     """Raised when execute_sql_query returns an unexpected payload."""
-
-
-def _parse_tool_response_with_shim(payload) -> ExecuteSQLQueryResponseEnvelope:
-    """Parse tool response with optional legacy shim."""
-    envelope = parse_execute_sql_response(payload)
-
-    # Check if we should attempt legacy list shim
-    is_candidate_for_shim = (
-        envelope.is_error()
-        and envelope.error_message
-        and (
-            envelope.error_message == "Malformed response payload"
-            or envelope.error_message.startswith("Invalid payload type")
-        )
-    )
-
-    if is_candidate_for_shim:
-        # Check if it's a raw list of rows (legacy format)
-        import json
-
-        raw_list = None
-        if isinstance(payload, list):
-            raw_list = payload
-        elif isinstance(payload, str):
-            try:
-                parsed = json.loads(payload)
-                if isinstance(parsed, list):
-                    raw_list = parsed
-            except json.JSONDecodeError:
-                pass
-
-        if raw_list is not None and get_env_bool("AGENT_ENABLE_LEGACY_TOOL_SHIM", False):
-            # Shim: wrap list in envelope
-            if telemetry.get_current_span():
-                telemetry.get_current_span().add_event(
-                    "tool.response_legacy_shape", {"type": "list"}
-                )
-
-            return ExecuteSQLQueryResponseEnvelope(
-                rows=raw_list,
-                metadata=ExecuteSQLQueryMetadata(
-                    rows_returned=len(raw_list),
-                    is_truncated=False,
-                ),
-            )
-
-    return envelope
 
 
 def _schema_drift_hint(
@@ -148,6 +97,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
     ) as span:
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "execute_sql")
+        # Initialize required contract attributes to satisfy enforcement on early exits
+        span.set_attribute("result.rows_returned", 0)
+        span.set_attribute("result.is_truncated", False)
+        span.set_attribute("error.category", "unknown")
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")
 
@@ -310,7 +263,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 first_page_latency_seconds = max(0.0, time.monotonic() - first_page_started_at)
 
                 # --- Typed Parsing ---
-                envelope = _parse_tool_response_with_shim(result)
+                envelope = parse_execute_sql_response(result)
 
                 # Map envelope to local vars
                 result_is_truncated = envelope.metadata.is_truncated
@@ -514,7 +467,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                 page_result = await executor_tool.ainvoke(page_payload)
 
                             # Typed Parsing for Pages
-                            page_envelope = _parse_tool_response_with_shim(page_result)
+                            page_envelope = parse_execute_sql_response(page_result)
 
                             span.add_event(
                                 "pagination.auto_page_fetch",
@@ -703,7 +656,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                             prefetch_payload
                                         )
                                     # Parse as envelope
-                                    prefetched_env = _parse_tool_response_with_shim(prefetched_raw)
+                                    prefetched_env = parse_execute_sql_response(prefetched_raw)
                                     if prefetched_env.is_error():
                                         return None
                                     return prefetched_env.model_dump(exclude_none=True)

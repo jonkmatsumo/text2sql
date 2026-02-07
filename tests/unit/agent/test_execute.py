@@ -149,42 +149,6 @@ class TestValidateAndExecuteNode:
         assert result["error"] is None
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    @patch("agent.nodes.execute.get_mcp_tools")
-    @patch("agent.nodes.execute.PolicyEnforcer")
-    @patch("agent.nodes.execute.TenantRewriter")
-    async def test_validate_and_execute_node_success_list_result(
-        self, mock_rewriter, mock_enforcer, mock_get_tools, monkeypatch
-    ):
-        """Test successful query execution with list result (Legacy Shim)."""
-        monkeypatch.setenv("AGENT_ENABLE_LEGACY_TOOL_SHIM", "true")
-
-        # Mock enforcer to pass
-        mock_enforcer.validate_sql.return_value = None
-        # Mock rewriter to return same SQL
-        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-        mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query"
-        # Rows must be dicts for Pydantic validation
-        mock_tool.ainvoke = AsyncMock(return_value=[{"v": 1}, {"v": 2}, {"v": 3}])
-
-        mock_get_tools.return_value = [mock_tool]
-
-        state = AgentState(
-            messages=[],
-            schema_context="",
-            current_sql="SELECT 1 UNION SELECT 2 UNION SELECT 3",
-            query_result=None,
-            error=None,
-            retry_count=0,
-        )
-
-        result = await validate_and_execute_node(state)
-
-        assert result["query_result"] == [{"v": 1}, {"v": 2}, {"v": 3}]
-        assert result["error"] is None
-
-    @pytest.mark.asyncio
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")
     @patch("agent.nodes.execute.TenantRewriter")
@@ -219,39 +183,6 @@ class TestValidateAndExecuteNode:
         assert result["result_is_truncated"] is True
         assert result["result_row_limit"] == 100
         assert result["result_rows_returned"] == 1
-
-    @pytest.mark.asyncio
-    @patch("agent.nodes.execute.get_mcp_tools")
-    @patch("agent.nodes.execute.PolicyEnforcer")
-    @patch("agent.nodes.execute.TenantRewriter")
-    async def test_execute_backcompat_raw_rows(
-        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture, monkeypatch
-    ):
-        """Test backcompat when tool returns raw row list (Legacy Shim)."""
-        monkeypatch.setenv("AGENT_ENABLE_LEGACY_TOOL_SHIM", "true")
-
-        mock_enforcer.validate_sql.return_value = None
-        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-        mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1}])
-
-        mock_get_tools.return_value = [mock_tool]
-
-        state = AgentState(
-            messages=[],
-            schema_context="",
-            current_sql=schema_fixture.sample_query,
-            query_result=None,
-            error=None,
-            retry_count=0,
-        )
-
-        result = await validate_and_execute_node(state)
-
-        assert result["query_result"] == [{"id": 1}]
-        assert result["error"] is None
-        assert result["result_is_truncated"] is False
 
     @pytest.mark.asyncio
     @patch("agent.nodes.execute.get_mcp_tools")
