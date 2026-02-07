@@ -186,59 +186,76 @@ class OTELTelemetrySpan(TelemetrySpan):
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
         """Set span inputs with redaction, truncation, and metadata."""
-        from agent.telemetry_schema import TelemetryKeys, truncate_json
+        try:
+            from agent.telemetry_schema import TelemetryKeys, truncate_json
 
-        json_str, truncated, size, sha256 = truncate_json(inputs)
-        self._span.set_attribute(TelemetryKeys.INPUTS, json_str)
-        self._span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
-        if sha256:
-            self._span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
-        if truncated:
-            self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+            json_str, truncated, size, sha256 = truncate_json(inputs)
+            self._span.set_attribute(TelemetryKeys.INPUTS, json_str)
+            self._span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+            if sha256:
+                self._span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
+            if truncated:
+                self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry inputs: {e}")
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
         """Set span outputs with redaction, truncation, and error handling."""
-        from agent.telemetry_schema import TelemetryKeys, truncate_json
+        try:
+            from agent.telemetry_schema import TelemetryKeys, truncate_json
 
-        json_str, truncated, size, sha256 = truncate_json(outputs)
-        self._span.set_attribute(TelemetryKeys.OUTPUTS, json_str)
+            json_str, truncated, size, sha256 = truncate_json(outputs)
+            self._span.set_attribute(TelemetryKeys.OUTPUTS, json_str)
 
-        # Check for error in outputs
-        error = outputs.get("error")
-        if error:
-            self._has_error = True
-            error_json, _, _, _ = truncate_json({"error": str(error), "type": type(error).__name__})
-            self._span.set_attribute(TelemetryKeys.ERROR, error_json)
-            self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+            # Check for error in outputs
+            error = outputs.get("error")
+            if error:
+                self._has_error = True
+                error_json, _, _, _ = truncate_json(
+                    {"error": str(error), "type": type(error).__name__}
+                )
+                self._span.set_attribute(TelemetryKeys.ERROR, error_json)
+                self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry outputs: {e}")
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        # To catch sensitive keys at the top level, we redact a wrapper dict
-        redacted_dict = redact_recursive({key: value})
-        redacted_value = redacted_dict[key]
+            # To catch sensitive keys at the top level, we redact a wrapper dict
+            redacted_dict = redact_recursive({key: value})
+            redacted_value = redacted_dict[key]
 
-        guarded_value = bound_attribute(key, redacted_value)
-        self._span.set_attribute(key, guarded_value)
-        self._tracked_attributes[key] = guarded_value
-        if key in ("error", "error.category", "error.type"):
-            self._has_error = True
+            guarded_value = bound_attribute(key, redacted_value)
+            self._span.set_attribute(key, guarded_value)
+            self._tracked_attributes[key] = guarded_value
+            if key in ("error", "error.category", "error.type"):
+                self._has_error = True
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry attribute {key}: {e}")
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        redacted_attrs = redact_recursive(attributes)
-        guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
-        self._span.set_attributes(guarded_attrs)
-        self._tracked_attributes.update(guarded_attrs)
-        if any(k in attributes for k in ("error", "error.category", "error.type")):
-            self._has_error = True
+            redacted_attrs = redact_recursive(attributes)
+            guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+            self._span.set_attributes(guarded_attrs)
+            self._tracked_attributes.update(guarded_attrs)
+            if any(k in attributes for k in ("error", "error.category", "error.type")):
+                self._has_error = True
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry attributes: {e}")
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
-        self._span.add_event(name, attributes or {})
+        try:
+            self._span.add_event(name, attributes or {})
+        except Exception as e:
+            logger.debug(f"Failed to add telemetry event {name}: {e}")
 
     def get_tracked_attributes(self) -> Dict[str, Any]:
         """Return attributes that were tracked for contract validation."""
