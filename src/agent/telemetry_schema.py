@@ -67,6 +67,10 @@ HIGH_CARDINALITY_KEYS = {
     "procedural_plan",
     "query_result",
     "last_tool_output",
+    "correction_strategy",
+    "procedural_plan",
+    "explanation",
+    "plan",
 }
 
 # Keys that contain SQL or other sensitive text that should be hashed + summarized
@@ -75,6 +79,9 @@ SENSITIVE_TEXT_KEYS = {
     "rewritten_sql",
     "sql",
     "original_sql",
+    "failed_sql",
+    "bad_query",
+    "corrected_sql",
 }
 
 

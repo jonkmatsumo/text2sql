@@ -433,11 +433,20 @@ class InMemoryTelemetrySpan(TelemetrySpan):
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        self.attributes[key] = value
+        from agent.telemetry_schema import bound_attribute
+
+        redacted_dict = redact_recursive({key: value})
+        redacted_value = redacted_dict[key]
+        guarded_value = bound_attribute(key, redacted_value)
+        self.attributes[key] = guarded_value
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        self.attributes.update(attributes)
+        from agent.telemetry_schema import bound_attribute
+
+        redacted_attrs = redact_recursive(attributes)
+        guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+        self.attributes.update(guarded_attrs)
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
