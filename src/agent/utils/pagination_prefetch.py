@@ -3,17 +3,18 @@
 import asyncio
 import hashlib
 import json
+import logging
 from collections import OrderedDict
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Set
 
 from common.config.env import get_env_int, get_env_str
+
+logger = logging.getLogger(__name__)
 
 PrefetchFetchFn = Callable[[], Awaitable[Optional[dict[str, Any]]]]
 
 _PREFETCH_CACHE_MAX_ENTRIES = 128
 _PREFETCH_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
-_PREFETCH_INFLIGHT: set[str] = set()
-_PREFETCH_TASKS: set[asyncio.Task] = set()
 _PREFETCH_SEMAPHORE: Optional[asyncio.Semaphore] = None
 _PREFETCH_SEMAPHORE_LIMIT = 1
 _PREFETCH_ACTIVE_COUNT = 0
@@ -50,6 +51,7 @@ def build_prefetch_cache_key(
     schema_snapshot_id: Optional[str],
     seed: Optional[int],
     completeness_hint: Optional[str],
+    scope_id: Optional[str] = None,
 ) -> str:
     """Build a stable cache key for prefetch payloads."""
     # Only include flags that affect tool behavior/results
@@ -66,6 +68,7 @@ def build_prefetch_cache_key(
         "seed": seed,
         "completeness_hint": completeness_hint,
         "flags": relevant_flags,
+        "scope": scope_id,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -93,59 +96,77 @@ def _get_semaphore(limit: int) -> asyncio.Semaphore:
     return _PREFETCH_SEMAPHORE
 
 
-async def _run_prefetch(cache_key: str, fetch_fn: PrefetchFetchFn, max_concurrency: int) -> None:
-    global _PREFETCH_ACTIVE_COUNT
-    global _PREFETCH_MAX_OBSERVED
-    semaphore = _get_semaphore(max_concurrency)
-    try:
-        async with semaphore:
-            _PREFETCH_ACTIVE_COUNT += 1
-            _PREFETCH_MAX_OBSERVED = max(_PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT)
-            try:
-                payload = await fetch_fn()
-            finally:
-                _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
-        if payload is not None:
-            cache_prefetched_page(cache_key, payload)
-    finally:
-        _PREFETCH_INFLIGHT.discard(cache_key)
+class PrefetchManager:
+    """Context manager for structured prefetch concurrency."""
+
+    def __init__(self, max_concurrency: int = 1):
+        """Initialize the prefetch manager."""
+        self.max_concurrency = max_concurrency
+        self._task_group: Optional[asyncio.TaskGroup] = None
+        self._inflight_keys: Set[str] = set()
+
+    async def __aenter__(self):
+        """Enter the context manager."""
+        self._task_group = asyncio.TaskGroup()
+        await self._task_group.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context manager."""
+        if self._task_group:
+            await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+        self._inflight_keys.clear()
+
+    def schedule(self, cache_key: str, fetch_fn: PrefetchFetchFn) -> bool:
+        """Schedule a prefetch task if not duplicate."""
+        if not self._task_group:
+            raise RuntimeError("PrefetchManager not entered")
+
+        if cache_key in _PREFETCH_CACHE:
+            return False
+        if cache_key in self._inflight_keys:
+            return False
+
+        self._inflight_keys.add(cache_key)
+        self._task_group.create_task(self._run_task(cache_key, fetch_fn))
+        return True
+
+    async def _run_task(self, cache_key: str, fetch_fn: PrefetchFetchFn):
+        global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
+        semaphore = _get_semaphore(self.max_concurrency)
+        try:
+            async with semaphore:
+                _PREFETCH_ACTIVE_COUNT += 1
+                _PREFETCH_MAX_OBSERVED = max(_PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT)
+                try:
+                    payload = await fetch_fn()
+                finally:
+                    _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
+
+            if payload is not None:
+                cache_prefetched_page(cache_key, payload)
+        except Exception as e:
+            logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
+        finally:
+            self._inflight_keys.discard(cache_key)
 
 
 def start_prefetch_task(cache_key: str, fetch_fn: PrefetchFetchFn, max_concurrency: int) -> bool:
-    """Start a background prefetch task if key is not already cached/in-flight."""
-    if cache_key in _PREFETCH_CACHE:
-        return False
-    if cache_key in _PREFETCH_INFLIGHT:
-        return False
-
-    _PREFETCH_INFLIGHT.add(cache_key)
-    task = asyncio.create_task(_run_prefetch(cache_key, fetch_fn, max_concurrency))
-    _PREFETCH_TASKS.add(task)
-
-    def _cleanup(done: asyncio.Task) -> None:
-        _PREFETCH_TASKS.discard(done)
-        try:
-            done.result()
-        except Exception:
-            # Prefetch failures are best-effort and should not break the agent path.
-            pass
-
-    task.add_done_callback(_cleanup)
-    return True
+    """Start a background prefetch task (Deprecated)."""
+    logger.warning("Called deprecated start_prefetch_task. Prefetch ignored.")
+    return False
 
 
-async def wait_for_prefetch_tasks() -> None:
-    """Wait for active background prefetch tasks (test utility)."""
-    if not _PREFETCH_TASKS:
-        return
-    await asyncio.gather(*list(_PREFETCH_TASKS), return_exceptions=True)
+def wait_for_prefetch_tasks() -> None:
+    """No-op: PrefetchManager awaits tasks on exit."""
+    pass
 
 
 def prefetch_diagnostics() -> dict[str, int]:
     """Expose lightweight diagnostic counters for tests."""
     return {
         "cache_entries": len(_PREFETCH_CACHE),
-        "inflight_entries": len(_PREFETCH_INFLIGHT),
+        "inflight_entries": 0,  # Not tracking global inflight anymore
         "active_count": _PREFETCH_ACTIVE_COUNT,
         "max_observed_concurrency": _PREFETCH_MAX_OBSERVED,
     }
@@ -153,10 +174,7 @@ def prefetch_diagnostics() -> dict[str, int]:
 
 def reset_prefetch_state() -> None:
     """Reset in-memory prefetch state (test utility)."""
-    global _PREFETCH_ACTIVE_COUNT
-    global _PREFETCH_MAX_OBSERVED
+    global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
     _PREFETCH_CACHE.clear()
-    _PREFETCH_INFLIGHT.clear()
-    _PREFETCH_TASKS.clear()
     _PREFETCH_ACTIVE_COUNT = 0
     _PREFETCH_MAX_OBSERVED = 0

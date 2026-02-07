@@ -9,10 +9,9 @@ import pytest
 from agent.nodes.execute import validate_and_execute_node
 from agent.state import AgentState
 from agent.utils.pagination_prefetch import (
+    PrefetchManager,
     prefetch_diagnostics,
     reset_prefetch_state,
-    start_prefetch_task,
-    wait_for_prefetch_tasks,
 )
 
 
@@ -77,7 +76,7 @@ async def test_prefetch_disabled_respects_flag(
     )
 
     result = await validate_and_execute_node(state)
-    await wait_for_prefetch_tasks()
+    # No need to await wait_for_prefetch_tasks, node handles it.
 
     assert mock_tool.ainvoke.call_count == 1
     completeness = result["result_completeness"]
@@ -118,7 +117,6 @@ async def test_prefetch_skips_non_interactive_sessions(
     )
 
     result = await validate_and_execute_node(state)
-    await wait_for_prefetch_tasks()
 
     assert mock_tool.ainvoke.call_count == 1
     completeness = result["result_completeness"]
@@ -166,9 +164,8 @@ async def test_prefetch_schedules_and_serves_cached_next_page(
     )
 
     first_result = await validate_and_execute_node(first_state)
-    await wait_for_prefetch_tasks()
 
-    assert mock_tool.ainvoke.call_count == 2
+    assert mock_tool.ainvoke.call_count == 2  # 1 for fetch, 1 for prefetch
     first_completeness = first_result["result_completeness"]
     assert first_completeness["prefetch_enabled"] is True
     assert first_completeness["prefetch_scheduled"] is True
@@ -187,9 +184,10 @@ async def test_prefetch_schedules_and_serves_cached_next_page(
         schema_snapshot_id="snap-1",
     )
 
+    # Second call should use cache
     second_result = await validate_and_execute_node(second_state)
-    await wait_for_prefetch_tasks()
 
+    # mock_tool should NOT be called again because of cache hit
     assert mock_tool.ainvoke.call_count == 2
     assert second_result["query_result"] == [{"id": 2}]
     assert second_result["result_completeness"]["prefetch_reason"] == "cache_hit"
@@ -204,11 +202,14 @@ async def test_prefetch_concurrency_never_exceeds_configured_limit():
         await asyncio.sleep(0.05)
         return {"rows": [{"id": 1}], "metadata": {"next_page_token": None}}
 
-    assert start_prefetch_task("key-1", _slow_fetch, max_concurrency=concurrency_limit) is True
-    assert start_prefetch_task("key-2", _slow_fetch, max_concurrency=concurrency_limit) is True
-    assert start_prefetch_task("key-3", _slow_fetch, max_concurrency=concurrency_limit) is True
+    async with PrefetchManager(max_concurrency=concurrency_limit) as pm:
+        assert pm.schedule("key-1", _slow_fetch) is True
+        assert pm.schedule("key-2", _slow_fetch) is True
+        assert pm.schedule("key-3", _slow_fetch) is True
 
-    await wait_for_prefetch_tasks()
+        # Wait for tasks to complete
+        pass
 
     diag = prefetch_diagnostics()
     assert diag["max_observed_concurrency"] <= concurrency_limit
+    assert diag["active_count"] == 0
