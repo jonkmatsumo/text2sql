@@ -13,6 +13,20 @@ from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
 class TestExecuteSqlQuery:
     """Tests for execute_sql_query tool."""
 
+    def setup_method(self, method):
+        """Initialize Database capabilities for tests."""
+        from types import SimpleNamespace
+
+        from dal.database import Database
+
+        Database._query_target_capabilities = SimpleNamespace(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+        )
+        Database._query_target_provider = "postgres"
+
     def test_tool_name_no_suffix(self):
         """Verify TOOL_NAME does not end with '_tool'."""
         assert not TOOL_NAME.endswith("_tool")

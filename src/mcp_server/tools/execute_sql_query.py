@@ -123,7 +123,7 @@ async def handler(
             "Unauthorized. No Tenant ID context found. "
             "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
         )
-        return json.dumps({"error": error_msg})
+        return json.dumps({"error": error_msg, "error_category": "unsupported_capability"})
 
     # Application-Level Security Check (Pre-flight)
     # Reject mutative keywords to provide immediate feedback.
@@ -142,9 +142,14 @@ async def handler(
 
     for pattern in forbidden_patterns:
         if re.search(pattern, sql_query):
-            return (
-                f"Error: Query contains forbidden keyword matching '{pattern}'. "
-                "Read-only access only."
+            return json.dumps(
+                {
+                    "error": (
+                        f"Error: Query contains forbidden keyword matching '{pattern}'. "
+                        "Read-only access only."
+                    ),
+                    "error_category": "unsupported_capability",
+                }
             )
 
     provider = Database.get_query_target_provider()
@@ -218,6 +223,7 @@ async def handler(
         caps.supports_pagination,
     )
     if unsupported_response is not None:
+        print(f"DEBUG: pagination unsupported_response: {unsupported_response}")
         return unsupported_response
 
     max_page_size = 1000
@@ -373,11 +379,11 @@ async def handler(
         if partial_reason is None and size_truncated:
             partial_reason = PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
-            partial_reason = PayloadTruncationReason.PROVIDER_CAP.value  # Was "LIMITED"
+            partial_reason = PayloadTruncationReason.PROVIDER_CAP.value
         if partial_reason is None and safety_truncated:
-            partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value  # Was "TRUNCATED"
+            partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value
         if partial_reason is None and is_truncated:
-            partial_reason = PayloadTruncationReason.MAX_ROWS.value  # Was "TRUNCATED"
+            partial_reason = PayloadTruncationReason.MAX_ROWS.value
         cap_detected = partial_reason == "PROVIDER_CAP"
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
@@ -417,13 +423,12 @@ async def handler(
         error_message = f"Database Error: {str(e)}"
         payload = {"error": error_message}
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e)
-        if category:
-            payload["error_category"] = category
-            classification = classify_error_info(provider, e)
-            if classification.retry_after_seconds is not None:
-                payload["retry_after_seconds"] = classification.retry_after_seconds
-            emit_classified_error(provider, "execute_sql_query", category, e)
+        category = maybe_classify_error(provider, e) or "unknown"
+        payload["error_category"] = category
+        classification = classify_error_info(provider, e)
+        if classification.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = classification.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", category, e)
         return json.dumps(payload)
     except Exception as e:
         error_message = f"Execution Error: {str(e)}"
@@ -432,11 +437,10 @@ async def handler(
             "error_type": type(e).__name__,
         }
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e)
-        if category:
-            payload["error_category"] = category
-            classification = classify_error_info(provider, e)
-            if classification.retry_after_seconds is not None:
-                payload["retry_after_seconds"] = classification.retry_after_seconds
-            emit_classified_error(provider, "execute_sql_query", category, e)
+        category = maybe_classify_error(provider, e) or "unknown"
+        payload["error_category"] = category
+        classification = classify_error_info(provider, e)
+        if classification.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = classification.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", category, e)
         return json.dumps(payload)
