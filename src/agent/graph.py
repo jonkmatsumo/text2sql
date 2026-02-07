@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
+def _safe_env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        parsed = get_env_int(name, default)
+    except ValueError:
+        logger.warning("Invalid %s; using default %s", name, default)
+        return default
+    if parsed is None:
+        return default
+    return max(minimum, int(parsed))
+
+
 def run_telemetry_configure():
     """Configure telemetry at runtime to avoid import-time side effects."""
     # Configure Telemetry (OTEL only)
@@ -132,7 +143,8 @@ def route_after_validation(state: AgentState) -> str:
 
     Routes based on AST validation result:
     - If validation passed: go to execute
-    - If validation failed: go to correction
+    - If validation failed and budget available: go to correction
+    - If validation failed and budget exhausted: go to synthesize
 
     Args:
         state: Current agent state
@@ -140,12 +152,17 @@ def route_after_validation(state: AgentState) -> str:
     Returns:
         str: Next node name
     """
+    retry_count = state.get("retry_count", 0)
+    max_retries = _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+
     ast_result = state.get("ast_validation_result")
-    if ast_result and not ast_result.get("is_valid"):
-        return "correct"
-    # Also check for error set by validation
-    if state.get("error"):
-        return "correct"
+    is_invalid = (ast_result and not ast_result.get("is_valid")) or state.get("error")
+
+    if is_invalid:
+        if retry_count < max_retries:
+            return "correct"
+        return "synthesize"
+
     return "execute"
 
 
@@ -448,6 +465,7 @@ def create_workflow() -> StateGraph:
         {
             "execute": "execute",
             "correct": "correct",
+            "synthesize": "synthesize",
         },
     )
 
@@ -459,7 +477,7 @@ def create_workflow() -> StateGraph:
             "correct": "correct",
             "visualize": "visualize",
             "refresh_schema": "refresh_schema",
-            "failed": END,
+            "failed": "synthesize",
         },
     )
 

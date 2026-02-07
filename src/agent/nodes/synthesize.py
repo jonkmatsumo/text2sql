@@ -131,6 +131,30 @@ def synthesize_insight_node(state: AgentState) -> dict:
         if completeness.query_limit is not None:
             span.set_attribute("result.limit", completeness.query_limit)
 
+        error = state.get("error")
+        error_metadata = state.get("error_metadata")
+        error_category = state.get("error_category")
+
+        if error:
+            # Handle error synthesis
+            response_content = f"I encountered an error while processing your request: {error}"
+
+            # If we have structured metadata, we can be more specific
+            if error_category == "unsupported_capability":
+                cap = (error_metadata or {}).get("required_capability")
+                if cap:
+                    response_content = (
+                        f"The database backend does not support the '{cap}' "
+                        "capability required for this query."
+                    )
+
+            span.set_outputs({"error_response": response_content})
+            return {
+                "messages": [
+                    AIMessage(content=response_content),
+                ]
+            }
+
         if query_result is None:
             response_content = "I couldn't retrieve any results for your query."
             span.set_outputs({"response": response_content})

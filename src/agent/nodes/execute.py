@@ -402,6 +402,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             if parsed.get("response_shape") == "error":
                 error_msg = parsed.get("error") or "Tool returned an error."
                 error_category = parsed.get("error_category")
+                error_metadata = parsed.get("error_metadata")
                 retry_after_seconds = parsed.get("retry_after_seconds")
                 required_capability = parsed.get("required_capability")
                 capability_required = parsed.get("capability_required")
@@ -452,7 +453,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "query_result": None,
                     "error_category": error_category,
                     "retry_after_seconds": retry_after_seconds,
-                    "error_metadata": (
+                    "error_metadata": error_metadata
+                    or (
                         {
                             "required_capability": required_capability,
                             "capability_required": capability_required,
