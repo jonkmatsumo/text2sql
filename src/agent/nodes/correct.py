@@ -13,7 +13,7 @@ from agent.state import AgentState
 from agent.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
-from agent.utils.latency import update_latency_ema
+from agent.utils.budgeting import update_latency_ema
 from common.config.env import get_env_bool, get_env_float, get_env_str
 
 logger = logging.getLogger(__name__)
@@ -259,7 +259,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         span.set_attribute("latency.correct_seconds", latency_seconds)
         ema_alpha = get_env_float("AGENT_RETRY_BUDGET_EMA_ALPHA", 0.3)
         ema_latency = update_latency_ema(
-            state.get("ema_llm_latency_seconds"), latency_seconds, ema_alpha
+            state.get("ema_llm_latency_seconds"), latency_seconds, ema_alpha, dampen=True
         )
         span.set_attribute("retry.budget.observed_latency_seconds", latency_seconds)
         if ema_latency is not None:

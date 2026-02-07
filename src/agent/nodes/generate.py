@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
-from agent.utils.latency import update_latency_ema
+from agent.utils.budgeting import update_latency_ema
 from common.config.env import get_env_float
 
 load_dotenv()
