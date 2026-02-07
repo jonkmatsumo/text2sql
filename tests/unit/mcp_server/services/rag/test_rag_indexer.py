@@ -19,8 +19,9 @@ class TestIndexer:
     """Test suite for Schema Indexer."""
 
     @pytest.mark.asyncio
-    async def test_index_all_tables(self):
+    async def test_index_all_tables(self, monkeypatch):
         """Test indexing flow with mocked introspector and store."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         mock_introspector = AsyncMock()
         mock_introspector.list_table_names.return_value = ["users"]
 

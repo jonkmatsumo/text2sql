@@ -41,6 +41,7 @@ async def test_run_agent_create_interaction_strict_mode(monkeypatch):
     """Test that agent fails when interaction creation times out in strict mode."""
     monkeypatch.setenv("AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", "10")
     monkeypatch.setenv("AGENT_INTERACTION_PERSISTENCE_FAIL_OPEN", "False")
+    monkeypatch.setenv("AGENT_INTERACTION_PERSISTENCE_MODE", "strict")
 
     async def slow_create(*args, **kwargs):
         await asyncio.sleep(0.1)
