@@ -53,6 +53,15 @@ def redact_sensitive_info(text: str) -> str:
     # Redact potential API keys (e.g. sk-..., key-...)
     res = re.sub(r"\b(sk-[a-zA-Z0-9]{20,})\b", "<api-key>", res)
 
+    # Redact common sensitive key-value patterns
+    # Matches: password=..., token: ..., etc.
+    sensitive_keys = r"password|token|secret|api_key|auth|credential"
+    res = re.sub(
+        rf"(?i)\b({sensitive_keys})([ \t]*[=:][ \t]*)[^\s,;]+",
+        r"\1\2<redacted>",
+        res,
+    )
+
     return res
 
 

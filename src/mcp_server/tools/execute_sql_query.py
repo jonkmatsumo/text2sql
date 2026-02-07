@@ -15,11 +15,7 @@ from dal.capability_negotiation import (
     parse_capability_fallback_policy,
 )
 from dal.database import Database
-from dal.error_classification import (
-    classify_error_info,
-    emit_classified_error,
-    maybe_classify_error,
-)
+from dal.error_classification import emit_classified_error, extract_error_metadata
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
@@ -420,27 +416,26 @@ async def handler(
         return json.dumps(payload, default=str, separators=(",", ":"))
 
     except asyncpg.PostgresError as e:
-        error_message = f"Database Error: {str(e)}"
-        payload = {"error": error_message}
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e) or "unknown"
-        payload["error_category"] = category
-        classification = classify_error_info(provider, e)
-        if classification.retry_after_seconds is not None:
-            payload["retry_after_seconds"] = classification.retry_after_seconds
-        emit_classified_error(provider, "execute_sql_query", category, e)
+        metadata = extract_error_metadata(provider, e)
+        payload = {
+            "error": metadata.message,
+            "error_category": metadata.category,
+            "error_metadata": metadata.to_dict(),
+        }
+        if metadata.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = metadata.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return json.dumps(payload)
     except Exception as e:
-        error_message = f"Execution Error: {str(e)}"
-        payload = {
-            "error": error_message,
-            "error_type": type(e).__name__,
-        }
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e) or "unknown"
-        payload["error_category"] = category
-        classification = classify_error_info(provider, e)
-        if classification.retry_after_seconds is not None:
-            payload["retry_after_seconds"] = classification.retry_after_seconds
-        emit_classified_error(provider, "execute_sql_query", category, e)
+        metadata = extract_error_metadata(provider, e)
+        payload = {
+            "error": metadata.message,
+            "error_category": metadata.category,
+            "error_metadata": metadata.to_dict(),
+        }
+        if metadata.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = metadata.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return json.dumps(payload)
