@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Tuple
 
+from common.sanitization.bounding import redact_recursive
+
 # --- Constants & Keys ---
 
 
@@ -57,22 +59,53 @@ class TelemetryKeys(str, Enum):
 # --- Safety Utilities ---
 
 MAX_PAYLOAD_SIZE = 32 * 1024  # 32KB hard limit for attributes
-SENSITIVE_KEYS = {"api_key", "password", "secret", "token", "credential", "auth"}
+
+# Keys that are known to contain large text or high-cardinality data
+HIGH_CARDINALITY_KEYS = {
+    "schema_context",
+    "raw_schema_context",
+    "procedural_plan",
+    "query_result",
+    "last_tool_output",
+}
+
+# Keys that contain SQL or other sensitive text that should be hashed + summarized
+SENSITIVE_TEXT_KEYS = {
+    "current_sql",
+    "rewritten_sql",
+    "sql",
+    "original_sql",
+}
 
 
-def redact_secrets(obj: Any) -> Any:
-    """Recursively redact sensitive keys in dictionaries."""
-    if isinstance(obj, dict):
-        new_obj = {}
-        for k, v in obj.items():
-            if any(s in k.lower() for s in SENSITIVE_KEYS):
-                new_obj[k] = "[REDACTED]"
-            else:
-                new_obj[k] = redact_secrets(v)
-        return new_obj
-    elif isinstance(obj, list):
-        return [redact_secrets(item) for item in obj]
-    return obj
+def bound_attribute(key: str, value: Any) -> Any:
+    """Apply cardinality and safety guardrails to a single attribute."""
+    if value is None:
+        return None
+
+    # Handle Sensitive Text (SQL, etc.)
+    if key in SENSITIVE_TEXT_KEYS and isinstance(value, str):
+        val_hash = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        summary = value[:500] + "..." if len(value) > 500 else value
+        return f"hash:{val_hash} | {summary}"
+
+    # Handle High Cardinality / Large Objects
+    if key in HIGH_CARDINALITY_KEYS:
+        from common.sanitization.bounding import bound_payload
+
+        # Bound collections to a safe size
+        bounded = bound_payload(value, max_items=20)
+        # Serialize to string if it's still a complex object for OTEL compatibility
+        if isinstance(bounded, (dict, list)):
+            json_str, _, _, _ = truncate_json(bounded, max_len=2048)
+            return json_str
+        return bounded
+
+    # General Bounding for all strings
+    if isinstance(value, str) and len(value) > 2048:
+        return value[:2045] + "..."
+
+    return value
 
 
 def truncate_json(
@@ -85,7 +118,7 @@ def truncate_json(
         Tuple(serialized_str, was_truncated, size_bytes, sha256_hash)
     """
     # 1. Redact first
-    clean_obj = redact_secrets(obj)
+    clean_obj = redact_recursive(obj)
 
     # 2. Serialize deterministically
     try:

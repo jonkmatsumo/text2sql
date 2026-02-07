@@ -14,6 +14,10 @@ from typing import Optional
 import sqlglot
 from sqlglot import exp
 
+from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
+from common.config.env import get_env_int
+from common.constants.reason_codes import ValidationRefusalReason
+
 
 class ViolationType(str, Enum):
     """Types of security violations detected during AST validation."""
@@ -22,6 +26,7 @@ class ViolationType(str, Enum):
     FORBIDDEN_COMMAND = "forbidden_command"
     DANGEROUS_PATTERN = "dangerous_pattern"
     SYNTAX_ERROR = "syntax_error"
+    COMPLEXITY_LIMIT = "complexity_limit"
 
 
 @dataclass
@@ -265,28 +270,13 @@ def extract_metadata(ast: exp.Expression) -> SQLMetadata:
     metadata = SQLMetadata()
 
     # Extract table lineage
-    tables = set()
-    for table in ast.find_all(exp.Table):
-        if table.name:
-            table_name = table.name
-            if table.db:
-                table_name = f"{table.db}.{table_name}"
-            tables.add(table_name)
-    metadata.table_lineage = sorted(tables)
+    metadata.table_lineage = sorted(extract_tables(ast))
 
     # Extract column usage
-    columns = set()
-    for column in ast.find_all(exp.Column):
-        if column.name:
-            col_ref = column.name
-            if column.table:
-                col_ref = f"{column.table}.{col_ref}"
-            columns.add(col_ref)
-    metadata.column_usage = sorted(columns)
+    metadata.column_usage = sorted(extract_columns(ast))
 
     # Count join complexity
-    joins = list(ast.find_all(exp.Join))
-    metadata.join_complexity = len(joins)
+    metadata.join_complexity = count_joins(ast)
 
     # Check for aggregation
     agg_funcs = (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max, exp.AggFunc)
@@ -301,9 +291,46 @@ def extract_metadata(ast: exp.Expression) -> SQLMetadata:
     return metadata
 
 
+def validate_complexity(ast: exp.Expression) -> list[SecurityViolation]:
+    """
+    Validate SQL AST for complexity limits.
+
+    Checks:
+    - Join complexity
+
+    Args:
+        ast: Parsed SQL AST
+
+    Returns:
+        List of SecurityViolation objects (empty if valid)
+    """
+    violations = []
+
+    # Join Complexity
+    # Default to 10 as per conservative default
+    max_joins = get_env_int("AGENT_MAX_JOIN_COMPLEXITY", 10)
+    join_count = count_joins(ast)
+    if join_count > max_joins:
+        violations.append(
+            SecurityViolation(
+                violation_type=ViolationType.COMPLEXITY_LIMIT,
+                message=(
+                    f"Complexity Limit: Query contains {join_count} joins, "
+                    f"exceeding the limit of {max_joins}. Please simplify the query."
+                ),
+                details={
+                    "join_count": join_count,
+                    "limit": max_joins,
+                    "reason_code": ValidationRefusalReason.JOIN_COMPLEXITY_EXCEEDED.value,
+                },
+            )
+        )
+    return violations
+
+
 def validate_sql(sql: str, dialect: str = "postgres") -> ASTValidationResult:
     """
-    Complete SQL validation: parse, security check, and metadata extraction.
+    Complete SQL validation: parse, security check, complexity check, and metadata extraction.
 
     This is the main entry point for AST validation.
 
@@ -332,12 +359,16 @@ def validate_sql(sql: str, dialect: str = "postgres") -> ASTValidationResult:
     # Validate security
     violations = validate_security(ast)
 
+    # Validate complexity
+    complexity_violations = validate_complexity(ast)
+    violations.extend(complexity_violations)
+
     # Extract metadata (even if there are violations, for audit purposes)
     metadata = extract_metadata(ast)
 
     # Transpile to normalized form (useful for caching and comparison)
     try:
-        parsed_sql = ast.sql(dialect=dialect)
+        parsed_sql = normalize_sql(ast, dialect=dialect)
     except Exception:
         parsed_sql = sql  # Fallback to original
 

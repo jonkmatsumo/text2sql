@@ -6,9 +6,62 @@ from dataclasses import dataclass
 from typing import Optional
 
 from common.config.env import get_env_bool
+from common.models.error_metadata import ErrorMetadata
+from common.sanitization.bounding import redact_recursive
 from dal.feature_flags import experimental_features_enabled
 
 logger = logging.getLogger(__name__)
+
+
+def extract_error_metadata(provider: str, exc: Exception) -> ErrorMetadata:
+    """Extract structured ErrorMetadata from an exception."""
+    info = classify_error_info(provider, exc)
+
+    # Defaults
+    sql_state = None
+    line_number = None
+    position = None
+    hint = None
+    message = str(exc)
+
+    # Provider-specific extraction
+    module_name = exc.__class__.__module__.lower()
+    if "asyncpg" in module_name:
+        # asyncpg.exceptions.PostgresError subclasses
+        sql_state = getattr(exc, "sqlstate", None)
+        hint = getattr(exc, "hint", None)
+        # detail often contains PII, so we redact it if we were to use it.
+        # message already contains the primary error.
+
+        # Extract position/line if available
+        # asyncpg errors often have a structured message with position
+        pos = getattr(exc, "position", None)
+        if pos is not None:
+            try:
+                position = int(pos)
+            except (ValueError, TypeError):
+                pass
+
+    # Apply shared redaction and bounding
+    redacted_message = redact_recursive(message)
+    if len(redacted_message) > 2048:
+        redacted_message = redacted_message[:2045] + "..."
+
+    redacted_hint = redact_recursive(hint) if hint else None
+    if redacted_hint and len(redacted_hint) > 2048:
+        redacted_hint = redacted_hint[:2045] + "..."
+
+    return ErrorMetadata(
+        sql_state=sql_state,
+        message=redacted_message,
+        line_number=line_number,
+        position=position,
+        hint=redacted_hint,
+        provider=info.provider,
+        category=info.category,
+        is_retryable=info.is_retryable,
+        retry_after_seconds=info.retry_after_seconds,
+    )
 
 
 def maybe_classify_error(provider: str, exc: Exception) -> Optional[str]:
@@ -68,7 +121,15 @@ def classify_error_info(provider: str, exc: Exception) -> ErrorClassification:
     ):
         return _classification("auth", provider, retry_after)
     if _matches_any(
-        message, ("syntax error", "sql compilation error", "parse error", "invalid query")
+        message,
+        (
+            "syntax error",
+            "sql compilation error",
+            "parse error",
+            "invalid query",
+            "does not exist",
+            "not found",
+        ),
     ):
         return _classification("syntax", provider, retry_after)
     if _matches_any(message, ("not supported", "unsupported", "feature not supported")):

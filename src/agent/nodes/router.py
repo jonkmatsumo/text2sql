@@ -97,7 +97,9 @@ async def router_node(state: AgentState) -> dict:
                 )
                 from agent.llm_client import get_llm
 
-                contextualize_chain = contextualize_prompt | get_llm(temperature=0)
+                contextualize_chain = contextualize_prompt | get_llm(
+                    temperature=0, seed=state.get("seed")
+                )
 
                 # Exclude the last message (current user query) from history
                 history_messages = messages[:-1]
@@ -162,7 +164,7 @@ async def router_node(state: AgentState) -> dict:
             prompt = ChatPromptTemplate.from_messages([("system", CLARIFICATION_SYSTEM_PROMPT)])
             from agent.llm_client import get_llm
 
-            chain = prompt | get_llm(temperature=0)
+            chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
             response = await chain.ainvoke(
                 {
                     "ambiguity_data": json.dumps(res_data),

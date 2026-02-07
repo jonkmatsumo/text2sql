@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Optional
 
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
@@ -18,6 +19,11 @@ from agent.utils.pagination_prefetch import (
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
 from common.config.env import get_env_bool, get_env_int, get_env_str
+from common.constants.reason_codes import (
+    DriftDetectionMethod,
+    PaginationStopReason,
+    PrefetchSuppressionReason,
+)
 from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
@@ -27,9 +33,20 @@ class ToolResponseMalformedError(RuntimeError):
     """Raised when execute_sql_query returns an unexpected payload."""
 
 
-def _schema_drift_hint(error_text: str, provider: str) -> tuple[bool, list[str]]:
+def _schema_drift_hint(
+    error_text: str,
+    provider: str,
+    sql: Optional[str] = None,
+    raw_schema_context: Optional[list[dict]] = None,
+) -> tuple[bool, list[str], Optional[DriftDetectionMethod]]:
+    from agent.utils.drift_detection import detect_schema_drift
+
+    if sql and raw_schema_context:
+        identifiers, method = detect_schema_drift(sql, error_text, provider, raw_schema_context)
+        return (len(identifiers) > 0, identifiers, method)
+
     identifiers = extract_missing_identifiers(provider, error_text)
-    return (len(identifiers) > 0, identifiers)
+    return (len(identifiers) > 0, identifiers, DriftDetectionMethod.REGEX_FALLBACK)
 
 
 def _safe_env_int(name: str, default: int, minimum: int) -> int:
@@ -104,6 +121,7 @@ def parse_execute_tool_response(payload) -> dict:
                     "response_shape": "error",
                     "error": item.get("error"),
                     "error_category": item.get("error_category"),
+                    "error_metadata": item.get("error_metadata"),
                     "retry_after_seconds": item.get("retry_after_seconds"),
                     "required_capability": item.get("required_capability"),
                     "capability_required": item.get("capability_required"),
@@ -136,6 +154,7 @@ def parse_execute_tool_response(payload) -> dict:
                 "response_shape": "error",
                 "error": parsed.get("error"),
                 "error_category": parsed.get("error_category"),
+                "error_metadata": parsed.get("error_metadata"),
                 "retry_after_seconds": parsed.get("retry_after_seconds"),
                 "required_capability": parsed.get("required_capability"),
                 "capability_required": parsed.get("capability_required"),
@@ -351,7 +370,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             result_cap_mitigation_mode = None
             result_auto_paginated = False
             result_pages_fetched = 1
-            result_auto_pagination_stopped_reason = "disabled"
+            result_auto_pagination_stopped_reason = PaginationStopReason.DISABLED.value
             result_prefetch_enabled = prefetch_enabled
             result_prefetch_scheduled = False
             result_prefetch_reason = prefetch_reason
@@ -362,13 +381,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 provider = get_env_str(
                     "QUERY_TARGET_BACKEND", get_env_str("QUERY_TARGET_PROVIDER", "postgres")
                 )
-                suspected, identifiers = _schema_drift_hint(error_msg, provider)
+                sql = state.get("current_sql")
+                raw_schema_context = state.get("raw_schema_context")
+                suspected, identifiers, method = _schema_drift_hint(
+                    error_msg, provider, sql, raw_schema_context
+                )
                 if not suspected:
                     return {}
                 auto_refresh = get_env_bool("AGENT_SCHEMA_DRIFT_AUTO_REFRESH", False)
                 span.set_attribute("schema.drift.suspected", True)
                 span.set_attribute("schema.drift.missing_identifiers_count", len(identifiers))
                 span.set_attribute("schema.drift.auto_refresh_enabled", auto_refresh)
+                if method:
+                    span.set_attribute("schema.drift.detection_method", method.value)
                 return {
                     "schema_drift_suspected": True,
                     "missing_identifiers": identifiers,
@@ -489,14 +514,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_cap_mitigation_mode = metadata.get("cap_mitigation_mode")
                 auto_pagination_enabled, auto_max_pages, auto_max_rows = _auto_pagination_config()
                 if auto_pagination_enabled:
-                    result_auto_pagination_stopped_reason = "no_next_page"
+                    result_auto_pagination_stopped_reason = PaginationStopReason.NO_NEXT_PAGE.value
                 if auto_pagination_enabled and len(query_result) > auto_max_rows:
                     query_result = query_result[:auto_max_rows]
                     result_is_truncated = True
                     if not result_partial_reason:
                         result_partial_reason = "LIMITED"
                     result_rows_returned = len(query_result)
-                    result_auto_pagination_stopped_reason = "max_rows"
+                    result_auto_pagination_stopped_reason = PaginationStopReason.MAX_ROWS.value
                 elif (
                     auto_pagination_enabled
                     and result_next_page_token
@@ -512,17 +537,23 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
                     while next_page_token:
                         if result_pages_fetched >= auto_max_pages:
-                            result_auto_pagination_stopped_reason = "max_pages"
+                            result_auto_pagination_stopped_reason = (
+                                PaginationStopReason.MAX_PAGES.value
+                            )
                             break
                         if len(aggregated_rows) >= auto_max_rows:
-                            result_auto_pagination_stopped_reason = "max_rows"
+                            result_auto_pagination_stopped_reason = (
+                                PaginationStopReason.MAX_ROWS.value
+                            )
                             break
 
                         page_timeout = None
                         if deadline_ts is not None:
                             page_timeout = max(0.0, deadline_ts - time.monotonic())
                             if page_timeout <= 0.5:  # Grace period
-                                result_auto_pagination_stopped_reason = "budget_exhausted"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.BUDGET_EXHAUSTED.value
+                                )
                                 break
 
                         page_payload = {
@@ -554,11 +585,15 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             )
 
                             if page_parsed.get("response_shape") == "error":
-                                result_auto_pagination_stopped_reason = "fetch_error"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.FETCH_ERROR.value
+                                )
                                 break
 
                             if page_parsed.get("response_shape") != "enveloped":
-                                result_auto_pagination_stopped_reason = "non_enveloped_response"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.NON_ENVELOPED_RESPONSE.value
+                                )
                                 break
 
                             page_rows = page_parsed.get("rows") or []
@@ -566,13 +601,18 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
                             # Progress check: empty page with token is suspicious
                             if not page_rows and page_metadata.get("next_page_token"):
-                                if result_auto_pagination_stopped_reason == "empty_page_with_token":
+                                if (
+                                    result_auto_pagination_stopped_reason
+                                    == PaginationStopReason.EMPTY_PAGE_WITH_TOKEN.value
+                                ):
                                     # Already saw an empty page once, stop now to prevent spinning
                                     result_auto_pagination_stopped_reason = (
-                                        "pathological_empty_pages"
+                                        PaginationStopReason.PATHOLOGICAL_EMPTY_PAGES.value
                                     )
                                     break
-                                result_auto_pagination_stopped_reason = "empty_page_with_token"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.EMPTY_PAGE_WITH_TOKEN.value
+                                )
 
                             aggregated_rows.extend(page_rows)
                             result_pages_fetched += 1
@@ -582,7 +622,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             if next_page_token:
                                 token_str = str(next_page_token)
                                 if token_str in seen_tokens:
-                                    result_auto_pagination_stopped_reason = "token_repeat"
+                                    result_auto_pagination_stopped_reason = (
+                                        PaginationStopReason.TOKEN_REPEAT.value
+                                    )
                                     next_page_token = None
                                     break
                                 seen_tokens.add(token_str)
@@ -651,13 +693,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                 result_is_truncated = True
                                 if not result_partial_reason:
                                     result_partial_reason = "LIMITED"
-                                result_auto_pagination_stopped_reason = "max_rows"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.MAX_ROWS.value
+                                )
                                 break
                             if not next_page_token:
-                                result_auto_pagination_stopped_reason = "no_next_page"
+                                result_auto_pagination_stopped_reason = (
+                                    PaginationStopReason.NO_NEXT_PAGE.value
+                                )
                         except Exception as e:
                             logger.warning(f"Auto-pagination page fetch failed: {e}")
-                            result_auto_pagination_stopped_reason = "fetch_exception"
+                            result_auto_pagination_stopped_reason = (
+                                PaginationStopReason.FETCH_EXCEPTION.value
+                            )
                             break
 
                     query_result = aggregated_rows
@@ -668,19 +716,25 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     and result_capability_required == "pagination"
                     and result_capability_supported is False
                 ):
-                    result_auto_pagination_stopped_reason = "unsupported_capability"
+                    result_auto_pagination_stopped_reason = (
+                        PaginationStopReason.UNSUPPORTED_CAPABILITY.value
+                    )
 
                 if prefetch_enabled:
                     if result_prefetch_reason == "cache_hit":
                         pass
                     elif result_auto_paginated:
-                        result_prefetch_reason = "auto_pagination_active"
+                        result_prefetch_reason = (
+                            PrefetchSuppressionReason.AUTO_PAGINATION_ACTIVE.value
+                        )
                     elif auto_pagination_enabled:
                         # Even if not active for this turn, skip if enabled globally
                         # to avoid mixing manual prefetch with auto loop potential
-                        result_prefetch_reason = "auto_pagination_enabled"
+                        result_prefetch_reason = (
+                            PrefetchSuppressionReason.AUTO_PAGINATION_ENABLED.value
+                        )
                     elif not result_next_page_token:
-                        result_prefetch_reason = "no_next_page"
+                        result_prefetch_reason = PrefetchSuppressionReason.NO_NEXT_PAGE.value
                     else:
                         prefetch_page_size = execute_payload.get("page_size") or result_page_size
                         if prefetch_page_size is None:
@@ -691,7 +745,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             first_page_rows,
                             int(prefetch_page_size),
                         ):
-                            result_prefetch_reason = "not_cheap"
+                            result_prefetch_reason = PrefetchSuppressionReason.NOT_CHEAP.value
                         else:
                             prefetch_timeout = None
                             if deadline_ts is not None:
@@ -700,8 +754,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     0.0, min(2.0, deadline_ts - time.monotonic())
                                 )
                                 if prefetch_timeout <= 0.5:
-                                    result_prefetch_reason = "low_budget"
-                            if result_prefetch_reason not in {"low_budget", "not_cheap"}:
+                                    result_prefetch_reason = (
+                                        PrefetchSuppressionReason.LOW_BUDGET.value
+                                    )
+                            if result_prefetch_reason not in {
+                                PrefetchSuppressionReason.LOW_BUDGET.value,
+                                PrefetchSuppressionReason.NOT_CHEAP.value,
+                            }:
                                 next_page_token_for_prefetch = str(result_next_page_token)
                                 prefetch_key = build_prefetch_cache_key(
                                     sql_query=rewritten_sql,
@@ -747,15 +806,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     max_concurrency=prefetch_max_concurrency,
                                 )
                                 if result_prefetch_scheduled:
-                                    result_prefetch_reason = "scheduled"
+                                    result_prefetch_reason = (
+                                        PrefetchSuppressionReason.SCHEDULED.value
+                                    )
                                 else:
-                                    result_prefetch_reason = "already_cached_or_inflight"
+                                    result_prefetch_reason = (
+                                        PrefetchSuppressionReason.ALREADY_CACHED_OR_INFLIGHT.value
+                                    )
 
                 # Emit event if prefetch was enabled but not scheduled (and not cache hit)
                 if (
                     prefetch_enabled
                     and not result_prefetch_scheduled
-                    and result_prefetch_reason != "cache_hit"
+                    and result_prefetch_reason != PrefetchSuppressionReason.CACHE_HIT.value
                 ):
                     span.add_event(
                         "pagination.prefetch_suppressed", {"reason": str(result_prefetch_reason)}

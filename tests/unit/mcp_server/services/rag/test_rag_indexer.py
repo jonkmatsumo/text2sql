@@ -19,8 +19,9 @@ class TestIndexer:
     """Test suite for Schema Indexer."""
 
     @pytest.mark.asyncio
-    async def test_index_all_tables(self):
+    async def test_index_all_tables(self, monkeypatch):
         """Test indexing flow with mocked introspector and store."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         mock_introspector = AsyncMock()
         mock_introspector.list_table_names.return_value = ["users"]
 
@@ -65,7 +66,7 @@ class TestIndexer:
             mock_store.save_schema_embedding.assert_called_once()
             embedding_arg = mock_store.save_schema_embedding.call_args[0][0]
             assert embedding_arg.table_name == "users"
-            assert "email (text, nullable)" in embedding_arg.schema_text
+            assert "email (string, nullable)" in embedding_arg.schema_text
             assert embedding_arg.embedding == [0.1, 0.2]
 
             mock_reload.assert_called_once()

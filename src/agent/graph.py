@@ -1,5 +1,6 @@
 """LangGraph workflow definition for Text 2 SQL agent with MLflow tracing."""
 
+import asyncio
 import inspect
 import json
 import logging
@@ -25,6 +26,7 @@ from agent.nodes.visualize import visualize_query_node
 from agent.state import AgentState
 from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
+from common.constants.reason_codes import RetryDecisionReason
 
 logger = logging.getLogger(__name__)
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -205,7 +207,7 @@ def route_after_execution(state: AgentState) -> str:
                 {
                     "category": "unsupported_capability",
                     "is_retryable": False,
-                    "reason_code": "UNSUPPORTED_CAPABILITY",
+                    "reason_code": RetryDecisionReason.UNSUPPORTED_CAPABILITY.value,
                     "will_retry": False,
                 },
             )
@@ -264,7 +266,7 @@ def route_after_execution(state: AgentState) -> str:
         if not is_retryable:
             retry_summary["stopped_non_retryable"] = True
             state["retry_summary"] = retry_summary
-            retry_decision["reason_code"] = "NON_RETRYABLE_CATEGORY"
+            retry_decision["reason_code"] = RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
             retry_decision["will_retry"] = False
             if span:
                 span.add_event("retry.decision", retry_decision)
@@ -285,7 +287,9 @@ def route_after_execution(state: AgentState) -> str:
                 retry_summary["budget_exhausted"] = True
                 state["retry_summary"] = retry_summary
                 state["error_category"] = "timeout"
-                retry_decision["reason_code"] = "BUDGET_EXHAUSTED_RETRY_AFTER"
+                retry_decision["reason_code"] = (
+                    RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER.value
+                )
                 retry_decision["will_retry"] = False
                 if span:
                     span.add_event("retry.decision", retry_decision)
@@ -322,7 +326,7 @@ def route_after_execution(state: AgentState) -> str:
                 f"{required_budget:.2f}s."
             )
             state["error_category"] = "timeout"
-            retry_decision["reason_code"] = "INSUFFICIENT_BUDGET"
+            retry_decision["reason_code"] = RetryDecisionReason.INSUFFICIENT_BUDGET.value
             retry_decision["will_retry"] = False
             if span:
                 span.add_event("retry.decision", retry_decision)
@@ -334,7 +338,7 @@ def route_after_execution(state: AgentState) -> str:
     if deadline_ts is not None and time.monotonic() >= deadline_ts:
         retry_summary["budget_exhausted"] = True
         state["retry_summary"] = retry_summary
-        retry_decision["reason_code"] = "DEADLINE_EXCEEDED"
+        retry_decision["reason_code"] = RetryDecisionReason.DEADLINE_EXCEEDED.value
         retry_decision["will_retry"] = False
         if span:
             span.add_event("retry.decision", retry_decision)
@@ -343,14 +347,14 @@ def route_after_execution(state: AgentState) -> str:
     if retry_count >= max_retries:
         retry_summary["max_retries_reached"] = True
         state["retry_summary"] = retry_summary
-        retry_decision["reason_code"] = "MAX_RETRIES_REACHED"
+        retry_decision["reason_code"] = RetryDecisionReason.MAX_RETRIES_REACHED.value
         retry_decision["will_retry"] = False
         if span:
             span.add_event("retry.decision", retry_decision)
         return "failed"
 
     state["retry_summary"] = retry_summary
-    retry_decision["reason_code"] = "PROCEED_TO_CORRECTION"
+    retry_decision["reason_code"] = RetryDecisionReason.PROCEED_TO_CORRECTION.value
     retry_decision["will_retry"] = True
     if span:
         span.add_event("retry.decision", retry_decision)
@@ -567,6 +571,7 @@ async def run_agent_with_tracing(
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
             "page_size": page_size,
+            "seed": get_env_int("AGENT_LLM_SEED", None),
             "interactive_session": interactive_session,
             "replay_bundle": replay_bundle,
         }
@@ -656,21 +661,48 @@ async def run_agent_with_tracing(
                     if telemetry.get_current_span():
                         telemetry.get_current_span().add_event("persistence.create.start")
 
-                    raw_interaction_id = await retry_with_backoff(
-                        _create_interaction,
-                        "create_interaction",
-                        extra_context={"trace_id": thread_id},
+                    persistence_timeout_ms = get_env_int(
+                        "AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", 500
                     )
-                    interaction_id = unpack_mcp_result(raw_interaction_id)
-                    inputs["interaction_id"] = interaction_id
-                    interaction_persisted = True
-                    inputs["interaction_persisted"] = True
-                    # Also make interaction_id sticky
-                    telemetry.update_current_trace({"interaction_id": interaction_id})
-                    if telemetry.get_current_span():
-                        telemetry.get_current_span().add_event(
-                            "persistence.create.success", {"interaction_id": interaction_id}
+                    persistence_fail_open = get_env_bool(
+                        "AGENT_INTERACTION_PERSISTENCE_FAIL_OPEN", True
+                    )
+
+                    try:
+                        raw_interaction_id = await asyncio.wait_for(
+                            retry_with_backoff(
+                                _create_interaction,
+                                "create_interaction",
+                                extra_context={"trace_id": thread_id},
+                            ),
+                            timeout=persistence_timeout_ms / 1000.0,
                         )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Interaction creation timed out after %dms", persistence_timeout_ms
+                        )
+                        telemetry.add_event(
+                            "interaction.persistence_timeout",
+                            attributes={"stage": "create", "timeout_ms": persistence_timeout_ms},
+                        )
+                        if not persistence_fail_open:
+                            raise
+                        raw_interaction_id = None
+
+                    if raw_interaction_id:
+                        interaction_id = unpack_mcp_result(raw_interaction_id)
+                        inputs["interaction_id"] = interaction_id
+                        interaction_persisted = True
+                        inputs["interaction_persisted"] = True
+                        # Also make interaction_id sticky
+                        telemetry.update_current_trace({"interaction_id": interaction_id})
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "persistence.create.success", {"interaction_id": interaction_id}
+                            )
+                    else:
+                        interaction_persisted = False
+                        inputs["interaction_persisted"] = False
                 except Exception as e:
                     # Structured logging with context (retry utility already logged attempts)
                     logger.error(
@@ -770,14 +802,38 @@ async def run_agent_with_tracing(
                                 "persistence.update.start", {"interaction_id": interaction_id}
                             )
 
-                        await retry_with_backoff(
-                            _update_interaction,
-                            "update_interaction",
-                            extra_context={
-                                "trace_id": thread_id,
-                                "interaction_id": interaction_id,
-                            },
+                        persistence_timeout_ms = get_env_int(
+                            "AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", 500
                         )
+                        persistence_fail_open = get_env_bool(
+                            "AGENT_INTERACTION_PERSISTENCE_FAIL_OPEN", True
+                        )
+
+                        try:
+                            await asyncio.wait_for(
+                                retry_with_backoff(
+                                    _update_interaction,
+                                    "update_interaction",
+                                    extra_context={
+                                        "trace_id": thread_id,
+                                        "interaction_id": interaction_id,
+                                    },
+                                ),
+                                timeout=persistence_timeout_ms / 1000.0,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "Interaction update timed out after %dms", persistence_timeout_ms
+                            )
+                            telemetry.add_event(
+                                "interaction.persistence_timeout",
+                                attributes={
+                                    "stage": "update",
+                                    "timeout_ms": persistence_timeout_ms,
+                                },
+                            )
+                            if not persistence_fail_open:
+                                raise
 
                         if telemetry.get_current_span():
                             telemetry.get_current_span().add_event(

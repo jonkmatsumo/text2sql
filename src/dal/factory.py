@@ -365,7 +365,7 @@ def get_schema_introspector() -> SchemaIntrospector:
             from dal.schema_cache import SCHEMA_CACHE, CachedSchemaIntrospector
 
             caps = Database.get_query_target_capabilities()
-            if caps.supports_schema_cache:
+            if getattr(caps, "supports_schema_cache", False):
                 _schema_introspector = CachedSchemaIntrospector(
                     provider, _schema_introspector, SCHEMA_CACHE
                 )

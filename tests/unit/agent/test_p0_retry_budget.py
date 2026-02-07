@@ -7,7 +7,7 @@ import pytest
 from agent.graph import _estimate_correction_budget_seconds, route_after_execution
 from agent.nodes.correct import correct_sql_node
 from agent.state import AgentState
-from agent.utils.latency import update_latency_ema
+from agent.utils.budgeting import update_latency_ema
 
 
 def test_estimate_uses_observed_latency_with_overhead(monkeypatch):
@@ -43,6 +43,14 @@ def test_estimate_uses_ema_when_present(monkeypatch):
 def test_latency_ema_update_math():
     """EMA should update deterministically based on alpha."""
     ema = update_latency_ema(2.0, 4.0, 0.25)
+    assert ema == pytest.approx(2.5)
+
+
+def test_latency_ema_update_math_dampened():
+    """Dampening should reduce alpha by 50%."""
+    # alpha=0.5 -> effective alpha=0.25
+    # ema = 0.25 * 4.0 + 0.75 * 2.0 = 1.0 + 1.5 = 2.5
+    ema = update_latency_ema(2.0, 4.0, 0.5, dampen=True)
     assert ema == pytest.approx(2.5)
 
 

@@ -20,6 +20,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
+from common.sanitization.bounding import redact_recursive
 
 logger = logging.getLogger(__name__)
 
@@ -172,10 +173,10 @@ class TelemetryBackend(abc.ABC):
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
 
-    def __init__(self, otel_span):
+    def __init__(self, otel_span, attributes: Optional[Dict[str, Any]] = None):
         """Initialize with an OTEL span object."""
         self._span = otel_span
-        self._tracked_attributes: Dict[str, Any] = {}
+        self._tracked_attributes: Dict[str, Any] = attributes.copy() if attributes else {}
         self._has_error = False
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
@@ -207,15 +208,26 @@ class OTELTelemetrySpan(TelemetrySpan):
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        self._span.set_attribute(key, value)
-        self._tracked_attributes[key] = value
+        from agent.telemetry_schema import bound_attribute
+
+        # To catch sensitive keys at the top level, we redact a wrapper dict
+        redacted_dict = redact_recursive({key: value})
+        redacted_value = redacted_dict[key]
+
+        guarded_value = bound_attribute(key, redacted_value)
+        self._span.set_attribute(key, guarded_value)
+        self._tracked_attributes[key] = guarded_value
         if key in ("error", "error.category", "error.type"):
             self._has_error = True
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        self._span.set_attributes(attributes)
-        self._tracked_attributes.update(attributes)
+        from agent.telemetry_schema import bound_attribute
+
+        redacted_attrs = redact_recursive(attributes)
+        guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+        self._span.set_attributes(guarded_attrs)
+        self._tracked_attributes.update(guarded_attrs)
         if any(k in attributes for k in ("error", "error.category", "error.type")):
             self._has_error = True
 
@@ -329,7 +341,7 @@ class OTELTelemetryBackend(TelemetryBackend):
         with tracer.start_as_current_span(
             name=name, kind=trace.SpanKind.INTERNAL, attributes=base_attrs
         ) as otel_span:
-            span = OTELTelemetrySpan(otel_span)
+            span = OTELTelemetrySpan(otel_span, attributes=base_attrs)
             if inputs:
                 span.set_inputs(inputs)
             try:
@@ -626,6 +638,8 @@ class TelemetryService:
 
         try:
             # 4. Prepare Attributes
+            from agent.telemetry_schema import bound_attribute
+
             merged_attributes = child_meta.copy()
             # Remove internal keys for emission
             if "_seq_counter" in merged_attributes:
@@ -634,23 +648,27 @@ class TelemetryService:
             if attributes:
                 merged_attributes.update(attributes)
 
+            # Redact and bound all attributes before starting span
+            redacted_attributes = redact_recursive(merged_attributes)
+            final_attributes = {k: bound_attribute(k, v) for k, v in redacted_attributes.items()}
+
             # Set standard contract attributes explicitly
-            merged_attributes["event.seq"] = event_seq
+            final_attributes["event.seq"] = event_seq
             # Auto-set event.type from span_type (unless already provided)
-            if "event.type" not in merged_attributes:
-                merged_attributes["event.type"] = (
+            if "event.type" not in final_attributes:
+                final_attributes["event.type"] = (
                     span_type.value if hasattr(span_type, "value") else str(span_type)
                 )
             # Auto-set event.name from span name (unless already provided)
-            if "event.name" not in merged_attributes:
-                merged_attributes["event.name"] = name
+            if "event.name" not in final_attributes:
+                final_attributes["event.name"] = name
 
             # 5. Start Span
             with self._backend.start_span(
                 name=name,
                 span_type=span_type,
                 inputs=inputs,
-                attributes=merged_attributes,
+                attributes=final_attributes,
             ) as span:
                 yield span
 
@@ -744,6 +762,19 @@ class TelemetryService:
     def get_current_span(self) -> Optional[TelemetrySpan]:
         """Get the current active span from the backend."""
         return self._backend.get_current_span()
+
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the current active span."""
+        span = self.get_current_span()
+        if span:
+            if attributes:
+                from agent.telemetry_schema import bound_attribute
+
+                redacted_attrs = redact_recursive(attributes)
+                guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+                span.add_event(name, guarded_attrs)
+            else:
+                span.add_event(name, None)
 
     def get_current_trace_id(self) -> Optional[str]:
         """Get the current trace ID from the backend."""

@@ -568,6 +568,7 @@ class Database:
         return cls._metadata_store
 
     @classmethod
+    @classmethod
     def get_query_target_provider(cls) -> str:
         """Return the active query-target provider."""
         return cls._query_target_provider

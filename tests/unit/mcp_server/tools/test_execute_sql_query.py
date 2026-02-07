@@ -13,6 +13,20 @@ from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
 class TestExecuteSqlQuery:
     """Tests for execute_sql_query tool."""
 
+    def setup_method(self, method):
+        """Initialize Database capabilities for tests."""
+        from dal.capabilities import BackendCapabilities
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        Database._query_target_provider = "postgres"
+
     def test_tool_name_no_suffix(self):
         """Verify TOOL_NAME does not end with '_tool'."""
         assert not TOOL_NAME.endswith("_tool")
@@ -191,8 +205,9 @@ class TestExecuteSqlQuery:
         with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
             result = await handler("SELECT * FROM nonexistent", tenant_id=1)
 
-            assert "Database Error:" in result
-            assert "Syntax error" in result
+            data = json.loads(result)
+            assert "error" in data
+            assert "Syntax error" in data["error"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_general_error(self):
@@ -206,8 +221,9 @@ class TestExecuteSqlQuery:
         with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
             result = await handler("SELECT * FROM film", tenant_id=1)
 
-            assert "Execution Error:" in result
-            assert "Unexpected error" in result
+            data = json.loads(result)
+            assert "error" in data
+            assert "Unexpected error" in data["error"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_with_params(self):

@@ -66,6 +66,9 @@ class AgentState(TypedDict):
     page_token: Optional[str]
     page_size: Optional[int]
 
+    # Deterministic execution seed
+    seed: Optional[int]
+
     # Deadline propagation and budgeting
     deadline_ts: Optional[float]
     timeout_seconds: Optional[float]

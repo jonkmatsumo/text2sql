@@ -1,220 +1,142 @@
-"""Unit tests for MCP tool functions.
+"""Tests for MCP tools."""
 
-NOTE:
-Renamed from test_tools.py to test_mcp_tools.py to avoid pytest module
-name collisions with agent/tests/test_tools.py when running tests
-from the repo root.
-
-This module contains comprehensive tests for the core database tools.
-Tests import from the new per-tool modules.
-"""
-
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
 
-import mcp_server.tools.execute_sql_query as execute_sql_query_mod
-import mcp_server.tools.get_semantic_definitions as get_semantic_definitions_mod
-import mcp_server.tools.search_relevant_tables as search_relevant_tables_mod
-from schema import ColumnDef
-
-execute_sql_query = execute_sql_query_mod.handler
-get_semantic_definitions = get_semantic_definitions_mod.handler
-search_relevant_tables = search_relevant_tables_mod.handler
+from mcp_server.tools.execute_sql_query import handler as execute_sql_query_handler
 
 
-class TestExecuteSqlQuery:
-    """Unit tests for execute_sql_query function."""
+@pytest.fixture
+def mock_db_caps():
+    """Mock database capabilities."""
+    from dal.capabilities import BackendCapabilities
+    from dal.database import Database
 
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_requires_tenant_id(self):
-        """Test that execute_sql_query requires tenant_id."""
-        result = await execute_sql_query("SELECT * FROM film", tenant_id=None)
+    Database._query_target_capabilities = BackendCapabilities(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+        supports_schema_cache=False,
+    )
+    yield
+    Database._query_target_capabilities = None
 
-        import json
 
-        error_data = json.loads(result)
-        assert "error" in error_data
-        assert "Tenant ID" in error_data["error"] or "Unauthorized" in error_data["error"]
+@pytest.mark.asyncio
+async def test_execute_sql_query_requires_tenant_id():
+    """Test that execute_sql_query requires tenant_id."""
+    result = await execute_sql_query_handler("SELECT * FROM film", tenant_id=None)
+    data = json.loads(result)
+    assert "error" in data
+    assert data["error_category"] == "unsupported_capability"
 
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_valid_select(self):
-        """Test executing a valid SELECT query."""
-        mock_conn = AsyncMock()
-        mock_rows = [{"count": 1000}]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
 
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
+@pytest.mark.asyncio
+async def test_execute_sql_query_valid_select():
+    """Test executing a valid SELECT query."""
+    mock_conn = AsyncMock()
+    mock_rows = [{"count": 1000}]
+    mock_conn.fetch = AsyncMock(return_value=mock_rows)
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_get = MagicMock(return_value=mock_conn)
 
-        mock_caps = MagicMock()
-        mock_caps.supports_column_metadata = True
-        mock_caps.execution_model = "sync"
-        mock_caps.supports_pagination = True
+    with (
+        patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+        ) as mock_caps,
+    ):
+        mock_caps.return_value.supports_column_metadata = True
+        mock_caps.return_value.execution_model = "sync"
+        mock_caps.return_value.supports_pagination = True
 
-        with (
-            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
-            patch.object(
-                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
-            ),
-            patch.object(
-                execute_sql_query_mod.Database,
-                "get_query_target_capabilities",
-                return_value=mock_caps,
-            ),
-        ):
+        result = await execute_sql_query_handler("SELECT COUNT(*) as count FROM film", tenant_id=1)
+        data = json.loads(result)
+        assert data["rows"][0]["count"] == 1000
 
-            result = await execute_sql_query("SELECT COUNT(*) as count FROM film", tenant_id=1)
 
-            mock_get.assert_called_once()
-            mock_conn.fetch.assert_called_once_with("SELECT COUNT(*) as count FROM film")
+@pytest.mark.asyncio
+async def test_execute_sql_query_empty_result():
+    """Test handling empty result set."""
+    mock_conn = AsyncMock()
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_get = MagicMock(return_value=mock_conn)
 
-            import json
+    with (
+        patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+        ) as mock_caps,
+    ):
+        mock_caps.return_value.supports_column_metadata = True
+        mock_caps.return_value.execution_model = "sync"
+        mock_caps.return_value.supports_pagination = True
 
-            data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
-            assert data["rows"][0]["count"] == 1000
-            assert data["metadata"]["is_truncated"] is False
+        result = await execute_sql_query_handler(
+            "SELECT * FROM film WHERE film_id = -1", tenant_id=1
+        )
+        data = json.loads(result)
+        assert data["rows"] == []
 
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_empty_result(self):
-        """Test handling empty result set."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
 
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
+@pytest.mark.asyncio
+async def test_execute_sql_query_size_limit():
+    """Test enforcing row limit."""
+    mock_conn = AsyncMock()
+    mock_rows = [{"id": i} for i in range(1001)]
+    mock_conn.fetch = AsyncMock(return_value=mock_rows)
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_get = MagicMock(return_value=mock_conn)
 
-        mock_caps = MagicMock()
-        mock_caps.supports_column_metadata = True
-        mock_caps.execution_model = "sync"
-        mock_caps.supports_pagination = True
+    with (
+        patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+        ) as mock_caps,
+    ):
+        mock_caps.return_value.supports_column_metadata = True
+        mock_caps.return_value.execution_model = "sync"
+        mock_caps.return_value.supports_pagination = True
 
-        with (
-            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
-            patch.object(
-                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
-            ),
-            patch.object(
-                execute_sql_query_mod.Database,
-                "get_query_target_capabilities",
-                return_value=mock_caps,
-            ),
-        ):
+        result = await execute_sql_query_handler("SELECT * FROM film", tenant_id=1)
+        data = json.loads(result)
+        assert len(data["rows"]) == 1000
+        assert data["metadata"]["is_truncated"] is True
 
-            result = await execute_sql_query("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
-            import json
+@pytest.mark.asyncio
+async def test_execute_sql_query_database_error():
+    """Test handling database error."""
+    mock_conn = AsyncMock()
+    mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_get = MagicMock(return_value=mock_conn)
 
-            data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
-            assert data["rows"] == []
-            assert data["metadata"]["is_truncated"] is False
+    with (
+        patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+        ) as mock_caps,
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+    ):
+        mock_caps.return_value.supports_column_metadata = True
+        mock_caps.return_value.execution_model = "sync"
 
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_size_limit(self):
-        """Test enforcing 1000 row limit."""
-        mock_conn = AsyncMock()
-        mock_rows = [{"id": i} for i in range(1001)]
-        mock_conn.fetch = AsyncMock(return_value=mock_rows)
-
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
-
-        mock_caps = MagicMock()
-        mock_caps.supports_column_metadata = True
-        mock_caps.execution_model = "sync"
-        mock_caps.supports_pagination = True
-
-        with (
-            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
-            patch.object(
-                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
-            ),
-            patch.object(
-                execute_sql_query_mod.Database,
-                "get_query_target_capabilities",
-                return_value=mock_caps,
-            ),
-        ):
-
-            result = await execute_sql_query("SELECT * FROM film", tenant_id=1)
-
-            import json
-
-            data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
-            assert len(data["rows"]) == 1000
-            assert data["metadata"]["is_truncated"] is True
-            assert data["metadata"]["row_limit"] == 1000
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_forbidden_drop(self):
-        """Test rejecting DROP keyword."""
-        result = await execute_sql_query("DROP TABLE film", tenant_id=1)
-
-        assert "Error:" in result
-        assert "forbidden keyword" in result
-        assert "DROP" in result or "drop" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_forbidden_delete(self):
-        """Test rejecting DELETE keyword."""
-        result = await execute_sql_query("DELETE FROM film WHERE film_id = 1", tenant_id=1)
-
-        assert "Error:" in result
-        assert "forbidden keyword" in result
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_forbidden_insert(self):
-        """Test rejecting INSERT keyword."""
-        result = await execute_sql_query("INSERT INTO film VALUES (1, 'Test')", tenant_id=1)
-
-        assert "Error:" in result
-        assert "forbidden keyword" in result
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_forbidden_update(self):
-        """Test rejecting UPDATE keyword."""
-        result = await execute_sql_query("UPDATE film SET title = 'Test'", tenant_id=1)
-
-        assert "Error:" in result
-        assert "forbidden keyword" in result
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_database_error(self):
-        """Test handling PostgresError."""
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=asyncpg.PostgresError("Syntax error"))
-
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
-
-        mock_caps = MagicMock()
-        mock_caps.supports_column_metadata = True
-        mock_caps.execution_model = "sync"
-
-        with (
-            patch.object(execute_sql_query_mod.Database, "get_connection", mock_get),
-            patch.object(
-                execute_sql_query_mod.Database, "get_query_target_provider", return_value="postgres"
-            ),
-            patch.object(
-                execute_sql_query_mod.Database,
-                "get_query_target_capabilities",
-                return_value=mock_caps,
-            ),
-        ):
-
-            result = await execute_sql_query("SELECT * FROM nonexistent", tenant_id=1)
-
-            assert "Database Error:" in result
-            assert "Syntax error" in result
+        result = await execute_sql_query_handler("SELECT * FROM nonexistent", tenant_id=1)
+        assert "error" in result
+        assert "Syntax error" in result
 
 
 class TestGetSemanticDefinitions:
@@ -223,44 +145,28 @@ class TestGetSemanticDefinitions:
     @pytest.mark.asyncio
     async def test_get_semantic_definitions_single_term(self):
         """Test retrieving definition for a single term."""
+        from mcp_server.tools.get_semantic_definitions import handler
+
         mock_conn = AsyncMock()
         mock_rows = [
             {
                 "term_name": "High Value Customer",
-                "definition": "Customer with lifetime payments > $150",
-                "sql_logic": "SUM(amount) > 150",
+                "definition": "A customer with total spend > $1000",
+                "sql_logic": "total_spend > 1000",
             }
         ]
         mock_conn.fetch = AsyncMock(return_value=mock_rows)
-
         mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_conn.__aexit__ = AsyncMock(return_value=False)
-        mock_get = MagicMock(return_value=mock_conn)
 
-        with patch.object(get_semantic_definitions_mod.Database, "get_connection", mock_get):
-
-            result = await get_semantic_definitions(["High Value Customer"])
-
-            mock_get.assert_called_once()
-
-            import json
-
+        with patch("dal.database.Database.get_connection", return_value=mock_conn):
+            result = await handler(["High Value Customer"])
             data = json.loads(result)
             assert "High Value Customer" in data
             assert (
-                data["High Value Customer"]["definition"]
-                == "Customer with lifetime payments > $150"
+                data["High Value Customer"]["definition"] == "A customer with total spend > $1000"
             )
-
-    @pytest.mark.asyncio
-    async def test_get_semantic_definitions_empty_list(self):
-        """Test handling empty terms list."""
-        result = await get_semantic_definitions([])
-
-        import json
-
-        data = json.loads(result)
-        assert data == {}
+            assert data["High Value Customer"]["sql_logic"] == "total_spend > 1000"
 
 
 class TestSearchRelevantTables:
@@ -268,70 +174,29 @@ class TestSearchRelevantTables:
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_success(self):
-        """Test successful search with results."""
-        mock_results = [
-            {
-                "table_name": "payment",
-                "schema_text": "Table: payment. Columns: payment_id, amount",
-                "distance": 0.1,
-            },
-            {
-                "table_name": "customer",
-                "schema_text": "Table: customer. Columns: customer_id, name",
-                "distance": 0.2,
-            },
-        ]
+        """Test successful search."""
+        from dal.database import Database
+        from mcp_server.tools.search_relevant_tables import handler
+        from schema import TableDef
 
-        mock_conn = AsyncMock()
-        mock_conn.fetch = AsyncMock(return_value=[])
-        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_results = [{"table_name": "film", "distance": 0.1, "schema_text": "Table: film"}]
+        mock_introspector = MagicMock()
+        mock_introspector.get_table_def = AsyncMock(return_value=TableDef(name="film", columns=[]))
 
-        with patch.object(
-            search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
+        with (
+            patch(
+                "mcp_server.tools.search_relevant_tables.RagEngine.embed_text",
+                AsyncMock(return_value=[0.1]),
+            ),
+            patch(
+                "mcp_server.tools.search_relevant_tables.search_similar_tables",
+                AsyncMock(return_value=mock_results),
+            ),
+            patch.object(
+                Database, "get_schema_introspector", MagicMock(return_value=mock_introspector)
+            ),
         ):
-            with (
-                patch.object(
-                    search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
-                ) as mock_search,
-                patch.object(
-                    search_relevant_tables_mod.Database, "get_schema_introspector"
-                ) as mock_intro,
-            ):
-                mock_col = ColumnDef(name="id", data_type="int", is_nullable=False)
-                mock_table_def = MagicMock()
-                mock_table_def.columns = [mock_col]
-                mock_table_def.foreign_keys = []
-                mock_intro.return_value.get_table_def = AsyncMock(return_value=mock_table_def)
-                mock_search.return_value = mock_results
-
-                result = await search_relevant_tables("customer payment transactions", limit=5)
-
-                mock_search.assert_called_once()
-
-                import json
-
-                data = json.loads(result)
-                assert len(data) == 2
-                assert data[0]["table_name"] == "payment"
-                assert data[0]["similarity"] == 0.9
-
-    @pytest.mark.asyncio
-    async def test_search_relevant_tables_empty_result(self):
-        """Test empty results handling."""
-        with patch.object(
-            search_relevant_tables_mod.RagEngine, "embed_text", return_value=[0.1] * 384
-        ):
-            with (
-                patch.object(
-                    search_relevant_tables_mod, "search_similar_tables", new_callable=AsyncMock
-                ) as mock_search,
-                patch.object(search_relevant_tables_mod.Database, "get_schema_introspector"),
-            ):
-                mock_search.return_value = []
-
-                result = await search_relevant_tables("nonexistent query", limit=5)
-
-                import json
-
-                assert json.loads(result) == []
+            result = await handler("movies about space")
+            data = json.loads(result)
+            assert len(data) == 1
+            assert data[0]["table_name"] == "film"

@@ -1,10 +1,11 @@
-from agent.telemetry_schema import MAX_PAYLOAD_SIZE, redact_secrets, truncate_json
+from agent.telemetry_schema import MAX_PAYLOAD_SIZE, truncate_json
+from common.sanitization.bounding import redact_recursive
 
 
 class TestTelemetrySchema:
     """Test suite for telemetry schema utilities."""
 
-    def test_redact_secrets(self):
+    def test_redact_recursive(self):
         """Test recursive redaction of sensitive keys."""
         input_data = {
             "public": "value",
@@ -17,14 +18,14 @@ class TestTelemetrySchema:
             "list": [{"credential": "bad", "ok": "good"}],
         }
 
-        redacted = redact_secrets(input_data)
+        redacted = redact_recursive(input_data)
 
         assert redacted["public"] == "value"
-        assert redacted["api_key"] == "[REDACTED]"
-        assert redacted["nested"]["Auth_Token"] == "[REDACTED]"
+        assert redacted["api_key"] == "<redacted>"
+        assert redacted["nested"]["Auth_Token"] == "<redacted>"
         assert redacted["nested"]["safe"] == "value"
-        assert redacted["nested"]["deep"]["password"] == "[REDACTED]"
-        assert redacted["list"][0]["credential"] == "[REDACTED]"
+        assert redacted["nested"]["deep"]["password"] == "<redacted>"
+        assert redacted["list"][0]["credential"] == "<redacted>"
         assert redacted["list"][0]["ok"] == "good"
 
     def test_truncate_json_small(self):

@@ -7,21 +7,19 @@ from typing import Optional
 
 import asyncpg
 
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_str
+from common.constants.reason_codes import PayloadTruncationReason
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
     negotiate_capability_request,
     parse_capability_fallback_policy,
 )
 from dal.database import Database
-from dal.error_classification import (
-    classify_error_info,
-    emit_classified_error,
-    maybe_classify_error,
-)
+from dal.error_classification import emit_classified_error, extract_error_metadata
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
+from mcp_server.utils.json_budget import JSONBudget
 
 TOOL_NAME = "execute_sql_query"
 
@@ -121,7 +119,7 @@ async def handler(
             "Unauthorized. No Tenant ID context found. "
             "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
         )
-        return json.dumps({"error": error_msg})
+        return json.dumps({"error": error_msg, "error_category": "unsupported_capability"})
 
     # Application-Level Security Check (Pre-flight)
     # Reject mutative keywords to provide immediate feedback.
@@ -140,9 +138,14 @@ async def handler(
 
     for pattern in forbidden_patterns:
         if re.search(pattern, sql_query):
-            return (
-                f"Error: Query contains forbidden keyword matching '{pattern}'. "
-                "Read-only access only."
+            return json.dumps(
+                {
+                    "error": (
+                        f"Error: Query contains forbidden keyword matching '{pattern}'. "
+                        "Read-only access only."
+                    ),
+                    "error_category": "unsupported_capability",
+                }
             )
 
     provider = Database.get_query_target_provider()
@@ -216,6 +219,7 @@ async def handler(
         caps.supports_pagination,
     )
     if unsupported_response is not None:
+        print(f"DEBUG: pagination unsupported_response: {unsupported_response}")
         return unsupported_response
 
     max_page_size = 1000
@@ -346,17 +350,36 @@ async def handler(
             forced_limited = True
             row_limit = force_result_limit
 
+        # JSON Size Budget
+        max_bytes = get_env_int("MCP_JSON_PAYLOAD_LIMIT_BYTES", 2 * 1024 * 1024)
+        budget = JSONBudget(max_bytes)
+        safe_rows = []
+        size_truncated = False
+
+        # Approximate envelope overhead
+        budget.consume({"metadata": {}, "rows": []})
+
+        for row in result_rows:
+            if not budget.consume(row):
+                size_truncated = True
+                break
+            safe_rows.append(row)
+
+        result_rows = safe_rows
+
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
 
-        is_truncated = bool(last_truncated or safety_truncated or forced_limited)
+        is_truncated = bool(last_truncated or safety_truncated or forced_limited or size_truncated)
         partial_reason = last_truncated_reason
+        if partial_reason is None and size_truncated:
+            partial_reason = PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
-            partial_reason = "LIMITED"
+            partial_reason = PayloadTruncationReason.PROVIDER_CAP.value
         if partial_reason is None and safety_truncated:
-            partial_reason = "TRUNCATED"
+            partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value
         if partial_reason is None and is_truncated:
-            partial_reason = "TRUNCATED"
+            partial_reason = PayloadTruncationReason.MAX_ROWS.value
         cap_detected = partial_reason == "PROVIDER_CAP"
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
@@ -393,29 +416,26 @@ async def handler(
         return json.dumps(payload, default=str, separators=(",", ":"))
 
     except asyncpg.PostgresError as e:
-        error_message = f"Database Error: {str(e)}"
-        payload = {"error": error_message}
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e)
-        if category:
-            payload["error_category"] = category
-            classification = classify_error_info(provider, e)
-            if classification.retry_after_seconds is not None:
-                payload["retry_after_seconds"] = classification.retry_after_seconds
-            emit_classified_error(provider, "execute_sql_query", category, e)
+        metadata = extract_error_metadata(provider, e)
+        payload = {
+            "error": metadata.message,
+            "error_category": metadata.category,
+            "error_metadata": metadata.to_dict(),
+        }
+        if metadata.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = metadata.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return json.dumps(payload)
     except Exception as e:
-        error_message = f"Execution Error: {str(e)}"
-        payload = {
-            "error": error_message,
-            "error_type": type(e).__name__,
-        }
         provider = Database.get_query_target_provider()
-        category = maybe_classify_error(provider, e)
-        if category:
-            payload["error_category"] = category
-            classification = classify_error_info(provider, e)
-            if classification.retry_after_seconds is not None:
-                payload["retry_after_seconds"] = classification.retry_after_seconds
-            emit_classified_error(provider, "execute_sql_query", category, e)
+        metadata = extract_error_metadata(provider, e)
+        payload = {
+            "error": metadata.message,
+            "error_category": metadata.category,
+            "error_metadata": metadata.to_dict(),
+        }
+        if metadata.retry_after_seconds is not None:
+            payload["retry_after_seconds"] = metadata.retry_after_seconds
+        emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return json.dumps(payload)
