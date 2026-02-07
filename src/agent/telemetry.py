@@ -169,6 +169,11 @@ class TelemetryBackend(abc.ABC):
         """Get the current trace ID as a 32-char hex string."""
         pass
 
+    @abc.abstractmethod
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the exporter."""
+        pass
+
 
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
@@ -392,6 +397,18 @@ class OTELTelemetryBackend(TelemetryBackend):
             return format(ctx.trace_id, "032x")
         return None
 
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the OTLP exporter."""
+        try:
+            # We must reach into the global tracer provider
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "force_flush"):
+                return provider.force_flush(timeout_millis=timeout_ms)
+            return True
+        except Exception as e:
+            logger.debug(f"Telemetry flush failed: {e}")
+            return False
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -489,6 +506,10 @@ class InMemoryTelemetryBackend(TelemetryBackend):
             return "0" * 32
         return None
 
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """No-op for in-memory backend."""
+        return True
+
 
 class NoOpTelemetrySpan(TelemetrySpan):
     """No-op implementation of TelemetrySpan."""
@@ -552,6 +573,10 @@ class NoOpTelemetryBackend(TelemetryBackend):
     def get_current_trace_id(self) -> Optional[str]:
         """Get no-op trace ID."""
         return None
+
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """No-op for no-op backend."""
+        return True
 
 
 class TelemetryService:
@@ -779,6 +804,10 @@ class TelemetryService:
     def get_current_trace_id(self) -> Optional[str]:
         """Get the current trace ID from the backend."""
         return self._backend.get_current_trace_id()
+
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the backend exporter."""
+        return self._backend.flush(timeout_ms=timeout_ms)
 
 
 # Global instance for easy access
