@@ -1,17 +1,22 @@
 """Deterministic replay bundle capture and validation utilities."""
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
+from agent.config import PROMPT_VERSION
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.sanitization.bounding import bound_payload, redact_recursive
+from common.utils.hashing import canonical_json_hash
 
 REPLAY_BUNDLE_VERSION = "1.0"
 MAX_TOOL_ROWS = 50
+
+logger = logging.getLogger(__name__)
 
 
 class ReplayToolIO(BaseModel):
@@ -30,6 +35,7 @@ class ReplayBundle(BaseModel):
     model: dict[str, Any]
     seed: Optional[int] = None
     prompts: dict[str, Any]
+    prompt_hash: Optional[str] = None
     schema_context: dict[str, Any]
     flags: dict[str, Any]
     tool_io: list[ReplayToolIO]
@@ -151,6 +157,7 @@ def build_replay_bundle(
                 "assistant": response_text,
             }
         ),
+        prompt_hash=canonical_json_hash(PROMPT_VERSION),
         schema_context={
             "schema_snapshot_id": state.get("schema_snapshot_id"),
             "fingerprint": state.get("schema_snapshot_id"),
@@ -204,6 +211,16 @@ def validate_replay_bundle(bundle_payload: dict[str, Any]) -> ReplayBundle:
         bundle = ReplayBundle.model_validate(bundle_payload)
     except ValidationError as e:
         raise ValueError(f"Replay bundle schema validation failed: {e}") from e
+
+    # Check for prompt version mismatch
+    current_hash = canonical_json_hash(PROMPT_VERSION)
+    if bundle.prompt_hash and bundle.prompt_hash != current_hash:
+        logger.warning(
+            "Replay bundle prompt hash mismatch: %s != %s (current). "
+            "Replay behavior may diverge.",
+            bundle.prompt_hash,
+            current_hash,
+        )
 
     # Invariant checks: redaction
     # We can't easily prove EVERYTHING is redacted, but we can check the prompts/outcome

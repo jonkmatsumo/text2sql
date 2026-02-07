@@ -8,6 +8,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SYNTHESIZE_TEMPERATURE = 0.7
 
+# Semantic version of the agent's system prompts.
+# Increment this when changing prompt templates in nodes.
+PROMPT_VERSION = "1.0.0"
+
 
 def get_synthesize_temperature() -> float:
     """Return synthesize temperature with deterministic override support."""
