@@ -4,7 +4,7 @@ These tests verify the tools use the expected DAL/store implementations.
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -79,9 +79,7 @@ class TestLegacyTools:
         mock_introspector.get_table_def = get_table_def_async
 
         mock_search = [{"table_name": "t1", "schema_text": "text", "distance": 0.1}]
-
-        def _fake_embed_text(_query):
-            return [0.1]
+        _fake_embed_text = AsyncMock(return_value=[0.1])
 
         async def _fake_search_similar_tables(_query_embedding, limit=5, tenant_id=None):
             return mock_search

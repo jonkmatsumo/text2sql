@@ -73,6 +73,7 @@ async def test_prefetch_suppressed_low_budget(
 ):
     """Prefetch should be suppressed if time budget is low."""
     monkeypatch.setenv("AGENT_PREFETCH_NEXT_PAGE", "on")
+    monkeypatch.setenv("AGENT_AUTO_PAGINATION", "off")
 
     # 0.0 at start, 0.6 before prefetch check
     mock_monotonic.side_effect = [0.0, 0.0, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6]

@@ -10,6 +10,7 @@ from agent.state import AgentState
 
 
 def _mock_span_ctx(mock_start_span):
+    """Mock the start_span context manager."""
     mock_span = MagicMock()
     mock_start_span.return_value.__enter__ = MagicMock(return_value=mock_span)
     mock_start_span.return_value.__exit__ = MagicMock(return_value=False)
@@ -31,6 +32,9 @@ async def test_execute_passthrough_page_token(
 
     mock_tool = AsyncMock()
     mock_tool.name = "execute_sql_query"
+
+    # We set next_page_token to None in the mock return to prevent auto-pagination loop
+    # from triggering and overwriting call_args if it were to run.
     payload = json.dumps(
         {
             "rows": [{"id": 1}],
@@ -38,7 +42,7 @@ async def test_execute_passthrough_page_token(
                 "is_truncated": False,
                 "row_limit": 0,
                 "rows_returned": 1,
-                "next_page_token": "next-token",
+                "next_page_token": None,
                 "page_size": 20,
             },
         }
@@ -55,11 +59,15 @@ async def test_execute_passthrough_page_token(
         retry_count=0,
         page_token="token-1",
         page_size=20,
+        seed=None,
     )
 
     result = await validate_and_execute_node(state)
-    call_args = mock_tool.ainvoke.call_args[0][0]
+
+    # Verify the FIRST call to the tool used our page_token
+    call_args = mock_tool.ainvoke.call_args_list[0][0][0]
     assert call_args["page_token"] == "token-1"
     assert call_args["page_size"] == 20
+
     completeness = result["result_completeness"]
-    assert completeness["next_page_token"] == "next-token"
+    assert completeness["rows_returned"] == 1

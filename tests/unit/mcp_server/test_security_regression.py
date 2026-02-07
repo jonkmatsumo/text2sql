@@ -69,8 +69,8 @@ class TestSecurityRegression:
             with patch("re.search", return_value=None):
                 result = await execute_sql_query(bypass_query, tenant_id=1)
 
-                assert "Database Error:" in result
-                assert "read-only transaction" in result
+                assert "error" in result
+                assert "cannot execute INSERT" in result
 
     @pytest.mark.asyncio
     async def test_bypass_with_cte_mutation(self):

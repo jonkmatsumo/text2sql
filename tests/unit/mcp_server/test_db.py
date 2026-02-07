@@ -123,7 +123,13 @@ class TestDatabase:
         Database._pool = mock_pool
 
         async with Database.get_connection() as conn:
-            assert conn == mock_conn
+            # We check if it is either the mock_conn or a TracedAsyncpgConnection wrapping it
+            from dal.tracing import TracedAsyncpgConnection
+
+            if isinstance(conn, TracedAsyncpgConnection):
+                assert conn._conn == mock_conn
+            else:
+                assert conn == mock_conn
             mock_pool.acquire.assert_called_once()
             mock_conn.transaction.assert_called_once()
 
@@ -149,7 +155,12 @@ class TestDatabase:
 
         tenant_id = 1
         async with Database.get_connection(tenant_id=tenant_id) as conn:
-            assert conn == mock_conn
+            from dal.tracing import TracedAsyncpgConnection
+
+            if isinstance(conn, TracedAsyncpgConnection):
+                assert conn._conn == mock_conn
+            else:
+                assert conn == mock_conn
             # Verify set_config was called with tenant_id
             mock_conn.execute.assert_called_once()
             call_args = mock_conn.execute.call_args

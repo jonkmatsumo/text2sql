@@ -205,7 +205,7 @@ class TestInstrumentationParity:
         span = self.backend.spans[0]
         inputs = span.attributes[TelemetryKeys.INPUTS]
 
-        assert "[REDACTED]" in inputs
+        assert "<redacted>" in inputs
         assert "secret123" not in inputs
         assert "visible" in inputs
 

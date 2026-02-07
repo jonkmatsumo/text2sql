@@ -13,6 +13,7 @@ from common.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
+from dal.capabilities import BackendCapabilities
 from dal.factory import (
     CACHE_STORE_PROVIDERS,
     EXAMPLE_STORE_PROVIDERS,
@@ -48,6 +49,21 @@ def reset_factory_state():
 
 class TestProviderRegistries:
     """Tests for provider registry definitions."""
+
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
 
     def test_graph_store_providers_contains_memgraph(self):
         """Verify Memgraph is registered for graph stores."""
@@ -88,6 +104,21 @@ class TestProviderRegistries:
 
 class TestDefaultProviders:
     """Tests for default provider behavior (no env vars set)."""
+
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
 
     def test_cache_store_defaults_to_postgres(self):
         """Test that CacheStore defaults to PgSemanticCache."""
@@ -168,6 +199,21 @@ class TestGraphStoreProvider:
 class TestSingletonBehavior:
     """Tests for singleton pattern implementation."""
 
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
+
     def test_cache_store_is_singleton(self):
         """get_cache_store returns same instance on multiple calls."""
         store1 = get_cache_store()
@@ -215,6 +261,21 @@ class TestSingletonBehavior:
 class TestResetSingletons:
     """Tests for reset_singletons utility."""
 
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
+
     def test_reset_allows_reinitialization(self):
         """reset_singletons allows new instances to be created."""
         store1 = get_cache_store()
@@ -247,6 +308,21 @@ class TestResetSingletons:
 
 class TestEnvVarProviderSelection:
     """Tests for environment variable provider selection."""
+
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
 
     def test_invalid_cache_provider_raises_error(self):
         """Invalid CACHE_STORE_PROVIDER raises ValueError."""
@@ -288,6 +364,21 @@ class TestEnvVarProviderSelection:
 
 class TestInterfaceCompliance:
     """Tests verifying stores implement correct interfaces."""
+
+    @pytest.fixture(autouse=True)
+    def mock_db_caps(self):
+        """Initialize Database capabilities for tests."""
+        from dal.database import Database
+
+        Database._query_target_capabilities = BackendCapabilities(
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        )
+        yield
+        Database._query_target_capabilities = None
 
     def test_cache_store_implements_interface(self):
         """Test that CacheStore getter returns CacheStore protocol."""

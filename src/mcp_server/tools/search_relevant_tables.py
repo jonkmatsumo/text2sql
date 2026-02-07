@@ -24,7 +24,7 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
         JSON array of relevant tables with schema information.
     """
     # Generate embedding for user query
-    query_embedding = RagEngine.embed_text(user_query)
+    query_embedding = await RagEngine.embed_text(user_query)
 
     # Search for similar tables
     results = await search_similar_tables(query_embedding, limit=limit, tenant_id=tenant_id)

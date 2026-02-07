@@ -65,7 +65,7 @@ class TestIndexer:
             mock_store.save_schema_embedding.assert_called_once()
             embedding_arg = mock_store.save_schema_embedding.call_args[0][0]
             assert embedding_arg.table_name == "users"
-            assert "email (text, nullable)" in embedding_arg.schema_text
+            assert "email (string, nullable)" in embedding_arg.schema_text
             assert embedding_arg.embedding == [0.1, 0.2]
 
             mock_reload.assert_called_once()

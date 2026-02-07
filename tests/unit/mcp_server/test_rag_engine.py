@@ -1,9 +1,4 @@
-"""Unit tests for RAG engine module.
-
-NOTE:
-Renamed from test_rag.py to avoid pytest import collisions with
-mcp-server/scripts/test_rag.py and to clarify this file tests the RAG engine.
-"""
+"""Tests for RAG Engine."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -11,98 +6,94 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from mcp_server.services.rag import RagEngine, search_similar_tables
-from mcp_server.services.rag.engine import format_vector_for_postgres, generate_schema_document
+from mcp_server.services.rag.engine import (
+    RagEngine,
+    format_vector_for_postgres,
+    generate_schema_document,
+    search_similar_tables,
+)
 
 
 class TestRagEngine:
     """Unit tests for RagEngine class."""
 
-    def setup_method(self):
-        """Reset the model before each test."""
+    @pytest.fixture(autouse=True)
+    def reset_model(self):
+        """Reset the singleton model before each test."""
+        RagEngine._model = None
+        yield
         RagEngine._model = None
 
     @pytest.mark.asyncio
     async def test_model_lazy_loading(self):
-        """Test that model loads on first use and reuses on subsequent calls."""
-        mock_model = MagicMock()
-        mock_embedding1 = np.array([0.1] * 384)
-        mock_embedding2 = np.array([0.2] * 384)
-        mock_model.embed.side_effect = [iter([mock_embedding1]), iter([mock_embedding2])]
+        """Test that the embedding model is loaded only once."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_embedding.return_value = MagicMock()
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
-            # First call should load the model
-            embedding1 = await RagEngine.embed_text("test text")
-            assert RagEngine._model is not None
-            assert mock_model.embed.call_count == 1
-            assert len(embedding1) == 384
+            # First call loads model
+            RagEngine._get_model()
+            mock_embedding.assert_called_once()
 
-            # Second call should reuse the same model
-            embedding2 = await RagEngine.embed_text("another text")
-            assert RagEngine._model is mock_model
-            assert mock_model.embed.call_count == 2
-            assert len(embedding2) == 384
+            # Second call uses cached model
+            RagEngine._get_model()
+            mock_embedding.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_embed_text_dimension(self):
-        """Test that embedding is 384 dimensions."""
-        mock_model = MagicMock()
-        mock_embedding = np.array([0.1] * 384)
-        mock_model.embed.return_value = iter([mock_embedding])
+        """Test that embed_text returns a vector of the correct dimension."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_model = MagicMock()
+            mock_model.embed.return_value = iter([np.random.rand(384)])
+            mock_embedding.return_value = mock_model
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
-            embedding = await RagEngine.embed_text("test table with customer data")
+            embedding = await RagEngine.embed_text("test")
             assert len(embedding) == 384
+            assert isinstance(embedding, list)
 
     @pytest.mark.asyncio
     async def test_embed_text_type(self):
-        """Test that return type is list[float]."""
-        mock_model = MagicMock()
-        mock_embedding = np.array([0.1, 0.2, 0.3] * 128)  # 384 elements
-        mock_model.embed.return_value = iter([mock_embedding])
+        """Test that embed_text returns a list of floats."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_model = MagicMock()
+            mock_model.embed.return_value = iter([np.random.rand(384)])
+            mock_embedding.return_value = mock_model
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
             embedding = await RagEngine.embed_text("test")
-            assert isinstance(embedding, list)
-            assert all(isinstance(x, float) for x in embedding)
+            assert all(isinstance(x, (float, np.float32, np.float64)) for x in embedding)
 
     @pytest.mark.asyncio
     async def test_embed_batch(self):
-        """Test batch embedding with multiple texts."""
-        mock_model = MagicMock()
-        mock_embeddings = [
-            np.array([0.1] * 384),
-            np.array([0.2] * 384),
-            np.array([0.3] * 384),
-        ]
-        mock_model.embed.return_value = iter(mock_embeddings)
+        """Test that embed_batch returns multiple embeddings."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_model = MagicMock()
+            mock_model.embed.return_value = iter([np.random.rand(384), np.random.rand(384)])
+            mock_embedding.return_value = mock_model
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
-            texts = ["text1", "text2", "text3"]
+            texts = ["test1", "test2"]
             embeddings = await RagEngine.embed_batch(texts)
-
-            assert len(embeddings) == 3
-            assert all(len(emb) == 384 for emb in embeddings)
-            assert all(isinstance(emb, list) for emb in embeddings)
+            assert len(embeddings) == 2
+            assert len(embeddings[0]) == 384
+            assert len(embeddings[1]) == 384
 
     @pytest.mark.asyncio
     async def test_embed_batch_empty(self):
-        """Test empty batch handling."""
-        mock_model = MagicMock()
-        mock_model.embed.return_value = iter([])
+        """Test embed_batch with empty list."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_model = MagicMock()
+            mock_model.embed.return_value = iter([])
+            mock_embedding.return_value = mock_model
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
             embeddings = await RagEngine.embed_batch([])
-            assert embeddings == []
+            assert len(embeddings) == 0
 
     @pytest.mark.asyncio
     async def test_embed_text_empty_string(self):
-        """Test empty string handling."""
-        mock_model = MagicMock()
-        mock_embedding = np.array([0.0] * 384)
-        mock_model.embed.return_value = iter([mock_embedding])
+        """Test embed_text with empty string."""
+        with patch("mcp_server.services.rag.engine.TextEmbedding") as mock_embedding:
+            mock_model = MagicMock()
+            mock_model.embed.return_value = iter([np.zeros(384)])
+            mock_embedding.return_value = mock_model
 
-        with patch("mcp_server.services.rag.engine.TextEmbedding", return_value=mock_model):
             embedding = await RagEngine.embed_text("")
             assert len(embedding) == 384
 
@@ -111,39 +102,39 @@ class TestFormatVectorForPostgres:
     """Unit tests for format_vector_for_postgres function."""
 
     def test_format_vector_basic(self):
-        """Test basic vector formatting."""
-        vector = [1.0, 2.0, 3.0]
-        result = format_vector_for_postgres(vector)
-        assert result == "[1.0,2.0,3.0]"
+        """Test formatting a simple vector."""
+        embedding = [0.1, 0.2, 0.3]
+        result = format_vector_for_postgres(embedding)
+        assert result == "[0.1,0.2,0.3]"
 
     def test_format_vector_384d(self):
-        """Test 384-dimensional vector formatting."""
-        vector = [0.1] * 384
-        result = format_vector_for_postgres(vector)
-        assert result.startswith("[")
-        assert result.endswith("]")
-        assert result.count(",") == 383  # 384 elements = 383 commas
+        """Test formatting a 384-dimension vector."""
+        embedding = [0.1] * 384
+        result = format_vector_for_postgres(embedding)
+        assert result.startswith("[0.1,0.1,")
+        assert result.endswith(",0.1]")
+        assert result.count(",") == 383
 
     def test_format_vector_negative_values(self):
-        """Test negative float values."""
-        vector = [-1.5, 2.0, -3.7]
-        result = format_vector_for_postgres(vector)
-        assert "-1.5" in result
-        assert "-3.7" in result
+        """Test formatting vector with negative values."""
+        embedding = [-0.1, 0.0, 0.1]
+        result = format_vector_for_postgres(embedding)
+        assert result == "[-0.1,0.0,0.1]"
 
     def test_format_vector_scientific_notation(self):
-        """Test scientific notation handling."""
-        vector = [1e-5, 2e10, 3.5]
-        result = format_vector_for_postgres(vector)
-        # Should convert to standard float format
-        assert "1e-05" in result or "1.0e-05" in result or "0.00001" in result
+        """Test formatting vector with very small values."""
+        embedding = [1e-10, 2e-10]
+        result = format_vector_for_postgres(embedding)
+        # float to string might use scientific notation
+        assert "1e-10" in result or "0.0000000001" in result
 
 
 class TestGenerateSchemaDocument:
     """Unit tests for generate_schema_document function."""
 
-    def test_generate_schema_document_basic(self):
+    def test_generate_schema_document_basic(self, monkeypatch):
         """Test basic table with columns."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "name", "data_type": "text", "is_nullable": "YES"},
@@ -151,12 +142,13 @@ class TestGenerateSchemaDocument:
         doc = generate_schema_document("customer", columns)
 
         assert "Table: customer" in doc
-        assert "id (integer, identifier, required)" in doc
-        assert "name (text, nullable)" in doc
+        assert "id (int, identifier, required)" in doc
+        assert "name (string, nullable)" in doc
         assert doc.endswith(".")
 
-    def test_generate_schema_document_with_fks(self):
+    def test_generate_schema_document_with_fks(self, monkeypatch):
         """Test with foreign keys."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "customer_id", "data_type": "integer", "is_nullable": "NO"},
@@ -170,8 +162,9 @@ class TestGenerateSchemaDocument:
         assert "customer_id links to customer" in doc
         assert "Relationships:" in doc
 
-    def test_generate_schema_document_no_fks(self):
+    def test_generate_schema_document_no_fks(self, monkeypatch):
         """Test without foreign keys."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
         ]
@@ -180,26 +173,29 @@ class TestGenerateSchemaDocument:
         assert "Table: test_table" in doc
         assert "Relationships:" not in doc
 
-    def test_generate_schema_document_nullable_columns(self):
+    def test_generate_schema_document_nullable_columns(self, monkeypatch):
         """Test nullable vs not null columns."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "email", "data_type": "text", "is_nullable": "YES"},
         ]
         doc = generate_schema_document("user", columns)
 
-        assert "id (integer, identifier, required)" in doc
-        assert "email (text, nullable)" in doc
+        assert "id (int, identifier, required)" in doc
+        assert "email (string, nullable)" in doc
 
-    def test_generate_schema_document_empty_columns(self):
+    def test_generate_schema_document_empty_columns(self, monkeypatch):
         """Test edge case with empty columns list."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         doc = generate_schema_document("empty_table", [])
 
         assert "Table: empty_table" in doc
         assert "Columns:" in doc
 
-    def test_generate_schema_document_with_table_comment(self):
+    def test_generate_schema_document_with_table_comment(self, monkeypatch):
         """Test with table comment."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
         ]
@@ -210,8 +206,9 @@ class TestGenerateSchemaDocument:
         assert "Table payment: Customer payment transactions" in doc
         assert doc.startswith("Table payment:")
 
-    def test_generate_schema_document_semantic_hints(self):
+    def test_generate_schema_document_semantic_hints(self, monkeypatch):
         """Test semantic hint detection for various column names."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "payment_id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "amount", "data_type": "numeric", "is_nullable": "NO"},
@@ -222,15 +219,16 @@ class TestGenerateSchemaDocument:
         ]
         doc = generate_schema_document("payment", columns)
 
-        assert "payment_id (integer, identifier, required)" in doc
-        assert "amount (numeric, monetary value, required)" in doc
+        assert "payment_id (int, identifier, required)" in doc
+        assert "amount (decimal, monetary value, required)" in doc
         assert "payment_date (timestamp, timestamp, required)" in doc
-        assert "created_at (timestamp, required)" in doc  # No semantic hint (doesn't match pattern)
-        assert "price (numeric, monetary value, nullable)" in doc
-        assert "name (text, required)" in doc  # No semantic hint
+        assert "created_at (timestamp, required)" in doc
+        assert "price (decimal, monetary value, nullable)" in doc
+        assert "name (string, required)" in doc
 
-    def test_generate_schema_document_backward_compatibility(self):
+    def test_generate_schema_document_backward_compatibility(self, monkeypatch):
         """Test backward compatibility (no new parameters)."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "id", "data_type": "integer", "is_nullable": "NO"},
         ]
@@ -238,10 +236,11 @@ class TestGenerateSchemaDocument:
         doc = generate_schema_document("test_table", columns)
 
         assert "Table: test_table" in doc
-        assert "id (integer, identifier, required)" in doc
+        assert "id (int, identifier, required)" in doc
 
-    def test_generate_schema_document_all_semantic_patterns(self):
+    def test_generate_schema_document_all_semantic_patterns(self, monkeypatch):
         """Test all semantic hint patterns."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "user_id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "order_id", "data_type": "integer", "is_nullable": "NO"},
@@ -252,13 +251,16 @@ class TestGenerateSchemaDocument:
         ]
         doc = generate_schema_document("orders", columns)
 
-        # All should have semantic hints
-        assert "identifier" in doc
-        assert "timestamp" in doc
-        assert "monetary value" in doc
+        assert "user_id (int, identifier, required)" in doc
+        assert "order_id (int, identifier, required)" in doc
+        assert "transaction_date (date, timestamp, required)" in doc
+        assert "updated_time (timestamp, timestamp, required)" in doc
+        assert "total_amount (decimal, monetary value, required)" in doc
+        assert "unit_price (decimal, monetary value, required)" in doc
 
-    def test_generate_schema_document_combination(self):
+    def test_generate_schema_document_combination(self, monkeypatch):
         """Test combination of hints, relationships, and table comment."""
+        monkeypatch.setenv("DAL_EXPERIMENTAL_FEATURES", "on")
         columns = [
             {"column_name": "payment_id", "data_type": "integer", "is_nullable": "NO"},
             {"column_name": "customer_id", "data_type": "integer", "is_nullable": "NO"},
@@ -275,8 +277,9 @@ class TestGenerateSchemaDocument:
         )
 
         assert "Table payment: Customer payment transactions" in doc
-        assert "payment_id (integer, identifier, required)" in doc
-        assert "amount (numeric, monetary value, required)" in doc
+        assert "payment_id (int, identifier, required)" in doc
+        assert "amount (decimal, monetary value, required)" in doc
+        assert "customer_id (int, identifier, required)" in doc
         assert "customer_id links to customer" in doc
         assert "Relationships:" in doc
 

@@ -2,12 +2,20 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent.nodes.correct import correct_sql_node
 from agent.state import AgentState
 
 
 class TestCorrectSqlNode:
     """Unit tests for correct_sql_node function."""
+
+    @pytest.fixture(autouse=True)
+    def disable_similarity(self):
+        """Disable similarity enforcement for these tests."""
+        with patch.dict("os.environ", {"AGENT_CORRECTION_SIMILARITY_ENFORCE": "False"}):
+            yield
 
     @patch("agent.llm_client.get_llm")
     @patch("agent.nodes.correct.ChatPromptTemplate")
