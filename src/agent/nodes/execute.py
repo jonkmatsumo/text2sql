@@ -24,6 +24,7 @@ from common.constants.reason_codes import (
     PaginationStopReason,
     PrefetchSuppressionReason,
 )
+from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
 
@@ -710,6 +711,16 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     query_result = aggregated_rows
                     result_rows_returned = len(query_result)
                     result_auto_paginated = result_pages_fetched > 1
+
+                    # Emit unified pagination decision
+                    pagination_summary = format_decision_summary(
+                        action="pagination",
+                        decision="stop",
+                        reason_code=result_auto_pagination_stopped_reason,
+                        pages_fetched=result_pages_fetched,
+                        rows_aggregated=len(query_result),
+                    )
+                    span.add_event("system.decision", pagination_summary.to_dict())
                 elif (
                     auto_pagination_enabled
                     and result_capability_required == "pagination"
@@ -819,9 +830,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     and not result_prefetch_scheduled
                     and result_prefetch_reason != PrefetchSuppressionReason.CACHE_HIT.value
                 ):
-                    span.add_event(
-                        "pagination.prefetch_suppressed", {"reason": str(result_prefetch_reason)}
+                    prefetch_summary = format_decision_summary(
+                        action="prefetch",
+                        decision="suppress",
+                        reason_code=result_prefetch_reason,
                     )
+                    span.add_event("system.decision", prefetch_summary.to_dict())
+                elif prefetch_enabled and result_prefetch_scheduled:
+                    prefetch_summary = format_decision_summary(
+                        action="prefetch",
+                        decision="proceed",
+                        reason_code=result_prefetch_reason,
+                    )
+                    span.add_event("system.decision", prefetch_summary.to_dict())
 
                 result_columns = parsed.get("columns")
                 error = None
