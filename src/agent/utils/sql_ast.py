@@ -21,26 +21,41 @@ def parse_sql(sql: str, dialect: str = "postgres") -> Optional[exp.Expression]:
 
 
 def extract_tables(ast: exp.Expression) -> Set[str]:
-    """Extract fully qualified table names from AST."""
+    """Extract fully qualified table names from AST.
+
+    Handles catalog.db.table, db.table, and table.
+    """
     tables = set()
     for table in ast.find_all(exp.Table):
-        if table.name:
-            table_name = table.name
-            if table.db:
-                table_name = f"{table.db}.{table_name}"
-            tables.add(table_name)
+        parts = []
+        if table.catalog:
+            parts.append(table.catalog)
+        if table.db:
+            parts.append(table.db)
+        if table.this:
+            # table.this is the table name (as an Identifier or string)
+            parts.append(table.name)
+
+        if parts:
+            tables.add(".".join(parts))
     return tables
 
 
 def extract_columns(ast: exp.Expression) -> Set[str]:
-    """Extract qualified column names from AST."""
+    """Extract qualified column names from AST.
+
+    Handles table.column and column.
+    """
     columns = set()
     for column in ast.find_all(exp.Column):
-        if column.name:
-            col_ref = column.name
-            if column.table:
-                col_ref = f"{column.table}.{col_ref}"
-            columns.add(col_ref)
+        parts = []
+        if column.table:
+            parts.append(column.table)
+        if column.this:
+            parts.append(column.name)
+
+        if parts:
+            columns.add(".".join(parts))
     return columns
 
 

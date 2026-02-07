@@ -54,8 +54,15 @@ def detect_schema_drift(
     missing_identifiers: List[str] = []
     method = DriftDetectionMethod.AST
 
+    # Normalize inputs
+    sql = (sql or "").strip()
+    error_message = (error_message or "").strip()
+
     # 1. Best-effort AST analysis
-    ast = parse_sql(sql)
+    ast = None
+    if sql:
+        ast = parse_sql(sql)
+
     if ast:
         schema_map = _build_schema_set(raw_schema_context)
         if schema_map:
@@ -90,7 +97,7 @@ def detect_schema_drift(
 
                     if not valid_referenced_tables:
                         # If no valid tables found in schema, we can't really validate
-                        # the column via AST
+                        # the column via AST alone
                         continue
 
                     for table_key in valid_referenced_tables:
@@ -100,6 +107,10 @@ def detect_schema_drift(
 
                     if not found:
                         missing_identifiers.append(col_ref)
+        else:
+            # SQL is present and parsed, but we have no local schema context to compare against.
+            # We will rely entirely on regex in this case.
+            pass
 
     # 2. If AST found nothing or parse failed, or if we want to be aggressive (Hybrid)
     # The error message is often the most authoritative source of what's EXACTLY missing.
@@ -110,10 +121,16 @@ def detect_schema_drift(
         method = DriftDetectionMethod.REGEX_FALLBACK if not ast else DriftDetectionMethod.HYBRID
     elif missing_identifiers and regex_identifiers:
         # Merge results for Hybrid approach
+        # Regex identifiers are high-confidence (confirmed by DB)
+        # AST identifiers are suspected (missing from our schema context)
         for ri in regex_identifiers:
             if ri not in missing_identifiers:
                 missing_identifiers.append(ri)
         method = DriftDetectionMethod.HYBRID
+    elif missing_identifiers and not regex_identifiers:
+        # We suspect drift via AST, but DB error doesn't explicitly name the identifier
+        # or we don't have a regex for it yet.
+        method = DriftDetectionMethod.AST
     elif not ast:
         method = DriftDetectionMethod.REGEX_FALLBACK
 

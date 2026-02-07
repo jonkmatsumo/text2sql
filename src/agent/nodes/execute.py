@@ -24,7 +24,6 @@ from common.constants.reason_codes import (
     PaginationStopReason,
     PrefetchSuppressionReason,
 )
-from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +40,10 @@ def _schema_drift_hint(
 ) -> tuple[bool, list[str], Optional[DriftDetectionMethod]]:
     from agent.utils.drift_detection import detect_schema_drift
 
-    if sql and raw_schema_context:
-        identifiers, method = detect_schema_drift(sql, error_text, provider, raw_schema_context)
-        return (len(identifiers) > 0, identifiers, method)
-
-    identifiers = extract_missing_identifiers(provider, error_text)
-    return (len(identifiers) > 0, identifiers, DriftDetectionMethod.REGEX_FALLBACK)
+    identifiers, method = detect_schema_drift(
+        sql or "", error_text, provider, raw_schema_context or []
+    )
+    return (len(identifiers) > 0, identifiers, method)
 
 
 def _safe_env_int(name: str, default: int, minimum: int) -> int:

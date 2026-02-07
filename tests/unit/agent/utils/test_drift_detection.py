@@ -82,3 +82,37 @@ def test_detect_schema_drift_hybrid(raw_schema_context):
     assert "products" in missing
     # Note: 'products.user_id' is NOT included because 'products' table is already missing
     assert method == DriftDetectionMethod.HYBRID
+
+
+def test_detect_schema_drift_with_catalog(raw_schema_context):
+    """Test that qualified table names with catalogs are handled."""
+    # We add a catalog to the schema context mock for this test
+    context = raw_schema_context + [
+        {"type": "Table", "name": "analytics.sales.events"},
+        {"type": "Column", "table": "analytics.sales.events", "name": "id"},
+    ]
+
+    # Matching
+    sql = "SELECT id FROM analytics.sales.events"
+    missing, _ = detect_schema_drift(sql, "", "postgres", context)
+    assert "analytics.sales.events" not in missing
+    assert "id" not in missing
+
+    # Mismatching catalog
+    sql = "SELECT id FROM wrong.sales.events"
+    missing, _ = detect_schema_drift(sql, "", "postgres", context)
+    assert "wrong.sales.events" in missing
+
+
+def test_detect_schema_drift_no_context_regex_only():
+    """Test that when schema context is missing, it relies on regex even if SQL is valid."""
+    sql = "SELECT * FROM users"
+    error_message = 'relation "users" does not exist'
+
+    missing, method = detect_schema_drift(sql, error_message, "postgres", [])
+
+    assert "users" in missing
+    # Since AST couldn't validate anything (no context), it should be REGEX_FALLBACK or HYBRID?
+    # Currently it would be HYBRID because ast exists but missing_identifiers from AST is empty.
+    # Wait, if ast exists but missing_identifiers is empty, and regex finds something, it is HYBRID.
+    assert method == DriftDetectionMethod.HYBRID

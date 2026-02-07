@@ -223,6 +223,7 @@ def generate_correction_strategy(
     error_message: str,
     failed_sql: str,
     schema_context: str = "",
+    missing_identifiers: Optional[list[str]] = None,
 ) -> str:
     """
     Generate a detailed correction strategy based on error classification.
@@ -231,6 +232,7 @@ def generate_correction_strategy(
         error_message: The database error message
         failed_sql: The SQL query that failed
         schema_context: Available schema context
+        missing_identifiers: Structured list of identifiers (tables/columns) confirmed missing
 
     Returns:
         Formatted correction strategy for the LLM
@@ -241,7 +243,16 @@ def generate_correction_strategy(
 
 ### Error Message
 {error_message}
+"""
 
+    if missing_identifiers:
+        strategy += f"""
+### Missing Identifiers (Confirmed)
+The following identifiers were referenced in the SQL but are NOT present in the schema:
+{", ".join(f"'{i}'" for i in missing_identifiers)}
+"""
+
+    strategy += f"""
 ### Failed SQL
 {failed_sql}
 

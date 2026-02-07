@@ -99,6 +99,7 @@ def correct_sql_node(state: AgentState) -> dict:
             error_message=error or "",
             failed_sql=current_sql or "",
             schema_context=schema_context,
+            missing_identifiers=state.get("missing_identifiers"),
         )
 
         # Prepare context variables for the prompt
