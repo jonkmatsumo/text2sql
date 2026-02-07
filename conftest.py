@@ -1,5 +1,14 @@
 import os
 import sys
+
+# Fail fast if Python version is unsupported (PEP 604 unions require 3.10+)
+if sys.version_info < (3, 10):
+    print(
+        f"ERROR: This project requires Python 3.10+ (found {sys.version.split()[0]}).",
+        file=sys.stderr,
+    )
+    print("Please upgrade your local environment or use 'uv run pytest'.", file=sys.stderr)
+    sys.exit(1)
 from pathlib import Path
 
 import pytest

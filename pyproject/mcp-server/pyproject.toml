@@ -2,7 +2,7 @@
 name = "text2sql-mcp"
 version = "0.1.0"
 description = "MCP Server for Text 2 SQL"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=0.9.0",
     "uvicorn>=0.24.0",

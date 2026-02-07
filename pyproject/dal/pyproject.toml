@@ -2,7 +2,7 @@
 name = "text2sql-dal"
 version = "0.1.0"
 description = "Data Access Layer for Text 2 SQL"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
     "asyncpg>=0.29.0",
