@@ -9,7 +9,11 @@ from typing import Dict
 import sqlglot
 from sqlglot import exp
 
+from agent.telemetry import telemetry
+from agent.utils.sql_ast import normalize_sql
 from agent.validation.policy_loader import PolicyDefinition, PolicyLoader
+from common.sanitization.bounding import bound_payload, redact_recursive
+from common.utils.hashing import canonical_json_hash
 
 logger = logging.getLogger(__name__)
 
@@ -38,19 +42,49 @@ class TenantRewriter:
         try:
             expression = sqlglot.parse_one(sql)
         except Exception as e:
+            telemetry.add_event(
+                "tenant_rewriter.failure",
+                attributes=redact_recursive(
+                    {
+                        "error": str(e),
+                        "sql_hash": canonical_json_hash(sql),
+                    }
+                ),
+            )
             raise ValueError(f"Failed to parse SQL for rewriting: {e}")
 
         # 3. Apply rewriting transformation
+        tables_total = len(list(expression.find_all(exp.Table)))
+
         # We process the tree to find Table nodes and replace them with filtered subqueries
         # or inject WHERE clauses.
-        # Strategy: Replace 'Table' with '(SELECT * FROM Table WHERE tenant_col = :tenant_id)'
-        # This preserves JOIN semantics (e.g. OUTER JOINs) better than appending to global WHERE.
-
         rewritten = cls._rewrite_node(expression, policies)
+
+        tables_rewritten = len(list(rewritten.find_all(exp.Subquery)))  # Rough heuristic
 
         # 4. Generate SQL
         # We output using default postgres dialect
-        return rewritten.sql(dialect="postgres")
+        rewritten_sql = normalize_sql(rewritten, dialect="postgres")
+
+        # Emit Audit Telemetry
+        telemetry.add_event(
+            "tenant_rewriter.audit",
+            attributes=bound_payload(
+                redact_recursive(
+                    {
+                        "original_sql_hash": canonical_json_hash(normalize_sql(expression)),
+                        "rewritten_sql_hash": canonical_json_hash(rewritten_sql),
+                        "stats": {
+                            "tables_total": tables_total,
+                            "tables_rewritten": tables_rewritten,
+                            "policy_count": len(policies),
+                        },
+                    }
+                )
+            ),
+        )
+
+        return rewritten_sql
 
     @classmethod
     def _rewrite_node(

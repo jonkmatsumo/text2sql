@@ -748,6 +748,12 @@ class TelemetryService:
         """Get the current active span from the backend."""
         return self._backend.get_current_span()
 
+    def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+        """Add a timed event to the current active span."""
+        span = self.get_current_span()
+        if span:
+            span.add_event(name, attributes)
+
     def get_current_trace_id(self) -> Optional[str]:
         """Get the current trace ID from the backend."""
         return self._backend.get_current_trace_id()
