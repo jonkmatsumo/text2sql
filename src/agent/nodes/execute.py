@@ -374,7 +374,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     error_category = error_obj.category if error_obj else None
                     error_metadata = error_obj.to_dict() if error_obj else None
 
-                    if error_msg == "Malformed response payload":
+                    if error_msg == "Malformed response payload" or (
+                        error_msg and error_msg.startswith("Invalid payload type")
+                    ):
                         span.set_attribute("tool.response_shape", "malformed")
                         trace_id = telemetry.get_current_trace_id()
                         error_msg = (
@@ -868,7 +870,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 }
 
         except Exception as e:
-            error = str(e)
+            if hasattr(e, "exceptions"):
+                # Unwrap ExceptionGroup from TaskGroup
+                error = "; ".join([str(ex) for ex in e.exceptions])
+            else:
+                error = str(e)
             span.set_outputs({"error": error})
             span.set_attribute("error.type", type(e).__name__)
             return {
