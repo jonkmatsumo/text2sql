@@ -7,7 +7,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from common.config.env import get_env_int, get_env_str
-from common.sanitization.text import redact_sensitive_info
+from common.constants.reason_codes import PayloadTruncationReason
+from common.sanitization.bounding import bound_payload, redact_recursive
 
 REPLAY_BUNDLE_VERSION = "1.0"
 MAX_TOOL_ROWS = 50
@@ -33,32 +34,6 @@ class ReplayBundle(BaseModel):
     flags: dict[str, Any]
     tool_io: list[ReplayToolIO]
     outcome: dict[str, Any]
-
-
-def _redact_recursive(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_sensitive_info(value)
-    if isinstance(value, list):
-        return [_redact_recursive(item) for item in value]
-    if isinstance(value, dict):
-        redacted: dict[str, Any] = {}
-        for key, item in value.items():
-            lowered = key.lower()
-            if any(
-                token in lowered for token in ("token", "password", "secret", "api_key", "auth")
-            ):
-                redacted[key] = "<redacted>"
-            else:
-                redacted[key] = _redact_recursive(item)
-        return redacted
-    return value
-
-
-def _bounded_rows(rows: Any, max_rows: int = MAX_TOOL_ROWS) -> list[dict[str, Any]]:
-    if not isinstance(rows, list):
-        return []
-    bounded = rows[:max_rows]
-    return [_redact_recursive(row) for row in bounded if isinstance(row, dict)]
 
 
 def collect_replay_flags() -> dict[str, Any]:
@@ -110,31 +85,18 @@ def build_replay_bundle(
     if state.get("last_tool_output"):
         # If we have the raw last tool output, capture it (bounded)
         last_output = state["last_tool_output"]
-        if isinstance(last_output, dict) and "rows" in last_output:
-            # Create a bounded version of the raw output
-            bounded_output = last_output.copy()
-            bounded_output["rows"] = _bounded_rows(last_output.get("rows"))
 
-            tool_io.append(
-                ReplayToolIO(
-                    name="execute_sql_query",
-                    input=_redact_recursive(
-                        {
-                            "sql_query": state.get("current_sql"),
-                            "tenant_id": request_payload.get("tenant_id"),
-                            "page_token": request_payload.get("page_token"),
-                            "page_size": request_payload.get("page_size"),
-                        }
-                    ),
-                    output=_redact_recursive(bounded_output),
-                )
-            )
-    elif state.get("current_sql"):
-        # Fallback to summary if raw output not available
+        # Use shared bounding logic
+        bounded_output = bound_payload(
+            last_output,
+            max_items=MAX_TOOL_ROWS,
+            truncation_reason=PayloadTruncationReason.SAFETY_LIMIT,
+        )
+
         tool_io.append(
             ReplayToolIO(
                 name="execute_sql_query",
-                input=_redact_recursive(
+                input=redact_recursive(
                     {
                         "sql_query": state.get("current_sql"),
                         "tenant_id": request_payload.get("tenant_id"),
@@ -142,11 +104,30 @@ def build_replay_bundle(
                         "page_size": request_payload.get("page_size"),
                     }
                 ),
-                output=_redact_recursive(
+                output=redact_recursive(bounded_output),
+            )
+        )
+    elif state.get("current_sql"):
+        # Fallback to summary if raw output not available
+        query_result = state.get("query_result") or []
+        bounded_rows = bound_payload(query_result, max_items=MAX_TOOL_ROWS)
+
+        tool_io.append(
+            ReplayToolIO(
+                name="execute_sql_query",
+                input=redact_recursive(
                     {
-                        "rows": _bounded_rows(state.get("query_result")),
+                        "sql_query": state.get("current_sql"),
+                        "tenant_id": request_payload.get("tenant_id"),
+                        "page_token": request_payload.get("page_token"),
+                        "page_size": request_payload.get("page_size"),
+                    }
+                ),
+                output=redact_recursive(
+                    {
+                        "rows": bounded_rows,
                         "metadata": {
-                            "rows_returned": len(state.get("query_result") or []),
+                            "rows_returned": len(query_result),
                             "error": state.get("error"),
                             "error_category": state.get("error_category"),
                         },
@@ -164,7 +145,7 @@ def build_replay_bundle(
             "temperature": get_env_str("LLM_TEMPERATURE"),
         },
         seed=_resolve_seed(state),
-        prompts=_redact_recursive(
+        prompts=redact_recursive(
             {
                 "user": question,
                 "assistant": response_text,
@@ -176,10 +157,10 @@ def build_replay_bundle(
         },
         flags=collect_replay_flags(),
         tool_io=tool_io,
-        outcome=_redact_recursive(
+        outcome=redact_recursive(
             {
                 "sql": state.get("current_sql"),
-                "result": _bounded_rows(state.get("query_result")),
+                "result": bound_payload(state.get("query_result") or [], max_items=MAX_TOOL_ROWS),
                 "response": response_text,
                 "error": state.get("error"),
                 "error_category": state.get("error_category"),

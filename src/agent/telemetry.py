@@ -20,6 +20,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
+from common.sanitization.bounding import redact_recursive
 
 logger = logging.getLogger(__name__)
 
@@ -207,15 +208,17 @@ class OTELTelemetrySpan(TelemetrySpan):
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        self._span.set_attribute(key, value)
-        self._tracked_attributes[key] = value
+        redacted_value = redact_recursive(value)
+        self._span.set_attribute(key, redacted_value)
+        self._tracked_attributes[key] = redacted_value
         if key in ("error", "error.category", "error.type"):
             self._has_error = True
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        self._span.set_attributes(attributes)
-        self._tracked_attributes.update(attributes)
+        redacted_attrs = redact_recursive(attributes)
+        self._span.set_attributes(redacted_attrs)
+        self._tracked_attributes.update(redacted_attrs)
         if any(k in attributes for k in ("error", "error.category", "error.type")):
             self._has_error = True
 

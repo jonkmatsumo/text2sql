@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional, Tuple
 
+from common.sanitization.bounding import redact_recursive
+
 # --- Constants & Keys ---
 
 
@@ -57,22 +59,6 @@ class TelemetryKeys(str, Enum):
 # --- Safety Utilities ---
 
 MAX_PAYLOAD_SIZE = 32 * 1024  # 32KB hard limit for attributes
-SENSITIVE_KEYS = {"api_key", "password", "secret", "token", "credential", "auth"}
-
-
-def redact_secrets(obj: Any) -> Any:
-    """Recursively redact sensitive keys in dictionaries."""
-    if isinstance(obj, dict):
-        new_obj = {}
-        for k, v in obj.items():
-            if any(s in k.lower() for s in SENSITIVE_KEYS):
-                new_obj[k] = "[REDACTED]"
-            else:
-                new_obj[k] = redact_secrets(v)
-        return new_obj
-    elif isinstance(obj, list):
-        return [redact_secrets(item) for item in obj]
-    return obj
 
 
 def truncate_json(
@@ -85,7 +71,7 @@ def truncate_json(
         Tuple(serialized_str, was_truncated, size_bytes, sha256_hash)
     """
     # 1. Redact first
-    clean_obj = redact_secrets(obj)
+    clean_obj = redact_recursive(obj)
 
     # 2. Serialize deterministically
     try:
