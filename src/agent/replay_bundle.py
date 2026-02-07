@@ -186,46 +186,57 @@ def serialize_replay_bundle(bundle: ReplayBundle) -> str:
 
 
 def validate_replay_bundle(bundle_payload: dict[str, Any]) -> ReplayBundle:
-    """Validate replay bundle payload using schema model and version checks."""
-    if not isinstance(bundle_payload, dict):
-        raise ValidationError.from_exception_data(
-            "Replay bundle must be a dictionary object", line_errors=[]
-        )
+    """Validate replay bundle payload using schema model and version checks.
 
+    Returns:
+        Validated ReplayBundle object.
+
+    Raises:
+        ValueError: If bundle is invalid or incompatible.
+    """
+    if not isinstance(bundle_payload, dict):
+        raise ValueError("Replay bundle must be a dictionary object")
+
+    # 1. Version Check (Fail fast)
     version = bundle_payload.get("version")
     if not version:
-        raise ValueError("Replay bundle is missing 'version' field")
+        raise ValueError("Replay bundle is missing required 'version' field")
 
     if version != REPLAY_BUNDLE_VERSION:
         raise ValueError(
-            f"Unsupported replay bundle version: {version}. " f"Expected: {REPLAY_BUNDLE_VERSION}"
+            f"Incompatible replay bundle version: '{version}'. "
+            f"This agent supports version '{REPLAY_BUNDLE_VERSION}'. "
+            "Please capture a new bundle."
         )
 
-    # Required top-level fields check (beyond what Pydantic might do if we want explicit messages)
+    # 2. Required top-level fields check
     required_fields = ["captured_at", "model", "prompts", "schema_context", "tool_io", "outcome"]
     missing = [f for f in required_fields if f not in bundle_payload]
     if missing:
-        raise ValueError(f"Replay bundle is missing required fields: {', '.join(missing)}")
+        raise ValueError(f"Replay bundle is corrupted (missing fields): {', '.join(missing)}")
 
+    # 3. Pydantic schema validation
     try:
         bundle = ReplayBundle.model_validate(bundle_payload)
     except ValidationError as e:
-        raise ValueError(f"Replay bundle schema validation failed: {e}") from e
+        # Wrap Pydantic errors in more actionable messages
+        error_details = []
+        for error in e.errors():
+            loc = ".".join(str(x) for x in error["loc"])
+            error_details.append(f"{loc}: {error['msg']}")
+        raise ValueError(
+            f"Replay bundle schema validation failed: {'; '.join(error_details)}"
+        ) from e
 
-    # Check for prompt version mismatch
+    # 4. Prompt compatibility check
     current_hash = canonical_json_hash(PROMPT_VERSION)
     if bundle.prompt_hash and bundle.prompt_hash != current_hash:
         logger.warning(
-            "Replay bundle prompt hash mismatch: %s != %s (current). "
-            "Replay behavior may diverge.",
+            "Replay bundle prompt hash mismatch: %s != %s. "
+            "Replay behavior may diverge from original capture.",
             bundle.prompt_hash,
             current_hash,
         )
-
-    # Invariant checks: redaction
-    # We can't easily prove EVERYTHING is redacted, but we can check the prompts/outcome
-    # for common leak patterns if we wanted to be extremely strict.
-    # For now, we'll trust the capture logic but we could add a sanity check here.
 
     return bundle
 
@@ -233,22 +244,43 @@ def validate_replay_bundle(bundle_payload: dict[str, Any]) -> ReplayBundle:
 def replay_response_from_bundle(
     bundle: ReplayBundle, allow_external_calls: bool = False
 ) -> dict[str, Any]:
-    """Build a replay response envelope from captured bundle content."""
+    """Build a replay response envelope from captured bundle content.
+
+    This function enforces redaction and bounding invariants on the
+    captured content before merging it into the agent state.
+    """
     if allow_external_calls:
         return {
-            "mode": "external_calls_requested",
-            "note": "Replay bundle accepted; external execution is caller-managed.",
+            "mode": "replay",
+            "execution.mode": "replay",
+            "execution.hybrid": True,
+            "note": "Replay bundle accepted; external execution is enabled.",
         }
 
     outcome = bundle.outcome
+
+    # Enforce invariants on the data we are about to 'execute' (replay)
+    # This prevents using an un-redacted bundle to bypass security in replay mode
+    sanitized_sql = redact_recursive(outcome.get("sql"))
+    sanitized_result = bound_payload(
+        redact_recursive(outcome.get("result") or []), max_items=MAX_TOOL_ROWS
+    )
+    sanitized_response = redact_recursive(outcome.get("response") or "")
+
+    current_prompt_hash = canonical_json_hash(PROMPT_VERSION)
+    prompt_match = bundle.prompt_hash == current_prompt_hash
+
     return {
-        "current_sql": outcome.get("sql"),
-        "query_result": outcome.get("result"),
-        "error": outcome.get("error"),
+        "current_sql": sanitized_sql,
+        "query_result": sanitized_result,
+        "error": redact_recursive(outcome.get("error")),
         "error_category": outcome.get("error_category"),
         "retry_summary": outcome.get("retry_summary"),
         "result_completeness": outcome.get("result_completeness"),
-        "messages": [type("ReplayMessage", (), {"content": outcome.get("response") or ""})()],
+        "messages": [type("ReplayMessage", (), {"content": sanitized_response})()],
+        "execution.mode": "replay",
+        "replay.prompt_match": prompt_match,
+        "replay.version": bundle.version,
     }
 
 
