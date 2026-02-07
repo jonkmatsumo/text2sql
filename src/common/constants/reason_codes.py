@@ -66,3 +66,11 @@ class PayloadTruncationReason(str, Enum):
     MAX_BYTES = "max_bytes"  # JSON size limit
     PROVIDER_CAP = "provider_cap"
     SAFETY_LIMIT = "safety_limit"
+
+
+class DriftDetectionMethod(str, Enum):
+    """Methods used for drift detection."""
+
+    AST = "ast"
+    REGEX_FALLBACK = "regex_fallback"
+    HYBRID = "hybrid"

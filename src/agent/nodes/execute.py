@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Optional
 
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
@@ -18,7 +19,11 @@ from agent.utils.pagination_prefetch import (
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
 from common.config.env import get_env_bool, get_env_int, get_env_str
-from common.constants.reason_codes import PaginationStopReason, PrefetchSuppressionReason
+from common.constants.reason_codes import (
+    DriftDetectionMethod,
+    PaginationStopReason,
+    PrefetchSuppressionReason,
+)
 from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
@@ -28,9 +33,20 @@ class ToolResponseMalformedError(RuntimeError):
     """Raised when execute_sql_query returns an unexpected payload."""
 
 
-def _schema_drift_hint(error_text: str, provider: str) -> tuple[bool, list[str]]:
+def _schema_drift_hint(
+    error_text: str,
+    provider: str,
+    sql: Optional[str] = None,
+    raw_schema_context: Optional[list[dict]] = None,
+) -> tuple[bool, list[str], Optional[DriftDetectionMethod]]:
+    from agent.utils.drift_detection import detect_schema_drift
+
+    if sql and raw_schema_context:
+        identifiers, method = detect_schema_drift(sql, error_text, provider, raw_schema_context)
+        return (len(identifiers) > 0, identifiers, method)
+
     identifiers = extract_missing_identifiers(provider, error_text)
-    return (len(identifiers) > 0, identifiers)
+    return (len(identifiers) > 0, identifiers, DriftDetectionMethod.REGEX_FALLBACK)
 
 
 def _safe_env_int(name: str, default: int, minimum: int) -> int:
@@ -363,13 +379,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 provider = get_env_str(
                     "QUERY_TARGET_BACKEND", get_env_str("QUERY_TARGET_PROVIDER", "postgres")
                 )
-                suspected, identifiers = _schema_drift_hint(error_msg, provider)
+                sql = state.get("current_sql")
+                raw_schema_context = state.get("raw_schema_context")
+                suspected, identifiers, method = _schema_drift_hint(
+                    error_msg, provider, sql, raw_schema_context
+                )
                 if not suspected:
                     return {}
                 auto_refresh = get_env_bool("AGENT_SCHEMA_DRIFT_AUTO_REFRESH", False)
                 span.set_attribute("schema.drift.suspected", True)
                 span.set_attribute("schema.drift.missing_identifiers_count", len(identifiers))
                 span.set_attribute("schema.drift.auto_refresh_enabled", auto_refresh)
+                if method:
+                    span.set_attribute("schema.drift.detection_method", method.value)
                 return {
                     "schema_drift_suspected": True,
                     "missing_identifiers": identifiers,
