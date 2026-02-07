@@ -7,7 +7,8 @@ from typing import Optional
 
 import asyncpg
 
-from common.config.env import get_env_str
+from common.config.env import get_env_int, get_env_str
+from common.constants.reason_codes import PayloadTruncationReason
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
     negotiate_capability_request,
@@ -22,6 +23,7 @@ from dal.error_classification import (
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
+from mcp_server.utils.json_budget import JSONBudget
 
 TOOL_NAME = "execute_sql_query"
 
@@ -346,17 +348,36 @@ async def handler(
             forced_limited = True
             row_limit = force_result_limit
 
+        # JSON Size Budget
+        max_bytes = get_env_int("MCP_JSON_PAYLOAD_LIMIT_BYTES", 2 * 1024 * 1024)
+        budget = JSONBudget(max_bytes)
+        safe_rows = []
+        size_truncated = False
+
+        # Approximate envelope overhead
+        budget.consume({"metadata": {}, "rows": []})
+
+        for row in result_rows:
+            if not budget.consume(row):
+                size_truncated = True
+                break
+            safe_rows.append(row)
+
+        result_rows = safe_rows
+
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
 
-        is_truncated = bool(last_truncated or safety_truncated or forced_limited)
+        is_truncated = bool(last_truncated or safety_truncated or forced_limited or size_truncated)
         partial_reason = last_truncated_reason
+        if partial_reason is None and size_truncated:
+            partial_reason = PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
-            partial_reason = "LIMITED"
+            partial_reason = PayloadTruncationReason.PROVIDER_CAP.value  # Was "LIMITED"
         if partial_reason is None and safety_truncated:
-            partial_reason = "TRUNCATED"
+            partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value  # Was "TRUNCATED"
         if partial_reason is None and is_truncated:
-            partial_reason = "TRUNCATED"
+            partial_reason = PayloadTruncationReason.MAX_ROWS.value  # Was "TRUNCATED"
         cap_detected = partial_reason == "PROVIDER_CAP"
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
