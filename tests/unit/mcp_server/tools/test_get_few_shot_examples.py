@@ -30,15 +30,16 @@ class TestGetFewShotExamples:
             mock_svc.assert_called_once_with("show all users", 3, 1)
             assert result == mock_result
 
+            mock_svc.assert_called_once_with("show all users", 3, 1)
+            assert result == mock_result
+
     @pytest.mark.asyncio
-    async def test_get_few_shot_examples_default_params(self):
-        """Test default parameter values."""
-        with patch(
-            "mcp_server.tools.get_few_shot_examples.get_relevant_examples", new_callable=AsyncMock
-        ) as mock_svc:
-            mock_svc.return_value = "[]"
+    async def test_get_few_shot_examples_requires_tenant_id(self):
+        """Verify that get_few_shot_examples requires tenant_id."""
+        import json
 
-            await handler("test query")
-
-            # Default tenant_id=1, limit=3
-            mock_svc.assert_called_once_with("test query", 3, 1)
+        result_json = await handler("test query", tenant_id=None)
+        result = json.loads(result_json)
+        assert "error" in result
+        assert "Tenant ID is required" in result["error"]
+        assert result["error_category"] == "invalid_request"
