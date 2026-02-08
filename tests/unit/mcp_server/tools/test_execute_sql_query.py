@@ -291,3 +291,13 @@ class TestExecuteSqlQuery:
             data = json.loads(result)
             assert data["error"]["category"] == "invalid_request"
             assert "exceeds maximum length" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_blocked_function(self):
+        """Test rejecting blocked functions like pg_sleep."""
+        result = await handler("SELECT pg_sleep(5)", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "invalid_request"
+        assert "Forbidden function" in data["error"]["message"]
+        assert "PG_SLEEP" in data["error"]["message"]
