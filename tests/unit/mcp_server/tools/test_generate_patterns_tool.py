@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -33,9 +34,10 @@ async def test_generate_patterns_tool_success():
 
         result = await handler(dry_run=False)
 
-        assert result["success"] is True
-        assert result["run_id"] == str(run_id)
-        assert result["metrics"]["generated_count"] == 10
+        data = json.loads(result)
+        assert data["result"]["success"] is True
+        assert data["result"]["run_id"] == str(run_id)
+        assert data["result"]["metrics"]["generated_count"] == 10
 
 
 @pytest.mark.asyncio
@@ -64,5 +66,6 @@ async def test_generate_patterns_tool_failure():
 
         result = await handler(dry_run=False)
 
-        assert result["success"] is False
-        assert "LLM capacity exceeded" in result["error"]
+        data = json.loads(result)
+        assert data["result"]["success"] is False
+        assert "LLM capacity exceeded" in data["result"]["error"]

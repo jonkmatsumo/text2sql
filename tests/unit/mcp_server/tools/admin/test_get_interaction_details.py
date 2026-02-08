@@ -1,5 +1,6 @@
 """Tests for get_interaction_details tool."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -42,8 +43,9 @@ class TestGetInteractionDetails:
 
             mock_i_store.get_interaction_detail.assert_called_once_with("int-1")
             mock_f_store.get_feedback_for_interaction.assert_called_once_with("int-1")
-            assert result["id"] == "int-1"
-            assert result["feedback"] == mock_feedback
+            data = json.loads(result)
+            assert data["result"]["id"] == "int-1"
+            assert data["result"]["feedback"] == mock_feedback
 
     @pytest.mark.asyncio
     async def test_get_interaction_details_not_found(self):
@@ -61,5 +63,6 @@ class TestGetInteractionDetails:
 
             result = await handler("nonexistent")
 
-            assert "error" in result
-            assert "not found" in result["error"]
+            data = json.loads(result)
+            assert data["error"]["category"] == "not_found"
+            assert "not found" in data["error"]["message"]

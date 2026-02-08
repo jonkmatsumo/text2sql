@@ -154,6 +154,31 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     return None
 
 
+def _validate_params(params: Optional[list]) -> Optional[str]:
+    """Validate parameters to ensure they are a flat list of scalars."""
+    if params is None:
+        return None
+
+    if not isinstance(params, (list, tuple)):
+        # We accept list or tuple as "list-like", but the type hint says list.
+        # Strict requirement says "must be a list".
+        # Let's stick to list check if the requirement is strict.
+        # However, `handler` signature says `params: Optional[list]`.
+        # I will check for list.
+        return "Parameters must be a list."
+
+    for i, param in enumerate(params):
+        if param is None:
+            continue
+        if not isinstance(param, (str, int, float, bool)):
+            return (
+                f"Parameter at index {i} has unsupported type: {type(param).__name__}. "
+                "Only scalar values (str, int, float, bool, None) are allowed."
+            )
+
+    return None
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int] = None,
@@ -171,6 +196,15 @@ async def handler(
     if validation_error:
         return _construct_error_response(
             validation_error,
+            category="invalid_request",
+            provider=provider,
+        )
+
+    # 1.5 Parameter Validation
+    param_error = _validate_params(params)
+    if param_error:
+        return _construct_error_response(
+            param_error,
             category="invalid_request",
             provider=provider,
         )

@@ -5,7 +5,7 @@ from dal.factory import get_feedback_store
 TOOL_NAME = "export_approved_to_fewshot"
 
 
-async def handler(limit: int = 10) -> dict:
+async def handler(limit: int = 10) -> str:
     """Sync approved interactions to the Few-Shot Registry.
 
     Args:
@@ -14,12 +14,18 @@ async def handler(limit: int = 10) -> dict:
     Returns:
         Summary of exports with total, published count, and any errors.
     """
+    import time
+
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
+
+    start_time = time.monotonic()
 
     f_store = get_feedback_store()
 
     approved = await f_store.get_approved_interactions(limit)
     results = {"total": len(approved), "published": 0, "errors": []}
+    execution_time_ms = (time.monotonic() - start_time) * 1000
 
     for item in approved:
         try:
@@ -43,4 +49,9 @@ async def handler(limit: int = 10) -> dict:
         except Exception as e:
             results["errors"].append({"id": item["interaction_id"], "error": str(e)})
 
-    return results
+    return ToolResponseEnvelope(
+        result=results,
+        metadata=GenericToolMetadata(
+            provider="registry_service", execution_time_ms=execution_time_ms
+        ),
+    ).model_dump_json(exclude_none=True)

@@ -16,7 +16,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
-from agent.utils.parsing import parse_tool_output
+from agent.utils.parsing import parse_tool_output, unwrap_envelope
 
 load_dotenv()
 
@@ -155,12 +155,8 @@ async def router_node(state: AgentState) -> dict:
                 parsed_res = parsed_res[0]
 
             # Unwrap GenericToolResponseEnvelope if present
-            if (
-                isinstance(parsed_res, dict)
-                and "result" in parsed_res
-                and "schema_version" in parsed_res
-            ):
-                parsed_res = parsed_res["result"]
+            # Unwrap GenericToolResponseEnvelope if present
+            parsed_res = unwrap_envelope(parsed_res)
 
             if isinstance(parsed_res, dict):
                 res_data = parsed_res

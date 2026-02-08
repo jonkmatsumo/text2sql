@@ -69,7 +69,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
                 if subgraph_json:
                     try:
-                        from agent.utils.parsing import parse_tool_output
+                        from agent.utils.parsing import parse_tool_output, unwrap_envelope
 
                         graph_data = parse_tool_output(subgraph_json)
 
@@ -81,12 +81,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
                             graph_data = graph_data[0]
 
                         # Unwrap GenericToolResponseEnvelope if present
-                        if (
-                            isinstance(graph_data, dict)
-                            and "result" in graph_data
-                            and "schema_version" in graph_data
-                        ):
-                            graph_data = graph_data["result"]
+                        # Unwrap GenericToolResponseEnvelope if present
+                        graph_data = unwrap_envelope(graph_data)
 
                         if isinstance(graph_data, dict):
                             # Extract table names from nodes

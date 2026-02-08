@@ -104,6 +104,6 @@ class TestLegacyTools:
 
             assert calls["tables"] == ["t1"]
             assert calls["tables"] == ["t1"]
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert data[0]["table_name"] == "t1"
             assert data[0]["columns"][0]["name"] == "c1"

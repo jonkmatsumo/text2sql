@@ -123,48 +123,54 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.search_relevant_tables import handler as search_relevant_tables
     from mcp_server.tools.update_cache import handler as update_cache
 
+    # Helper for traced registration
+    from mcp_server.utils.tracing import trace_tool
+
+    def register(name, func):
+        mcp.tool(name=name)(trace_tool(name)(func))
+
     # Register core retrieval tools
-    mcp.tool(name="list_tables")(list_tables)
-    mcp.tool(name="get_table_schema")(get_table_schema)
-    mcp.tool(name="get_sample_data")(get_sample_data)
-    mcp.tool(name="search_relevant_tables")(search_relevant_tables)
-    mcp.tool(name="get_semantic_subgraph")(get_semantic_subgraph)
-    mcp.tool(name="get_semantic_definitions")(get_semantic_definitions)
+    register("list_tables", list_tables)
+    register("get_table_schema", get_table_schema)
+    register("get_sample_data", get_sample_data)
+    register("search_relevant_tables", search_relevant_tables)
+    register("get_semantic_subgraph", get_semantic_subgraph)
+    register("get_semantic_definitions", get_semantic_definitions)
 
     # Register execution tools
-    mcp.tool(name="execute_sql_query")(execute_sql_query)
+    register("execute_sql_query", execute_sql_query)
 
     # Register validation tools
-    mcp.tool(name="resolve_ambiguity")(resolve_ambiguity)
+    register("resolve_ambiguity", resolve_ambiguity)
 
     # Register cache tools
-    mcp.tool(name="lookup_cache")(lookup_cache)
-    mcp.tool(name="update_cache")(update_cache)
-    mcp.tool(name="get_few_shot_examples")(get_few_shot_examples)
-    mcp.tool(name="recommend_examples")(recommend_examples)
+    register("lookup_cache", lookup_cache)
+    register("update_cache", update_cache)
+    register("get_few_shot_examples", get_few_shot_examples)
+    register("recommend_examples", recommend_examples)
 
     # Register conversation tools
-    mcp.tool(name="save_conversation_state")(save_conversation_state)
-    mcp.tool(name="load_conversation_state")(load_conversation_state)
+    register("save_conversation_state", save_conversation_state)
+    register("load_conversation_state", load_conversation_state)
 
     # Register interaction tools
-    mcp.tool(name="create_interaction")(create_interaction)
-    mcp.tool(name="update_interaction")(update_interaction)
+    register("create_interaction", create_interaction)
+    register("update_interaction", update_interaction)
 
     # Register feedback tools
-    mcp.tool(name="submit_feedback")(submit_feedback)
+    register("submit_feedback", submit_feedback)
 
     # Register admin tools
-    mcp.tool(name="list_interactions")(list_interactions)
-    mcp.tool(name="get_interaction_details")(get_interaction_details)
-    mcp.tool(name="approve_interaction")(approve_interaction)
-    mcp.tool(name="reject_interaction")(reject_interaction)
-    mcp.tool(name="export_approved_to_fewshot")(export_approved_to_fewshot)
-    mcp.tool(name="list_approved_examples")(list_approved_examples)
-    mcp.tool(name="reload_patterns")(reload_patterns)
-    mcp.tool(name="manage_pin_rules")(manage_pin_rules)
-    mcp.tool(name="generate_patterns")(generate_patterns)
-    mcp.tool(name="hydrate_schema")(hydrate_schema)
-    mcp.tool(name="reindex_semantic_cache")(reindex_cache)
+    register("list_interactions", list_interactions)
+    register("get_interaction_details", get_interaction_details)
+    register("approve_interaction", approve_interaction)
+    register("reject_interaction", reject_interaction)
+    register("export_approved_to_fewshot", export_approved_to_fewshot)
+    register("list_approved_examples", list_approved_examples)
+    register("reload_patterns", reload_patterns)
+    register("manage_pin_rules", manage_pin_rules)
+    register("generate_patterns", generate_patterns)
+    register("hydrate_schema", hydrate_schema)
+    register("reindex_semantic_cache", reindex_cache)
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

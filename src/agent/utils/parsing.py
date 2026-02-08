@@ -171,3 +171,29 @@ def parse_tool_output(tool_output):
             continue
 
     return aggregated_results
+
+
+def unwrap_envelope(data: Any) -> Any:
+    """Unwrap ToolResponseEnvelope if present.
+
+    Args:
+        data: The parsed tool output (dict, list, or primitive).
+
+    Returns:
+        The inner 'result' if data is an envelope, otherwise data itself.
+    """
+    if isinstance(data, dict) and "result" in data and "schema_version" in data:
+        # Basic version check
+        from common.models.tool_envelopes import CURRENT_SCHEMA_VERSION, is_compatible
+
+        version = data.get("schema_version", "1.0")
+        if not is_compatible(version, CURRENT_SCHEMA_VERSION):
+            logger.warning(
+                f"Tool envelope version mismatch: received {version}, "
+                f"expected compatible with {CURRENT_SCHEMA_VERSION}"
+            )
+            # For now, we still return the result, but we logged the warning.
+            # In strict mode, we might want to raise an error or return raw data.
+
+        return data["result"]
+    return data

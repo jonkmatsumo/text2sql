@@ -27,10 +27,10 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
-    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
 
-    envelope = GenericToolResponseEnvelope(
+    envelope = ToolResponseEnvelope(
         result=data,
         metadata=GenericToolMetadata(
             provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms

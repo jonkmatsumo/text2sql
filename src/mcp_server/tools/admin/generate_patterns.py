@@ -1,10 +1,10 @@
-from typing import Any, Dict
-
 from dal.factory import get_pattern_run_store
 from mcp_server.services.ops.maintenance import MaintenanceService
 
+TOOL_NAME = "generate_patterns"
 
-async def handler(dry_run: bool = False) -> Dict[str, Any]:
+
+async def handler(dry_run: bool = False) -> str:
     """Generate EntityRuler patterns from database schema interactions.
 
     This tool triggers the pattern generation pipeline, which:
@@ -19,6 +19,13 @@ async def handler(dry_run: bool = False) -> Dict[str, Any]:
         JSON compatible dictionary with run status and metrics.
     """
     # We collect the logs but primary goal is to return the final run status
+    import time
+
+    from common.models.error_metadata import ErrorMetadata
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    start_time = time.monotonic()
+
     logs = []
     run_id = None
 
@@ -41,24 +48,44 @@ async def handler(dry_run: bool = False) -> Dict[str, Any]:
             run_store = get_pattern_run_store()
             run = await run_store.get_run(run_id)
             if run:
-                return {
-                    "success": run.status == "COMPLETED",
-                    "run_id": str(run_id),
-                    "status": run.status,
-                    "metrics": run.metrics,
-                    "error": run.error_message,
-                }
+                execution_time_ms = (time.monotonic() - start_time) * 1000
+                return ToolResponseEnvelope(
+                    result={
+                        "success": run.status == "COMPLETED",
+                        "run_id": str(run_id),
+                        "status": run.status,
+                        "metrics": run.metrics,
+                        "error": run.error_message,
+                    },
+                    metadata=GenericToolMetadata(
+                        provider="pattern_generator", execution_time_ms=execution_time_ms
+                    ),
+                ).model_dump_json(exclude_none=True)
 
         # Fallback if run info not found
-        return {
-            "success": any("successfully saved" in log.lower() for log in logs),
-            "run_id": run_id,
-            "logs": logs[-3:] if logs else [],
-        }
+        execution_time_ms = (time.monotonic() - start_time) * 1000
+        return ToolResponseEnvelope(
+            result={
+                "success": any("successfully saved" in log.lower() for log in logs),
+                "run_id": run_id,
+                "logs": logs[-3:] if logs else [],
+            },
+            metadata=GenericToolMetadata(
+                provider="pattern_generator", execution_time_ms=execution_time_ms
+            ),
+        ).model_dump_json(exclude_none=True)
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "run_id": run_id,
-        }
+        return ToolResponseEnvelope(
+            result={
+                "success": False,
+                "error": str(e),
+                "run_id": run_id,
+            },
+            error=ErrorMetadata(
+                message=str(e),
+                category="generation_failed",
+                provider="pattern_generator",
+                is_retryable=False,
+            ),
+        ).model_dump_json(exclude_none=True)

@@ -126,6 +126,7 @@ class PrefetchManager:
         Returns:
             Tuple of (scheduled_boolean, reason_code_string)
         """
+        global _PREFETCH_WAITING_COUNT
         import time
 
         from common.constants.reason_codes import PrefetchSuppressionReason
@@ -153,6 +154,7 @@ class PrefetchManager:
             logger.debug("Prefetch in cooldown status. Skipping.")
             return False, PrefetchSuppressionReason.COOLDOWN_ACTIVE.value
 
+        _PREFETCH_WAITING_COUNT += 1
         self._inflight_keys.add(cache_key)
         self._task_group.create_task(self._run_task(cache_key, fetch_fn))
         return True, PrefetchSuppressionReason.SCHEDULED.value
@@ -166,18 +168,20 @@ class PrefetchManager:
         global_semaphore = get_global_prefetch_semaphore()
 
         # Robust counter management
-        waiting_incremented = False
+        # Waiting count was incremented in schedule()
+        waiting_decremented = False
         active_incremented = False
 
         try:
             async with self.local_semaphore:
-                _PREFETCH_WAITING_COUNT += 1
-                waiting_incremented = True
+                # We are waiting for execution slot.
+                # Once we acquire local semaphore, we try to acquire global.
                 try:
                     async with global_semaphore:
-                        # Once we have the semaphore, we are no longer waiting
-                        _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
-                        waiting_incremented = False
+                        # Once we have the global semaphore, we are no longer waiting/pending
+                        if not waiting_decremented:
+                            _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+                            waiting_decremented = True
 
                         _PREFETCH_ACTIVE_COUNT += 1
                         active_incremented = True
@@ -188,19 +192,23 @@ class PrefetchManager:
                     # Ensure active count is ALWAYS decremented if it was incremented
                     if active_incremented:
                         _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
-                    # Ensure waiting count is cleaned up if we were cancelled while waiting
-                    if waiting_incremented:
-                        _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
 
             if payload is not None:
                 cache_prefetched_page(cache_key, payload)
+
         except Exception as e:
             logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
             cooldown_seconds = _safe_prefetch_int(
                 "AGENT_PREFETCH_COOLDOWN_SECONDS", default=30, minimum=1
             )
             _PREFETCH_COOLDOWN_UNTIL = time.time() + cooldown_seconds
+
         finally:
+            # Ensure waiting count is cleaned up if we exited before acquiring global semaphore
+            # (e.g. cancelled while waiting for local/global semaphore, or exception before acquire)
+            if not waiting_decremented:
+                _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+
             self._inflight_keys.discard(cache_key)
 
 

@@ -1,5 +1,6 @@
 """Tests for list_interactions tool."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -33,7 +34,8 @@ class TestListInteractions:
             result = await handler(limit=10, offset=0)
 
             mock_store.get_recent_interactions.assert_called_once_with(10, 0)
-            assert result == mock_interactions
+            data = json.loads(result)
+            assert data["result"] == mock_interactions
 
     @pytest.mark.asyncio
     async def test_list_interactions_default_params(self):

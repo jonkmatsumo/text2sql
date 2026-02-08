@@ -36,9 +36,9 @@ async def handler(table_names: list[str], tenant_id: Optional[int] = None) -> st
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
-    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 
-    envelope = GenericToolResponseEnvelope(
+    envelope = ToolResponseEnvelope(
         result=schema_list,
         metadata=GenericToolMetadata(
             provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms

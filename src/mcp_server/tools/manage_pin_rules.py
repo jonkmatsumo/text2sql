@@ -1,6 +1,6 @@
 """MCP tool: manage_pin_rules - Manage pinned recommendation rules."""
 
-from typing import Any, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
@@ -17,7 +17,7 @@ async def handler(
     registry_example_ids: Optional[List[str]] = None,
     priority: Optional[int] = None,
     enabled: Optional[bool] = None,
-) -> Any:
+) -> str:
     """Manage pinned recommendation rules.
 
     Args:
@@ -33,85 +33,114 @@ async def handler(
     Returns:
         List of rules, single rule, or boolean success.
     """
-    store = PostgresPinnedRecommendationStore()
+    import time
 
-    if operation == "list":
-        rules = await store.list_rules(tenant_id)
-        # Convert dataclasses to dicts for JSON serialization
-        return [
-            {
-                "id": str(r.id),
-                "tenant_id": r.tenant_id,
-                "match_type": r.match_type,
-                "match_value": r.match_value,
-                "registry_example_ids": r.registry_example_ids,
-                "priority": r.priority,
-                "enabled": r.enabled,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
-            for r in rules
-        ]
+    from common.models.error_metadata import ErrorMetadata
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from dal.database import Database
 
-    elif operation == "upsert":
-        # Check if we are updating or creating
-        if rule_id:
-            # Update
-            updated = await store.update_rule(
-                rule_id=UUID(rule_id),
-                tenant_id=tenant_id,
-                match_type=match_type,
-                match_value=match_value,
-                registry_example_ids=registry_example_ids,
-                priority=priority,
-                enabled=enabled,
-            )
-            if not updated:
-                return {"error": "Rule not found or update failed"}
+    start_time = time.monotonic()
 
-            r = updated
-            return {
-                "id": str(r.id),
-                "tenant_id": r.tenant_id,
-                "match_type": r.match_type,
-                "match_value": r.match_value,
-                "registry_example_ids": r.registry_example_ids,
-                "priority": r.priority,
-                "enabled": r.enabled,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
+    try:
+        store = PostgresPinnedRecommendationStore()
+        result = None
+
+        if operation == "list":
+            rules = await store.list_rules(tenant_id)
+            # Convert dataclasses to dicts for JSON serialization
+            result = [
+                {
+                    "id": str(r.id),
+                    "tenant_id": r.tenant_id,
+                    "match_type": r.match_type,
+                    "match_value": r.match_value,
+                    "registry_example_ids": r.registry_example_ids,
+                    "priority": r.priority,
+                    "enabled": r.enabled,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                }
+                for r in rules
+            ]
+
+        elif operation == "upsert":
+            # Check if we are updating or creating
+            if rule_id:
+                # Update
+                updated = await store.update_rule(
+                    rule_id=UUID(rule_id),
+                    tenant_id=tenant_id,
+                    match_type=match_type,
+                    match_value=match_value,
+                    registry_example_ids=registry_example_ids,
+                    priority=priority,
+                    enabled=enabled,
+                )
+                if not updated:
+                    raise ValueError("Rule not found or update failed")
+
+                r = updated
+                result = {
+                    "id": str(r.id),
+                    "tenant_id": r.tenant_id,
+                    "match_type": r.match_type,
+                    "match_value": r.match_value,
+                    "registry_example_ids": r.registry_example_ids,
+                    "priority": r.priority,
+                    "enabled": r.enabled,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                }
+            else:
+                # Create
+                if not all([match_type, match_value, registry_example_ids is not None]):
+                    raise ValueError("Missing required fields for creating a rule")
+
+                r = await store.create_rule(
+                    tenant_id=tenant_id,
+                    match_type=match_type,  # type: ignore
+                    match_value=match_value,  # type: ignore
+                    registry_example_ids=registry_example_ids,  # type: ignore
+                    priority=priority or 0,
+                    enabled=enabled if enabled is not None else True,
+                )
+                result = {
+                    "id": str(r.id),
+                    "tenant_id": r.tenant_id,
+                    "match_type": r.match_type,
+                    "match_value": r.match_value,
+                    "registry_example_ids": r.registry_example_ids,
+                    "priority": r.priority,
+                    "enabled": r.enabled,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                }
+
+        elif operation == "delete":
+            if not rule_id:
+                raise ValueError("rule_id required for delete")
+
+            success = await store.delete_rule(UUID(rule_id), tenant_id)
+            result = {"success": success}
+
         else:
-            # Create
-            if not all([match_type, match_value, registry_example_ids is not None]):
-                return {"error": "Missing required fields for creating a rule"}
+            raise ValueError(f"Unknown operation: {operation}")
 
-            r = await store.create_rule(
-                tenant_id=tenant_id,
-                match_type=match_type,  # type: ignore
-                match_value=match_value,  # type: ignore
-                registry_example_ids=registry_example_ids,  # type: ignore
-                priority=priority or 0,
-                enabled=enabled if enabled is not None else True,
-            )
-            return {
-                "id": str(r.id),
-                "tenant_id": r.tenant_id,
-                "match_type": r.match_type,
-                "match_value": r.match_value,
-                "registry_example_ids": r.registry_example_ids,
-                "priority": r.priority,
-                "enabled": r.enabled,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
+        execution_time_ms = (time.monotonic() - start_time) * 1000
+        return ToolResponseEnvelope(
+            result=result,
+            metadata=GenericToolMetadata(
+                provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+            ),
+        ).model_dump_json(exclude_none=True)
 
-    elif operation == "delete":
-        if not rule_id:
-            return {"error": "rule_id required for delete"}
-
-        success = await store.delete_rule(UUID(rule_id), tenant_id)
-        return {"success": success}
-
-    else:
-        return {"error": f"Unknown operation: {operation}"}
+    except Exception as e:
+        return ToolResponseEnvelope(
+            result={"success": False, "error": str(e)},
+            error=ErrorMetadata(
+                message=str(e),
+                category="rule_management_failed",
+                provider="pinned_recommendation_store",
+                is_retryable=False,
+            ),
+        ).model_dump_json(exclude_none=True)

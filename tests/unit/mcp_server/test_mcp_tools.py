@@ -163,7 +163,7 @@ class TestGetSemanticDefinitions:
 
         with patch("dal.database.Database.get_connection", return_value=mock_conn):
             result = await handler(["High Value Customer"])
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert "High Value Customer" in data
             assert (
                 data["High Value Customer"]["definition"] == "A customer with total spend > $1000"
@@ -199,6 +199,6 @@ class TestSearchRelevantTables:
             ),
         ):
             result = await handler("movies about space")
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 1
             assert data[0]["table_name"] == "film"

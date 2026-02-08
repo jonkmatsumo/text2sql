@@ -122,16 +122,22 @@ class TestDatabase:
         mock_pool.acquire = MagicMock(return_value=mock_acquire_cm)
         Database._pool = mock_pool
 
-        async with Database.get_connection() as conn:
-            # We check if it is either the mock_conn or a TracedAsyncpgConnection wrapping it
-            from dal.tracing import TracedAsyncpgConnection
+        mock_capabilities = MagicMock()
+        mock_capabilities.supports_transactions = True
 
-            if isinstance(conn, TracedAsyncpgConnection):
-                assert conn._conn == mock_conn
-            else:
-                assert conn == mock_conn
-            mock_pool.acquire.assert_called_once()
-            mock_conn.transaction.assert_called_once()
+        with patch.object(
+            Database, "get_query_target_capabilities", return_value=mock_capabilities
+        ):
+            async with Database.get_connection() as conn:
+                # We check if it is either the mock_conn or a TracedAsyncpgConnection wrapping it
+                from dal.tracing import TracedAsyncpgConnection
+
+                if isinstance(conn, TracedAsyncpgConnection):
+                    assert conn._conn == mock_conn
+                else:
+                    assert conn == mock_conn
+                mock_pool.acquire.assert_called_once()
+                mock_conn.transaction.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_connection_with_tenant_id(self):
@@ -154,18 +160,24 @@ class TestDatabase:
         Database._pool = mock_pool
 
         tenant_id = 1
-        async with Database.get_connection(tenant_id=tenant_id) as conn:
-            from dal.tracing import TracedAsyncpgConnection
+        mock_capabilities = MagicMock()
+        mock_capabilities.supports_transactions = True
 
-            if isinstance(conn, TracedAsyncpgConnection):
-                assert conn._conn == mock_conn
-            else:
-                assert conn == mock_conn
-            # Verify set_config was called with tenant_id
-            mock_conn.execute.assert_called_once()
-            call_args = mock_conn.execute.call_args
-            assert "set_config" in call_args[0][0]
-            assert str(tenant_id) in call_args[0]
+        with patch.object(
+            Database, "get_query_target_capabilities", return_value=mock_capabilities
+        ):
+            async with Database.get_connection(tenant_id=tenant_id) as conn:
+                from dal.tracing import TracedAsyncpgConnection
+
+                if isinstance(conn, TracedAsyncpgConnection):
+                    assert conn._conn == mock_conn
+                else:
+                    assert conn == mock_conn
+                # Verify set_config was called with tenant_id
+                mock_conn.execute.assert_called_once()
+                call_args = mock_conn.execute.call_args
+                assert "set_config" in call_args[0][0]
+                assert str(tenant_id) in call_args[0]
 
     @pytest.mark.asyncio
     async def test_get_connection_not_initialized(self):

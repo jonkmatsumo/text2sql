@@ -3,6 +3,7 @@
 These tests verify the admin tools work correctly with the DAL layer.
 """
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,7 +24,8 @@ async def test_list_interactions():
         mock_store.get_recent_interactions = AsyncMock(return_value=mock_interactions)
         mock_get_store.return_value = mock_store
 
-        results = await list_interactions(limit=10)
+        raw_results = await list_interactions(limit=10)
+        results = json.loads(raw_results)["result"]
 
         assert results == mock_interactions
         mock_store.get_recent_interactions.assert_called_once_with(10, 0)
@@ -50,7 +52,8 @@ async def test_get_interaction_details():
         mock_f.get_feedback_for_interaction = AsyncMock(return_value=mock_feedback)
         mock_f_store.return_value = mock_f
 
-        result = await get_interaction_details("int-1")
+        raw_result = await get_interaction_details("int-1")
+        result = json.loads(raw_result)["result"]
 
         assert result["id"] == "int-1"
         assert result["feedback"] == mock_feedback
@@ -66,9 +69,10 @@ async def test_approve_interaction():
         mock_store.update_review_status = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        res = await approve_interaction(
+        raw_res = await approve_interaction(
             interaction_id="int-1", corrected_sql="SELECT 1", resolution_type="FIXED"
         )
+        res = json.loads(raw_res)["result"]["status"]
 
         assert res == "OK"
         mock_store.update_review_status.assert_called_once()
@@ -86,7 +90,8 @@ async def test_reject_interaction():
         mock_store.update_review_status = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        res = await reject_interaction(interaction_id="int-1", reason="BAD_QUERY")
+        raw_res = await reject_interaction(interaction_id="int-1", reason="BAD_QUERY")
+        res = json.loads(raw_res)["result"]["status"]
 
         assert res == "OK"
         mock_store.update_review_status.assert_called_once()

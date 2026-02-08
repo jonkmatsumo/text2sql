@@ -1,5 +1,6 @@
 """Tests for approve_interaction tool."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +35,8 @@ class TestApproveInteraction:
                 interaction_id="int-1", corrected_sql="SELECT 1", resolution_type="FIXED"
             )
 
-            assert result == "OK"
+            data = json.loads(result)
+            assert data["result"]["status"] == "OK"
             assert calls["interaction_id"] == "int-1"
             assert calls["status"] == "APPROVED"
             assert calls["resolution_type"] == "FIXED"

@@ -7,7 +7,6 @@ Uses deterministic "Mini-Schema" expansion:
 """
 
 import asyncio
-import json
 import logging
 import time
 
@@ -353,7 +352,12 @@ async def handler(query: str, tenant_id: int = None) -> str:
         JSON string containing nodes and relationships of the subgraph.
     """
     # Cache Read
+    # Cache Read
     embedding = None
+    import time
+
+    start_time = time.monotonic()
+
     if tenant_id:
         try:
             cache = Database.get_cache_store()
@@ -371,15 +375,30 @@ async def handler(query: str, tenant_id: int = None) -> str:
         store = Database.get_graph_store()
     except Exception as e:
         logger.error(f"Failed to get graph store: {e}")
-        return json.dumps({"error": "Graph store not authorized or initialized."})
+        from common.models.error_metadata import ErrorMetadata
+        from common.models.tool_envelopes import ToolResponseEnvelope
+
+        return ToolResponseEnvelope(
+            result={},
+            error=ErrorMetadata(
+                message="Graph store not authorized or initialized.",
+                category="dependency_failure",
+                provider="graph_store",
+                is_retryable=False,
+            ),
+        ).model_dump_json(exclude_none=True)
 
     result = await _get_mini_graph(query, store)
 
-    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    execution_time_ms = (time.monotonic() - start_time) * 1000
 
-    envelope = GenericToolResponseEnvelope(
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    envelope = ToolResponseEnvelope(
         result=result,
-        metadata=GenericToolMetadata(provider=Database.get_query_target_provider()),
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
     )
     json_result = envelope.model_dump_json(exclude_none=True)
 
