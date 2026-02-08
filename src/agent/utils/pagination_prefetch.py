@@ -35,7 +35,7 @@ def _safe_prefetch_int(name: str, default: int, minimum: int) -> int:
 
 def get_prefetch_config(interactive_session: bool) -> tuple[bool, int, str]:
     """Resolve prefetch enablement and concurrency settings."""
-    mode = (get_env_str("AGENT_PREFETCH_NEXT_PAGE", "off") or "off").strip().lower()
+    mode = (get_env_str("AGENT_PREFETCH_NEXT_PAGE", "on") or "on").strip().lower()
     concurrency = _safe_prefetch_int("AGENT_PREFETCH_MAX_CONCURRENCY", default=1, minimum=1)
     if mode != "on":
         return False, concurrency, "disabled"

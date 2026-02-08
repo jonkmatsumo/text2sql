@@ -44,6 +44,7 @@ async def test_invariant_reason_codes_on_decisions(telemetry_backend):
         patch("agent.nodes.execute.get_mcp_tools") as mock_get_tools,
         patch("agent.nodes.execute.PolicyEnforcer.validate_sql", return_value=None),
         patch("agent.nodes.execute.TenantRewriter.rewrite_sql", side_effect=lambda sql, tid: sql),
+        patch("agent.nodes.execute.get_prefetch_config", return_value=(True, 1, "enabled")),
     ):
         mock_tool = MagicMock()
         mock_tool.name = "execute_sql_query"
