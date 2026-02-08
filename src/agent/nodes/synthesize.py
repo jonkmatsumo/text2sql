@@ -136,17 +136,36 @@ def synthesize_insight_node(state: AgentState) -> dict:
         error_category = state.get("error_category")
 
         if error:
-            # Handle error synthesis
-            response_content = f"I encountered an error while processing your request: {error}"
+            # 1. Redact potentially sensitive info first
+            from common.sanitization.text import redact_sensitive_info
 
-            # If we have structured metadata, we can be more specific
-            if error_category == "unsupported_capability":
-                cap = (error_metadata or {}).get("required_capability")
-                if cap:
-                    response_content = (
-                        f"The database backend does not support the '{cap}' "
-                        "capability required for this query."
-                    )
+            error_str = redact_sensitive_info(str(error))
+
+            # 2. Handle error synthesis based on category safety
+            # Safe categories can show the redacted error message.
+            # Others get a generic message to prevent schema/SQL detail leakage.
+            SAFE_CATEGORIES = {
+                "unsupported_capability",
+                "timeout",
+                "resource_exhausted",
+                "throttling",
+                "invalid_request",
+            }
+
+            if error_category in SAFE_CATEGORIES:
+                response_content = (
+                    f"I encountered an error while processing your request: {error_str}"
+                )
+                if error_category == "unsupported_capability":
+                    cap = (error_metadata or {}).get("required_capability")
+                    if cap:
+                        response_content = (
+                            f"The database backend does not support the '{cap}' "
+                            "capability required for this query."
+                        )
+            else:
+                # For unknown/unsafe categories (like syntax or unknown), use a generic message.
+                response_content = "An internal error occurred while processing your request."
 
             span.set_outputs({"error_response": response_content})
             return {
