@@ -1,5 +1,6 @@
 """Unit tests for manage_pin_rules tool."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -36,7 +37,8 @@ async def test_list_rules(mock_store):
 
     mock_store.list_rules.return_value = [mock_rule]
 
-    result = await handler("list", tenant_id=1)
+    raw_result = await handler("list", tenant_id=1)
+    result = json.loads(raw_result)["result"]
 
     assert len(result) == 1
     assert result[0]["id"] == str(mock_rule.id)
@@ -60,13 +62,14 @@ async def test_upsert_create_rule(mock_store):
 
     mock_store.create_rule.return_value = mock_rule
 
-    result = await handler(
+    raw_result = await handler(
         "upsert",
         tenant_id=1,
         match_type="contains",
         match_value="bar",
         registry_example_ids=["ex2"],
     )
+    result = json.loads(raw_result)["result"]
 
     assert result["id"] == str(mock_rule.id)
     assert result["match_type"] == "contains"
@@ -90,7 +93,8 @@ async def test_upsert_update_rule(mock_store):
 
     mock_store.update_rule.return_value = mock_rule
 
-    result = await handler("upsert", tenant_id=1, rule_id=rule_id, enabled=False)
+    raw_result = await handler("upsert", tenant_id=1, rule_id=rule_id, enabled=False)
+    result = json.loads(raw_result)["result"]
 
     assert result["id"] == rule_id
     assert result["enabled"] is False
@@ -103,7 +107,8 @@ async def test_delete_rule(mock_store):
     rule_id = str(uuid4())
     mock_store.delete_rule.return_value = True
 
-    result = await handler("delete", tenant_id=1, rule_id=rule_id)
+    raw_result = await handler("delete", tenant_id=1, rule_id=rule_id)
+    result = json.loads(raw_result)["result"]
 
     assert result["success"] is True
     mock_store.delete_rule.assert_called_once()

@@ -37,6 +37,16 @@ def validate_redshift_query(sql: str) -> List[str]:
             )
             continue
 
+        # Check for ARRAY casts
+        if isinstance(node, exp.Cast) and (
+            node.to.is_type("array") or node.to.this == exp.DataType.Type.ARRAY
+        ):
+            errors.append(
+                "This query uses ARRAY syntax or array operators, "
+                "which are not supported on Redshift."
+            )
+            continue
+
         # Check for JSONB features
         # 1. Cast to JSONB (::jsonb)
         if isinstance(node, exp.Cast) and node.to.this == exp.DataType.Type.JSONB:

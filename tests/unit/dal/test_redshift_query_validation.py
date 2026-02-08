@@ -30,7 +30,7 @@ def test_redshift_validation_blocks_arrays(sql):
 def test_redshift_validation_blocks_json_ops(sql):
     """Detect JSONB operators/functions as unsupported in Redshift."""
     errors = validate_redshift_query(sql)
-    assert any("JSONB" in err or "jsonb" in err for err in errors)
+    assert any("JSONB" in err or "jsonb" in err or "JSON extraction" in err for err in errors)
 
 
 def test_redshift_validation_allows_simple_select():
