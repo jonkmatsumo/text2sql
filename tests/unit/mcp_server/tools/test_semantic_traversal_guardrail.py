@@ -84,7 +84,8 @@ class TestSemanticTraversalGuardrail:
         ):
 
             result_json = await get_semantic_subgraph("query is irrelevant with fixed seeds")
-            result = json.loads(result_json)
+            response = json.loads(result_json)
+            result = response["result"]
 
             # 5. VERIFICATION
             nodes = result["nodes"]
@@ -140,7 +141,8 @@ class TestSemanticTraversalGuardrail:
         ):
 
             result_json = await get_semantic_subgraph("find orders")
-            result = json.loads(result_json)
+            response = json.loads(result_json)
+            result = response["result"]
 
             node_ids = set(n["id"] for n in result["nodes"])
 

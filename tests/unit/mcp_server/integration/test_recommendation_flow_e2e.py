@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -106,13 +107,17 @@ async def test_recommendation_flow_e2e_happy_path():
 
         # Execute
         # Setting limit to 4 to trigger both diversity caps and fallback
-        response = await handler(
+        response_json = await handler(
             query="Standard question", tenant_id=1, limit=4, enable_fallback=True
         )
+        response = json.loads(response_json)
 
         # Assertions
-        assert "examples" in response
-        examples = response["examples"]
+        assert "result" in response
+        result = response["result"]
+
+        assert "examples" in result
+        examples = result["examples"]
 
         # Final Expected: [P1, V1, S1, F1]
         assert len(examples) == 4
@@ -123,8 +128,8 @@ async def test_recommendation_flow_e2e_happy_path():
         assert "F1" in ids
 
         # Verify explanation
-        assert "explanation" in response
-        exp = response["explanation"]
+        assert "explanation" in result
+        exp = result["explanation"]
 
         # Filtering
         assert exp["filtering"]["missing_fields_removed"] == 1
@@ -174,9 +179,11 @@ async def test_recommendation_flow_fallback_disabled():
         mock_list_rules.return_value = []
 
         # Execute with enable_fallback=False
-        response = await handler(query="Only one", tenant_id=1, limit=3, enable_fallback=False)
+        response_json = await handler(query="Only one", tenant_id=1, limit=3, enable_fallback=False)
+        response = json.loads(response_json)
+        result = response["result"]
 
         # Assertions
-        assert len(response["examples"]) == 1
-        assert response["explanation"]["fallback"]["enabled"] is False
-        assert response["explanation"]["fallback"]["used"] is False
+        assert len(result["examples"]) == 1
+        assert result["explanation"]["fallback"]["enabled"] is False
+        assert result["explanation"]["fallback"]["used"] is False

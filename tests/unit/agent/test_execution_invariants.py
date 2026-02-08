@@ -29,6 +29,7 @@ async def test_invariant_reason_codes_on_decisions(telemetry_backend):
         current_sql="SELECT 1",
         retry_count=0,
         interactive_session=True,
+        page_size=10,  # Required for prefetch candidate check
     )
 
     # Mock tool to return a next_page_token to trigger prefetch decision
