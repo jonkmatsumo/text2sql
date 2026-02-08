@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import re
 from typing import Any, Dict, Optional
 
 import asyncpg
@@ -112,6 +111,49 @@ def _construct_error_response(
     return envelope.model_dump_json(exclude_none=True)
 
 
+def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
+    """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
+    import sqlglot
+
+    # Map Text2SQL provider names to sqlglot dialects
+    dialect_map = {
+        "postgres": "postgres",
+        "postgresql": "postgres",
+        "redshift": "redshift",
+        "sqlite": "sqlite",
+        "duckdb": "duckdb",
+        "mysql": "mysql",
+        "bigquery": "bigquery",
+        "snowflake": "snowflake",
+    }
+    dialect = dialect_map.get(provider.lower(), "postgres")
+
+    try:
+        expressions = sqlglot.parse(sql, read=dialect)
+        if not expressions:
+            return "Empty or invalid SQL query."
+
+        if len(expressions) > 1:
+            return "Multi-statement queries are forbidden."
+
+        expression = expressions[0]
+        if expression is None:
+            return "Failed to parse SQL query."
+
+        # Ensure it's a SELECT statement (including WITH clauses and UNIONS)
+        # Using .key check as it's more stable across sqlglot versions than class checks
+        # sqlglot.exp.Query covers Select, Union, Intersect, Except
+        if expression.key not in ("select", "union", "intersect", "except", "with"):
+            return f"Forbidden statement type: {expression.key.upper()}. Only SELECT is allowed."
+
+    except sqlglot.errors.ParseError as e:
+        return f"SQL Syntax Error: {e}"
+    except Exception as e:
+        return f"SQL Validation Error: {str(e)}"
+
+    return None
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int] = None,
@@ -123,6 +165,24 @@ async def handler(
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
+
+    # 1. Server-Side AST Validation
+    validation_error = _validate_sql_ast(sql_query, provider)
+    if validation_error:
+        return _construct_error_response(
+            validation_error,
+            category="invalid_request",
+            provider=provider,
+        )
+
+    # 2. Authorization Check (Tenant Context)
+    if tenant_id is None:
+        return _construct_error_response(
+            "Unauthorized. No Tenant ID context found. "
+            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var.",
+            category="unsupported_capability",
+            provider=provider,
+        )
 
     def _unsupported_capability_response(
         required_capability: str,
@@ -150,37 +210,6 @@ async def handler(
                 "fallback_mode": fallback_mode,
             },
         )
-
-    # Require tenant_id for RLS enforcement
-    if tenant_id is None:
-        return _construct_error_response(
-            "Unauthorized. No Tenant ID context found. "
-            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var.",
-            category="unsupported_capability",
-            provider=provider,
-        )
-
-    # Application-Level Security Check
-    forbidden_patterns = [
-        r"(?i)\bDROP\b",
-        r"(?i)\bDELETE\b",
-        r"(?i)\bINSERT\b",
-        r"(?i)\bUPDATE\b",
-        r"(?i)\bALTER\b",
-        r"(?i)\bGRANT\b",
-        r"(?i)\bREVOKE\b",
-        r"(?i)\bTRUNCATE\b",
-        r"(?i)\bCREATE\b",
-    ]
-
-    for pattern in forbidden_patterns:
-        if re.search(pattern, sql_query):
-            return _construct_error_response(
-                f"Error: Query contains forbidden keyword matching '{pattern}'. "
-                "Read-only access only.",
-                category="unsupported_capability",
-                provider=provider,
-            )
 
     caps = Database.get_query_target_capabilities()
     fallback_policy = parse_capability_fallback_policy(

@@ -18,6 +18,10 @@ async def handler(table_names: list[str], tenant_id: Optional[int] = None) -> st
     Returns:
         JSON array of table schema objects with columns and foreign keys.
     """
+    import time
+
+    start_time = time.monotonic()
+
     store = Database.get_metadata_store()
     schema_list = []
 
@@ -30,4 +34,14 @@ async def handler(table_names: list[str], tenant_id: Optional[int] = None) -> st
             # Silently skip tables that error (e.g. don't exist)
             continue
 
-    return json.dumps(schema_list, separators=(",", ":"))
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+
+    envelope = GenericToolResponseEnvelope(
+        result=schema_list,
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

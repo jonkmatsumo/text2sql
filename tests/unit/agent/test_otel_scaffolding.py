@@ -38,7 +38,7 @@ def test_otel_import_sanity():
     assert backend._tracer is not None
 
 
-def test_otel_backend_configure(clean_env, reset_telemetry_globals):
+def test_otel_backend_configure(clean_env):
     """Verify that configure() correctly initializes the OTEL SDK."""
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider

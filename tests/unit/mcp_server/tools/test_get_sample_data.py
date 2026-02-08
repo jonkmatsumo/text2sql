@@ -27,7 +27,7 @@ class TestGetSampleData:
         result = await handler("users", limit=5)
 
         mock_introspector.get_sample_rows.assert_called_once_with("users", 5)
-        data = json.loads(result)
+        data = json.loads(result)["result"]
         assert len(data) == 1
         assert data[0]["id"] == 1
 
@@ -54,5 +54,5 @@ class TestGetSampleData:
 
         result = await handler("empty_table")
 
-        data = json.loads(result)
+        data = json.loads(result)["result"]
         assert data == []

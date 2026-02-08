@@ -76,7 +76,6 @@ def _emit_recommendation_telemetry(
             "recommendation.selected.truncated": any_truncated,
         }
 
-        # Attach to child span and parent trace
         if span:
             span.set_attributes(telemetry_attrs)
         telemetry.update_current_trace(metadata=telemetry_attrs)
@@ -143,24 +142,42 @@ async def get_few_shot_examples(
 
             from agent.utils.parsing import parse_tool_output
 
-            output = parse_tool_output(result)
+            raw_output = parse_tool_output(result)
+            if not raw_output:
+                return ""
 
-            # parse_tool_output returns a list of chunks.
-            # recommend_examples returns a dict with 'examples'.
-            # legacy returns a flat list of dicts.
-            if (
-                output
-                and isinstance(output, list)
-                and isinstance(output[0], dict)
-                and "examples" in output[0]
-            ):
-                examples = output[0]["examples"]
-                reco_metadata = output[0].get("metadata", {})
-                fallback_used = output[0].get("fallback_used", False)
-            else:
-                examples = output
-                reco_metadata = {}
-                fallback_used = False
+            examples = []
+            reco_metadata = {}
+            fallback_used = False
+
+            for chunk in raw_output:
+                # Unwrap GenericToolResponseEnvelope if present
+                if isinstance(chunk, dict) and "result" in chunk and "schema_version" in chunk:
+                    # Merge metadata from envelope
+                    env_meta = chunk.get("metadata", {})
+                    if isinstance(env_meta, dict):
+                        reco_metadata.update(env_meta)
+                    inner_result = chunk["result"]
+                else:
+                    inner_result = chunk
+
+                # Now handle the inner result (which could be a dict with 'examples' or a flat list)
+                if isinstance(inner_result, dict) and "examples" in inner_result:
+                    inner_examples = inner_result["examples"]
+                    if isinstance(inner_examples, list):
+                        examples.extend(inner_examples)
+                    else:
+                        examples.append(inner_examples)
+
+                    # Merge recommendation-specific internal metadata
+                    inner_meta = inner_result.get("metadata", {})
+                    if isinstance(inner_meta, dict):
+                        reco_metadata.update(inner_meta)
+                    fallback_used = fallback_used or bool(inner_result.get("fallback_used", False))
+                elif isinstance(inner_result, list):
+                    examples.extend(inner_result)
+                elif inner_result:
+                    examples.append(inner_result)
 
             # Emit Telemetry (OTEL-compatible flat attributes)
             _emit_recommendation_telemetry(reco_metadata, fallback_used, span)

@@ -28,7 +28,12 @@ async def test_generate_few_shot_integration(
         {"question": "How many users?", "sql": "SELECT count(*) FROM users"},
         {"question": "List admins", "sql": "SELECT * FROM users WHERE role='admin'"},
     ]
-    mock_tool.ainvoke = AsyncMock(return_value=json.dumps(examples_data))
+    reco_envelope = {
+        "schema_version": "1.0",
+        "result": examples_data,
+        "metadata": {"provider": "postgres", "execution_time_ms": 10.0},
+    }
+    mock_tool.ainvoke = AsyncMock(return_value=json.dumps(reco_envelope))
     mock_get_mcp_tools.return_value = [mock_tool]
 
     # Mock Prompt & Chain

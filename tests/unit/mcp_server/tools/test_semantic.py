@@ -112,7 +112,7 @@ class TestGetSemanticSubgraph:
                     return_value=mock_indexer,
                 ):
                     result_json = await get_semantic_subgraph("find customers")
-                result = json.loads(result_json)
+                result = json.loads(result_json)["result"]
 
                 assert "nodes" in result
                 assert "relationships" in result
@@ -144,7 +144,7 @@ class TestGetSemanticSubgraph:
                     return_value=mock_indexer,
                 ):
                     result = await get_semantic_subgraph("query")
-                data = json.loads(result)
+                data = json.loads(result)["result"]
                 assert data["nodes"] == []
                 assert data["relationships"] == []
 
@@ -168,6 +168,9 @@ class TestGetSemanticSubgraph:
                 ):
                     result = await get_semantic_subgraph("query")
                 data = json.loads(result)
+                # Unwrap if enveloped
+                if "result" in data:
+                    data = data["result"]
                 assert "error" in data
                 assert "Search failed" in data["error"]
 

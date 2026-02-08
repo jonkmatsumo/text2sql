@@ -22,6 +22,10 @@ async def handler(
     Returns:
         JSON compatible dictionary with recommended examples and fallback status.
     """
+    import time
+
+    start_time = time.monotonic()
+
     # Build kwargs to avoid passing None if we want to rely on service defaults,
     # though recommend_examples has a default of True.
     kwargs = {"question": query, "tenant_id": tenant_id, "limit": limit}
@@ -30,4 +34,15 @@ async def handler(
 
     result = await RecommendationService.recommend_examples(**kwargs)
 
-    return result.model_dump()
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from dal.database import Database
+
+    envelope = GenericToolResponseEnvelope(
+        result=result.model_dump(),
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

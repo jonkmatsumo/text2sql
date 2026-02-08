@@ -15,10 +15,12 @@ PrefetchFetchFn = Callable[[], Awaitable[Optional[dict[str, Any]]]]
 
 _PREFETCH_CACHE_MAX_ENTRIES = 128
 _PREFETCH_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
-_PREFETCH_SEMAPHORE: Optional[asyncio.Semaphore] = None
-_PREFETCH_SEMAPHORE_LIMIT = 1
+
+_GLOBAL_PREFETCH_SEMAPHORE: Optional[asyncio.Semaphore] = None
 _PREFETCH_ACTIVE_COUNT = 0
+_PREFETCH_WAITING_COUNT = 0
 _PREFETCH_MAX_OBSERVED = 0
+_PREFETCH_COOLDOWN_UNTIL = 0.0  # time.time()
 
 
 def _safe_prefetch_int(name: str, default: int, minimum: int) -> int:
@@ -40,6 +42,15 @@ def get_prefetch_config(interactive_session: bool) -> tuple[bool, int, str]:
     if not interactive_session:
         return False, concurrency, "non_interactive"
     return True, concurrency, "enabled"
+
+
+def get_global_prefetch_semaphore() -> asyncio.Semaphore:
+    """Get or initialize the project-wide prefetch semaphore."""
+    global _GLOBAL_PREFETCH_SEMAPHORE
+    if _GLOBAL_PREFETCH_SEMAPHORE is None:
+        limit = _safe_prefetch_int("AGENT_PREFETCH_GLOBAL_LIMIT", default=4, minimum=1)
+        _GLOBAL_PREFETCH_SEMAPHORE = asyncio.Semaphore(limit)
+    return _GLOBAL_PREFETCH_SEMAPHORE
 
 
 def build_prefetch_cache_key(
@@ -87,21 +98,13 @@ def cache_prefetched_page(cache_key: str, payload: dict[str, Any]) -> None:
         _PREFETCH_CACHE.popitem(last=False)
 
 
-def _get_semaphore(limit: int) -> asyncio.Semaphore:
-    global _PREFETCH_SEMAPHORE
-    global _PREFETCH_SEMAPHORE_LIMIT
-    if _PREFETCH_SEMAPHORE is None or _PREFETCH_SEMAPHORE_LIMIT != limit:
-        _PREFETCH_SEMAPHORE = asyncio.Semaphore(limit)
-        _PREFETCH_SEMAPHORE_LIMIT = limit
-    return _PREFETCH_SEMAPHORE
-
-
 class PrefetchManager:
     """Context manager for structured prefetch concurrency."""
 
     def __init__(self, max_concurrency: int = 1):
         """Initialize the prefetch manager."""
         self.max_concurrency = max_concurrency
+        self.local_semaphore = asyncio.Semaphore(max_concurrency)
         self._task_group: Optional[asyncio.TaskGroup] = None
         self._inflight_keys: Set[str] = set()
 
@@ -117,36 +120,86 @@ class PrefetchManager:
             await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
         self._inflight_keys.clear()
 
-    def schedule(self, cache_key: str, fetch_fn: PrefetchFetchFn) -> bool:
-        """Schedule a prefetch task if not duplicate."""
+    def schedule(self, cache_key: str, fetch_fn: PrefetchFetchFn) -> tuple[bool, str]:
+        """Schedule a prefetch task.
+
+        Returns:
+            Tuple of (scheduled_boolean, reason_code_string)
+        """
+        import time
+
+        from common.constants.reason_codes import PrefetchSuppressionReason
+
         if not self._task_group:
             raise RuntimeError("PrefetchManager not entered")
 
+        # 1. Duplicate check
         if cache_key in _PREFETCH_CACHE:
-            return False
+            return False, PrefetchSuppressionReason.ALREADY_CACHED.value
         if cache_key in self._inflight_keys:
-            return False
+            return False, PrefetchSuppressionReason.DUPLICATE_INFLIGHT.value
+
+        # 2. Storm Control (Waiters Threshold)
+        global_limit = _safe_prefetch_int("AGENT_PREFETCH_GLOBAL_LIMIT", default=4, minimum=1)
+        storm_threshold = _safe_prefetch_int(
+            "AGENT_PREFETCH_STORM_THRESHOLD", default=global_limit * 2, minimum=1
+        )
+        if _PREFETCH_WAITING_COUNT >= storm_threshold:
+            logger.debug(f"Prefetch storm detected ({_PREFETCH_WAITING_COUNT} waiters). Skipping.")
+            return False, PrefetchSuppressionReason.STORM_WAITERS.value
+
+        # 3. Backoff / Cooldown Check
+        if time.time() < _PREFETCH_COOLDOWN_UNTIL:
+            logger.debug("Prefetch in cooldown status. Skipping.")
+            return False, PrefetchSuppressionReason.COOLDOWN_ACTIVE.value
 
         self._inflight_keys.add(cache_key)
         self._task_group.create_task(self._run_task(cache_key, fetch_fn))
-        return True
+        return True, PrefetchSuppressionReason.SCHEDULED.value
 
     async def _run_task(self, cache_key: str, fetch_fn: PrefetchFetchFn):
         global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
-        semaphore = _get_semaphore(self.max_concurrency)
+        global _PREFETCH_WAITING_COUNT, _PREFETCH_COOLDOWN_UNTIL
+        import time
+
+        payload = None
+        global_semaphore = get_global_prefetch_semaphore()
+
+        # Robust counter management
+        waiting_incremented = False
+        active_incremented = False
+
         try:
-            async with semaphore:
-                _PREFETCH_ACTIVE_COUNT += 1
-                _PREFETCH_MAX_OBSERVED = max(_PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT)
+            async with self.local_semaphore:
+                _PREFETCH_WAITING_COUNT += 1
+                waiting_incremented = True
                 try:
-                    payload = await fetch_fn()
+                    async with global_semaphore:
+                        # Once we have the semaphore, we are no longer waiting
+                        _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+                        waiting_incremented = False
+
+                        _PREFETCH_ACTIVE_COUNT += 1
+                        active_incremented = True
+                        _PREFETCH_MAX_OBSERVED = max(_PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT)
+
+                        payload = await fetch_fn()
                 finally:
-                    _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
+                    # Ensure active count is ALWAYS decremented if it was incremented
+                    if active_incremented:
+                        _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
+                    # Ensure waiting count is cleaned up if we were cancelled while waiting
+                    if waiting_incremented:
+                        _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
 
             if payload is not None:
                 cache_prefetched_page(cache_key, payload)
         except Exception as e:
             logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
+            cooldown_seconds = _safe_prefetch_int(
+                "AGENT_PREFETCH_COOLDOWN_SECONDS", default=30, minimum=1
+            )
+            _PREFETCH_COOLDOWN_UNTIL = time.time() + cooldown_seconds
         finally:
             self._inflight_keys.discard(cache_key)
 
@@ -162,19 +215,27 @@ def wait_for_prefetch_tasks() -> None:
     pass
 
 
-def prefetch_diagnostics() -> dict[str, int]:
+def prefetch_diagnostics() -> dict[str, Any]:
     """Expose lightweight diagnostic counters for tests."""
+    import time
+
     return {
         "cache_entries": len(_PREFETCH_CACHE),
-        "inflight_entries": 0,  # Not tracking global inflight anymore
+        "inflight_entries": 0,
         "active_count": _PREFETCH_ACTIVE_COUNT,
+        "waiting_count": _PREFETCH_WAITING_COUNT,
         "max_observed_concurrency": _PREFETCH_MAX_OBSERVED,
+        "in_cooldown": time.time() < _PREFETCH_COOLDOWN_UNTIL,
     }
 
 
 def reset_prefetch_state() -> None:
     """Reset in-memory prefetch state (test utility)."""
-    global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
+    global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED, _GLOBAL_PREFETCH_SEMAPHORE
+    global _PREFETCH_WAITING_COUNT, _PREFETCH_COOLDOWN_UNTIL
     _PREFETCH_CACHE.clear()
     _PREFETCH_ACTIVE_COUNT = 0
+    _PREFETCH_WAITING_COUNT = 0
     _PREFETCH_MAX_OBSERVED = 0
+    _PREFETCH_COOLDOWN_UNTIL = 0.0
+    _GLOBAL_PREFETCH_SEMAPHORE = None

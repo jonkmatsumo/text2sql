@@ -45,6 +45,11 @@ async def _get_current_schema_snapshot_id(
     parsed = parse_tool_output(raw_subgraph)
     if isinstance(parsed, list) and parsed:
         parsed = parsed[0]
+
+    # Unwrap GenericToolResponseEnvelope if present
+    if isinstance(parsed, dict) and "result" in parsed and "schema_version" in parsed:
+        parsed = parsed["result"]
+
     nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
     from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
 
@@ -96,6 +101,16 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
                 cache_data = cache_data[0]
+
+            # Unwrap GenericToolResponseEnvelope if present
+            if (
+                isinstance(cache_data, dict)
+                and "result" in cache_data
+                and "schema_version" in cache_data
+            ):
+                # We can also extract metadata here if needed in the future
+                cache_data = cache_data["result"]
+
             if not isinstance(cache_data, dict):
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
@@ -174,3 +189,9 @@ async def cache_lookup_node(state: AgentState) -> dict:
             span.set_attribute("error.type", type(e).__name__)
             span.set_attribute("cache.hit", False)
             return {"cached_sql": None, "from_cache": False}
+
+
+def reset_cache_state() -> None:
+    """Reset the internal schema snapshot cache (test utility)."""
+    global _SCHEMA_SNAPSHOT_CACHE
+    _SCHEMA_SNAPSHOT_CACHE.clear()

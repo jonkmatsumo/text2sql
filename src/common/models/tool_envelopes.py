@@ -65,6 +65,31 @@ class ExecuteSQLQueryResponseEnvelope(BaseModel):
         return self.error is not None or self.error_message is not None
 
 
+def is_compatible(payload_version: str, current_version: str) -> bool:
+    """Check if payload_version is compatible with current_version.
+
+    Rules:
+    - Major versions must match exactly.
+    - We support both backward and forward compatibility for minor versions
+      within the same major version.
+    """
+    try:
+        p_parts = payload_version.split(".")
+        c_parts = current_version.split(".")
+
+        p_major = int(p_parts[0])
+        c_major = int(c_parts[0])
+
+        if p_major != c_major:
+            return False
+
+        # Within the same major version, we assume compatibility.
+        # Future work could add stricter checks for specific minor version features.
+        return True
+    except (ValueError, IndexError):
+        return False
+
+
 def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
     """Parse a raw payload into a typed envelope.
 
@@ -92,7 +117,18 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
     # Check if it matches the envelope structure (duck typing)
     if "metadata" in raw_data and "rows" in raw_data:
         try:
-            return ExecuteSQLQueryResponseEnvelope.model_validate(raw_data)
+            envelope = ExecuteSQLQueryResponseEnvelope.model_validate(raw_data)
+
+            # Version Migration / Compatibility Check
+            payload_version = envelope.schema_version or "1.0"
+            if not is_compatible(payload_version, CURRENT_SCHEMA_VERSION):
+                return _create_error_envelope(
+                    f"Incompatible envelope version: {payload_version} "
+                    f"(supported: {CURRENT_SCHEMA_VERSION.split('.')[0]}.x)",
+                    category="invalid_response_version",
+                )
+
+            return envelope
         except Exception:
             # Fall through to legacy/malformed handling
             pass
@@ -110,6 +146,22 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
 
     # If we really can't parse it, return an error envelope
     return _create_error_envelope("Malformed response payload")
+
+
+class GenericToolMetadata(BaseModel):
+    """Generic metadata for tool responses."""
+
+    provider: str = Field("unknown", description="Database or system provider")
+    execution_time_ms: Optional[float] = None
+
+
+class GenericToolResponseEnvelope(BaseModel):
+    """Standardized envelope for miscellaneous tool responses."""
+
+    schema_version: str = Field(default=CURRENT_SCHEMA_VERSION)
+    result: Any = Field(..., description="The tool's main output payload")
+    metadata: GenericToolMetadata = Field(default_factory=GenericToolMetadata)
+    error: Optional[ErrorMetadata] = None
 
 
 def _create_error_envelope(

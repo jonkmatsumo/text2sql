@@ -34,7 +34,7 @@ class TestGetTableSchema:
             result = await handler(["users"])
 
             mock_store.get_table_definition.assert_called_once_with("users")
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 1
             assert data[0]["table_name"] == "users"
 
@@ -60,7 +60,7 @@ class TestGetTableSchema:
             result = await handler(["users", "orders"])
 
             assert mock_store.get_table_definition.call_count == 2
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 2
 
     @pytest.mark.asyncio
@@ -80,7 +80,7 @@ class TestGetTableSchema:
         ):
             result = await handler(["users", "missing", "orders"])
 
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 2
             assert data[0]["table_name"] == "users"
             assert data[1]["table_name"] == "orders"
@@ -96,5 +96,5 @@ class TestGetTableSchema:
             result = await handler([])
 
             mock_store.get_table_definition.assert_not_called()
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert data == []

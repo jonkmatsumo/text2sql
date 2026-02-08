@@ -35,15 +35,35 @@ def clean_env():
     os.environ.update(old_env)
 
 
-@pytest.fixture
-def reset_telemetry_globals():
-    """Reset global state in telemetry module."""
+@pytest.fixture(autouse=True)
+def autoreset_globals():
+    """Reset all global state before each test to ensure isolation."""
+    # 1. Telemetry
     from agent import telemetry
 
-    # Reset the global flag in telemetry module
     telemetry._otel_initialized = False
+
+    # 2. Prefetch
+    from agent.utils.pagination_prefetch import reset_prefetch_state
+
+    reset_prefetch_state()
+
+    # 3. Cache Lookup
+    from agent.nodes.cache_lookup import reset_cache_state
+
+    reset_cache_state()
+
+    # 4. Schema Cache
+    from agent.utils.schema_cache import reset_schema_cache
+
+    reset_schema_cache()
+
     yield
-    telemetry._otel_initialized = False
+
+    # Optional: cleanup after as well
+    reset_prefetch_state()
+    reset_cache_state()
+    reset_schema_cache()
 
 
 @pytest.fixture(scope="session")

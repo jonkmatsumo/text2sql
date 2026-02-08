@@ -231,39 +231,3 @@ async def test_completeness_provider_cap(
 
     assert completeness["partial_reason"] == "PROVIDER_CAP"
     assert completeness["cap_detected"] is True
-
-
-@pytest.mark.asyncio
-@patch("agent.nodes.execute.telemetry.start_span")
-@patch("agent.nodes.execute.get_mcp_tools")
-@patch("agent.nodes.execute.PolicyEnforcer")
-@patch("agent.nodes.execute.TenantRewriter")
-async def test_completeness_legacy_defaults(
-    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture, monkeypatch
-):
-    """Legacy responses should map to a sane default completeness object (shim enabled)."""
-    monkeypatch.setenv("AGENT_ENABLE_LEGACY_TOOL_SHIM", "true")
-    _mock_span_ctx(mock_start_span)
-    mock_enforcer.validate_sql.return_value = None
-    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-
-    mock_tool = AsyncMock()
-    mock_tool.name = "execute_sql_query"
-    mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1}, {"id": 2}])
-    mock_get_tools.return_value = [mock_tool]
-
-    state = AgentState(
-        messages=[],
-        schema_context="",
-        current_sql=schema_fixture.sample_query,
-        query_result=None,
-        error=None,
-        retry_count=0,
-    )
-
-    result = await validate_and_execute_node(state)
-    completeness = result["result_completeness"]
-
-    assert completeness["rows_returned"] == 2
-    assert completeness["is_truncated"] is False
-    assert completeness["partial_reason"] is None

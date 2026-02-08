@@ -375,7 +375,13 @@ async def handler(query: str, tenant_id: int = None) -> str:
 
     result = await _get_mini_graph(query, store)
 
-    json_result = json.dumps(result, separators=(",", ":"))
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+
+    envelope = GenericToolResponseEnvelope(
+        result=result,
+        metadata=GenericToolMetadata(provider=Database.get_query_target_provider()),
+    )
+    json_result = envelope.model_dump_json(exclude_none=True)
 
     # Cache Write
     if tenant_id and embedding and not result.get("error"):

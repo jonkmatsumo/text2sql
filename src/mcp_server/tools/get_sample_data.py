@@ -1,6 +1,5 @@
 """MCP tool: get_sample_data - Get sample rows from a table."""
 
-import json
 from typing import Optional
 
 from dal.factory import get_schema_introspector
@@ -19,6 +18,22 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
     Returns:
         JSON string of sample data.
     """
+    import time
+
+    start_time = time.monotonic()
+
     introspector = get_schema_introspector()
     data = await introspector.get_sample_rows(table_name, limit)
-    return json.dumps(data, separators=(",", ":"), default=str)
+
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from dal.database import Database
+
+    envelope = GenericToolResponseEnvelope(
+        result=data,
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

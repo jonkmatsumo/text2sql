@@ -195,21 +195,25 @@ SPAN_CONTRACTS: dict[str, SpanContract] = {
         name="cache_lookup",
         required=frozenset({"cache.hit"}),
         optional=frozenset({"cache.snapshot_mismatch", "cache.cache_id"}),
+        required_on_error=frozenset({"error.category"}),
     ),
     "generate_sql": SpanContract(
         name="generate_sql",
         required=frozenset({"from_cache"}),
         optional=frozenset({"generation.model", "generation.latency_seconds"}),
+        required_on_error=frozenset({"error.category"}),
     ),
     "synthesize_insight": SpanContract(
         name="synthesize_insight",
         required=frozenset({"result.is_truncated", "result.rows_returned"}),
         optional=frozenset({"result.is_limited"}),
+        required_on_error=frozenset({"error.category"}),
     ),
     "retrieve_context": SpanContract(
         name="retrieve_context",
-        required=frozenset(),
+        required=frozenset({"event.type"}),
         optional=frozenset({"retrieval.node_count", "retrieval.table_count"}),
+        required_on_error=frozenset({"error.category"}),
     ),
 }
 

@@ -26,20 +26,28 @@ class TestLookupCache:
         ) as mock_svc:
             mock_svc.return_value = mock_result
 
-            result = await handler("show all users", tenant_id=1)
+            import json
+
+            response_json = await handler("show all users", tenant_id=1)
+            response = json.loads(response_json)
+            result = response["result"]
 
             mock_svc.assert_called_once_with("show all users", 1)
-            assert "SELECT * FROM users" in result
+            assert result["sql"] == "SELECT * FROM users"
 
     @pytest.mark.asyncio
     async def test_lookup_cache_miss(self):
-        """Test cache miss returns MISSING."""
+        """Test cache miss returns MISSING wrapped in envelope."""
         with patch(
             "mcp_server.tools.lookup_cache.lookup_cache_svc", new_callable=AsyncMock
         ) as mock_svc:
             mock_svc.return_value = None
 
-            result = await handler("unknown query", tenant_id=1)
+            import json
+
+            response_json = await handler("unknown query", tenant_id=1)
+            response = json.loads(response_json)
+            result = response["result"]
 
             mock_svc.assert_called_once_with("unknown query", 1)
             assert result == "MISSING"

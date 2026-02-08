@@ -80,7 +80,10 @@ async def test_recommend_examples_handler_includes_explanation():
         mock_result = RecommendationResult(examples=[], explanation=mock_explanation)
         mock_service.return_value = mock_result
 
-        response = await handler(query="test", tenant_id=1, limit=3)
+        import json
+
+        response_json = await handler(query="test", tenant_id=1, limit=3)
+        response = json.loads(response_json)["result"]
 
         assert "explanation" in response
         assert response["explanation"]["selection_summary"]["total_candidates"] == 5
@@ -105,7 +108,10 @@ async def test_recommend_examples_handler_includes_safety_info():
         mock_result = RecommendationResult(examples=[], explanation=mock_explanation)
         mock_service.return_value = mock_result
 
-        response = await handler(query="test", tenant_id=1, limit=3)
+        import json
+
+        response_json = await handler(query="test", tenant_id=1, limit=3)
+        response = json.loads(response_json)["result"]
 
         assert "explanation" in response
         assert response["explanation"]["filtering"]["safety_removed"] == 2

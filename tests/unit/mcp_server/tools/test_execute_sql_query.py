@@ -152,7 +152,7 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["message"]
-        assert "forbidden keyword" in data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_delete(self):
@@ -161,7 +161,7 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["message"]
-        assert "forbidden keyword" in data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_insert(self):
@@ -170,7 +170,7 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["message"]
-        assert "forbidden keyword" in data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_update(self):
@@ -179,7 +179,7 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["message"]
-        assert "forbidden keyword" in data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_alter(self):
@@ -188,18 +188,26 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["message"]
-        assert "forbidden keyword" in data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
+        assert "ALTER" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_forbidden_multi_statement(self):
+        """Test rejecting multiple statements."""
+        result = await handler("SELECT 1; DROP TABLE film", tenant_id=1)
+        data = json.loads(result)
+        assert "Multi-statement queries are forbidden" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_security_case_insensitive(self):
         """Test case-insensitive security matching."""
         result1 = await handler("drop table film", tenant_id=1)
         data1 = json.loads(result1)
-        assert "Error:" in data1["error"]["message"]
+        assert "Only SELECT is allowed" in data1["error"]["message"]
 
         result2 = await handler("DeLeTe FrOm film", tenant_id=1)
         data2 = json.loads(result2)
-        assert "Error:" in data2["error"]["message"]
+        assert "Only SELECT is allowed" in data2["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_database_error(self):

@@ -79,50 +79,6 @@ async def test_execute_parses_enveloped_rows_and_metadata(
 
 @pytest.mark.asyncio
 @patch("agent.nodes.execute.telemetry.start_span")
-@patch("agent.nodes.execute.get_mcp_tools")
-@patch("agent.nodes.execute.PolicyEnforcer")
-@patch("agent.nodes.execute.TenantRewriter")
-async def test_execute_parses_legacy_list_rows(
-    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture, monkeypatch
-):
-    """Legacy list responses should still work (shim enabled)."""
-    monkeypatch.setenv("AGENT_ENABLE_LEGACY_TOOL_SHIM", "true")
-
-    mock_span = _mock_span_ctx(mock_start_span)
-    mock_enforcer.validate_sql.return_value = None
-    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-
-    mock_tool = AsyncMock()
-    mock_tool.name = "execute_sql_query"
-    mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1}])
-    mock_get_tools.return_value = [mock_tool]
-
-    state = AgentState(
-        messages=[],
-        schema_context="",
-        current_sql=schema_fixture.sample_query,
-        query_result=None,
-        error=None,
-        retry_count=0,
-    )
-
-    result = await validate_and_execute_node(state)
-
-    assert result["query_result"] == [{"id": 1}]
-    assert result["error"] is None
-    # With shim, it might look enveloped or malformed->shimmed?
-    # If shim succeeds, it returns an envelope. So response_shape might be
-    # recorded as enveloped? Or legacy?
-    # In `_parse_tool_response_with_shim`, if shim works, it returns envelope.
-    # In `validate_and_execute_node`: `envelope = ...`.
-    # `span.set_attribute("tool.response_shape", "enveloped")`
-    # Wait, `validate_and_execute_node` sets "enveloped" if success path.
-    # So assertions on "legacy" might fail.
-    mock_span.set_attribute.assert_any_call("tool.response_shape", "enveloped")
-
-
-@pytest.mark.asyncio
-@patch("agent.nodes.execute.telemetry.start_span")
 @patch("agent.nodes.execute.telemetry.get_current_trace_id")
 @patch("agent.nodes.execute.get_mcp_tools")
 @patch("agent.nodes.execute.PolicyEnforcer")

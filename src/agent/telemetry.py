@@ -198,6 +198,10 @@ class OTELTelemetrySpan(TelemetrySpan):
                 self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
         except Exception as e:
             logger.debug(f"Failed to set telemetry inputs: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
         """Set span outputs with redaction, truncation, and error handling."""
@@ -218,6 +222,10 @@ class OTELTelemetrySpan(TelemetrySpan):
                 self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
         except Exception as e:
             logger.debug(f"Failed to set telemetry outputs: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
@@ -235,6 +243,10 @@ class OTELTelemetrySpan(TelemetrySpan):
                 self._has_error = True
         except Exception as e:
             logger.debug(f"Failed to set telemetry attribute {key}: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
@@ -249,6 +261,10 @@ class OTELTelemetrySpan(TelemetrySpan):
                 self._has_error = True
         except Exception as e:
             logger.debug(f"Failed to set telemetry attributes: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
@@ -451,28 +467,56 @@ class InMemoryTelemetrySpan(TelemetrySpan):
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
         """Set span inputs."""
-        self.inputs.update(inputs)
+        try:
+            self.inputs.update(inputs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_inputs failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
         """Set span outputs."""
-        self.outputs.update(outputs)
+        try:
+            self.outputs.update(outputs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_outputs failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        redacted_dict = redact_recursive({key: value})
-        redacted_value = redacted_dict[key]
-        guarded_value = bound_attribute(key, redacted_value)
-        self.attributes[key] = guarded_value
+            redacted_dict = redact_recursive({key: value})
+            redacted_value = redacted_dict[key]
+            guarded_value = bound_attribute(key, redacted_value)
+            self.attributes[key] = guarded_value
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_attribute failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        redacted_attrs = redact_recursive(attributes)
-        guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
-        self.attributes.update(guarded_attrs)
+            redacted_attrs = redact_recursive(attributes)
+            guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+            self.attributes.update(guarded_attrs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_attributes failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
@@ -698,30 +742,40 @@ class TelemetryService:
 
         try:
             # 4. Prepare Attributes
-            from agent.telemetry_schema import bound_attribute
+            final_attributes = {}
+            try:
+                from agent.telemetry_schema import bound_attribute
 
-            merged_attributes = child_meta.copy()
-            # Remove internal keys for emission
-            if "_seq_counter" in merged_attributes:
-                del merged_attributes["_seq_counter"]
+                merged_attributes = child_meta.copy()
+                # Remove internal keys for emission
+                if "_seq_counter" in merged_attributes:
+                    del merged_attributes["_seq_counter"]
 
-            if attributes:
-                merged_attributes.update(attributes)
+                if attributes:
+                    merged_attributes.update(attributes)
 
-            # Redact and bound all attributes before starting span
-            redacted_attributes = redact_recursive(merged_attributes)
-            final_attributes = {k: bound_attribute(k, v) for k, v in redacted_attributes.items()}
+                # Redact and bound all attributes before starting span
+                redacted_attributes = redact_recursive(merged_attributes)
+                final_attributes = {
+                    k: bound_attribute(k, v) for k, v in redacted_attributes.items()
+                }
 
-            # Set standard contract attributes explicitly
-            final_attributes["event.seq"] = event_seq
-            # Auto-set event.type from span_type (unless already provided)
-            if "event.type" not in final_attributes:
-                final_attributes["event.type"] = (
-                    span_type.value if hasattr(span_type, "value") else str(span_type)
-                )
-            # Auto-set event.name from span name (unless already provided)
-            if "event.name" not in final_attributes:
-                final_attributes["event.name"] = name
+                # Set standard contract attributes explicitly
+                final_attributes["event.seq"] = event_seq
+                # Auto-set event.type from span_type (unless already provided)
+                if "event.type" not in final_attributes:
+                    final_attributes["event.type"] = (
+                        span_type.value if hasattr(span_type, "value") else str(span_type)
+                    )
+                # Auto-set event.name from span name (unless already provided)
+                if "event.name" not in final_attributes:
+                    final_attributes["event.name"] = name
+            except Exception as e:
+                logger.debug(f"Telemetry attribute preparation failed: {e}")
+                from common.config.env import get_env_bool
+
+                if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                    raise
 
             # 5. Start Span
             with self._backend.start_span(
@@ -730,6 +784,15 @@ class TelemetryService:
                 inputs=inputs,
                 attributes=final_attributes,
             ) as span:
+                from common.config.env import get_env_bool
+
+                if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                    # For OTEL, check if recording
+                    if hasattr(span, "_span") and hasattr(span._span, "is_recording"):
+                        if not span._span.is_recording():
+                            raise RuntimeError(
+                                f"Telemetry required but span '{name}' is not recording."
+                            )
                 yield span
 
         finally:

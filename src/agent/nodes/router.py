@@ -152,7 +152,18 @@ async def router_node(state: AgentState) -> dict:
             )
             parsed_res = parse_tool_output(res_json)
             if isinstance(parsed_res, list) and len(parsed_res) > 0:
-                res_data = parsed_res[0]
+                parsed_res = parsed_res[0]
+
+            # Unwrap GenericToolResponseEnvelope if present
+            if (
+                isinstance(parsed_res, dict)
+                and "result" in parsed_res
+                and "schema_version" in parsed_res
+            ):
+                parsed_res = parsed_res["result"]
+
+            if isinstance(parsed_res, dict):
+                res_data = parsed_res
         else:
             logger.warning("resolve_ambiguity tool not found.")
 

@@ -648,3 +648,78 @@ class TestValidateAndExecuteNode:
         assert "Security Policy Violation" in result["error"]
         assert error_msg in result["error"]
         assert result["query_result"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.telemetry.start_span")
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_sql_node_fails_on_incompatible_version(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+    ):
+        """Node should fail if the tool returns an incompatible major version."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        # Return a version 2.0 payload
+        data = {
+            "schema_version": "2.0",
+            "rows": [{"id": 1}],
+            "metadata": {"rows_returned": 1, "is_truncated": False},
+        }
+        mock_tool.ainvoke = AsyncMock(return_value=json.dumps(data))
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT 1",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["error"] is not None
+        assert "Incompatible envelope version" in result["error"]
+        assert "2.0" in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.telemetry.start_span")
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_sql_node_accepts_stable_minor_version(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+    ):
+        """Node should accept a minor version update (e.g., 1.1) from the tool."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        # Return a version 1.1 payload
+        data = {
+            "schema_version": "1.1",
+            "rows": [{"id": 1}],
+            "metadata": {"rows_returned": 1, "is_truncated": False},
+        }
+        mock_tool.ainvoke = AsyncMock(return_value=json.dumps(data))
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT 1",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+        assert result["error"] is None
+        assert result["query_result"] == [{"id": 1}]

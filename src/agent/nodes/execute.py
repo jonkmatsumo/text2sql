@@ -661,18 +661,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                         return None
                                     return prefetched_env.model_dump(exclude_none=True)
 
-                                result_prefetch_scheduled = prefetcher.schedule(
-                                    prefetch_key,
-                                    _fetch_prefetched_page,
+                                result_prefetch_scheduled, result_prefetch_reason = (
+                                    prefetcher.schedule(
+                                        prefetch_key,
+                                        _fetch_prefetched_page,
+                                    )
                                 )
-                                if result_prefetch_scheduled:
-                                    result_prefetch_reason = (
-                                        PrefetchSuppressionReason.SCHEDULED.value
-                                    )
-                                else:
-                                    result_prefetch_reason = (
-                                        PrefetchSuppressionReason.ALREADY_CACHED_OR_INFLIGHT.value
-                                    )
 
                 # Emit event if prefetch was enabled but not scheduled (and not cache hit)
                 if (
