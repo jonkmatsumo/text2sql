@@ -1,4 +1,5 @@
 import functools
+import json
 import logging
 from typing import Awaitable, Callable, ParamSpec, TypeVar
 
@@ -41,28 +42,81 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 span_name,
                 kind=trace.SpanKind.SERVER,
             ) as span:
-                # Enforcement: specific attributes must be present?
-                # Or just checks.
+                # 1. Record basic attributes
+                span.set_attribute("mcp.tool.name", tool_name)
+
+                # Capture tenant_id if present
+                tenant_id = kwargs.get("tenant_id")
+                if tenant_id is not None:
+                    span.set_attribute("mcp.tenant_id", str(tenant_id))
+
+                # Estimate request size (approximate)
+                try:
+                    req_size = len(json.dumps(kwargs, default=str).encode("utf-8"))
+                    span.set_attribute("mcp.tool.request.size_bytes", req_size)
+                except Exception:
+                    pass
 
                 if not span.is_recording():
-                    # If span is not recording, it usually means sampling dropped it
-                    # OR tracing is disabled.
-                    # In "error" mode, we might be strict, but we shouldn't crash on sampling.
-                    # However, if we expected a parent span and didn't get one, that's different.
-                    # For now, just log warning if mode is strict.
                     if mode in ("warn", "error"):
                         logger.warning(
                             f"Tool {tool_name} executed without active recording span. "
                             f"Mode={mode}."
                         )
 
-                span.set_attribute("mcp.tool.name", tool_name)
-
                 try:
-                    return await func(*args, **kwargs)
+                    # Execute the tool
+                    response = await func(*args, **kwargs)
+
+                    # 2. Apply Output Bounding (Phase 7)
+                    # We only apply this to non-execute tools or if the response is not a string
+                    # But most tools return JSON strings.
+                    from mcp_server.utils.tool_output import bound_tool_output
+
+                    actual_response = response
+                    is_truncated = False
+                    resp_size = 0
+
+                    if tool_name != "execute_sql_query":
+                        # If it's a JSON string, we parse it to bound it properly
+                        if isinstance(response, str):
+                            try:
+                                data = json.loads(response)
+                                bounded_data, meta = bound_tool_output(data)
+                                is_truncated = meta["truncated"]
+                                resp_size = meta["returned_bytes"]
+                                if is_truncated:
+                                    actual_response = json.dumps(
+                                        bounded_data, default=str, separators=(",", ":")
+                                    )
+                            except Exception:
+                                # Fallback to raw string length if parsing fails
+                                resp_size = len(str(response).encode("utf-8"))
+                        else:
+                            # If it's already an object, bound it
+                            bounded_obj, meta = bound_tool_output(response)
+                            actual_response = bounded_obj
+                            is_truncated = meta["truncated"]
+                            resp_size = meta["returned_bytes"]
+                    else:
+                        # For execute_sql_query, we just record the size (it handles truncation)
+                        resp_size = len(str(response).encode("utf-8"))
+                        # We try to detect if it was truncated from the string (heuristic or parse)
+                        if '"is_truncated":true' in str(response).lower():
+                            is_truncated = True
+
+                    # 3. Record response attributes
+                    span.set_attribute("mcp.tool.response.size_bytes", resp_size)
+                    span.set_attribute("mcp.tool.response.truncated", is_truncated)
+
+                    return actual_response
+
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(Status(StatusCode.ERROR, str(e)))
+                    # Try to classify error if possible
+                    err_cls = getattr(e, "category", "unknown")
+                    span.set_attribute("mcp.tool.error.category", err_cls)
                     raise
 
         return wrapper
