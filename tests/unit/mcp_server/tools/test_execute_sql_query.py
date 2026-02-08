@@ -281,3 +281,13 @@ class TestExecuteSqlQuery:
 
             data = json.loads(result)
             assert data["error"]["category"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_max_length_exceeded(self):
+        """Test rejecting a query that exceeds MCP_MAX_SQL_LENGTH."""
+        with patch("mcp_server.tools.execute_sql_query.get_env_int", return_value=10):
+            result = await handler("SELECT 1234567890", tenant_id=1)
+
+            data = json.loads(result)
+            assert data["error"]["category"] == "invalid_request"
+            assert "exceeds maximum length" in data["error"]["message"]
