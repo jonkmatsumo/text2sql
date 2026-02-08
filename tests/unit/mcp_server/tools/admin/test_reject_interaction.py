@@ -1,5 +1,6 @@
 """Tests for reject_interaction tool."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +35,8 @@ class TestRejectInteraction:
                 interaction_id="int-1", reason="BAD_QUERY", reviewer_notes="Cannot parse"
             )
 
-            assert result == "OK"
+            data = json.loads(result)
+            assert data["result"]["status"] == "OK"
             assert calls["interaction_id"] == "int-1"
             assert calls["status"] == "REJECTED"
             assert calls["resolution_type"] == "BAD_QUERY"

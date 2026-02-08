@@ -23,8 +23,7 @@ async def handler(query: str, tenant_id: int) -> str:
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
-    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
-    from dal.database import Database
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 
     # If result is None, we still return "MISSING" in the result field for now
     # to maintain consistency with historical behavior.
@@ -33,10 +32,9 @@ async def handler(query: str, tenant_id: int) -> str:
     if inner_result is None:
         inner_result = "MISSING"
 
-    envelope = GenericToolResponseEnvelope(
+    # Note: cache logic is dummy for now
+    envelope = ToolResponseEnvelope(
         result=inner_result,
-        metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
-        ),
+        metadata=GenericToolMetadata(provider="cache_service", execution_time_ms=execution_time_ms),
     )
     return envelope.model_dump_json(exclude_none=True)

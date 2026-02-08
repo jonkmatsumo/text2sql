@@ -8,7 +8,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
-from agent.utils.parsing import parse_tool_output
+from agent.utils.parsing import parse_tool_output, unwrap_envelope
 from common.config.env import get_env_bool
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,8 @@ async def _get_current_schema_snapshot_id(
         parsed = parsed[0]
 
     # Unwrap GenericToolResponseEnvelope if present
-    if isinstance(parsed, dict) and "result" in parsed and "schema_version" in parsed:
-        parsed = parsed["result"]
+    # Unwrap GenericToolResponseEnvelope if present
+    parsed = unwrap_envelope(parsed)
 
     nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
     from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
@@ -103,13 +103,8 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 cache_data = cache_data[0]
 
             # Unwrap GenericToolResponseEnvelope if present
-            if (
-                isinstance(cache_data, dict)
-                and "result" in cache_data
-                and "schema_version" in cache_data
-            ):
-                # We can also extract metadata here if needed in the future
-                cache_data = cache_data["result"]
+            # Unwrap GenericToolResponseEnvelope if present
+            cache_data = unwrap_envelope(cache_data)
 
             if not isinstance(cache_data, dict):
                 logger.info("Cache Miss or Rejected Hit")

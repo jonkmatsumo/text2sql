@@ -1,6 +1,5 @@
 """MCP tool: search_relevant_tables - Search for tables using semantic similarity."""
 
-import json
 from typing import Optional
 
 from dal.database import Database
@@ -23,6 +22,10 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
     Returns:
         JSON array of relevant tables with schema information.
     """
+    import time
+
+    start_time = time.monotonic()
+
     # Generate embedding for user query
     query_embedding = await RagEngine.embed_text(user_query)
 
@@ -59,4 +62,16 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
             # Skip tables that might be in index but missing in introspection
             continue
 
-    return json.dumps(structured_results, separators=(",", ":"))
+    import time
+
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    envelope = ToolResponseEnvelope(
+        result=structured_results,
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

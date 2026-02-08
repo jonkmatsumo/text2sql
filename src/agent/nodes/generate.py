@@ -140,7 +140,7 @@ async def get_few_shot_examples(
             if not result:
                 return ""
 
-            from agent.utils.parsing import parse_tool_output
+            from agent.utils.parsing import parse_tool_output, unwrap_envelope
 
             raw_output = parse_tool_output(result)
             if not raw_output:
@@ -157,7 +157,7 @@ async def get_few_shot_examples(
                     env_meta = chunk.get("metadata", {})
                     if isinstance(env_meta, dict):
                         reco_metadata.update(env_meta)
-                    inner_result = chunk["result"]
+                    inner_result = unwrap_envelope(chunk)
                 else:
                     inner_result = chunk
 

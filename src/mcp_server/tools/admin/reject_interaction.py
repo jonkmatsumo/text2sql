@@ -22,6 +22,11 @@ async def handler(
     Returns:
         "OK" on success.
     """
+    import time
+
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    start_time = time.monotonic()
     store = get_feedback_store()
     await store.update_review_status(
         interaction_id=interaction_id,
@@ -29,4 +34,12 @@ async def handler(
         resolution_type=reason,
         reviewer_notes=reviewer_notes,
     )
-    return "OK"
+
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    return ToolResponseEnvelope(
+        result={"status": "OK"},
+        metadata=GenericToolMetadata(
+            provider="feedback_store", execution_time_ms=execution_time_ms
+        ),
+    ).model_dump_json(exclude_none=True)

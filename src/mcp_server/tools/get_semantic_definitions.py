@@ -1,6 +1,5 @@
 """MCP tool: get_semantic_definitions - Retrieve business metric definitions."""
 
-import json
 from typing import Optional
 
 from dal.database import Database
@@ -18,8 +17,17 @@ async def handler(terms: list[str], tenant_id: Optional[int] = None) -> str:
     Returns:
         JSON object mapping term names to their definitions and SQL logic.
     """
+    import time
+
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    start_time = time.monotonic()
+
     if not terms:
-        return json.dumps({})
+        return ToolResponseEnvelope(
+            result={},
+            metadata=GenericToolMetadata(provider="semantic_layer", execution_time_ms=0),
+        ).model_dump_json(exclude_none=True)
 
     # Build parameterized query for multiple terms
     placeholders = ",".join([f"${i+1}" for i in range(len(terms))])
@@ -40,4 +48,11 @@ async def handler(terms: list[str], tenant_id: Optional[int] = None) -> str:
             for row in rows
         }
 
-        return json.dumps(result, separators=(",", ":"))
+        execution_time_ms = (time.monotonic() - start_time) * 1000
+
+        return ToolResponseEnvelope(
+            result=result,
+            metadata=GenericToolMetadata(
+                provider="semantic_layer", execution_time_ms=execution_time_ms
+            ),
+        ).model_dump_json(exclude_none=True)

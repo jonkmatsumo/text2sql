@@ -1,13 +1,11 @@
 """MCP tool: list_interactions - List recent query interactions."""
 
-from typing import List
-
 from dal.factory import get_interaction_store
 
 TOOL_NAME = "list_interactions"
 
 
-async def handler(limit: int = 50, offset: int = 0) -> List[dict]:
+async def handler(limit: int = 50, offset: int = 0) -> str:
     """List recent query interactions with feedback summary.
 
     Args:
@@ -17,5 +15,20 @@ async def handler(limit: int = 50, offset: int = 0) -> List[dict]:
     Returns:
         List of interaction dictionaries.
     """
+    import time
+
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+    start_time = time.monotonic()
+
     store = get_interaction_store()
-    return await store.get_recent_interactions(limit, offset)
+    results = await store.get_recent_interactions(limit, offset)
+
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    return ToolResponseEnvelope(
+        result=results,
+        metadata=GenericToolMetadata(
+            provider="interaction_store", execution_time_ms=execution_time_ms
+        ),
+    ).model_dump_json(exclude_none=True)

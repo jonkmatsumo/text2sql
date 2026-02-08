@@ -163,6 +163,16 @@ class GenericToolResponseEnvelope(BaseModel):
     metadata: GenericToolMetadata = Field(default_factory=GenericToolMetadata)
     error: Optional[ErrorMetadata] = None
 
+    def model_dump_json(self, **kwargs) -> str:
+        """Dump model to JSON string."""
+        return super().model_dump_json(**kwargs)
+
+
+class ToolResponseEnvelope(GenericToolResponseEnvelope):
+    """Alias for GenericToolResponseEnvelope for backward compatibility/clarity."""
+
+    pass
+
 
 def _create_error_envelope(
     message: str, category: str = "unknown", metadata: Optional[Dict[str, Any]] = None

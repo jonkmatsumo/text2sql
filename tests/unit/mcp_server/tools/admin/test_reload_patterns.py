@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from unittest.mock import patch
 
@@ -26,12 +27,15 @@ async def test_reload_patterns_tool_success():
         result = await handler()
 
         # Assert
-        assert result["success"] is True
-        assert result["error"] is None
-        assert result["reloaded_at"] == now.isoformat()
-        assert result["pattern_count"] == 123
-        assert result["reload_id"] == "abc-123"
-        assert result["duration_ms"] == 45.6
+        # Assert
+        data = json.loads(result)
+        res = data["result"]
+        assert res["success"] is True
+        assert res["error"] is None
+        assert res["reloaded_at"] == now.isoformat()
+        assert res["pattern_count"] == 123
+        assert res["reload_id"] == "abc-123"
+        assert res["duration_ms"] == 45.6
         mock_reload.assert_awaited_once()
 
 
@@ -54,10 +58,13 @@ async def test_reload_patterns_tool_failure():
         result = await handler()
 
         # Assert
-        assert result["success"] is False
-        assert result["error"] == "Something went wrong"
-        assert result["reloaded_at"] == now.isoformat()
-        assert result["pattern_count"] is None
-        assert result["reload_id"] == "err-456"
-        assert result["duration_ms"] == 12.3
+        # Assert
+        data = json.loads(result)
+        res = data["result"]
+        assert res["success"] is False
+        assert res["error"] == "Something went wrong"
+        assert res["reloaded_at"] == now.isoformat()
+        assert res["pattern_count"] is None
+        assert res["reload_id"] == "err-456"
+        assert res["duration_ms"] == 12.3
         mock_reload.assert_awaited_once()

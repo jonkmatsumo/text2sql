@@ -3,13 +3,15 @@ from typing import Optional
 from mcp_server.services.recommendation.config import RECO_CONFIG
 from mcp_server.services.recommendation.service import RecommendationService
 
+TOOL_NAME = "recommend_examples"
+
 
 async def handler(
     query: str,
     tenant_id: int = 1,
     limit: int = RECO_CONFIG.limit_default,
     enable_fallback: Optional[bool] = None,
-) -> dict:
+) -> str:
     """Recommend few-shot examples for a given natural language query.
 
     Args:
@@ -36,11 +38,13 @@ async def handler(
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
-    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
 
-    envelope = GenericToolResponseEnvelope(
-        result=result.model_dump(),
+    formatted_examples = result.model_dump()
+
+    envelope = ToolResponseEnvelope(
+        result=formatted_examples,
         metadata=GenericToolMetadata(
             provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
         ),

@@ -41,9 +41,9 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
 
         execution_time_ms = (time.monotonic() - start_time) * 1000
 
-        from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+        from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 
-        envelope = GenericToolResponseEnvelope(
+        envelope = ToolResponseEnvelope(
             result=result,
             metadata=GenericToolMetadata(
                 provider="ambiguity_resolver", execution_time_ms=execution_time_ms
@@ -54,13 +54,15 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
         logger.error(f"Ambiguity resolution failed: {e}")
         # Build a manual error envelope
         from common.models.error_metadata import ErrorMetadata
-        from common.models.tool_envelopes import GenericToolResponseEnvelope
+        from common.models.tool_envelopes import ToolResponseEnvelope
 
-        return GenericToolResponseEnvelope(
+        envelope = ToolResponseEnvelope(
             result={"status": "ERROR", "resolved_bindings": {}, "ambiguities": []},
             error=ErrorMetadata(
                 message=str(e),
                 category="ambiguity_resolution_failed",
                 provider="ambiguity_resolver",
+                is_retryable=False,
             ),
-        ).model_dump_json(exclude_none=True)
+        )
+        return envelope.model_dump_json(exclude_none=True)
