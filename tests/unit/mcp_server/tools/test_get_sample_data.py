@@ -54,3 +54,21 @@ async def test_get_sample_data_with_tenant_id(mock_db_connection):
             args = mock_db_connection.fetch.call_args
             query = args[0][0]
             assert 'SELECT * FROM "users"' in query
+
+
+@pytest.mark.asyncio
+async def test_get_sample_data_invalid_limit():
+    """Verify that get_sample_data rejects invalid limits."""
+    # Test limit <= 0
+    result_str = await handler("users", limit=0, tenant_id=1)
+    result = json.loads(result_str)
+    assert "error" in result
+    assert "Invalid limit" in result["error"]
+    assert result["error_category"] == "invalid_request"
+
+    # Test limit > 100
+    result_str = await handler("users", limit=101, tenant_id=1)
+    result = json.loads(result_str)
+    assert "error" in result
+    assert "100" in result["error"]
+    assert result["error_category"] == "invalid_request"
