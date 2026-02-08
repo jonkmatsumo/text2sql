@@ -10,6 +10,7 @@ from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorMetadata
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
+from common.sql.dialect import normalize_sqlglot_dialect
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
     negotiate_capability_request,
@@ -116,17 +117,7 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     import sqlglot
 
     # Map Text2SQL provider names to sqlglot dialects
-    dialect_map = {
-        "postgres": "postgres",
-        "postgresql": "postgres",
-        "redshift": "redshift",
-        "sqlite": "sqlite",
-        "duckdb": "duckdb",
-        "mysql": "mysql",
-        "bigquery": "bigquery",
-        "snowflake": "snowflake",
-    }
-    dialect = dialect_map.get(provider.lower(), "postgres")
+    dialect = normalize_sqlglot_dialect(provider)
 
     try:
         expressions = sqlglot.parse(sql, read=dialect)

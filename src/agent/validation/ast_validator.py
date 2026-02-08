@@ -17,6 +17,7 @@ from sqlglot import exp
 from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
 from common.config.env import get_env_int
 from common.constants.reason_codes import ValidationRefusalReason
+from common.sql.dialect import normalize_sqlglot_dialect
 
 
 class ViolationType(str, Enum):
@@ -129,6 +130,7 @@ def parse_sql(
     Returns:
         Tuple of (parsed AST, error message if parse failed)
     """
+    dialect = normalize_sqlglot_dialect(dialect)
     try:
         expressions = sqlglot.parse(sql, dialect=dialect)
 
