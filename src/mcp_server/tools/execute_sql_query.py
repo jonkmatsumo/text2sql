@@ -189,7 +189,7 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
 
 async def handler(
     sql_query: str,
-    tenant_id: Optional[int] = None,
+    tenant_id: int,
     params: Optional[list] = None,
     include_columns: bool = False,
     timeout_seconds: Optional[float] = None,
@@ -198,6 +198,14 @@ async def handler(
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
+
+    # 0. Enforce Tenant ID
+    if tenant_id is None:
+        return _construct_error_response(
+            message="Tenant ID is required for execute_sql_query.",
+            category="invalid_request",
+            provider=provider,
+        )
 
     # 1. SQL Length Check
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)

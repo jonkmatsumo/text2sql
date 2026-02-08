@@ -15,6 +15,15 @@ async def handler(query: str, tenant_id: int) -> str:
     Returns:
         The cached SQL result if a semantic match is found, or "MISSING".
     """
+    import json
+
+    if tenant_id is None:
+        return json.dumps(
+            {
+                "error": "Tenant ID is required for lookup_cache.",
+                "error_category": "invalid_request",
+            }
+        )
     import time
 
     start_time = time.monotonic()
