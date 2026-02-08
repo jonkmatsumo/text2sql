@@ -10,7 +10,7 @@ class DuckDBConfig:
     path: str
     query_timeout_seconds: int
     max_rows: int
-    read_only: bool = False
+    read_only: bool = True
 
     @classmethod
     def from_env(cls) -> "DuckDBConfig":
@@ -18,7 +18,7 @@ class DuckDBConfig:
         path = get_env_str("DUCKDB_PATH", ":memory:")
         query_timeout_seconds = get_env_int("DUCKDB_QUERY_TIMEOUT_SECS", 30)
         max_rows = get_env_int("DUCKDB_MAX_ROWS", 1000)
-        read_only = get_env_bool("DUCKDB_READ_ONLY", False)
+        read_only = get_env_bool("DUCKDB_READ_ONLY", True)
         return cls(
             path=path,
             query_timeout_seconds=query_timeout_seconds,
