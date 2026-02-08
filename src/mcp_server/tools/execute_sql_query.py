@@ -146,6 +146,14 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
         if expression.key not in ("select", "union", "intersect", "except", "with"):
             return f"Forbidden statement type: {expression.key.upper()}. Only SELECT is allowed."
 
+        # Block dangerous functions (e.g., pg_sleep)
+        import sqlglot.expressions as exp
+
+        blocked_functions = {"pg_sleep", "sleep", "usleep", "sys_sleep"}
+        for node in expression.find_all(exp.Anonymous):
+            if str(node.this).lower() in blocked_functions:
+                return f"Forbidden function: {str(node.this).upper()} is not allowed."
+
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"
     except Exception as e:
