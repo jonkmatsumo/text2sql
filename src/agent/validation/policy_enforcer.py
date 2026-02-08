@@ -125,12 +125,12 @@ class PolicyEnforcer:
         allowed_tables = cls.get_allowed_tables()
 
         for statement in parsed:
-            # 1. Enforce specific statement types (SELECT only, plus UNION)
-            if not isinstance(statement, (exp.Select, exp.Union)):
+            # 1. Enforce specific statement types (SELECT, UNION, INTERSECT, EXCEPT)
+            if not isinstance(statement, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
                 # Allow specific SET commands if needed for session config, but generally block
                 raise ValueError(
                     f"Statement type not allowed: {type(statement).__name__}. "
-                    "Only SELECT is allowed."
+                    "Only SELECT, UNION, INTERSECT, EXCEPT are allowed."
                 )
 
             # 2. Walk the AST to check all nodes

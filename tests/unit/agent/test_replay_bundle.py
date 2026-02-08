@@ -54,10 +54,10 @@ def test_serialize_replay_bundle_is_deterministic():
 
 def test_validate_replay_bundle_rejects_invalid_payload():
     """Missing required fields should raise validation errors."""
-    with pytest.raises(ValueError, match="Replay bundle is missing 'version' field"):
+    with pytest.raises(ValueError, match="Replay bundle is missing required 'version' field"):
         validate_replay_bundle({})
 
-    with pytest.raises(ValueError, match="Unsupported replay bundle version"):
+    with pytest.raises(ValueError, match="Incompatible replay bundle version"):
         validate_replay_bundle({"version": "0.1"})
 
 
@@ -68,7 +68,7 @@ def test_validate_replay_bundle_checks_required_fields():
         "captured_at": "2026-01-01T00:00:00Z",
         # missing model, prompts, etc.
     }
-    with pytest.raises(ValueError, match="Replay bundle is missing required fields"):
+    with pytest.raises(ValueError, match=r"Replay bundle is corrupted \(missing fields\)"):
         validate_replay_bundle(payload)
 
 
@@ -114,6 +114,7 @@ def test_replay_response_from_bundle_uses_captured_outcome():
     assert replay_state["current_sql"] == "select 1"
     assert replay_state["query_result"] == [{"id": 1}]
     assert replay_state["messages"][-1].content == "captured"
+    assert replay_state["execution.mode"] == "replay"
 
 
 def test_build_replay_bundle_captures_raw_tool_io():

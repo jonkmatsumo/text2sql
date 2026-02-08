@@ -37,9 +37,11 @@ class TestExecuteSqlQuery:
         """Test that execute_sql_query requires tenant_id."""
         result = await handler("SELECT * FROM film", tenant_id=None)
 
-        error_data = json.loads(result)
-        assert "error" in error_data
-        assert "Tenant ID" in error_data["error"] or "Unauthorized" in error_data["error"]
+        data = json.loads(result)
+        assert "error" in data
+        assert data["error"]["message"] and (
+            "Tenant ID" in data["error"]["message"] or "Unauthorized" in data["error"]["message"]
+        )
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_valid_select(self):
@@ -58,7 +60,8 @@ class TestExecuteSqlQuery:
             mock_conn.fetch.assert_called_once_with("SELECT COUNT(*) as count FROM film")
 
             data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
+            # New envelope structure check
+            assert data["schema_version"] == "1.0"
             assert data["rows"][0]["count"] == 1000
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
@@ -81,7 +84,7 @@ class TestExecuteSqlQuery:
             )
 
             data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata", "columns"]
+            assert data["schema_version"] == "1.0"
             assert data["rows"] == mock_rows
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
@@ -119,7 +122,6 @@ class TestExecuteSqlQuery:
             result = await handler("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
             data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
             assert data["rows"] == []
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 0
@@ -138,7 +140,6 @@ class TestExecuteSqlQuery:
             result = await handler("SELECT * FROM film", tenant_id=1)
 
             data = json.loads(result)
-            assert list(data.keys()) == ["rows", "metadata"]
             assert len(data["rows"]) == 1000
             assert data["metadata"]["is_truncated"] is True
             assert data["metadata"]["row_limit"] == 1000
@@ -149,49 +150,64 @@ class TestExecuteSqlQuery:
         """Test rejecting DROP keyword."""
         result = await handler("DROP TABLE film", tenant_id=1)
 
-        assert "Error:" in result
-        assert "forbidden keyword" in result
+        data = json.loads(result)
+        assert data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_delete(self):
         """Test rejecting DELETE keyword."""
         result = await handler("DELETE FROM film WHERE film_id = 1", tenant_id=1)
 
-        assert "Error:" in result
-        assert "forbidden keyword" in result
+        data = json.loads(result)
+        assert data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_insert(self):
         """Test rejecting INSERT keyword."""
         result = await handler("INSERT INTO film VALUES (1, 'Test')", tenant_id=1)
 
-        assert "Error:" in result
-        assert "forbidden keyword" in result
+        data = json.loads(result)
+        assert data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_update(self):
         """Test rejecting UPDATE keyword."""
         result = await handler("UPDATE film SET title = 'Test'", tenant_id=1)
 
-        assert "Error:" in result
-        assert "forbidden keyword" in result
+        data = json.loads(result)
+        assert data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_alter(self):
         """Test rejecting ALTER keyword."""
         result = await handler("ALTER TABLE film ADD COLUMN test INT", tenant_id=1)
 
-        assert "Error:" in result
-        assert "forbidden keyword" in result
+        data = json.loads(result)
+        assert data["error"]["message"]
+        assert "Only SELECT is allowed" in data["error"]["message"]
+        assert "ALTER" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_forbidden_multi_statement(self):
+        """Test rejecting multiple statements."""
+        result = await handler("SELECT 1; DROP TABLE film", tenant_id=1)
+        data = json.loads(result)
+        assert "Multi-statement queries are forbidden" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_security_case_insensitive(self):
         """Test case-insensitive security matching."""
         result1 = await handler("drop table film", tenant_id=1)
-        assert "Error:" in result1
+        data1 = json.loads(result1)
+        assert "Only SELECT is allowed" in data1["error"]["message"]
 
         result2 = await handler("DeLeTe FrOm film", tenant_id=1)
-        assert "Error:" in result2
+        data2 = json.loads(result2)
+        assert "Only SELECT is allowed" in data2["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_database_error(self):
@@ -207,7 +223,7 @@ class TestExecuteSqlQuery:
 
             data = json.loads(result)
             assert "error" in data
-            assert "Syntax error" in data["error"]
+            assert "Syntax error" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_general_error(self):
@@ -223,7 +239,7 @@ class TestExecuteSqlQuery:
 
             data = json.loads(result)
             assert "error" in data
-            assert "Unexpected error" in data["error"]
+            assert "Unexpected error" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_with_params(self):
@@ -264,4 +280,4 @@ class TestExecuteSqlQuery:
             )
 
             data = json.loads(result)
-            assert data["error_category"] == "timeout"
+            assert data["error"]["category"] == "timeout"

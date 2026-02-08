@@ -36,7 +36,11 @@ class PrefetchSuppressionReason(str, Enum):
     NOT_CHEAP = "not_cheap"  # Too much data or latency on first page
     LOW_BUDGET = "low_budget"
     SCHEDULED = "scheduled"
-    ALREADY_CACHED_OR_INFLIGHT = "already_cached_or_inflight"
+    STORM_WAITERS = "storm_waiters"
+    COOLDOWN_ACTIVE = "cooldown_active"
+    ALREADY_CACHED = "already_cached"
+    DUPLICATE_INFLIGHT = "duplicate_inflight"
+    ALREADY_CACHED_OR_INFLIGHT = "already_cached_or_inflight"  # Kept for compatibility
 
 
 class RetryDecisionReason(str, Enum):

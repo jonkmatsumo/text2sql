@@ -29,10 +29,11 @@ class TestListTables:
 
             mock_store.list_tables.assert_called_once()
             data = json.loads(result)
-            assert len(data) == 3
-            assert "users" in data
-            assert "orders" in data
-            assert "payments" in data
+            assert data["schema_version"] == "1.0"
+            assert len(data["result"]) == 3
+            assert "users" in data["result"]
+            assert "orders" in data["result"]
+            assert "payments" in data["result"]
 
     @pytest.mark.asyncio
     async def test_list_tables_with_search_filter(self):
@@ -45,7 +46,7 @@ class TestListTables:
         ):
             result = await handler(search_term="user")
 
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 2
             assert "users" in data
             assert "user_sessions" in data
@@ -62,7 +63,7 @@ class TestListTables:
         ):
             result = await handler(search_term="USER")
 
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert len(data) == 2
             assert "Users" in data
             assert "user_sessions" in data
@@ -78,5 +79,5 @@ class TestListTables:
         ):
             result = await handler(search_term="nonexistent")
 
-            data = json.loads(result)
+            data = json.loads(result)["result"]
             assert data == []

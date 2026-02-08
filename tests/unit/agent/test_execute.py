@@ -9,6 +9,23 @@ from agent.nodes.execute import validate_and_execute_node
 from agent.state import AgentState
 
 
+def _envelope(rows=None, metadata=None, error=None):
+    data = {
+        "schema_version": "1.0",
+        "rows": rows if rows is not None else [],
+        "metadata": (
+            metadata
+            if metadata
+            else {"rows_returned": len(rows) if rows else 0, "is_truncated": False}
+        ),
+    }
+    if error:
+        data["error"] = error
+        if "rows_returned" not in data["metadata"]:
+            data["metadata"]["rows_returned"] = 0
+    return json.dumps(data)
+
+
 class TestValidateAndExecuteNode:
     """Unit tests for validate_and_execute_node function."""
 
@@ -28,7 +45,7 @@ class TestValidateAndExecuteNode:
         # Create mock tool
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=json.dumps([{"count": 1000}]))
+        mock_tool.ainvoke = AsyncMock(return_value=_envelope(rows=[{"count": 1000}]))
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -69,11 +86,10 @@ class TestValidateAndExecuteNode:
                 {
                     "name": "execute_sql_query",
                     "input": {"sql_query": "SELECT count(*) FROM users"},
-                    "output": {
-                        "rows": [{"count": 42}],
-                        "metadata": {"rows_returned": 1},
-                        "response_shape": "enveloped",
-                    },
+                    # The replay bundle might have legacy shape or new shape.
+                    # If legacy, we assume shim is enabled or we update bundle.
+                    # Let's update bundle mock to new shape for this test.
+                    "output": json.loads(_envelope(rows=[{"count": 42}])),
                 }
             ]
         }
@@ -103,7 +119,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_success_dict_result(
         self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
-        """Test successful query execution with dict result."""
+        """Test successful query execution with dict result (parsed envelope)."""
         # Mock enforcer to pass
         mock_enforcer.validate_sql.return_value = None
         # Mock rewriter to return same SQL
@@ -111,7 +127,10 @@ class TestValidateAndExecuteNode:
 
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1, "title": "Film 1"}])
+        # Tool usually returns string, but if it returned dict, parser handles it.
+        mock_tool.ainvoke = AsyncMock(
+            return_value=json.loads(_envelope(rows=[{"id": 1, "title": "Film 1"}]))
+        )
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -130,39 +149,6 @@ class TestValidateAndExecuteNode:
         assert result["error"] is None
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    @patch("agent.nodes.execute.get_mcp_tools")
-    @patch("agent.nodes.execute.PolicyEnforcer")
-    @patch("agent.nodes.execute.TenantRewriter")
-    async def test_validate_and_execute_node_success_list_result(
-        self, mock_rewriter, mock_enforcer, mock_get_tools
-    ):
-        """Test successful query execution with list result."""
-        # Mock enforcer to pass
-        mock_enforcer.validate_sql.return_value = None
-        # Mock rewriter to return same SQL
-        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-        mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=[1, 2, 3])
-
-        mock_get_tools.return_value = [mock_tool]
-
-        state = AgentState(
-            messages=[],
-            schema_context="",
-            current_sql="SELECT 1 UNION SELECT 2 UNION SELECT 3",
-            query_result=None,
-            error=None,
-            retry_count=0,
-        )
-
-        result = await validate_and_execute_node(state)
-
-        assert result["query_result"] == [1, 2, 3]
-        assert result["error"] is None
-
-    @pytest.mark.asyncio
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")
     @patch("agent.nodes.execute.TenantRewriter")
@@ -174,11 +160,8 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        payload = json.dumps(
-            {
-                "rows": [{"id": 1}],
-                "metadata": {"is_truncated": True, "row_limit": 100, "rows_returned": 1},
-            }
+        payload = _envelope(
+            rows=[{"id": 1}], metadata={"is_truncated": True, "row_limit": 100, "rows_returned": 1}
         )
         mock_tool.ainvoke = AsyncMock(return_value=payload)
 
@@ -205,37 +188,6 @@ class TestValidateAndExecuteNode:
     @patch("agent.nodes.execute.get_mcp_tools")
     @patch("agent.nodes.execute.PolicyEnforcer")
     @patch("agent.nodes.execute.TenantRewriter")
-    async def test_execute_backcompat_raw_rows(
-        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
-    ):
-        """Test backcompat when tool returns raw row list."""
-        mock_enforcer.validate_sql.return_value = None
-        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
-        mock_tool = AsyncMock()
-        mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=[{"id": 1}])
-
-        mock_get_tools.return_value = [mock_tool]
-
-        state = AgentState(
-            messages=[],
-            schema_context="",
-            current_sql=schema_fixture.sample_query,
-            query_result=None,
-            error=None,
-            retry_count=0,
-        )
-
-        result = await validate_and_execute_node(state)
-
-        assert result["query_result"] == [{"id": 1}]
-        assert result["error"] is None
-        assert result["result_is_truncated"] is False
-
-    @pytest.mark.asyncio
-    @patch("agent.nodes.execute.get_mcp_tools")
-    @patch("agent.nodes.execute.PolicyEnforcer")
-    @patch("agent.nodes.execute.TenantRewriter")
     async def test_execute_requests_include_columns(
         self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
@@ -244,7 +196,7 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=json.dumps({"rows": [], "metadata": {}}))
+        mock_tool.ainvoke = AsyncMock(return_value=_envelope(rows=[]))
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -275,7 +227,11 @@ class TestValidateAndExecuteNode:
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
         columns = [{"name": "id", "type": "int"}]
-        payload = json.dumps({"rows": [{"id": 1}], "columns": columns, "metadata": {}})
+
+        env = json.loads(_envelope(rows=[{"id": 1}]))
+        env["columns"] = columns
+        payload = json.dumps(env)
+
         mock_tool.ainvoke = AsyncMock(return_value=payload)
 
         mock_get_tools.return_value = [mock_tool]
@@ -305,7 +261,7 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value=json.dumps({"rows": [], "metadata": {}}))
+        mock_tool.ainvoke = AsyncMock(return_value=_envelope(rows=[]))
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -377,7 +333,17 @@ class TestValidateAndExecuteNode:
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
         error_msg = f"Error: relation '{schema_fixture.invalid_table}' does not exist"
-        mock_tool.ainvoke = AsyncMock(return_value=error_msg)
+        # Return error envelope
+        mock_tool.ainvoke = AsyncMock(
+            return_value=_envelope(
+                error={
+                    "message": error_msg,
+                    "category": "unknown",
+                    "provider": "test",
+                    "is_retryable": False,
+                }
+            )
+        )
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -410,7 +376,17 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        mock_tool.ainvoke = AsyncMock(return_value="Database Error: syntax error at or near 'FROM'")
+        error_msg = "Database Error: syntax error at or near 'FROM'"
+        mock_tool.ainvoke = AsyncMock(
+            return_value=_envelope(
+                error={
+                    "message": error_msg,
+                    "category": "syntax",
+                    "provider": "test",
+                    "is_retryable": False,
+                }
+            )
+        )
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -440,10 +416,17 @@ class TestValidateAndExecuteNode:
         mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
         mock_tool = AsyncMock()
         mock_tool.name = "execute_sql_query"
-        payload = json.dumps(
-            [{"error": "Database Error: syntax error", "error_category": "syntax"}]
+
+        mock_tool.ainvoke = AsyncMock(
+            return_value=_envelope(
+                error={
+                    "message": "Database Error: syntax error",
+                    "category": "syntax",
+                    "provider": "test",
+                    "is_retryable": False,
+                }
+            )
         )
-        mock_tool.ainvoke = AsyncMock(return_value=payload)
 
         mock_get_tools.return_value = [mock_tool]
 
@@ -568,7 +551,8 @@ class TestValidateAndExecuteNode:
 
         result = await validate_and_execute_node(state)
 
-        assert result["error"] == "Connection timeout"
+        # Exception from tool call inside TaskGroup will be wrapped
+        assert "Connection timeout" in result["error"]
         assert result["query_result"] is None
 
     @pytest.mark.asyncio
@@ -578,7 +562,7 @@ class TestValidateAndExecuteNode:
     async def test_validate_and_execute_node_invalid_json(
         self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
     ):
-        """Test handling when result is string but not valid JSON."""
+        """Test handling when result is string but not valid JSON (Malformed)."""
         # Mock enforcer to pass
         mock_enforcer.validate_sql.return_value = None
         # Mock rewriter to return same SQL
@@ -601,7 +585,16 @@ class TestValidateAndExecuteNode:
 
         result = await validate_and_execute_node(state)
 
-        # Should treat invalid JSON as error
+        # Should treat invalid JSON as error envelope with Malformed message
+        # (via _create_error_envelope fallback).
+        # _parse_tool_response_with_shim -> parse_execute_sql_response ->
+        # _create_error_envelope(payload)
+        # So error message is the payload string itself? No.
+        # `parse_execute_sql_response`:
+        # if isinstance(payload, str): try json.loads...
+        # except: return _create_error_envelope(payload)
+        # So yes, error message is "Error: Invalid JSON string".
+
         assert result["error"] == "Error: Invalid JSON string"
         assert result["query_result"] is None
 
@@ -655,3 +648,78 @@ class TestValidateAndExecuteNode:
         assert "Security Policy Violation" in result["error"]
         assert error_msg in result["error"]
         assert result["query_result"] is None
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.telemetry.start_span")
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_sql_node_fails_on_incompatible_version(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+    ):
+        """Node should fail if the tool returns an incompatible major version."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        # Return a version 2.0 payload
+        data = {
+            "schema_version": "2.0",
+            "rows": [{"id": 1}],
+            "metadata": {"rows_returned": 1, "is_truncated": False},
+        }
+        mock_tool.ainvoke = AsyncMock(return_value=json.dumps(data))
+
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT 1",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+
+        assert result["error"] is not None
+        assert "Incompatible envelope version" in result["error"]
+        assert "2.0" in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.telemetry.start_span")
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_sql_node_accepts_stable_minor_version(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+    ):
+        """Node should accept a minor version update (e.g., 1.1) from the tool."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        # Return a version 1.1 payload
+        data = {
+            "schema_version": "1.1",
+            "rows": [{"id": 1}],
+            "metadata": {"rows_returned": 1, "is_truncated": False},
+        }
+        mock_tool.ainvoke = AsyncMock(return_value=json.dumps(data))
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT 1",
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        result = await validate_and_execute_node(state)
+        assert result["error"] is None
+        assert result["query_result"] == [{"id": 1}]

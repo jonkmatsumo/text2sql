@@ -169,6 +169,11 @@ class TelemetryBackend(abc.ABC):
         """Get the current trace ID as a 32-char hex string."""
         pass
 
+    @abc.abstractmethod
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the exporter."""
+        pass
+
 
 class OTELTelemetrySpan(TelemetrySpan):
     """OpenTelemetry implementation of TelemetrySpan."""
@@ -181,59 +186,92 @@ class OTELTelemetrySpan(TelemetrySpan):
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
         """Set span inputs with redaction, truncation, and metadata."""
-        from agent.telemetry_schema import TelemetryKeys, truncate_json
+        try:
+            from agent.telemetry_schema import TelemetryKeys, truncate_json
 
-        json_str, truncated, size, sha256 = truncate_json(inputs)
-        self._span.set_attribute(TelemetryKeys.INPUTS, json_str)
-        self._span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
-        if sha256:
-            self._span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
-        if truncated:
-            self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+            json_str, truncated, size, sha256 = truncate_json(inputs)
+            self._span.set_attribute(TelemetryKeys.INPUTS, json_str)
+            self._span.set_attribute(TelemetryKeys.PAYLOAD_SIZE, size)
+            if sha256:
+                self._span.set_attribute(TelemetryKeys.PAYLOAD_HASH, sha256)
+            if truncated:
+                self._span.set_attribute(TelemetryKeys.PAYLOAD_TRUNCATED, True)
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry inputs: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
         """Set span outputs with redaction, truncation, and error handling."""
-        from agent.telemetry_schema import TelemetryKeys, truncate_json
+        try:
+            from agent.telemetry_schema import TelemetryKeys, truncate_json
 
-        json_str, truncated, size, sha256 = truncate_json(outputs)
-        self._span.set_attribute(TelemetryKeys.OUTPUTS, json_str)
+            json_str, truncated, size, sha256 = truncate_json(outputs)
+            self._span.set_attribute(TelemetryKeys.OUTPUTS, json_str)
 
-        # Check for error in outputs
-        error = outputs.get("error")
-        if error:
-            self._has_error = True
-            error_json, _, _, _ = truncate_json({"error": str(error), "type": type(error).__name__})
-            self._span.set_attribute(TelemetryKeys.ERROR, error_json)
-            self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+            # Check for error in outputs
+            error = outputs.get("error")
+            if error:
+                self._has_error = True
+                error_json, _, _, _ = truncate_json(
+                    {"error": str(error), "type": type(error).__name__}
+                )
+                self._span.set_attribute(TelemetryKeys.ERROR, error_json)
+                self._span.set_status(Status(StatusCode.ERROR, description=str(error)))
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry outputs: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        # To catch sensitive keys at the top level, we redact a wrapper dict
-        redacted_dict = redact_recursive({key: value})
-        redacted_value = redacted_dict[key]
+            # To catch sensitive keys at the top level, we redact a wrapper dict
+            redacted_dict = redact_recursive({key: value})
+            redacted_value = redacted_dict[key]
 
-        guarded_value = bound_attribute(key, redacted_value)
-        self._span.set_attribute(key, guarded_value)
-        self._tracked_attributes[key] = guarded_value
-        if key in ("error", "error.category", "error.type"):
-            self._has_error = True
+            guarded_value = bound_attribute(key, redacted_value)
+            self._span.set_attribute(key, guarded_value)
+            self._tracked_attributes[key] = guarded_value
+            if key in ("error", "error.category", "error.type"):
+                self._has_error = True
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry attribute {key}: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        from agent.telemetry_schema import bound_attribute
+        try:
+            from agent.telemetry_schema import bound_attribute
 
-        redacted_attrs = redact_recursive(attributes)
-        guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
-        self._span.set_attributes(guarded_attrs)
-        self._tracked_attributes.update(guarded_attrs)
-        if any(k in attributes for k in ("error", "error.category", "error.type")):
-            self._has_error = True
+            redacted_attrs = redact_recursive(attributes)
+            guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+            self._span.set_attributes(guarded_attrs)
+            self._tracked_attributes.update(guarded_attrs)
+            if any(k in attributes for k in ("error", "error.category", "error.type")):
+                self._has_error = True
+        except Exception as e:
+            logger.debug(f"Failed to set telemetry attributes: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
-        self._span.add_event(name, attributes or {})
+        try:
+            self._span.add_event(name, attributes or {})
+        except Exception as e:
+            logger.debug(f"Failed to add telemetry event {name}: {e}")
 
     def get_tracked_attributes(self) -> Dict[str, Any]:
         """Return attributes that were tracked for contract validation."""
@@ -256,6 +294,10 @@ def _get_contract_enforce_mode() -> str:
     return _CONTRACT_ENFORCE_MODE
 
 
+# Spans that must strictly adhere to the contract to ensure pipeline stability
+CRITICAL_SPANS = {"execute_sql", "validate_sql", "generate_sql", "synthesize_insight"}
+
+
 def validate_span_contract(
     span_name: str, span: OTELTelemetrySpan, otel_span: Optional[Any] = None
 ) -> None:
@@ -270,6 +312,10 @@ def validate_span_contract(
     if enforce_mode == "off":
         return
 
+    # Tiered enforcement: escalate 'warn' to 'error' for critical spans
+    if span_name in CRITICAL_SPANS and enforce_mode == "warn":
+        enforce_mode = "error"
+
     from agent.telemetry_schema import get_span_contract
 
     contract = get_span_contract(span_name)
@@ -281,7 +327,6 @@ def validate_span_contract(
 
     if missing:
         violation_msg = f"Span contract violation for '{span_name}': missing {missing}"
-        logger.warning(violation_msg)
 
         # Emit violation event on the span
         if otel_span is not None and hasattr(otel_span, "add_event"):
@@ -295,9 +340,11 @@ def validate_span_contract(
             )
 
         if enforce_mode == "error":
-            # In error mode, we still don't raise (to avoid breaking the flow)
-            # but we log at error level
+            # In error mode, we log at error level AND raise to ensure deterministic failure
             logger.error(violation_msg)
+            raise ValueError(violation_msg)
+        else:
+            logger.warning(violation_msg)
 
 
 class OTELTelemetryBackend(TelemetryBackend):
@@ -392,6 +439,18 @@ class OTELTelemetryBackend(TelemetryBackend):
             return format(ctx.trace_id, "032x")
         return None
 
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the OTLP exporter."""
+        try:
+            # We must reach into the global tracer provider
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "force_flush"):
+                return provider.force_flush(timeout_millis=timeout_ms)
+            return True
+        except Exception as e:
+            logger.debug(f"Telemetry flush failed: {e}")
+            return False
+
 
 class InMemoryTelemetrySpan(TelemetrySpan):
     """In-memory implementation of TelemetrySpan for testing."""
@@ -408,19 +467,56 @@ class InMemoryTelemetrySpan(TelemetrySpan):
 
     def set_inputs(self, inputs: Dict[str, Any]) -> None:
         """Set span inputs."""
-        self.inputs.update(inputs)
+        try:
+            self.inputs.update(inputs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_inputs failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_outputs(self, outputs: Dict[str, Any]) -> None:
         """Set span outputs."""
-        self.outputs.update(outputs)
+        try:
+            self.outputs.update(outputs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_outputs failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""
-        self.attributes[key] = value
+        try:
+            from agent.telemetry_schema import bound_attribute
+
+            redacted_dict = redact_recursive({key: value})
+            redacted_value = redacted_dict[key]
+            guarded_value = bound_attribute(key, redacted_value)
+            self.attributes[key] = guarded_value
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_attribute failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def set_attributes(self, attributes: Dict[str, Any]) -> None:
         """Set multiple span attributes."""
-        self.attributes.update(attributes)
+        try:
+            from agent.telemetry_schema import bound_attribute
+
+            redacted_attrs = redact_recursive(attributes)
+            guarded_attrs = {k: bound_attribute(k, v) for k, v in redacted_attrs.items()}
+            self.attributes.update(guarded_attrs)
+        except Exception as e:
+            logger.debug(f"InMemoryTelemetrySpan.set_attributes failed: {e}")
+            from common.config.env import get_env_bool
+
+            if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                raise
 
     def add_event(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """Add a timed event to the span."""
@@ -489,6 +585,10 @@ class InMemoryTelemetryBackend(TelemetryBackend):
             return "0" * 32
         return None
 
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """No-op for in-memory backend."""
+        return True
+
 
 class NoOpTelemetrySpan(TelemetrySpan):
     """No-op implementation of TelemetrySpan."""
@@ -552,6 +652,10 @@ class NoOpTelemetryBackend(TelemetryBackend):
     def get_current_trace_id(self) -> Optional[str]:
         """Get no-op trace ID."""
         return None
+
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """No-op for no-op backend."""
+        return True
 
 
 class TelemetryService:
@@ -638,30 +742,40 @@ class TelemetryService:
 
         try:
             # 4. Prepare Attributes
-            from agent.telemetry_schema import bound_attribute
+            final_attributes = {}
+            try:
+                from agent.telemetry_schema import bound_attribute
 
-            merged_attributes = child_meta.copy()
-            # Remove internal keys for emission
-            if "_seq_counter" in merged_attributes:
-                del merged_attributes["_seq_counter"]
+                merged_attributes = child_meta.copy()
+                # Remove internal keys for emission
+                if "_seq_counter" in merged_attributes:
+                    del merged_attributes["_seq_counter"]
 
-            if attributes:
-                merged_attributes.update(attributes)
+                if attributes:
+                    merged_attributes.update(attributes)
 
-            # Redact and bound all attributes before starting span
-            redacted_attributes = redact_recursive(merged_attributes)
-            final_attributes = {k: bound_attribute(k, v) for k, v in redacted_attributes.items()}
+                # Redact and bound all attributes before starting span
+                redacted_attributes = redact_recursive(merged_attributes)
+                final_attributes = {
+                    k: bound_attribute(k, v) for k, v in redacted_attributes.items()
+                }
 
-            # Set standard contract attributes explicitly
-            final_attributes["event.seq"] = event_seq
-            # Auto-set event.type from span_type (unless already provided)
-            if "event.type" not in final_attributes:
-                final_attributes["event.type"] = (
-                    span_type.value if hasattr(span_type, "value") else str(span_type)
-                )
-            # Auto-set event.name from span name (unless already provided)
-            if "event.name" not in final_attributes:
-                final_attributes["event.name"] = name
+                # Set standard contract attributes explicitly
+                final_attributes["event.seq"] = event_seq
+                # Auto-set event.type from span_type (unless already provided)
+                if "event.type" not in final_attributes:
+                    final_attributes["event.type"] = (
+                        span_type.value if hasattr(span_type, "value") else str(span_type)
+                    )
+                # Auto-set event.name from span name (unless already provided)
+                if "event.name" not in final_attributes:
+                    final_attributes["event.name"] = name
+            except Exception as e:
+                logger.debug(f"Telemetry attribute preparation failed: {e}")
+                from common.config.env import get_env_bool
+
+                if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                    raise
 
             # 5. Start Span
             with self._backend.start_span(
@@ -670,6 +784,15 @@ class TelemetryService:
                 inputs=inputs,
                 attributes=final_attributes,
             ) as span:
+                from common.config.env import get_env_bool
+
+                if get_env_bool("AGENT_TELEMETRY_REQUIRED", False):
+                    # For OTEL, check if recording
+                    if hasattr(span, "_span") and hasattr(span._span, "is_recording"):
+                        if not span._span.is_recording():
+                            raise RuntimeError(
+                                f"Telemetry required but span '{name}' is not recording."
+                            )
                 yield span
 
         finally:
@@ -779,6 +902,10 @@ class TelemetryService:
     def get_current_trace_id(self) -> Optional[str]:
         """Get the current trace ID from the backend."""
         return self._backend.get_current_trace_id()
+
+    def flush(self, timeout_ms: int = 1000) -> bool:
+        """Force flush all captured spans to the backend exporter."""
+        return self._backend.flush(timeout_ms=timeout_ms)
 
 
 # Global instance for easy access

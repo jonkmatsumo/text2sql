@@ -2,11 +2,13 @@
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ErrorMetadata(BaseModel):
     """Structured metadata for database and application errors."""
+
+    model_config = ConfigDict(extra="allow")
 
     sql_state: Optional[str] = Field(
         None, description="Database-specific error code (e.g. SQLSTATE)"

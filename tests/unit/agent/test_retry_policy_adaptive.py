@@ -102,15 +102,15 @@ def test_retry_decision_event_emitted(monkeypatch):
     route_after_execution(state)
 
     mock_span.add_event.assert_called()
-    # Check that retry.decision was among events
+    # Check that system.decision was among events
     found = False
     for call in mock_span.add_event.call_args_list:
-        if call[0][0] == "retry.decision":
+        if call[0][0] == "system.decision":
             found = True
             payload = call[0][1]
+            assert payload["action"] == "retry"
+            assert payload["decision"] == "proceed"
             assert payload["reason_code"] == "PROCEED_TO_CORRECTION"
-            assert payload["will_retry"] is True
-            assert payload["policy"] == "adaptive"
     assert found
 
 
@@ -138,7 +138,7 @@ def test_retry_suppressed_insufficient_budget(monkeypatch):
     # Verify reason code
     found = False
     for call in mock_span.add_event.call_args_list:
-        if call[0][0] == "retry.decision":
+        if call[0][0] == "system.decision":
             found = True
             assert call[0][1]["reason_code"] == "INSUFFICIENT_BUDGET"
     assert found

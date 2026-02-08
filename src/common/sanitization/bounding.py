@@ -17,6 +17,11 @@ def redact_recursive(value: Any) -> Any:
         sensitive_tokens = {"token", "password", "secret", "api_key", "auth", "credential"}
         for key, item in value.items():
             lowered_key = key.lower()
+            # Allowlist: operational keys that should NOT be redacted even if they contain 'token'
+            if "token_usage" in lowered_key or "page_token" in lowered_key:
+                redacted[key] = redact_recursive(item)
+                continue
+
             match = any(token in lowered_key for token in sensitive_tokens)
             if match:
                 redacted[key] = "<redacted>"

@@ -2,13 +2,14 @@
 
 import asyncio
 import json
-import re
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import asyncpg
 
-from common.config.env import get_env_int, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
+from common.models.error_metadata import ErrorMetadata
+from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
     negotiate_capability_request,
@@ -50,7 +51,6 @@ async def _cancel_best_effort(conn: object) -> None:
             else:
                 await cancel_fn()
         except Exception:
-            # Best effort cancellation, suppress errors but log if needed
             pass
     executor = getattr(conn, "executor", None)
     if executor is None:
@@ -63,6 +63,97 @@ async def _cancel_best_effort(conn: object) -> None:
             pass
 
 
+def _construct_error_response(
+    message: str,
+    category: str = "unknown",
+    metadata: Optional[Dict[str, Any]] = None,
+    provider: str = "unknown",
+    is_retryable: bool = False,
+    retry_after_seconds: Optional[float] = None,
+) -> str:
+    """Construct a standardized error response."""
+    legacy_mode = get_env_bool("MCP_EXECUTE_SQL_LEGACY_OUTPUT", False)
+
+    if legacy_mode:
+        payload = {
+            "error": message,
+            "error_category": category,
+        }
+        if metadata:
+            payload.update(metadata)
+        if retry_after_seconds is not None:
+            payload["retry_after_seconds"] = retry_after_seconds
+        return json.dumps(payload, separators=(",", ":"))
+
+    # Envelope Mode
+    meta_dict = (metadata or {}).copy()
+    # Remove keys that are passed explicitly to avoid multiple values error
+    for key in ["message", "category", "provider", "is_retryable", "retry_after_seconds"]:
+        meta_dict.pop(key, None)
+
+    error_meta = ErrorMetadata(
+        message=message,
+        category=category,
+        provider=provider,
+        is_retryable=is_retryable,
+        retry_after_seconds=retry_after_seconds,
+        **meta_dict,
+    )
+
+    envelope = ExecuteSQLQueryResponseEnvelope(
+        rows=[],
+        metadata=ExecuteSQLQueryMetadata(
+            rows_returned=0,
+            is_truncated=False,
+        ),
+        error=error_meta,
+    )
+    return envelope.model_dump_json(exclude_none=True)
+
+
+def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
+    """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
+    import sqlglot
+
+    # Map Text2SQL provider names to sqlglot dialects
+    dialect_map = {
+        "postgres": "postgres",
+        "postgresql": "postgres",
+        "redshift": "redshift",
+        "sqlite": "sqlite",
+        "duckdb": "duckdb",
+        "mysql": "mysql",
+        "bigquery": "bigquery",
+        "snowflake": "snowflake",
+    }
+    dialect = dialect_map.get(provider.lower(), "postgres")
+
+    try:
+        expressions = sqlglot.parse(sql, read=dialect)
+        if not expressions:
+            return "Empty or invalid SQL query."
+
+        if len(expressions) > 1:
+            return "Multi-statement queries are forbidden."
+
+        expression = expressions[0]
+        if expression is None:
+            return "Failed to parse SQL query."
+
+        # Ensure it's a SELECT statement (including WITH clauses and UNIONS)
+        # Using .key check as it's more stable across sqlglot versions than class checks
+        # sqlglot.exp.Query covers Select, Union, Intersect, Except
+        if expression.key not in ("select", "union", "intersect", "except", "with"):
+            return f"Forbidden statement type: {expression.key.upper()}. Only SELECT is allowed."
+
+    except sqlglot.errors.ParseError as e:
+        return f"SQL Syntax Error: {e}"
+    except Exception as e:
+        return f"SQL Validation Error: {str(e)}"
+
+    return None
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int] = None,
@@ -72,19 +163,26 @@ async def handler(
     page_token: Optional[str] = None,
     page_size: Optional[int] = None,
 ) -> str:
-    """Execute a valid SQL SELECT statement and return the result as JSON.
+    """Execute a valid SQL SELECT statement and return the result as JSON."""
+    provider = Database.get_query_target_provider()
 
-    Strictly read-only. Returns error messages as strings for self-correction.
-    Requires tenant_id for RLS enforcement.
+    # 1. Server-Side AST Validation
+    validation_error = _validate_sql_ast(sql_query, provider)
+    if validation_error:
+        return _construct_error_response(
+            validation_error,
+            category="invalid_request",
+            provider=provider,
+        )
 
-    Args:
-        sql_query: A SQL SELECT query string.
-        tenant_id: Required tenant identifier for RLS enforcement.
-        params: Optional list of bind parameters (e.g. for rewritten queries).
-
-    Returns:
-        JSON array of result rows, or error message as string.
-    """
+    # 2. Authorization Check (Tenant Context)
+    if tenant_id is None:
+        return _construct_error_response(
+            "Unauthorized. No Tenant ID context found. "
+            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var.",
+            category="unsupported_capability",
+            provider=provider,
+        )
 
     def _unsupported_capability_response(
         required_capability: str,
@@ -98,57 +196,21 @@ async def handler(
         fallback_policy = negotiation.fallback_policy if negotiation else "off"
         fallback_applied = negotiation.fallback_applied if negotiation else False
         fallback_mode = negotiation.fallback_mode if negotiation else "none"
-        return json.dumps(
-            {
-                "error": f"Requested capability is not supported: {required_capability}.",
-                "error_category": "unsupported_capability",
+
+        return _construct_error_response(
+            message=f"Requested capability is not supported: {required_capability}.",
+            category="unsupported_capability",
+            provider=provider_name,
+            metadata={
                 "required_capability": required_capability,
                 "capability_required": capability_required,
                 "capability_supported": capability_supported,
                 "fallback_policy": fallback_policy,
                 "fallback_applied": fallback_applied,
                 "fallback_mode": fallback_mode,
-                "provider": provider_name,
             },
-            separators=(",", ":"),
         )
 
-    # Require tenant_id for RLS enforcement
-    if tenant_id is None:
-        error_msg = (
-            "Unauthorized. No Tenant ID context found. "
-            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var."
-        )
-        return json.dumps({"error": error_msg, "error_category": "unsupported_capability"})
-
-    # Application-Level Security Check (Pre-flight)
-    # Reject mutative keywords to provide immediate feedback.
-    # Note: Real enforcement happens at the DB session/transaction level.
-    forbidden_patterns = [
-        r"(?i)\bDROP\b",
-        r"(?i)\bDELETE\b",
-        r"(?i)\bINSERT\b",
-        r"(?i)\bUPDATE\b",
-        r"(?i)\bALTER\b",
-        r"(?i)\bGRANT\b",
-        r"(?i)\bREVOKE\b",
-        r"(?i)\bTRUNCATE\b",
-        r"(?i)\bCREATE\b",
-    ]
-
-    for pattern in forbidden_patterns:
-        if re.search(pattern, sql_query):
-            return json.dumps(
-                {
-                    "error": (
-                        f"Error: Query contains forbidden keyword matching '{pattern}'. "
-                        "Read-only access only."
-                    ),
-                    "error_category": "unsupported_capability",
-                }
-            )
-
-    provider = Database.get_query_target_provider()
     caps = Database.get_query_target_capabilities()
     fallback_policy = parse_capability_fallback_policy(
         get_env_str("AGENT_CAPABILITY_FALLBACK_MODE")
@@ -219,18 +281,15 @@ async def handler(
         caps.supports_pagination,
     )
     if unsupported_response is not None:
-        print(f"DEBUG: pagination unsupported_response: {unsupported_response}")
         return unsupported_response
 
     max_page_size = 1000
     if page_size is not None:
         if page_size <= 0:
-            return json.dumps(
-                {
-                    "error": "Invalid page_size: must be greater than zero.",
-                    "error_category": "invalid_request",
-                },
-                separators=(",", ":"),
+            return _construct_error_response(
+                "Invalid page_size: must be greater than zero.",
+                category="invalid_request",
+                provider=provider,
             )
         if page_size > max_page_size:
             page_size = max_page_size
@@ -240,9 +299,11 @@ async def handler(
 
         errors = validate_redshift_query(sql_query)
         if errors:
-            return json.dumps(
-                {"error": "Redshift query validation failed.", "details": errors},
-                separators=(",", ":"),
+            return _construct_error_response(
+                "Redshift query validation failed.",
+                category="invalid_request",
+                provider=provider,
+                metadata={"details": errors},
             )
 
     try:
@@ -318,20 +379,14 @@ async def handler(
                     _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
                 )
             except asyncio.TimeoutError:
-                return json.dumps(
-                    {
-                        "error": "Execution timed out.",
-                        "error_category": "timeout",
-                    },
-                    separators=(",", ":"),
+                return _construct_error_response(
+                    "Execution timed out.", category="timeout", provider=provider
                 )
 
             raw_last_truncated = getattr(conn, "last_truncated", False)
             last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
-            raw_last_truncated_reason = getattr(conn, "last_truncated_reason", None)
-            last_truncated_reason = (
-                raw_last_truncated_reason if isinstance(raw_last_truncated_reason, str) else None
-            )
+            raw_reason = getattr(conn, "last_truncated_reason", None)
+            last_truncated_reason = raw_reason if isinstance(raw_reason, str) else None
 
         # Size Safety Valve
         safety_limit = 1000
@@ -357,6 +412,8 @@ async def handler(
         size_truncated = False
 
         # Approximate envelope overhead
+        # In new envelope, we have additional overhead from ErrorMetadata structure
+        # if present (none here) but also Metadata fields.
         budget.consume({"metadata": {}, "rows": []})
 
         for row in result_rows:
@@ -395,47 +452,73 @@ async def handler(
                 cap_mitigation_mode = "limited_view"
                 if row_limit <= 0:
                     row_limit = len(result_rows)
-        payload = {
-            "rows": result_rows,
-            "metadata": {
-                "is_truncated": is_truncated,
-                "row_limit": int(row_limit or 0),
-                "rows_returned": len(result_rows),
-                "next_page_token": next_token,
-                "page_size": effective_page_size,
-                "partial_reason": partial_reason,
-                "cap_detected": cap_detected,
-                "cap_mitigation_applied": cap_mitigation_applied,
-                "cap_mitigation_mode": cap_mitigation_mode,
-                **capability_metadata,
-            },
-        }
-        if include_columns:
-            payload["columns"] = columns
 
-        return json.dumps(payload, default=str, separators=(",", ":"))
+        legacy_mode = get_env_bool("MCP_EXECUTE_SQL_LEGACY_OUTPUT", False)
+        if legacy_mode:
+            payload = {
+                "rows": result_rows,
+                "metadata": {
+                    "is_truncated": is_truncated,
+                    "row_limit": int(row_limit or 0),
+                    "rows_returned": len(result_rows),
+                    "next_page_token": next_token,
+                    "page_size": effective_page_size,
+                    "partial_reason": partial_reason,
+                    "cap_detected": cap_detected,
+                    "cap_mitigation_applied": cap_mitigation_applied,
+                    "cap_mitigation_mode": cap_mitigation_mode,
+                    **capability_metadata,
+                },
+            }
+            if include_columns:
+                payload["columns"] = columns
+            return json.dumps(payload, default=str, separators=(",", ":"))
+
+        # Typed Envelope Construction
+        envelope_metadata = ExecuteSQLQueryMetadata(
+            rows_returned=len(result_rows),
+            is_truncated=is_truncated,
+            row_limit=int(row_limit or 0) if row_limit else None,
+            next_page_token=next_token,
+            partial_reason=partial_reason,
+            cap_detected=cap_detected,
+            cap_mitigation_applied=cap_mitigation_applied,
+            cap_mitigation_mode=cap_mitigation_mode,
+            # Capability negotiation
+            capability_required=capability_metadata.get("capability_required"),
+            capability_supported=capability_metadata.get("capability_supported"),
+            fallback_policy=capability_metadata.get("fallback_policy"),
+            fallback_applied=capability_metadata.get("fallback_applied"),
+            fallback_mode=capability_metadata.get("fallback_mode"),
+        )
+
+        envelope = ExecuteSQLQueryResponseEnvelope(
+            rows=result_rows, columns=columns, metadata=envelope_metadata
+        )
+
+        return envelope.model_dump_json(exclude_none=True)
 
     except asyncpg.PostgresError as e:
         provider = Database.get_query_target_provider()
         metadata = extract_error_metadata(provider, e)
-        payload = {
-            "error": metadata.message,
-            "error_category": metadata.category,
-            "error_metadata": metadata.to_dict(),
-        }
-        if metadata.retry_after_seconds is not None:
-            payload["retry_after_seconds"] = metadata.retry_after_seconds
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
-        return json.dumps(payload)
+        return _construct_error_response(
+            message=metadata.message,
+            category=metadata.category,
+            provider=provider,
+            is_retryable=metadata.is_retryable,
+            retry_after_seconds=metadata.retry_after_seconds,
+            metadata=metadata.to_dict(),  # include raw details if any
+        )
     except Exception as e:
         provider = Database.get_query_target_provider()
         metadata = extract_error_metadata(provider, e)
-        payload = {
-            "error": metadata.message,
-            "error_category": metadata.category,
-            "error_metadata": metadata.to_dict(),
-        }
-        if metadata.retry_after_seconds is not None:
-            payload["retry_after_seconds"] = metadata.retry_after_seconds
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
-        return json.dumps(payload)
+        return _construct_error_response(
+            message=metadata.message,
+            category=metadata.category,
+            provider=provider,
+            is_retryable=metadata.is_retryable,
+            retry_after_seconds=metadata.retry_after_seconds,
+            metadata=metadata.to_dict(),
+        )

@@ -26,7 +26,8 @@ class TestGetSampleData:
         mock_get_introspector.return_value = mock_introspector
 
         result_json = await get_sample_data("t1", limit=5)
-        result = json.loads(result_json)
+        response = json.loads(result_json)
+        result = response["result"]
 
         assert len(result) == 1
         assert result[0] == {"a": 1}

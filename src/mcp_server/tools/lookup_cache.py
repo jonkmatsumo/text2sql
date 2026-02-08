@@ -1,7 +1,6 @@
 """MCP tool: lookup_cache - Look up a query in the semantic registry cache."""
 
 from mcp_server.services.cache import lookup_cache as lookup_cache_svc
-from mcp_server.utils.parsing import format_result_for_tool
 
 TOOL_NAME = "lookup_cache"
 
@@ -16,5 +15,28 @@ async def handler(query: str, tenant_id: int) -> str:
     Returns:
         The cached SQL result if a semantic match is found, or "MISSING".
     """
+    import time
+
+    start_time = time.monotonic()
+
     result = await lookup_cache_svc(query, tenant_id)
-    return format_result_for_tool(result)
+
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+    from dal.database import Database
+
+    # If result is None, we still return "MISSING" in the result field for now
+    # to maintain consistency with historical behavior.
+    # Or better, we return the dict if it's there.
+    inner_result = result.model_dump() if result and hasattr(result, "model_dump") else result
+    if inner_result is None:
+        inner_result = "MISSING"
+
+    envelope = GenericToolResponseEnvelope(
+        result=inner_result,
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

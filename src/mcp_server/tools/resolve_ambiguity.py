@@ -1,6 +1,5 @@
 """MCP tool: resolve_ambiguity - Detect and resolve query ambiguity."""
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -32,12 +31,36 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     Returns:
         JSON string with resolution status and bindings.
     """
+    import time
+
+    start_time = time.monotonic()
+
     try:
         resolver = get_resolver()
         result = resolver.resolve(query, schema_context)
-        return json.dumps(result, separators=(",", ":"))
+
+        execution_time_ms = (time.monotonic() - start_time) * 1000
+
+        from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+
+        envelope = GenericToolResponseEnvelope(
+            result=result,
+            metadata=GenericToolMetadata(
+                provider="ambiguity_resolver", execution_time_ms=execution_time_ms
+            ),
+        )
+        return envelope.model_dump_json(exclude_none=True)
     except Exception as e:
         logger.error(f"Ambiguity resolution failed: {e}")
-        return json.dumps(
-            {"status": "ERROR", "error": str(e), "resolved_bindings": {}, "ambiguities": []}
-        )
+        # Build a manual error envelope
+        from common.models.error_metadata import ErrorMetadata
+        from common.models.tool_envelopes import GenericToolResponseEnvelope
+
+        return GenericToolResponseEnvelope(
+            result={"status": "ERROR", "resolved_bindings": {}, "ambiguities": []},
+            error=ErrorMetadata(
+                message=str(e),
+                category="ambiguity_resolution_failed",
+                provider="ambiguity_resolver",
+            ),
+        ).model_dump_json(exclude_none=True)

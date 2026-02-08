@@ -27,9 +27,21 @@ from agent.state import AgentState
 from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
+from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _safe_env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        parsed = get_env_int(name, default)
+    except ValueError:
+        logger.warning("Invalid %s; using default %s", name, default)
+        return default
+    if parsed is None:
+        return default
+    return max(minimum, int(parsed))
 
 
 def run_telemetry_configure():
@@ -132,7 +144,8 @@ def route_after_validation(state: AgentState) -> str:
 
     Routes based on AST validation result:
     - If validation passed: go to execute
-    - If validation failed: go to correction
+    - If validation failed and budget available: go to correction
+    - If validation failed and budget exhausted: go to synthesize
 
     Args:
         state: Current agent state
@@ -140,12 +153,17 @@ def route_after_validation(state: AgentState) -> str:
     Returns:
         str: Next node name
     """
+    retry_count = state.get("retry_count", 0)
+    max_retries = _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+
     ast_result = state.get("ast_validation_result")
-    if ast_result and not ast_result.get("is_valid"):
-        return "correct"
-    # Also check for error set by validation
-    if state.get("error"):
-        return "correct"
+    is_invalid = (ast_result and not ast_result.get("is_valid")) or state.get("error")
+
+    if is_invalid:
+        if retry_count < max_retries:
+            return "correct"
+        return "synthesize"
+
     return "execute"
 
 
@@ -268,8 +286,15 @@ def route_after_execution(state: AgentState) -> str:
             state["retry_summary"] = retry_summary
             retry_decision["reason_code"] = RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
             retry_decision["will_retry"] = False
+
+            decision_summary = format_decision_summary(
+                action="retry",
+                decision="stop",
+                reason_code=RetryDecisionReason.NON_RETRYABLE_CATEGORY,
+                category=error_category,
+            )
             if span:
-                span.add_event("retry.decision", retry_decision)
+                span.add_event("system.decision", decision_summary.to_dict())
             return "failed"
 
         if retry_after_seconds is not None and float(retry_after_seconds) > 0:
@@ -291,8 +316,15 @@ def route_after_execution(state: AgentState) -> str:
                     RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER.value
                 )
                 retry_decision["will_retry"] = False
+
+                decision_summary = format_decision_summary(
+                    action="retry",
+                    decision="stop",
+                    reason_code=RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER,
+                    remaining_budget=remaining,
+                )
                 if span:
-                    span.add_event("retry.decision", retry_decision)
+                    span.add_event("system.decision", decision_summary.to_dict())
                 return "failed"
             state["retry_after_seconds"] = bounded_retry_after
             retry_summary["retry_after_seconds"] = bounded_retry_after
@@ -328,8 +360,16 @@ def route_after_execution(state: AgentState) -> str:
             state["error_category"] = "timeout"
             retry_decision["reason_code"] = RetryDecisionReason.INSUFFICIENT_BUDGET.value
             retry_decision["will_retry"] = False
+
+            decision_summary = format_decision_summary(
+                action="retry",
+                decision="stop",
+                reason_code=RetryDecisionReason.INSUFFICIENT_BUDGET,
+                remaining_budget=remaining,
+                required_budget=required_budget,
+            )
             if span:
-                span.add_event("retry.decision", retry_decision)
+                span.add_event("system.decision", decision_summary.to_dict())
             return "failed"
 
     if span:
@@ -340,8 +380,14 @@ def route_after_execution(state: AgentState) -> str:
         state["retry_summary"] = retry_summary
         retry_decision["reason_code"] = RetryDecisionReason.DEADLINE_EXCEEDED.value
         retry_decision["will_retry"] = False
+
+        decision_summary = format_decision_summary(
+            action="retry",
+            decision="stop",
+            reason_code=RetryDecisionReason.DEADLINE_EXCEEDED,
+        )
         if span:
-            span.add_event("retry.decision", retry_decision)
+            span.add_event("system.decision", decision_summary.to_dict())
         return "failed"
 
     if retry_count >= max_retries:
@@ -349,15 +395,29 @@ def route_after_execution(state: AgentState) -> str:
         state["retry_summary"] = retry_summary
         retry_decision["reason_code"] = RetryDecisionReason.MAX_RETRIES_REACHED.value
         retry_decision["will_retry"] = False
+
+        decision_summary = format_decision_summary(
+            action="retry",
+            decision="stop",
+            reason_code=RetryDecisionReason.MAX_RETRIES_REACHED,
+            retry_count=retry_count,
+        )
         if span:
-            span.add_event("retry.decision", retry_decision)
+            span.add_event("system.decision", decision_summary.to_dict())
         return "failed"
 
     state["retry_summary"] = retry_summary
     retry_decision["reason_code"] = RetryDecisionReason.PROCEED_TO_CORRECTION.value
     retry_decision["will_retry"] = True
+
+    decision_summary = format_decision_summary(
+        action="retry",
+        decision="proceed",
+        reason_code=RetryDecisionReason.PROCEED_TO_CORRECTION,
+        attempt=retry_count + 1,
+    )
     if span:
-        span.add_event("retry.decision", retry_decision)
+        span.add_event("system.decision", decision_summary.to_dict())
     return "correct"  # Go to self-correction
 
 
@@ -448,6 +508,7 @@ def create_workflow() -> StateGraph:
         {
             "execute": "execute",
             "correct": "correct",
+            "synthesize": "synthesize",
         },
     )
 
@@ -459,7 +520,7 @@ def create_workflow() -> StateGraph:
             "correct": "correct",
             "visualize": "visualize",
             "refresh_schema": "refresh_schema",
-            "failed": END,
+            "failed": "synthesize",
         },
     )
 
@@ -878,4 +939,8 @@ async def run_agent_with_tracing(
 
         # Metadata is already handled early and made sticky via telemetry_context
 
-    return result
+        # 3. Final Flush (Control-plane safety)
+        # Ensure traces are sent before returning to avoid loss on rapid process exit
+        telemetry.flush(timeout_ms=500)
+
+        return result

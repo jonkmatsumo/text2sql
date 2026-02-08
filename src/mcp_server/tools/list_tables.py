@@ -1,6 +1,5 @@
 """MCP tool: list_tables - List available tables in the database."""
 
-import json
 from typing import Optional
 
 from dal.database import Database
@@ -20,6 +19,10 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
     Returns:
         JSON array of table names as strings.
     """
+    import time
+
+    start_time = time.monotonic()
+
     store = Database.get_metadata_store()
     tables = await store.list_tables()
 
@@ -27,4 +30,14 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
         search_term = search_term.lower()
         tables = [t for t in tables if search_term in t.lower()]
 
-    return json.dumps(tables, separators=(",", ":"))
+    execution_time_ms = (time.monotonic() - start_time) * 1000
+
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+
+    envelope = GenericToolResponseEnvelope(
+        result=tables,
+        metadata=GenericToolMetadata(
+            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+        ),
+    )
+    return envelope.model_dump_json(exclude_none=True)

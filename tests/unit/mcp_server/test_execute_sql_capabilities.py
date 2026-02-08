@@ -36,11 +36,13 @@ async def test_execute_tool_rejects_include_columns_when_unsupported():
 
         result = json.loads(payload)
         # It should be unsupported_capability if negotiated properly
-        if result["error_category"] == "unsupported_capability":
-            assert "required_capability" in result
-            assert result["required_capability"] == "column_metadata"
+        # Error details nested in 'error' object
+        error_obj = result["error"]
+        if error_obj["category"] == "unsupported_capability":
+            assert "required_capability" in error_obj
+            assert error_obj["required_capability"] == "column_metadata"
         else:
-            assert result["error_category"] == "unknown"
+            assert error_obj["category"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -70,4 +72,4 @@ async def test_tool_returns_classified_unsupported_capability_error():
 
         result = json.loads(payload)
         # Check either current classification or the one we want
-        assert result["error_category"] in ["unsupported_capability", "unknown"]
+        assert result["error"]["category"] in ["unsupported_capability", "unknown"]

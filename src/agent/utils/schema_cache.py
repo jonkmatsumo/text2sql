@@ -53,3 +53,9 @@ def get_schema_cache() -> SchemaSnapshotCache:
         # Future: Check env var AGENT_SCHEMA_SNAPSHOT_CACHE_BACKEND (redis, etc)
         _CACHE_BACKEND = MemorySchemaSnapshotCache()
     return _CACHE_BACKEND
+
+
+def reset_schema_cache() -> None:
+    """Reset the pluggable schema cache backend (test utility)."""
+    global _CACHE_BACKEND
+    _CACHE_BACKEND = None

@@ -75,7 +75,16 @@ def correct_sql_node(state: AgentState) -> dict:
                 time.sleep(sleep_seconds)
 
         # Classify the error using taxonomy
-        error_category, category_info = classify_error(error or "")
+        # Prioritize structured error category from state (higher confidence)
+        from agent.taxonomy.error_taxonomy import ERROR_TAXONOMY
+
+        state_error_category = state.get("error_category")
+        if state_error_category and state_error_category in ERROR_TAXONOMY:
+            error_category = state_error_category
+            category_info = ERROR_TAXONOMY[error_category]
+        else:
+            error_category, category_info = classify_error(error or "")
+
         span.set_attribute("error_category", error_category)
         max_attempts = 3
         span.set_attribute("retry.attempt", retry)
@@ -99,6 +108,8 @@ def correct_sql_node(state: AgentState) -> dict:
             error_message=error or "",
             failed_sql=current_sql or "",
             schema_context=schema_context,
+            missing_identifiers=state.get("missing_identifiers"),
+            error_metadata=state.get("error_metadata"),
         )
 
         # Prepare context variables for the prompt

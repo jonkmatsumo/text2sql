@@ -75,12 +75,18 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
                         logger.debug("Subgraph output type: %s", type(subgraph_json).__name__)
                         logger.debug("Parsed subgraph output type: %s", type(graph_data).__name__)
-                        if isinstance(graph_data, list):
-                            logger.debug("Parsed subgraph list size: %d", len(graph_data))
 
-                        # Handle case where graph_data is a list with single dict
+                        # Handle case where graph_data is a list with single dict or envelope
                         if isinstance(graph_data, list) and len(graph_data) > 0:
                             graph_data = graph_data[0]
+
+                        # Unwrap GenericToolResponseEnvelope if present
+                        if (
+                            isinstance(graph_data, dict)
+                            and "result" in graph_data
+                            and "schema_version" in graph_data
+                        ):
+                            graph_data = graph_data["result"]
 
                         if isinstance(graph_data, dict):
                             # Extract table names from nodes

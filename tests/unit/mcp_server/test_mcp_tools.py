@@ -32,7 +32,8 @@ async def test_execute_sql_query_requires_tenant_id():
     result = await execute_sql_query_handler("SELECT * FROM film", tenant_id=None)
     data = json.loads(result)
     assert "error" in data
-    assert data["error_category"] == "unsupported_capability"
+    # Error category is nested
+    assert data["error"]["category"] == "unsupported_capability"
 
 
 @pytest.mark.asyncio
@@ -135,8 +136,9 @@ async def test_execute_sql_query_database_error():
         mock_caps.return_value.execution_model = "sync"
 
         result = await execute_sql_query_handler("SELECT * FROM nonexistent", tenant_id=1)
-        assert "error" in result
-        assert "Syntax error" in result
+        data = json.loads(result)
+        assert "error" in data
+        assert "Syntax error" in data["error"]["message"]
 
 
 class TestGetSemanticDefinitions:
