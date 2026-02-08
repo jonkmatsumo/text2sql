@@ -31,6 +31,15 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
             }
         )
 
+    # 1.5 Validate Limit
+    if not isinstance(limit, int) or limit <= 0 or limit > 100:
+        return json.dumps(
+            {
+                "error": "Invalid limit. Must be between 1 and 100.",
+                "error_category": "invalid_request",
+            }
+        )
+
     start_time = time.monotonic()
 
     # 2. Execute with Tenant Scope
