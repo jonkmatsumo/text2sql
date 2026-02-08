@@ -191,7 +191,16 @@ async def handler(
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
 
-    # 1. Server-Side AST Validation
+    # 1. SQL Length Check
+    max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
+    if len(sql_query) > max_sql_len:
+        return _construct_error_response(
+            message=f"SQL query exceeds maximum length of {max_sql_len} bytes.",
+            category="invalid_request",
+            provider=provider,
+        )
+
+    # 2. Server-Side AST Validation
     validation_error = _validate_sql_ast(sql_query, provider)
     if validation_error:
         return _construct_error_response(
