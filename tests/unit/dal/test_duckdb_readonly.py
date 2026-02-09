@@ -31,6 +31,9 @@ async def test_duckdb_config_override_readonly():
 @pytest.mark.asyncio
 async def test_duckdb_readonly_flag_passed():
     """Verify that the read_only flag is passed to duckdb.connect."""
+    # Skip if duckdb is not installed to avoid ModuleNotFoundError during patch
+    pytest.importorskip("duckdb")
+
     config = DuckDBConfig(path=":memory:", query_timeout_seconds=5, max_rows=100, read_only=True)
     await DuckDBQueryTargetDatabase.init(config)
 
