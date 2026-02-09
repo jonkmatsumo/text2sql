@@ -27,6 +27,12 @@ async def handler(
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 
     start_time = time.monotonic()
+
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     store = get_feedback_store()
     await store.update_review_status(
         interaction_id=interaction_id,

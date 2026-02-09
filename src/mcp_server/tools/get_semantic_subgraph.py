@@ -9,6 +9,7 @@ Uses deterministic "Mini-Schema" expansion:
 import asyncio
 import logging
 import time
+from typing import Optional
 
 from common.telemetry import Telemetry
 from dal.database import Database
@@ -341,12 +342,13 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
         return {"error": str(e)}
 
 
-async def handler(query: str, tenant_id: int = None) -> str:
+async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] = None) -> str:
     """Retrieve relevant subgraph of tables and columns based on a natural language query.
 
     Args:
         query: The natural language query to search for.
         tenant_id: Optional tenant ID for semantic caching.
+        snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
         JSON string containing nodes and relationships of the subgraph.
@@ -403,7 +405,9 @@ async def handler(query: str, tenant_id: int = None) -> str:
     envelope = ToolResponseEnvelope(
         result=result,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+            provider=Database.get_query_target_provider(),
+            execution_time_ms=execution_time_ms,
+            snapshot_id=snapshot_id,
         ),
     )
     json_result = envelope.model_dump_json(exclude_none=True)

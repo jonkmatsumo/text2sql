@@ -26,6 +26,11 @@ async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     t_id = int(tenant_id) if tenant_id is not None else None
     pairs = await RegistryService.list_examples(tenant_id=t_id, limit=limit)
 

@@ -21,6 +21,11 @@ async def handler(interaction_id: str) -> str:
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     i_store = get_interaction_store()
     f_store = get_feedback_store()
 

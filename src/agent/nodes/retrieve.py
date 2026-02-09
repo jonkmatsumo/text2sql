@@ -63,8 +63,12 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 # Execute subgraph retrieval with grounded query
                 payload = {"query": grounded_query}
                 tenant_id = state.get("tenant_id")
+                existing_snapshot_id = state.get("schema_snapshot_id")
                 if tenant_id is not None:
                     payload["tenant_id"] = tenant_id
+                if existing_snapshot_id:
+                    payload["snapshot_id"] = existing_snapshot_id
+
                 subgraph_json = await subgraph_tool.ainvoke(payload)
 
                 if subgraph_json:
@@ -73,14 +77,10 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
                         graph_data = parse_tool_output(subgraph_json)
 
-                        logger.debug("Subgraph output type: %s", type(subgraph_json).__name__)
-                        logger.debug("Parsed subgraph output type: %s", type(graph_data).__name__)
-
                         # Handle case where graph_data is a list with single dict or envelope
                         if isinstance(graph_data, list) and len(graph_data) > 0:
                             graph_data = graph_data[0]
 
-                        # Unwrap GenericToolResponseEnvelope if present
                         # Unwrap GenericToolResponseEnvelope if present
                         graph_data = unwrap_envelope(graph_data)
 
@@ -89,6 +89,14 @@ async def retrieve_context_node(state: AgentState) -> dict:
                             nodes = graph_data.get("nodes", [])
                             for node in nodes:
                                 if node.get("type") == "Table":
+                                    # Check for missing/inaccessible status
+                                    status = node.get("status")
+                                    if status in ("TABLE_NOT_FOUND", "TABLE_INACCESSIBLE"):
+                                        logger.warning(f"Table {node.get('name')} is {status}")
+                                        span.set_attribute(
+                                            f"schema.issue.{node.get('name')}", status
+                                        )
+
                                     t_name = node.get("name")
                                     if t_name and t_name not in table_names:
                                         table_names.append(t_name)
@@ -107,25 +115,46 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 else:
                     context_str = "No relevant tables found."
             else:
-                logger.warning("get_semantic_subgraph tool not found.")
-                context_str = "Schema retrieval tool not available."
+                context_str = "No relevant tables found."
 
         except Exception as e:
-            logger.exception("Error during retrieval")
-            context_str = f"Error retrieving context: {e}"
+            logger.exception("Error in retrieve_context_node execution")
+            context_str = f"Error in context retrieval: {e}"
 
-        span.set_outputs(
-            {
-                "context_length": len(context_str),
-                "tables_retrieved": len(table_names),
-                "table_names": table_names,
-            }
-        )
-
+        # Drift Detection Logic
         raw_nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
         from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
 
-        schema_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
+        new_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
+        refresh_count = state.get("schema_refresh_count", 0)
+
+        if (
+            existing_snapshot_id
+            and existing_snapshot_id != "unknown"
+            and new_snapshot_id != existing_snapshot_id
+        ):
+            span.set_attribute("schema.drift_detected", True)
+            span.set_attribute("schema.old_snapshot_id", existing_snapshot_id)
+            span.set_attribute("schema.new_snapshot_id", new_snapshot_id)
+
+            if refresh_count >= 1:
+                # Hard fail if already refreshed once
+                return {
+                    "error": "Schema changed during request and refresh attempt "
+                    "failed to stabilize.",
+                    "error_category": "schema_changed_during_request",
+                    "retry_after_seconds": None,
+                }
+
+            # Trigger one-time refresh by clearing context and returning flag
+            # (In LangGraph, the router or retrieve node itself can handle this)
+            logger.warning("Schema drift detected. Triggering refresh.")
+            return {
+                "schema_refresh_count": refresh_count + 1,
+                "schema_snapshot_id": new_snapshot_id,
+                "schema_drift_suspected": True,
+                "error": "Schema drift detected",  # Triggers retry logic
+            }
 
         logger.info(
             "Schema retrieval completed",
@@ -134,6 +163,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 "schema_source": "semantic_subgraph",
                 "tables_retrieved": len(table_names),
                 "nodes_retrieved": len(raw_nodes),
+                "snapshot_id": new_snapshot_id,
             },
         )
 
@@ -141,5 +171,5 @@ async def retrieve_context_node(state: AgentState) -> dict:
             "schema_context": context_str,
             "raw_schema_context": raw_nodes,
             "table_names": table_names,
-            "schema_snapshot_id": schema_snapshot_id,
+            "schema_snapshot_id": new_snapshot_id,
         }

@@ -5,13 +5,19 @@ from typing import Optional
 TOOL_NAME = "get_sample_data"
 
 
-async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = None) -> str:
+async def handler(
+    table_name: str,
+    limit: int = 3,
+    tenant_id: Optional[int] = None,
+    snapshot_id: Optional[str] = None,
+) -> str:
     """Get sample data rows from a table.
 
     Args:
         table_name: The name of the table.
         limit: Number of rows to return (default: 3).
         tenant_id: Tenant identifier (REQUIRED).
+        snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
         JSON string of sample data.
@@ -20,7 +26,11 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.validation import require_tenant_id, validate_limit
+
+    if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
+        return err
 
     # 1. Validate inputs
     if err := require_tenant_id(tenant_id, TOOL_NAME):
@@ -45,6 +55,7 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
         metadata=GenericToolMetadata(
             provider=Database.get_query_target_provider(),
             execution_time_ms=execution_time_ms,
+            snapshot_id=snapshot_id,
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

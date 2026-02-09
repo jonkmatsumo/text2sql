@@ -1,12 +1,11 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
-import json
 from typing import Any, Dict, Optional
 
 import asyncpg
 
-from common.config.env import get_env_bool, get_env_int, get_env_str
+from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorMetadata
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
@@ -73,20 +72,7 @@ def _construct_error_response(
     retry_after_seconds: Optional[float] = None,
 ) -> str:
     """Construct a standardized error response."""
-    legacy_mode = get_env_bool("MCP_EXECUTE_SQL_LEGACY_OUTPUT", False)
-
-    if legacy_mode:
-        payload = {
-            "error": message,
-            "error_category": category,
-        }
-        if metadata:
-            payload.update(metadata)
-        if retry_after_seconds is not None:
-            payload["retry_after_seconds"] = retry_after_seconds
-        return json.dumps(payload, separators=(",", ":"))
-
-    # Envelope Mode
+    # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
     # Remove keys that are passed explicitly to avoid multiple values error
     for key in ["message", "category", "provider", "is_retryable", "retry_after_seconds"]:
@@ -197,6 +183,11 @@ async def handler(
 ) -> str:
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
+
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
+        return err
 
     from mcp_server.utils.validation import require_tenant_id
 
@@ -500,28 +491,7 @@ async def handler(
                 if row_limit <= 0:
                     row_limit = len(result_rows)
 
-        legacy_mode = get_env_bool("MCP_EXECUTE_SQL_LEGACY_OUTPUT", False)
-        if legacy_mode:
-            payload = {
-                "rows": result_rows,
-                "metadata": {
-                    "is_truncated": is_truncated,
-                    "row_limit": int(row_limit or 0),
-                    "rows_returned": len(result_rows),
-                    "next_page_token": next_token,
-                    "page_size": effective_page_size,
-                    "partial_reason": partial_reason,
-                    "cap_detected": cap_detected,
-                    "cap_mitigation_applied": cap_mitigation_applied,
-                    "cap_mitigation_mode": cap_mitigation_mode,
-                    **capability_metadata,
-                },
-            }
-            if include_columns:
-                payload["columns"] = columns
-            return json.dumps(payload, default=str, separators=(",", ":"))
-
-        # Typed Envelope Construction
+        # Typed Envelope Construction (Legacy mode removed)
         envelope_metadata = ExecuteSQLQueryMetadata(
             rows_returned=len(result_rows),
             is_truncated=is_truncated,

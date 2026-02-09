@@ -83,6 +83,33 @@ def test_tool_invariants(tool_name, handler):
                 call_names.append(call.func.attr)
         assert "validate_limit" in call_names, f"Tool '{tool_name}' MUST call validate_limit()"
 
+    # 4. Check for role validation (Phase C)
+    gated_tools = {
+        "get_table_schema": "TABLE_ADMIN_ROLE",
+        "get_sample_data": "TABLE_ADMIN_ROLE",
+        "search_relevant_tables": "TABLE_ADMIN_ROLE",
+        "execute_sql_query": "SQL_ADMIN_ROLE",
+    }
+    if tool_name in gated_tools:
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        call_names = []
+        for call in calls:
+            if isinstance(call.func, ast.Name):
+                call_names.append(call.func.id)
+            elif isinstance(call.func, ast.Attribute):
+                call_names.append(call.func.attr)
+        assert "validate_role" in call_names, f"Tool '{tool_name}' MUST call validate_role()"
+
+    # 5. Check for snapshot_id parameter (Phase C)
+    schema_tools = [
+        "get_table_schema",
+        "get_sample_data",
+        "search_relevant_tables",
+        "get_semantic_subgraph",
+    ]
+    if tool_name in schema_tools:
+        assert "snapshot_id" in handler_args, f"Tool '{tool_name}' MUST accept snapshot_id"
+
 
 def test_registry_wraps_all_with_tracing():
     """Verify that registry.py wraps all registered tools with trace_tool."""

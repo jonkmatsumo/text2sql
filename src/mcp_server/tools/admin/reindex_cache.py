@@ -14,6 +14,11 @@ async def handler(dry_run: bool = False) -> str:
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     try:
         results = []
         async for msg in MaintenanceService.reindex_cache():

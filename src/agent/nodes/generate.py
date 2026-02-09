@@ -362,6 +362,17 @@ Rules:
             ]
         )
 
+        from agent.utils.budget import TokenBudget
+
+        budget = TokenBudget.from_dict(state.get("token_budget"))
+        if budget and budget.is_exhausted():
+            span.set_attribute("budget.exhausted", True)
+            return {
+                "error": "Token budget exhausted for this request.",
+                "error_category": "budget_exhausted",
+                "retry_after_seconds": None,
+            }
+
         from agent.llm_client import get_llm
 
         chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
@@ -408,9 +419,16 @@ Rules:
             }
         )
 
+        if usage_stats and budget:
+            tokens = usage_stats.get("llm.token_usage.total_tokens", 0)
+            budget.consume(tokens)
+            span.set_attribute("budget.consumed_in_step", tokens)
+            span.set_attribute("budget.total_consumed", budget.consumed_tokens)
+
         return {
             "current_sql": sql,
             "from_cache": False,
             "latency_generate_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,
+            "token_budget": budget.to_dict() if budget else state.get("token_budget"),
         }

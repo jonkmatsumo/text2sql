@@ -8,7 +8,12 @@ from mcp_server.services.rag.engine import RagEngine, search_similar_tables
 TOOL_NAME = "search_relevant_tables"
 
 
-async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = None) -> str:
+async def handler(
+    user_query: str,
+    limit: int = 5,
+    tenant_id: Optional[int] = None,
+    snapshot_id: Optional[str] = None,
+) -> str:
     """Search for tables relevant to a natural language query using semantic similarity.
 
     This tool solves the context window problem by returning only the most relevant
@@ -17,19 +22,25 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
     Args:
         user_query: Natural language question (e.g., "Show me customer payments")
         limit: Maximum number of relevant tables to return (default: 5)
-        tenant_id: Optional tenant identifier (not required for schema queries).
+        tenant_id: Optional tenant identifier.
+        snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
         JSON array of relevant tables with schema information.
     """
     import time
 
+    start_time = time.monotonic()
+
     from mcp_server.utils.validation import validate_limit
 
     if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=50):
         return err
 
-    start_time = time.monotonic()
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
+        return err
 
     # Generate embedding for user query
     query_embedding = await RagEngine.embed_text(user_query)
@@ -64,16 +75,20 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
                 }
             )
         except Exception as e:
-            # Skip tables that might be in index but missing in introspection
+            error_msg = str(e).lower()
+            status = "error"
+            if "not found" in error_msg or "does not exist" in error_msg:
+                status = "TABLE_NOT_FOUND"
+            elif "permission" in error_msg or "access denied" in error_msg:
+                status = "TABLE_INACCESSIBLE"
+
             structured_results.append(
                 {
                     "table_name": table_name,
-                    "status": "error",
-                    "error": f"Introspection failed: {str(e)}",
+                    "status": status,
+                    "error": str(e),
                 }
             )
-
-    import time
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
@@ -82,7 +97,9 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
     envelope = ToolResponseEnvelope(
         result=structured_results,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+            provider=Database.get_query_target_provider(),
+            execution_time_ms=execution_time_ms,
+            snapshot_id=snapshot_id,
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

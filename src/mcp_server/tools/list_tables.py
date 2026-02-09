@@ -23,6 +23,11 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
+        return err
+
     store = Database.get_metadata_store()
     tables = await store.list_tables()
 

@@ -25,6 +25,11 @@ async def handler(limit: int = 50, offset: int = 0) -> str:
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     store = get_interaction_store()
     results = await store.get_recent_interactions(limit, offset)
 

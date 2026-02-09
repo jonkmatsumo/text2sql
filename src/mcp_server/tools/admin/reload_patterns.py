@@ -13,6 +13,10 @@ async def handler() -> str:
     It returns the status of the reload operation including pattern count.
     """
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
 
     # Pattern reload service tracks its own duration, but we'll wrap it
     result: ReloadResult = await PatternReloadService.reload(source="admin_tool")

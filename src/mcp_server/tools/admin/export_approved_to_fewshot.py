@@ -25,6 +25,11 @@ async def handler(limit: int = 10) -> str:
 
     start_time = time.monotonic()
 
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
+
     f_store = get_feedback_store()
 
     approved = await f_store.get_approved_interactions(limit)

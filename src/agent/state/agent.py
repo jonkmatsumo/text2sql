@@ -89,6 +89,17 @@ class AgentState(TypedDict):
     tenant_id: Optional[int]
 
     # =========================================================================
+    # Budget and Safety Fields
+    # =========================================================================
+    # Per-request token budget configuration and consumption
+    # Structure: {"max_tokens": int, "consumed_tokens": int}
+    token_budget: Optional[dict]
+
+    # History of error signatures in the current request to detect loops
+    # Signatures are hashes of (category, normalized_message)
+    error_signatures: List[str]
+
+    # =========================================================================
     # SQL-of-Thought Planning Fields
     # =========================================================================
 
