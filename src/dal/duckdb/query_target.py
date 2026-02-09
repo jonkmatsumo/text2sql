@@ -11,34 +11,40 @@ class DuckDBQueryTargetDatabase:
     """DuckDB query-target database wrapper."""
 
     _config: Optional[DuckDBConfig] = None
+    _conn: Optional[Any] = None
+    _lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     async def init(cls, config: DuckDBConfig) -> None:
-        """Initialize DuckDB query-target config."""
+        """Initialize DuckDB query-target config and shared connection."""
         cls._config = config
+        import duckdb
+
+        # Open a shared connection to ensure :memory: persistence
+        # and stable file access across connection yields.
+        cls._conn = await asyncio.to_thread(duckdb.connect, config.path, read_only=config.read_only)
 
     @classmethod
     async def close(cls) -> None:
-        """Close DuckDB resources (no-op)."""
+        """Close the shared DuckDB connection."""
+        if cls._conn:
+            await asyncio.to_thread(cls._conn.close)
+            cls._conn = None
         return None
 
     @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
-        """Yield a DuckDB connection wrapper (tenant context is a no-op)."""
+        """Yield a DuckDB connection wrapper using the shared connection."""
         _ = tenant_id
         _ = read_only
-        if cls._config is None:
-            raise RuntimeError(
-                "DuckDB config not initialized. Call DuckDBQueryTargetDatabase.init()."
-            )
+        if cls._config is None or cls._conn is None:
+            raise RuntimeError("DuckDB not initialized. Call DuckDBQueryTargetDatabase.init().")
 
-        import duckdb
-
-        conn = duckdb.connect(cls._config.path, read_only=cls._config.read_only)
         sync_max_rows = get_sync_max_rows()
         wrapper = _DuckDBConnection(
-            conn,
+            cls._conn,
+            cls._lock,
             query_timeout_seconds=cls._config.query_timeout_seconds,
             max_rows=cls._config.max_rows,
             sync_max_rows=sync_max_rows,
@@ -46,14 +52,23 @@ class DuckDBQueryTargetDatabase:
         try:
             yield wrapper
         finally:
-            await asyncio.to_thread(conn.close)
+            # We don't close the shared connection here; it stays open until cls.close()
+            pass
 
 
 class _DuckDBConnection:
     """Adapter providing asyncpg-like helpers over DuckDB."""
 
-    def __init__(self, conn, query_timeout_seconds: int, max_rows: int, sync_max_rows: int) -> None:
+    def __init__(
+        self,
+        conn,
+        lock: asyncio.Lock,
+        query_timeout_seconds: int,
+        max_rows: int,
+        sync_max_rows: int,
+    ) -> None:
         self._conn = conn
+        self._lock = lock
         self._query_timeout_seconds = query_timeout_seconds
         self._max_rows = max_rows
         self._sync_max_rows = sync_max_rows
@@ -72,7 +87,8 @@ class _DuckDBConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         async def _run():
-            await self._run_query(sql, list(params))
+            async with self._lock:
+                await self._run_query(sql, list(params))
             return "OK"
 
         return await trace_query_operation(
@@ -85,7 +101,8 @@ class _DuckDBConnection:
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         async def _run():
-            rows = await self._run_query(sql, list(params))
+            async with self._lock:
+                rows = await self._run_query(sql, list(params))
             limit = self._max_rows
             if self._sync_max_rows:
                 limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
@@ -106,7 +123,8 @@ class _DuckDBConnection:
         """Fetch rows with column metadata when supported."""
 
         async def _run():
-            rows, columns = await self._run_query_with_columns(sql, list(params))
+            async with self._lock:
+                rows, columns = await self._run_query_with_columns(sql, list(params))
             limit = self._max_rows
             if self._sync_max_rows:
                 limit = min(limit, self._sync_max_rows) if limit else self._sync_max_rows
