@@ -3,16 +3,28 @@
 from dal.factory import get_feedback_store, get_interaction_store
 
 TOOL_NAME = "get_interaction_details"
+TOOL_DESCRIPTION = "Get full details for a specific interaction, including all feedback."
 
 
 async def handler(interaction_id: str) -> str:
     """Get full details for a specific interaction, including all feedback.
 
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the interaction and feedback stores.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Not Found: If the interaction_id does not exist.
+        - Database Error: If stores are unavailable.
+
     Args:
         interaction_id: The unique identifier of the interaction.
 
     Returns:
-        Dictionary with interaction details and feedback list.
+        JSON string containing interaction details and feedback list.
     """
     import time
 

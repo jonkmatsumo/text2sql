@@ -6,12 +6,24 @@ from typing import Optional
 from dal.database import Database
 
 TOOL_NAME = "get_table_schema"
+TOOL_DESCRIPTION = "Retrieve the schema (columns, data types, foreign keys) for a list of tables."
 
 
 async def handler(
     table_names: list[str], tenant_id: Optional[int] = None, snapshot_id: Optional[str] = None
 ) -> str:
     """Retrieve the schema (columns, data types, foreign keys) for a list of tables.
+
+    Authorization:
+        Requires 'TABLE_ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the metadata store.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Table Not Found: If one or more requested tables do not exist.
+        - Table Inaccessible: If the user lacks permissions for a specific table.
 
     Args:
         table_names: A list of exact table names (e.g. ['film', 'actor']).

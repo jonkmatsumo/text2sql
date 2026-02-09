@@ -3,17 +3,29 @@
 from dal.factory import get_interaction_store
 
 TOOL_NAME = "list_interactions"
+TOOL_DESCRIPTION = "List recent query interactions with feedback summary."
 
 
 async def handler(limit: int = 50, offset: int = 0) -> str:
     """List recent query interactions with feedback summary.
+
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the interaction store.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Validation Error: If limit is out of bounds.
+        - Database Error: If the interaction store is unavailable.
 
     Args:
         limit: Maximum number of interactions to return (default: 50).
         offset: Number of interactions to skip (default: 0).
 
     Returns:
-        List of interaction dictionaries.
+        JSON string containing a list of interaction dictionaries.
     """
     import time
 

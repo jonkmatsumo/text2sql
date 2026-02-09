@@ -3,17 +3,29 @@
 from mcp_server.services.cache import lookup_cache as lookup_cache_svc
 
 TOOL_NAME = "lookup_cache"
+TOOL_DESCRIPTION = "Look up a query in the semantic registry cache."
 
 
 async def handler(query: str, tenant_id: int) -> str:
     """Look up a query in the semantic registry cache.
+
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher) and valid 'tenant_id'.
+
+    Data Access:
+        Read-only access to the semantic cache store. Scoped by tenant_id.
+
+    Failure Modes:
+        - Unauthorized: If tenant_id is missing or role is insufficient.
+        - Cache Miss: Returns "MISSING" if no semantic match is found.
+        - Dependency Failure: If the cache service is unavailable.
 
     Args:
         query: The user query to look up.
         tenant_id: Tenant identifier for cache lookup.
 
     Returns:
-        The cached SQL result if a semantic match is found, or "MISSING".
+        JSON string containing the cached SQL result or "MISSING".
     """
     from mcp_server.utils.validation import require_tenant_id
 

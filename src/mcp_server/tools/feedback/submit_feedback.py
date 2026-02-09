@@ -1,23 +1,35 @@
 """MCP tool: submit_feedback - Submit user feedback for an interaction."""
 
-import logging
 from typing import Optional
 
 from dal.factory import get_feedback_store
 
 TOOL_NAME = "submit_feedback"
-
-logger = logging.getLogger(__name__)
-
-
-class FeedbackLinkageError(Exception):
-    """Raised when feedback linkage to interaction fails."""
-
-    pass
+TOOL_DESCRIPTION = "Submit user feedback (UP/DOWN) for a specific interaction."
 
 
 async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None) -> str:
-    """Submit user feedback (UP/DOWN) for a specific interaction."""
+    """Submit user feedback (UP/DOWN) for a specific interaction.
+
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher).
+
+    Data Access:
+        Write access to the feedback store. Feedback is linked by interaction_id.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Invalid Request: If interaction_id is missing or doesn't exist.
+        - Database Error: If the feedback store is unavailable.
+
+    Args:
+        interaction_id: The unique identifier of the interaction.
+        thumb: UP or DOWN.
+        comment: Optional textual feedback.
+
+    Returns:
+        JSON string with success or error status.
+    """
     from mcp_server.utils.envelopes import tool_error_response, tool_success_response
 
     # Validate interaction_id before attempting write

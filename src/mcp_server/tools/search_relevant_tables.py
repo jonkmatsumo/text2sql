@@ -6,6 +6,9 @@ from dal.database import Database
 from mcp_server.services.rag.engine import RagEngine, search_similar_tables
 
 TOOL_NAME = "search_relevant_tables"
+TOOL_DESCRIPTION = (
+    "Search for tables relevant to a natural language query using semantic similarity."
+)
 
 
 async def handler(
@@ -16,8 +19,16 @@ async def handler(
 ) -> str:
     """Search for tables relevant to a natural language query using semantic similarity.
 
-    This tool solves the context window problem by returning only the most relevant
-    table schemas instead of the entire database schema.
+    Authorization:
+        Requires 'TABLE_ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the RAG metadata store. Metadata is scoped by tenant_id.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Validation Error: If limit is out of bounds.
+        - RAG Engine Error: If embedding generation or search fails.
 
     Args:
         user_query: Natural language question (e.g., "Show me customer payments")

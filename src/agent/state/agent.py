@@ -5,6 +5,8 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
+from agent.models.termination import TerminationReason
+
 
 class AgentState(TypedDict):
     """
@@ -218,3 +220,6 @@ class AgentState(TypedDict):
 
     # Replay bundle for deterministic execution
     replay_bundle: Optional[dict]
+
+    # Explicit termination reason for better observability
+    termination_reason: Optional[TerminationReason]

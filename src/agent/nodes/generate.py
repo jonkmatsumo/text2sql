@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
+from agent.models.termination import TerminationReason
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
@@ -370,6 +371,7 @@ Rules:
             return {
                 "error": "Token budget exhausted for this request.",
                 "error_category": "budget_exhausted",
+                "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
                 "retry_after_seconds": None,
             }
 

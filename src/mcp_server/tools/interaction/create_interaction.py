@@ -5,6 +5,7 @@ from typing import Optional
 from dal.factory import get_interaction_store
 
 TOOL_NAME = "create_interaction"
+TOOL_DESCRIPTION = "Log the start of a user interaction."
 
 
 async def handler(
@@ -16,7 +17,31 @@ async def handler(
     prompt_version: Optional[str] = None,
     trace_id: Optional[str] = None,
 ) -> str:
-    """Log the start of a user interaction."""
+    """Log the start of a user interaction.
+
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher).
+
+    Data Access:
+        Write access to the interaction store.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Validation Error: If required fields (e.g., user_nlq_text) are missing.
+        - Database Error: If the interaction store is unavailable.
+
+    Args:
+        conversation_id: Unique identifier for the conversation.
+        schema_snapshot_id: Schema snapshot ID at the time of interaction.
+        user_nlq_text: Natural language query text.
+        tenant_id: Tenant identifier.
+        model_version: Optional model version used.
+        prompt_version: Optional prompt version used.
+        trace_id: Optional trace identifier for observability.
+
+    Returns:
+        JSON-encoded ToolResponseEnvelope containing the new interaction_id.
+    """
     from mcp_server.utils.envelopes import tool_success_response
     from mcp_server.utils.validation import require_tenant_id
 

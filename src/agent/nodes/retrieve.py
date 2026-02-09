@@ -2,6 +2,7 @@
 
 import logging
 
+from agent.models.termination import TerminationReason
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
@@ -90,6 +91,10 @@ async def retrieve_context_node(state: AgentState) -> dict:
                                 "Context retrieval failed due to permissions or an internal error. "
                                 "Please ensure you have the required roles."
                             )
+                            return {
+                                "schema_context": context_str,
+                                "termination_reason": TerminationReason.PERMISSION_DENIED,
+                            }
                         elif isinstance(graph_data, dict):
                             # Extract table names from nodes
                             nodes = graph_data.get("nodes", [])
@@ -150,6 +155,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                     "failed to stabilize.",
                     "error_category": "schema_changed_during_request",
                     "retry_after_seconds": None,
+                    "termination_reason": TerminationReason.SCHEMA_CHANGED,
                 }
 
             # Trigger one-time refresh by clearing context and returning flag

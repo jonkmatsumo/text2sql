@@ -1,7 +1,7 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import asyncpg
 
@@ -23,6 +23,7 @@ from dal.util.timeouts import run_with_timeout
 from mcp_server.utils.json_budget import JSONBudget
 
 TOOL_NAME = "execute_sql_query"
+TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
 
 
 def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
@@ -175,13 +176,27 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
 async def handler(
     sql_query: str,
     tenant_id: int,
-    params: Optional[list] = None,
-    include_columns: bool = False,
+    params: Optional[List[Any]] = None,
+    include_columns: bool = True,
     timeout_seconds: Optional[float] = None,
     page_token: Optional[str] = None,
     page_size: Optional[int] = None,
 ) -> str:
-    """Execute a valid SQL SELECT statement and return the result as JSON."""
+    """Execute a validated SQL query against the target database.
+
+    Authorization:
+        Requires 'SQL_ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the scoped tenant database. Mutations (INSERT, UPDATE, DELETE, etc.)
+        are strictly blocked at Agent, MCP, and Database driver levels.
+
+    Failure Modes:
+        - Forbidden statement type: If mutation is detected.
+        - Unauthorized: If the required role is missing.
+        - Timeout: If execution exceeds the allotted time.
+        - Capacity detection: If query triggers row/resource caps.
+    """
     provider = Database.get_query_target_provider()
 
     from mcp_server.utils.auth import validate_role

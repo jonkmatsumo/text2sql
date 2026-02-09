@@ -51,7 +51,7 @@ services:
     ports:
       - "7687:7687"
       - "7444:7444"
-      - "${MEMGRAPH_LAB_PORT:-3000}:3000"
+      - "${MEMGRAPH_LAB_PORT:-3001}:3000"
     networks:
       - text2sql_net
     volumes:

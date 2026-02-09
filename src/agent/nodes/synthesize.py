@@ -9,6 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from agent.config import get_synthesize_temperature
 from agent.llm_client import get_llm
+from agent.models.termination import TerminationReason
 from agent.state import AgentState
 from agent.state.result_completeness import PartialReason, ResultCompleteness
 from agent.telemetry import telemetry
@@ -131,9 +132,10 @@ def synthesize_insight_node(state: AgentState) -> dict:
         if completeness.query_limit is not None:
             span.set_attribute("result.limit", completeness.query_limit)
 
+        termination_reason = state.get("termination_reason")
+        if termination_reason:
+            span.set_attribute("termination_reason", termination_reason)
         error = state.get("error")
-        error_metadata = state.get("error_metadata")
-        error_category = state.get("error_category")
 
         if error:
             # 1. Redact potentially sensitive info first
@@ -141,30 +143,38 @@ def synthesize_insight_node(state: AgentState) -> dict:
 
             error_str = redact_sensitive_info(str(error))
 
-            # 2. Handle error synthesis based on category safety
-            # Safe categories can show the redacted error message.
-            # Others get a generic message to prevent schema/SQL detail leakage.
-            SAFE_CATEGORIES = {
-                "unsupported_capability",
-                "timeout",
-                "resource_exhausted",
-                "throttling",
-                "invalid_request",
-            }
-
-            if error_category in SAFE_CATEGORIES:
+            # 2. Map termination reason to user-facing messages
+            if termination_reason == TerminationReason.READONLY_VIOLATION:
                 response_content = (
-                    f"I encountered an error while processing your request: {error_str}"
+                    "I cannot perform this operation. The system is currently in read-only mode "
+                    "to ensure data integrity."
                 )
-                if error_category == "unsupported_capability":
-                    cap = (error_metadata or {}).get("required_capability")
-                    if cap:
-                        response_content = (
-                            f"The database backend does not support the '{cap}' "
-                            "capability required for this query."
-                        )
+            elif termination_reason == TerminationReason.PERMISSION_DENIED:
+                response_content = (
+                    "I am unable to access the requested data due to insufficient permissions. "
+                    "Please contact your administrator if you believe this is an error."
+                )
+            elif termination_reason == TerminationReason.BUDGET_EXHAUSTED:
+                response_content = (
+                    "The processing for this request exceeded the allowed resource budget. "
+                    "Please try a simpler or more specific query."
+                )
+            elif termination_reason == TerminationReason.TIMEOUT:
+                response_content = (
+                    "The request timed out while waiting for the database to respond. "
+                    "The query might be too complex or the database is under heavy load."
+                )
+            elif termination_reason == TerminationReason.SCHEMA_CHANGED:
+                response_content = (
+                    "The database schema appears to have changed during your request. "
+                    "Please try again in a few moments."
+                )
+            elif termination_reason == TerminationReason.VALIDATION_FAILED:
+                response_content = (
+                    f"I encountered a validation error while processing your request: {error_str}"
+                )
             else:
-                # For unknown/unsafe categories (like syntax or unknown), use a generic message.
+                # Generic fallback for unknown/other errors
                 response_content = "An internal error occurred while processing your request."
 
             span.set_outputs({"error_response": response_content})

@@ -5,6 +5,7 @@ from typing import Optional
 from dal.factory import get_feedback_store
 
 TOOL_NAME = "reject_interaction"
+TOOL_DESCRIPTION = "Reject an interaction and update its review status."
 
 
 async def handler(
@@ -12,7 +13,18 @@ async def handler(
     reason: str = "CANNOT_FIX",
     reviewer_notes: Optional[str] = None,
 ) -> str:
-    """Reject an interaction.
+    """Reject an interaction and update its review status.
+
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read/Write access to the feedback store to update interaction records.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Not Found: If the interaction_id does not exist.
+        - Database Error: If the feedback store is unavailable.
 
     Args:
         interaction_id: The unique identifier of the interaction.
@@ -20,7 +32,7 @@ async def handler(
         reviewer_notes: Optional notes from the reviewer.
 
     Returns:
-        "OK" on success.
+        JSON object with status "OK" on success.
     """
     import time
 

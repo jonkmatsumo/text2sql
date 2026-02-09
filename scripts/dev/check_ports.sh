@@ -15,7 +15,7 @@ if [ -f .env ]; then
 fi
 
 # Resolve ports with defaults matching docker-compose files
-MEMGRAPH_LAB_PORT=${MEMGRAPH_LAB_PORT:-3000}
+MEMGRAPH_LAB_PORT=${MEMGRAPH_LAB_PORT:-3001}
 MINIO_PORT=${MINIO_PORT:-9000}
 MINIO_CONSOLE_PORT=${MINIO_CONSOLE_PORT:-9001}
 UI_DOCKER_PORT=${UI_PORT:-3333}

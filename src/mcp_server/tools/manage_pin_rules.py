@@ -6,6 +6,7 @@ from uuid import UUID
 from dal.postgres.pinned_recommendations import PostgresPinnedRecommendationStore
 
 TOOL_NAME = "manage_pin_rules"
+TOOL_DESCRIPTION = "Manage pinned recommendation rules for a tenant."
 
 
 async def handler(
@@ -18,7 +19,18 @@ async def handler(
     priority: Optional[int] = None,
     enabled: Optional[bool] = None,
 ) -> str:
-    """Manage pinned recommendation rules.
+    """Manage pinned recommendation rules for a tenant.
+
+    Authorization:
+        Requires 'ADMIN_ROLE' and valid 'tenant_id'.
+
+    Data Access:
+        Read/Write access to the pinned recommendations table. Scoped by tenant_id.
+
+    Failure Modes:
+        - Unauthorized: If the required role or tenant_id is missing.
+        - Validation Error: If required fields for upsert are missing or rule_id is malformed.
+        - Database Error: If the recommendation store is unavailable.
 
     Args:
         operation: One of 'list', 'upsert', 'delete'.
@@ -31,7 +43,7 @@ async def handler(
         enabled: Enable/disable status (for upsert).
 
     Returns:
-        List of rules, single rule, or boolean success.
+        JSON string containing list of rules, single rule, or boolean success.
     """
     import time
 

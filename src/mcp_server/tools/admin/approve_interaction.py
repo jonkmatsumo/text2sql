@@ -5,6 +5,7 @@ from typing import Optional
 from dal.factory import get_feedback_store
 
 TOOL_NAME = "approve_interaction"
+TOOL_DESCRIPTION = "Approve an interaction and update its review status."
 
 
 async def handler(
@@ -15,13 +16,25 @@ async def handler(
 ) -> str:
     """Approve an interaction and update its review status.
 
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read/Write access to the feedback store to update interaction records.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Not Found: If the interaction_id does not exist.
+        - Database Error: If the feedback store is unavailable.
+
     Args:
         interaction_id: The unique identifier of the interaction.
         corrected_sql: Optional corrected SQL if the original was wrong.
         resolution_type: Type of resolution (default: "APPROVED_AS_IS").
         reviewer_notes: Optional notes from the reviewer.
 
-        "OK" on success.
+    Returns:
+        JSON object with status "OK" on success.
     """
     import time
 

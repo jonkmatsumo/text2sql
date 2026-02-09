@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Optional
 
+from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
 from agent.state.result_completeness import ResultCompleteness
@@ -114,7 +115,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         if not original_sql:
             error = "No SQL query to execute"
             span.set_outputs({"error": error})
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.UNKNOWN,
+            }
 
         # 1. Structural Validation (AST)
         try:
@@ -123,7 +128,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             error = f"Security Policy Violation: {e}"
             logger.warning(f"Blocked unsafe SQL: {original_sql} | Reason: {e}")
             span.set_outputs({"error": error, "validation_failed": True})
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.READONLY_VIOLATION,
+            }
 
         # 2. Tenant Isolation Rewriting
         try:
@@ -150,7 +159,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
             span.set_outputs({"error": error})
             span.set_attribute("error.type", type(e).__name__)
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.PERMISSION_DENIED,
+            }
 
         try:
             tools = await get_mcp_tools()
@@ -162,6 +175,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 return {
                     "error": error,
                     "query_result": None,
+                    "termination_reason": TerminationReason.UNKNOWN,
                 }
 
             # Pre-execution schema validation hook
@@ -360,6 +374,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             "for this request."
                         )
 
+                    reason = TerminationReason.UNKNOWN
+                    if error_category == "unauthorized":
+                        reason = TerminationReason.PERMISSION_DENIED
+                    elif error_category == "timeout":
+                        reason = TerminationReason.TIMEOUT
+                    elif error_category == "unsupported_capability":
+                        reason = TerminationReason.VALIDATION_FAILED
+
                     drift_hint = _maybe_add_schema_drift(error_msg)
                     return {
                         "error": error_msg,
@@ -367,6 +389,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "error_category": error_category,
                         "retry_after_seconds": retry_after_seconds,
                         "error_metadata": error_metadata,
+                        "termination_reason": reason,
                         **drift_hint,
                     }
 
@@ -762,7 +785,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                     "result_prefetch_reason": result_prefetch_reason,
                     "retry_after_seconds": None,
-                    "last_tool_output": result if isinstance(result, dict) else None,
+                    "termination_reason": TerminationReason.SUCCESS,
                     "result_completeness": ResultCompleteness.from_parts(
                         rows_returned=rows_returned,
                         is_truncated=bool(result_is_truncated),

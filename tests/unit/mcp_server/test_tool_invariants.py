@@ -137,10 +137,26 @@ def test_tool_invariants(tool_name, handler):
 
     # 9. Check for consistent return type annotation (str)
     returns = tree.body[0].returns
-    if returns:
-        # Check if it returns str or Optional[str]
-        # Better yet, most tools should return str now (JSON envelope)
-        pass
+    # Some tools return ToolResponseEnvelope directly if using type-safe registration
+    # But current handlers return JSON strings.
+    assert returns is not None, f"Tool '{tool_name}' MUST have a return type annotation"
+
+    # 10. Check for Docstring sections
+    docstring = inspect.getdoc(handler)
+    assert docstring, f"Tool '{tool_name}' MUST have a docstring"
+
+    required_sections = ["Authorization", "Data Access", "Failure Modes"]
+    for section in required_sections:
+        assert (
+            section in docstring
+        ), f"Tool '{tool_name}' docstring MUST contain a '{section}' section"
+
+    # 11. Check for TOOL_NAME and TOOL_DESCRIPTION
+    module_source = inspect.getsource(inspect.getmodule(handler))
+    assert "TOOL_NAME" in module_source, f"Tool module for '{tool_name}' MUST define TOOL_NAME"
+    assert (
+        "TOOL_DESCRIPTION" in module_source
+    ), f"Tool module for '{tool_name}' MUST define TOOL_DESCRIPTION"
 
 
 def test_registry_wraps_all_with_tracing():

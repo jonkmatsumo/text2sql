@@ -18,6 +18,9 @@ from ingestion.vector_indexer import VectorIndexer
 from mcp_server.services.rag import RagEngine
 
 TOOL_NAME = "get_semantic_subgraph"
+TOOL_DESCRIPTION = (
+    "Retrieve relevant subgraph of tables and columns based on a natural language query."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +347,18 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
 
 async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] = None) -> str:
     """Retrieve relevant subgraph of tables and columns based on a natural language query.
+
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher) and valid 'tenant_id'.
+
+    Data Access:
+        Read-only access to the graph store (Memgraph) and RAG vector store.
+        Results are enriched with schema metadata from the target database.
+
+    Failure Modes:
+        - Unauthorized: If tenant_id is missing or role is insufficient.
+        - Dependency Failure: If Memgraph or Vector Store is unavailable.
+        - Validation Error: If the query is empty or malformed.
 
     Args:
         query: The natural language query to search for.

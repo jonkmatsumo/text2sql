@@ -3,6 +3,7 @@
 from typing import Optional
 
 TOOL_NAME = "get_sample_data"
+TOOL_DESCRIPTION = "Get sample data rows from a table."
 
 
 async def handler(
@@ -12,6 +13,17 @@ async def handler(
     snapshot_id: Optional[str] = None,
 ) -> str:
     """Get sample data rows from a table.
+
+    Authorization:
+        Requires 'TABLE_ADMIN_ROLE' and valid 'tenant_id'.
+
+    Data Access:
+        Read-only access to the scoped tenant database.
+
+    Failure Modes:
+        - Unauthorized: If the required role or tenant_id is missing.
+        - Validation Error: If limit is out of bounds.
+        - Database Error: If the table doesn't exist or connection fails.
 
     Args:
         table_name: The name of the table.

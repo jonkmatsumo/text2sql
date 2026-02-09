@@ -2,21 +2,29 @@ from dal.factory import get_pattern_run_store
 from mcp_server.services.ops.maintenance import MaintenanceService
 
 TOOL_NAME = "generate_patterns"
+TOOL_DESCRIPTION = "Generate EntityRuler patterns from database schema interactions."
 
 
 async def handler(dry_run: bool = False) -> str:
     """Generate EntityRuler patterns from database schema interactions.
 
-    This tool triggers the pattern generation pipeline, which:
-    1. Introspects table and column schemas.
-    2. Uses LLM enrichment for colloquial synonyms.
-    3. Validates and writes patterns to the nlp_patterns table.
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read access to schema metadata and interaction logs. Write access to the
+        nlp_patterns table (unless dry_run is True).
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Generation Failed: If LLM enrichment or validation fails.
+        - Database Error: If the pattern store is unavailable.
 
     Args:
         dry_run: If True, skips writing to the database.
 
     Returns:
-        JSON compatible dictionary with run status and metrics.
+        JSON string containing run status and metrics.
     """
     # We collect the logs but primary goal is to return the final run status
     import time
