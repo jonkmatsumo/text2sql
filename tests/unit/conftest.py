@@ -1,15 +1,6 @@
-"""Unit test environment helpers."""
-
 import os
-import warnings
 
 import pytest
-
-# Suppress known external deprecations that trigger even with -W error
-warnings.filterwarnings("ignore", category=UserWarning, message=".*pkg_resources is deprecated.*")
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, message=".*pkg_resources.declare_namespace.*"
-)
 
 
 @pytest.fixture(autouse=True)
