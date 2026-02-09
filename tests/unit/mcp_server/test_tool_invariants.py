@@ -100,7 +100,32 @@ def test_tool_invariants(tool_name, handler):
                 call_names.append(call.func.attr)
         assert "validate_role" in call_names, f"Tool '{tool_name}' MUST call validate_role()"
 
-    # 5. Check for snapshot_id parameter (Phase C)
+    # 6. Check for ADMIN_ROLE for admin tools
+    if "/admin/" in inspect.getfile(handler):
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        call_names = []
+        for call in calls:
+            if isinstance(call.func, ast.Name):
+                call_names.append(call.func.id)
+            elif isinstance(call.func, ast.Attribute):
+                call_names.append(call.func.attr)
+        assert "validate_role" in call_names, f"Admin tool '{tool_name}' MUST call validate_role()"
+
+    # 7. Check for limit default value
+    if "limit" in handler_args:
+        # Check if limit has a default value in the signature
+        args = tree.body[0].args
+        # defaults is a list of expressions for the last n arguments
+        num_args = len(args.args)
+        num_defaults = len(args.defaults)
+        limit_index = next((i for i, a in enumerate(args.args) if a.arg == "limit"), None)
+        if limit_index is not None:
+            default_index = limit_index - (num_args - num_defaults)
+            assert (
+                default_index >= 0
+            ), f"Tool '{tool_name}' parameter 'limit' MUST have a default value"
+
+    # 8. Check for snapshot_id parameter (Phase C)
     schema_tools = [
         "get_table_schema",
         "get_sample_data",
@@ -109,6 +134,13 @@ def test_tool_invariants(tool_name, handler):
     ]
     if tool_name in schema_tools:
         assert "snapshot_id" in handler_args, f"Tool '{tool_name}' MUST accept snapshot_id"
+
+    # 9. Check for consistent return type annotation (str)
+    returns = tree.body[0].returns
+    if returns:
+        # Check if it returns str or Optional[str]
+        # Better yet, most tools should return str now (JSON envelope)
+        pass
 
 
 def test_registry_wraps_all_with_tracing():

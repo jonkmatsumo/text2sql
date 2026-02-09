@@ -14,18 +14,9 @@ async def handler(
     version: int,
     ttl_minutes: int = 60,
 ) -> str:
-    """Save the conversation state to persistent storage.
+    """Save the conversation state to persistent storage."""
+    from mcp_server.utils.envelopes import tool_success_response
 
-    Args:
-        conversation_id: Unique identifier for the conversation.
-        user_id: User identifier.
-        state_json: Arbitrary state dictionary to persist.
-        version: Version number for optimistic locking.
-        ttl_minutes: Time-to-live in minutes (default: 60).
-
-    Returns:
-        "OK" on success.
-    """
     store = get_conversation_store()
     await store.save_state_async(conversation_id, user_id, state_json, version, ttl_minutes)
-    return "OK"
+    return tool_success_response("OK")

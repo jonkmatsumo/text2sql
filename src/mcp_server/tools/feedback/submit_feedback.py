@@ -17,30 +17,12 @@ class FeedbackLinkageError(Exception):
 
 
 async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None) -> str:
-    """Submit user feedback (UP/DOWN) for a specific interaction.
+    """Submit user feedback (UP/DOWN) for a specific interaction."""
+    from mcp_server.utils.envelopes import tool_error_response, tool_success_response
 
-    Args:
-        interaction_id: The unique identifier of the interaction.
-        thumb: Feedback type - "UP" for positive, "DOWN" for negative.
-        comment: Optional comment with the feedback.
-
-    Returns:
-        "OK" on success.
-
-    Raises:
-        FeedbackLinkageError: If interaction_id is None/empty or FK constraint fails.
-    """
     # Validate interaction_id before attempting write
     if not interaction_id or not interaction_id.strip():
-        logger.error(
-            "Feedback submission failed: interaction_id is required",
-            extra={
-                "operation": "submit_feedback",
-                "thumb": thumb,
-                "interaction_id": interaction_id,
-            },
-        )
-        raise FeedbackLinkageError("interaction_id is required for feedback submission")
+        return tool_error_response("interaction_id is required", category="invalid_request")
 
     store = get_feedback_store()
 
@@ -50,7 +32,7 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
         if thumb == "DOWN":
             await store.ensure_review_queue(interaction_id)
 
-        return "OK"
+        return tool_success_response("OK")
     except Exception as e:
         # Check for FK violation patterns
         error_msg = str(e).lower()
@@ -60,27 +42,11 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
             or "fk_" in error_msg
             or "references" in error_msg
         ):
-            logger.error(
-                "Feedback FK violation: interaction does not exist",
-                extra={
-                    "operation": "submit_feedback",
-                    "interaction_id": interaction_id,
-                    "thumb": thumb,
-                    "exception_type": type(e).__name__,
-                },
-                exc_info=True,
+            return tool_error_response(
+                f"Interaction '{interaction_id}' does not exist", category="invalid_request"
             )
-            raise FeedbackLinkageError(f"Interaction '{interaction_id}' does not exist: {e}") from e
 
-        # Re-raise other errors with context
-        logger.error(
-            "Feedback submission failed",
-            extra={
-                "operation": "submit_feedback",
-                "interaction_id": interaction_id,
-                "thumb": thumb,
-                "exception_type": type(e).__name__,
-            },
-            exc_info=True,
+        # Re-raise other errors or return standardized error
+        return tool_error_response(
+            f"Failed to submit feedback: {str(e)}", category="internal_error"
         )
-        raise

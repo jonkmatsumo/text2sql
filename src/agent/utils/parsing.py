@@ -176,14 +176,17 @@ def parse_tool_output(tool_output):
 def unwrap_envelope(data: Any) -> Any:
     """Unwrap ToolResponseEnvelope if present.
 
+    If an error is present in the envelope, it is logged and None is returned.
+
     Args:
         data: The parsed tool output (dict, list, or primitive).
 
     Returns:
-        The inner 'result' if data is an envelope, otherwise data itself.
+        The inner 'result' if data is an envelope and successful,
+        otherwise data itself. Returns None if an error is detected in the envelope.
     """
-    if isinstance(data, dict) and "result" in data and "schema_version" in data:
-        # Basic version check
+    if isinstance(data, dict) and "schema_version" in data:
+        # It looks like an envelope
         from common.models.tool_envelopes import CURRENT_SCHEMA_VERSION, is_compatible
 
         version = data.get("schema_version", "1.0")
@@ -192,8 +195,17 @@ def unwrap_envelope(data: Any) -> Any:
                 f"Tool envelope version mismatch: received {version}, "
                 f"expected compatible with {CURRENT_SCHEMA_VERSION}"
             )
-            # For now, we still return the result, but we logged the warning.
-            # In strict mode, we might want to raise an error or return raw data.
 
-        return data["result"]
+        # Check for error
+        error = data.get("error")
+        if error:
+            # If it's a dict, extract info
+            if isinstance(error, dict):
+                msg = error.get("message", "Unknown error")
+                cat = error.get("category", "unknown")
+                logger.error(f"Tool reported error: [{cat}] {msg}")
+                # We return None to signal an error occurred
+                return None
+
+        return data.get("result")
     return data

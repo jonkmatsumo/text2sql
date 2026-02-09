@@ -84,7 +84,13 @@ async def retrieve_context_node(state: AgentState) -> dict:
                         # Unwrap GenericToolResponseEnvelope if present
                         graph_data = unwrap_envelope(graph_data)
 
-                        if isinstance(graph_data, dict):
+                        if graph_data is None:
+                            # This means an error was detected in the envelope (e.g. Unauthorized)
+                            context_str = (
+                                "Context retrieval failed due to permissions or an internal error. "
+                                "Please ensure you have the required roles."
+                            )
+                        elif isinstance(graph_data, dict):
                             # Extract table names from nodes
                             nodes = graph_data.get("nodes", [])
                             for node in nodes:

@@ -15,19 +15,9 @@ async def handler(
     error_type: Optional[str] = None,
     tables_used: Optional[List[str]] = None,
 ) -> str:
-    """Log the result of an interaction.
+    """Log the result of an interaction."""
+    from mcp_server.utils.envelopes import tool_success_response
 
-    Args:
-        interaction_id: The unique identifier of the interaction.
-        generated_sql: The SQL query that was generated.
-        response_payload: JSON string of the response payload.
-        execution_status: Status of execution (default: "SUCCESS").
-        error_type: Optional error type if execution failed.
-        tables_used: Optional list of tables used in the query.
-
-    Returns:
-        "OK" on success.
-    """
     store = get_interaction_store()
     await store.update_interaction_result(
         interaction_id,
@@ -37,4 +27,4 @@ async def handler(
         error_type,
         tables_used,
     )
-    return "OK"
+    return tool_success_response("OK")
