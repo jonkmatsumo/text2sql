@@ -1,17 +1,14 @@
 """Unit tests for DuckDB read-only enforcement."""
 
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock duckdb if not present to allow testing the config/flag logic
-if "duckdb" not in sys.modules:
-    sys.modules["duckdb"] = MagicMock()
-
 from dal.duckdb.config import DuckDBConfig
 from dal.duckdb.query_target import DuckDBQueryTargetDatabase
+
+# Test the config/flag logic
 
 
 @pytest.mark.asyncio

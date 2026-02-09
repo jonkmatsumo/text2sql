@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +13,7 @@ async def test_reload_patterns_tool_success():
     """Test reload_patterns tool success response."""
     with patch("mcp_server.tools.admin.reload_patterns.PatternReloadService.reload") as mock_reload:
         # Setup mock return
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         mock_reload.return_value = ReloadResult(
             success=True,
             error=None,
@@ -44,7 +44,7 @@ async def test_reload_patterns_tool_failure():
     """Test reload_patterns tool failure response."""
     with patch("mcp_server.tools.admin.reload_patterns.PatternReloadService.reload") as mock_reload:
         # Setup mock return
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         mock_reload.return_value = ReloadResult(
             success=False,
             error="Something went wrong",

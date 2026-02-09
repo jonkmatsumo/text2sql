@@ -1,9 +1,12 @@
 """Unit tests for MCP server main entrypoint."""
 
 import importlib.util
+import warnings
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+warnings.filterwarnings("ignore", category=UserWarning, message=".*pkg_resources is deprecated.*")
 
 fastmcp_available = importlib.util.find_spec("fastmcp") is not None
 
