@@ -160,17 +160,24 @@ def register_all(mcp: "FastMCP") -> None:
     # Register feedback tools
     register("submit_feedback", submit_feedback)
 
-    # Register admin tools
-    register("list_interactions", list_interactions)
-    register("get_interaction_details", get_interaction_details)
-    register("approve_interaction", approve_interaction)
-    register("reject_interaction", reject_interaction)
-    register("export_approved_to_fewshot", export_approved_to_fewshot)
-    register("list_approved_examples", list_approved_examples)
-    register("reload_patterns", reload_patterns)
-    register("manage_pin_rules", manage_pin_rules)
-    register("generate_patterns", generate_patterns)
-    register("hydrate_schema", hydrate_schema)
-    register("reindex_semantic_cache", reindex_cache)
+    # Register admin tools (conditional)
+    from common.config.env import get_env_bool
+
+    if get_env_bool("MCP_ENABLE_ADMIN_TOOLS", False):
+        # Register admin tools
+        register("list_interactions", list_interactions)
+        register("get_interaction_details", get_interaction_details)
+        register("approve_interaction", approve_interaction)
+        register("reject_interaction", reject_interaction)
+        register("export_approved_to_fewshot", export_approved_to_fewshot)
+        register("list_approved_examples", list_approved_examples)
+        register("reload_patterns", reload_patterns)
+        register("manage_pin_rules", manage_pin_rules)
+        register("generate_patterns", generate_patterns)
+        register("hydrate_schema", hydrate_schema)
+        register("reindex_semantic_cache", reindex_cache)
+        logger.info("Admin tools registered")
+    else:
+        logger.info("Admin tools disabled (MCP_ENABLE_ADMIN_TOOLS=False)")
 
     logger.info(f"Registered {len(CANONICAL_TOOLS)} tools with MCP server")

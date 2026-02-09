@@ -324,73 +324,41 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         if error_obj
                         else (envelope.error_message or "Unknown error")
                     )
-                    error_category = error_obj.category if error_obj else None
-                    error_metadata = error_obj.to_dict() if error_obj else None
+                    error_category = error_obj.category if error_obj else "unknown"
+                    error_metadata = error_obj.to_dict() if error_obj else {}
 
-                    if error_msg == "Malformed response payload" or (
-                        error_msg and error_msg.startswith("Invalid payload type")
+                    # Check for malformed response based on error_category or msg
+                    if (
+                        error_category == "tool_response_malformed"
+                        or error_msg == "Malformed response payload"
                     ):
                         span.set_attribute("tool.response_shape", "malformed")
                         trace_id = telemetry.get_current_trace_id()
                         error_msg = (
                             f"Tool response malformed. Trace ID: {trace_id or 'unavailable'}."
                         )
-                        error_category = "tool_response_malformed"
                     else:
                         span.set_attribute("tool.response_shape", "error")
 
+                    # Capabilities might be in error_metadata (extra fields) or envelope.metadata
+                    # envelope.metadata is already populated from the envelope at 268+
                     retry_after_seconds = error_obj.retry_after_seconds if error_obj else None
 
-                    if error_metadata:
-                        req_cap = error_metadata.get("required_capability")
-                        if req_cap:
-                            result_capability_required = req_cap
-                            result_capability_supported = error_metadata.get("capability_supported")
-                            result_fallback_policy = error_metadata.get("fallback_policy")
-                            result_fallback_applied = error_metadata.get("fallback_applied")
-                            result_fallback_mode = error_metadata.get("fallback_mode")
-                            provider = error_metadata.get("provider")
-                            if provider:
-                                span.set_attribute("error.provider", provider)
-
-                    span.set_outputs(
-                        {
-                            "error": error_msg,
-                            "error_category": error_category,
-                        }
-                    )
+                    span.set_outputs({"error": error_msg, "error_category": error_category})
                     if error_category:
                         span.set_attribute("error_category", error_category)
                         span.set_attribute("timeout.triggered", error_category == "timeout")
                     if retry_after_seconds is not None:
                         span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
+
                     if error_category == "unsupported_capability":
-                        if result_capability_required:
-                            error_msg = (
-                                "This backend does not support "
-                                f"{result_capability_required} for this request."
-                            )
-                        else:
-                            error_msg = (
-                                "This backend does not support a required capability "
-                                "for this request."
-                            )
-                        if result_capability_required:
-                            span.set_attribute(
-                                "error.required_capability", result_capability_required
-                            )
-                        if result_capability_supported is not None:
-                            span.set_attribute(
-                                "error.capability_supported", bool(result_capability_supported)
-                            )
-                        if result_fallback_policy:
-                            span.set_attribute("error.fallback_policy", str(result_fallback_policy))
-                        if result_fallback_applied is not None:
-                            span.set_attribute(
-                                "error.fallback_applied", bool(result_fallback_applied)
-                            )
-                        if result_fallback_mode:
-                            span.set_attribute("error.fallback_mode", str(result_fallback_mode))
+                        error_msg = (
+                            f"This backend does not support {result_capability_required} "
+                            "for this request."
+                            if result_capability_required
+                            else "This backend does not support a required capability "
+                            "for this request."
+                        )
 
                     drift_hint = _maybe_add_schema_drift(error_msg)
                     return {

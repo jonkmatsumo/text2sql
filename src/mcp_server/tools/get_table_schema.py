@@ -30,9 +30,15 @@ async def handler(table_names: list[str], tenant_id: Optional[int] = None) -> st
             definition_json = await store.get_table_definition(table)
             definition = json.loads(definition_json)
             schema_list.append(definition)
-        except Exception:
-            # Silently skip tables that error (e.g. don't exist)
-            continue
+        except Exception as e:
+            # Capture error for specific table rather than silent skip
+            schema_list.append(
+                {
+                    "table_name": table,
+                    "error": str(e),
+                    "status": "not_found" if "not found" in str(e).lower() else "error",
+                }
+            )
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 

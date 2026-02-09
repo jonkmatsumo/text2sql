@@ -19,6 +19,10 @@ async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
 
     start_time = time.monotonic()
 

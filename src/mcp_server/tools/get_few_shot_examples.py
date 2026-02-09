@@ -18,13 +18,13 @@ async def handler(query: str, tenant_id: int, limit: int = 3) -> str:
     Returns:
         JSON string with similar query-SQL pairs.
     """
-    import json
+    from mcp_server.utils.validation import require_tenant_id
 
-    if tenant_id is None:
-        return json.dumps(
-            {
-                "error": "Tenant ID is required for get_few_shot_examples.",
-                "error_category": "invalid_request",
-            }
-        )
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
     return await get_relevant_examples(query, limit, tenant_id)

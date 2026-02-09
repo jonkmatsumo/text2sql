@@ -18,6 +18,10 @@ async def handler(limit: int = 50, offset: int = 0) -> str:
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
 
     start_time = time.monotonic()
 

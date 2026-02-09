@@ -24,6 +24,11 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
     """
     import time
 
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=50):
+        return err
+
     start_time = time.monotonic()
 
     # Generate embedding for user query
@@ -58,9 +63,15 @@ async def handler(user_query: str, limit: int = 5, tenant_id: Optional[int] = No
                     "columns": table_columns,
                 }
             )
-        except Exception:
+        except Exception as e:
             # Skip tables that might be in index but missing in introspection
-            continue
+            structured_results.append(
+                {
+                    "table_name": table_name,
+                    "status": "error",
+                    "error": f"Introspection failed: {str(e)}",
+                }
+            )
 
     import time
 

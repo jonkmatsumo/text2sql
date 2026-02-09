@@ -24,15 +24,13 @@ async def handler(
     Returns:
         JSON compatible dictionary with recommended examples and fallback status.
     """
-    import json
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
 
-    if tenant_id is None:
-        return json.dumps(
-            {
-                "error": "Tenant ID is required for recommend_examples.",
-                "error_category": "invalid_request",
-            }
-        )
+    # 1. Validate inputs
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
     import time
 
     start_time = time.monotonic()

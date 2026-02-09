@@ -16,29 +16,17 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
     Returns:
         JSON string of sample data.
     """
-    import json
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
 
-    # 1. Enforce Tenant ID
-    if tenant_id is None:
-        return json.dumps(
-            {
-                "error": "Tenant ID is required for get_sample_data.",
-                "error_category": "invalid_request",
-            }
-        )
-
-    # 1.5 Validate Limit
-    if not isinstance(limit, int) or limit <= 0 or limit > 100:
-        return json.dumps(
-            {
-                "error": "Invalid limit. Must be between 1 and 100.",
-                "error_category": "invalid_request",
-            }
-        )
+    # 1. Validate inputs
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+    if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=100):
+        return err
 
     start_time = time.monotonic()
 

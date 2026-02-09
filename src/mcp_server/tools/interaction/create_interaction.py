@@ -30,6 +30,11 @@ async def handler(
     Returns:
         interaction_id (UUID string)
     """
+    from mcp_server.utils.validation import require_tenant_id
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
     store = get_interaction_store()
     return await store.create_interaction(
         conversation_id=conversation_id,

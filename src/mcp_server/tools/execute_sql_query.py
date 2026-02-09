@@ -131,19 +131,27 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
         if expression is None:
             return "Failed to parse SQL query."
 
-        # Ensure it's a SELECT statement (including WITH clauses and UNIONS)
-        # Using .key check as it's more stable across sqlglot versions than class checks
-        # sqlglot.exp.Query covers Select, Union, Intersect, Except
-        if expression.key not in ("select", "union", "intersect", "except", "with"):
-            return f"Forbidden statement type: {expression.key.upper()}. Only SELECT is allowed."
+        # Use centralized policy
+        from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES, BLOCKED_FUNCTIONS
 
-        # Block dangerous functions (e.g., pg_sleep)
+        if expression.key not in ALLOWED_STATEMENT_TYPES:
+            allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
+            return (
+                f"Forbidden statement type: {expression.key.upper()}. "
+                f"Only {allowed_list} are allowed."
+            )
+
+        # Block dangerous functions
         import sqlglot.expressions as exp
 
-        blocked_functions = {"pg_sleep", "sleep", "usleep", "sys_sleep"}
         for node in expression.find_all(exp.Anonymous):
-            if str(node.this).lower() in blocked_functions:
+            if str(node.this).lower() in BLOCKED_FUNCTIONS:
                 return f"Forbidden function: {str(node.this).upper()} is not allowed."
+
+        for node in expression.find_all(exp.Func):
+            func_name = node.sql_name().lower()
+            if func_name in BLOCKED_FUNCTIONS:
+                return f"Forbidden function: {func_name.upper()} is not allowed."
 
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"
@@ -190,13 +198,11 @@ async def handler(
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
 
+    from mcp_server.utils.validation import require_tenant_id
+
     # 0. Enforce Tenant ID
-    if tenant_id is None:
-        return _construct_error_response(
-            message="Tenant ID is required for execute_sql_query.",
-            category="invalid_request",
-            provider=provider,
-        )
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     # 1. SQL Length Check
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
@@ -222,15 +228,6 @@ async def handler(
         return _construct_error_response(
             param_error,
             category="invalid_request",
-            provider=provider,
-        )
-
-    # 2. Authorization Check (Tenant Context)
-    if tenant_id is None:
-        return _construct_error_response(
-            "Unauthorized. No Tenant ID context found. "
-            "Set X-Tenant-ID header or DEFAULT_TENANT_ID env var.",
-            category="unsupported_capability",
             provider=provider,
         )
 

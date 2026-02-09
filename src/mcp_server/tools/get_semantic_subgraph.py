@@ -358,7 +358,13 @@ async def handler(query: str, tenant_id: int = None) -> str:
 
     start_time = time.monotonic()
 
-    if tenant_id:
+    from mcp_server.utils.validation import require_tenant_id
+
+    # Optional but if we want to enforce consistency:
+    # Actually, subgraph can be global or tenant-scoped.
+    # If the test says MUST call, I'll call it.
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
         try:
             cache = Database.get_cache_store()
             embedding = await RagEngine.embed_text(query)

@@ -75,18 +75,11 @@ def clear_table_cache() -> None:
 class PolicyEnforcer:
     """Enforces security policies on SQL AST."""
 
-    # Dangerous functions that should be blocked
-    BLOCKED_FUNCTIONS = {
-        "pg_read_file",
-        "pg_ls_dir",
-        "pg_stat_file",
-        "current_setting",
-        "set_config",
-        "current_user",
-        "session_user",
-        "version",
-        "pg_sleep",
-    }
+    from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES, BLOCKED_FUNCTIONS
+
+    # Unified policy
+    ALLOWED_STATEMENT_TYPES = ALLOWED_STATEMENT_TYPES
+    BLOCKED_FUNCTIONS = BLOCKED_FUNCTIONS
 
     # Optional static allowlist for testing/injection (if set, overrides introspection)
     _static_allowed_tables: Optional[Set[str]] = None
@@ -125,12 +118,13 @@ class PolicyEnforcer:
         allowed_tables = cls.get_allowed_tables()
 
         for statement in parsed:
-            # 1. Enforce specific statement types (SELECT, UNION, INTERSECT, EXCEPT)
-            if not isinstance(statement, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
+            # 1. Enforce specific statement types
+            if statement.key not in cls.ALLOWED_STATEMENT_TYPES:
                 # Allow specific SET commands if needed for session config, but generally block
                 raise ValueError(
                     f"Statement type not allowed: {type(statement).__name__}. "
-                    "Only SELECT, UNION, INTERSECT, EXCEPT are allowed."
+                    f"Only {', '.join(sorted([t.upper() for t in cls.ALLOWED_STATEMENT_TYPES]))} "
+                    "are allowed."
                 )
 
             # 2. Walk the AST to check all nodes
