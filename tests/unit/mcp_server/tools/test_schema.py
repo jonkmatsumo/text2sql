@@ -1,7 +1,7 @@
 """Tests for schema tools (get_sample_data)."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -18,17 +18,21 @@ class TestGetSampleData:
         assert get_sample_data_tool_name == "get_sample_data"
 
     @pytest.mark.asyncio
-    @patch("mcp_server.tools.get_sample_data.get_schema_introspector")
-    async def test_get_sample_data(self, mock_get_introspector):
+    async def test_get_sample_data(self):
         """Test get_sample_data tool."""
-        mock_introspector = MagicMock()
-        mock_introspector.get_sample_rows = AsyncMock(return_value=[{"a": 1}])
-        mock_get_introspector.return_value = mock_introspector
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"a": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
 
-        result_json = await get_sample_data("t1", limit=5)
-        response = json.loads(result_json)
-        result = response["result"]
+        with (
+            patch("dal.database.Database.get_connection", return_value=mock_conn),
+            patch("dal.database.Database.get_query_target_provider", return_value="duckdb"),
+        ):
+            result_json = await get_sample_data("t1", limit=5, tenant_id=1)
+            response = json.loads(result_json)
+            result = response["result"]
 
-        assert len(result) == 1
-        assert result[0] == {"a": 1}
-        mock_introspector.get_sample_rows.assert_called_with("t1", 5)
+            assert len(result) == 1
+            assert result[0] == {"a": 1}
+            mock_conn.fetch.assert_called()

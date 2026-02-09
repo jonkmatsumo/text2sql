@@ -51,3 +51,14 @@ class TestLookupCache:
 
             mock_svc.assert_called_once_with("unknown query", 1)
             assert result == "MISSING"
+
+    @pytest.mark.asyncio
+    async def test_lookup_cache_requires_tenant_id(self):
+        """Verify that lookup_cache requires tenant_id."""
+        import json
+
+        response_json = await handler("query", tenant_id=None)
+        response = json.loads(response_json)
+        assert "error" in response
+        assert "Tenant ID is required" in response["error"]
+        assert response["error_category"] == "invalid_request"

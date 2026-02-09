@@ -10,6 +10,7 @@ from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorMetadata
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
+from common.sql.dialect import normalize_sqlglot_dialect
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
     negotiate_capability_request,
@@ -116,17 +117,7 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     import sqlglot
 
     # Map Text2SQL provider names to sqlglot dialects
-    dialect_map = {
-        "postgres": "postgres",
-        "postgresql": "postgres",
-        "redshift": "redshift",
-        "sqlite": "sqlite",
-        "duckdb": "duckdb",
-        "mysql": "mysql",
-        "bigquery": "bigquery",
-        "snowflake": "snowflake",
-    }
-    dialect = dialect_map.get(provider.lower(), "postgres")
+    dialect = normalize_sqlglot_dialect(provider)
 
     try:
         expressions = sqlglot.parse(sql, read=dialect)
@@ -145,6 +136,14 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
         # sqlglot.exp.Query covers Select, Union, Intersect, Except
         if expression.key not in ("select", "union", "intersect", "except", "with"):
             return f"Forbidden statement type: {expression.key.upper()}. Only SELECT is allowed."
+
+        # Block dangerous functions (e.g., pg_sleep)
+        import sqlglot.expressions as exp
+
+        blocked_functions = {"pg_sleep", "sleep", "usleep", "sys_sleep"}
+        for node in expression.find_all(exp.Anonymous):
+            if str(node.this).lower() in blocked_functions:
+                return f"Forbidden function: {str(node.this).upper()} is not allowed."
 
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"
@@ -181,7 +180,7 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
 
 async def handler(
     sql_query: str,
-    tenant_id: Optional[int] = None,
+    tenant_id: int,
     params: Optional[list] = None,
     include_columns: bool = False,
     timeout_seconds: Optional[float] = None,
@@ -191,7 +190,24 @@ async def handler(
     """Execute a valid SQL SELECT statement and return the result as JSON."""
     provider = Database.get_query_target_provider()
 
-    # 1. Server-Side AST Validation
+    # 0. Enforce Tenant ID
+    if tenant_id is None:
+        return _construct_error_response(
+            message="Tenant ID is required for execute_sql_query.",
+            category="invalid_request",
+            provider=provider,
+        )
+
+    # 1. SQL Length Check
+    max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
+    if len(sql_query) > max_sql_len:
+        return _construct_error_response(
+            message=f"SQL query exceeds maximum length of {max_sql_len} bytes.",
+            category="invalid_request",
+            provider=provider,
+        )
+
+    # 2. Server-Side AST Validation
     validation_error = _validate_sql_ast(sql_query, provider)
     if validation_error:
         return _construct_error_response(

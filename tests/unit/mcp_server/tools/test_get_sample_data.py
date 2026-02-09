@@ -1,58 +1,74 @@
-"""Tests for get_sample_data tool."""
+"""Unit tests for get_sample_data tool."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_server.tools.get_sample_data import TOOL_NAME, handler
+from mcp_server.tools.get_sample_data import handler
 
 
-class TestGetSampleData:
-    """Tests for get_sample_data tool."""
+@pytest.fixture
+def mock_db_connection():
+    """Mock database connection."""
+    mock_conn = AsyncMock()
+    # Mock fetching rows
+    mock_conn.fetch.return_value = [{"id": 1, "name": "foo"}, {"id": 2, "name": "bar"}]
+    # Async context manager support
+    mock_conn.__aenter__.return_value = mock_conn
+    mock_conn.__aexit__.return_value = None
+    return mock_conn
 
-    def test_tool_name_no_suffix(self):
-        """Verify TOOL_NAME does not end with '_tool'."""
-        assert not TOOL_NAME.endswith("_tool")
-        assert TOOL_NAME == "get_sample_data"
 
-    @pytest.mark.asyncio
-    @patch("mcp_server.tools.get_sample_data.get_schema_introspector")
-    async def test_get_sample_data_returns_rows(self, mock_get_introspector):
-        """Test get_sample_data returns sample rows."""
-        mock_introspector = MagicMock()
-        mock_introspector.get_sample_rows = AsyncMock(return_value=[{"id": 1, "name": "test"}])
-        mock_get_introspector.return_value = mock_introspector
+@pytest.mark.asyncio
+async def test_get_sample_data_missing_tenant_id():
+    """Verify that calling get_sample_data without tenant_id returns a typed error."""
+    result_str = await handler("users", tenant_id=None)
+    result = json.loads(result_str)
 
-        result = await handler("users", limit=5)
+    assert "error" in result
+    assert result["error"] == "Tenant ID is required for get_sample_data."
+    assert result["error_category"] == "invalid_request"
 
-        mock_introspector.get_sample_rows.assert_called_once_with("users", 5)
-        data = json.loads(result)["result"]
-        assert len(data) == 1
-        assert data[0]["id"] == 1
 
-    @pytest.mark.asyncio
-    @patch("mcp_server.tools.get_sample_data.get_schema_introspector")
-    async def test_get_sample_data_default_limit(self, mock_get_introspector):
-        """Test default limit value."""
-        mock_introspector = MagicMock()
-        mock_introspector.get_sample_rows = AsyncMock(return_value=[])
-        mock_get_introspector.return_value = mock_introspector
+@pytest.mark.asyncio
+async def test_get_sample_data_with_tenant_id(mock_db_connection):
+    """Verify that providing tenant_id uses the tenant-scoped connection."""
+    with patch(
+        "dal.database.Database.get_connection", return_value=mock_db_connection
+    ) as mock_get_conn:
+        # Also mock get_query_target_provider to avoid DB call
+        with patch("dal.database.Database.get_query_target_provider", return_value="postgres"):
+            result_str = await handler("users", tenant_id=123)
 
-        await handler("users")
+            # Check result structure
+            result = json.loads(result_str)
+            assert "result" in result
+            assert len(result["result"]) == 2
 
-        # Default limit=3
-        mock_introspector.get_sample_rows.assert_called_once_with("users", 3)
+            # Verify correct connection call
+            mock_get_conn.assert_called_once_with(tenant_id=123)
 
-    @pytest.mark.asyncio
-    @patch("mcp_server.tools.get_sample_data.get_schema_introspector")
-    async def test_get_sample_data_empty_table(self, mock_get_introspector):
-        """Test get_sample_data with empty table."""
-        mock_introspector = MagicMock()
-        mock_introspector.get_sample_rows = AsyncMock(return_value=[])
-        mock_get_introspector.return_value = mock_introspector
+            # Verify query execution
+            mock_db_connection.fetch.assert_called_once()
+            args = mock_db_connection.fetch.call_args
+            query = args[0][0]
+            assert 'SELECT * FROM "users"' in query
 
-        result = await handler("empty_table")
 
-        data = json.loads(result)["result"]
-        assert data == []
+@pytest.mark.asyncio
+async def test_get_sample_data_invalid_limit():
+    """Verify that get_sample_data rejects invalid limits."""
+    # Test limit <= 0
+    result_str = await handler("users", limit=0, tenant_id=1)
+    result = json.loads(result_str)
+    assert "error" in result
+    assert "Invalid limit" in result["error"]
+    assert result["error_category"] == "invalid_request"
+
+    # Test limit > 100
+    result_str = await handler("users", limit=101, tenant_id=1)
+    result = json.loads(result_str)
+    assert "error" in result
+    assert "100" in result["error"]
+    assert result["error_category"] == "invalid_request"

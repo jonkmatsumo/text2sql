@@ -8,7 +8,7 @@ TOOL_NAME = "recommend_examples"
 
 async def handler(
     query: str,
-    tenant_id: int = 1,
+    tenant_id: int,
     limit: int = RECO_CONFIG.limit_default,
     enable_fallback: Optional[bool] = None,
 ) -> str:
@@ -16,7 +16,7 @@ async def handler(
 
     Args:
         query: The user's natural language question.
-        tenant_id: Tenant identifier.
+        tenant_id: Tenant identifier (REQUIRED).
         limit: Maximum number of examples to recommend.
         enable_fallback: Whether to search for interactions if few-shots are insufficient.
             If None, uses service default (True).
@@ -24,6 +24,15 @@ async def handler(
     Returns:
         JSON compatible dictionary with recommended examples and fallback status.
     """
+    import json
+
+    if tenant_id is None:
+        return json.dumps(
+            {
+                "error": "Tenant ID is required for recommend_examples.",
+                "error_category": "invalid_request",
+            }
+        )
     import time
 
     start_time = time.monotonic()

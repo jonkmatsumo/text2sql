@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -55,10 +55,7 @@ class Settings(BaseSettings):
             )
         return self
 
-    class Config:
-        """Pydantic config."""
-
-        case_sensitive = True
+    model_config = ConfigDict(case_sensitive=True)
 
 
 settings = Settings()

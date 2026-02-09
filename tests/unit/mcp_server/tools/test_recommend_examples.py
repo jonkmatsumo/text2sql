@@ -115,3 +115,15 @@ async def test_recommend_examples_handler_includes_safety_info():
 
         assert "explanation" in response
         assert response["explanation"]["filtering"]["safety_removed"] == 2
+
+
+@pytest.mark.asyncio
+async def test_recommend_examples_requires_tenant_id():
+    """Verify that recommend_examples requires tenant_id."""
+    import json
+
+    response_json = await handler(query="test", tenant_id=None)
+    response = json.loads(response_json)
+    assert "error" in response
+    assert "Tenant ID is required" in response["error"]
+    assert response["error_category"] == "invalid_request"

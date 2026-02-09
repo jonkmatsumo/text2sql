@@ -25,7 +25,7 @@ class DuckDBQueryTargetDatabase:
     @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
-        """Yield a DuckDB connection wrapper (tenant context is a no-op)."""
+        """Yield a DuckDB connection wrapper."""
         _ = tenant_id
         _ = read_only
         if cls._config is None:
@@ -35,7 +35,10 @@ class DuckDBQueryTargetDatabase:
 
         import duckdb
 
-        conn = duckdb.connect(cls._config.path, read_only=cls._config.read_only)
+        # Connect at context enter time so tests can patch duckdb.connect
+        conn = await asyncio.to_thread(
+            duckdb.connect, cls._config.path, read_only=cls._config.read_only
+        )
         sync_max_rows = get_sync_max_rows()
         wrapper = _DuckDBConnection(
             conn,

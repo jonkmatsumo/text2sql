@@ -1,5 +1,3 @@
-"""Unit test environment helpers."""
-
 import os
 
 import pytest

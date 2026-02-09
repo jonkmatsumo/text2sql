@@ -33,7 +33,7 @@ async def test_execute_sql_query_requires_tenant_id():
     data = json.loads(result)
     assert "error" in data
     # Error category is nested
-    assert data["error"]["category"] == "unsupported_capability"
+    assert data["error"]["category"] == "invalid_request"
 
 
 @pytest.mark.asyncio
