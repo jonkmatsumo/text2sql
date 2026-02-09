@@ -10,9 +10,15 @@ pytest.importorskip("duckdb")
 
 
 @pytest.fixture
-async def duckdb_with_schema():
-    """Create an in-memory DuckDB with test schema."""
-    config = DuckDBConfig(path=":memory:", query_timeout_seconds=30, max_rows=1000)
+async def duckdb_with_schema(tmp_path):
+    """Create a file-based DuckDB with test schema."""
+    from dal.database import Database
+
+    db_path = tmp_path / "test.duckdb"
+    Database._query_target_provider = "duckdb"
+    config = DuckDBConfig(
+        path=str(db_path), query_timeout_seconds=30, max_rows=1000, read_only=False
+    )
     await DuckDBQueryTargetDatabase.init(config)
 
     # Create test tables
@@ -103,10 +109,15 @@ async def test_duckdb_get_sample_rows_with_limit(duckdb_with_schema):
     assert len(rows) == 1
 
 
-@pytest.mark.asyncio
-async def test_duckdb_introspector_with_empty_table():
+async def test_duckdb_introspector_with_empty_table(tmp_path):
     """Verify introspection works on tables with no rows."""
-    config = DuckDBConfig(path=":memory:", query_timeout_seconds=30, max_rows=1000)
+    from dal.database import Database
+
+    db_path = tmp_path / "empty.duckdb"
+    Database._query_target_provider = "duckdb"
+    config = DuckDBConfig(
+        path=str(db_path), query_timeout_seconds=30, max_rows=1000, read_only=False
+    )
     await DuckDBQueryTargetDatabase.init(config)
 
     async with DuckDBQueryTargetDatabase.get_connection() as conn:

@@ -62,7 +62,7 @@ async def test_duckdb_query_target_conformance(tmp_path):
 
     db_path = tmp_path / "duckdb-conformance.duckdb"
     await DuckDBQueryTargetDatabase.init(
-        DuckDBConfig(path=str(db_path), query_timeout_seconds=5, max_rows=2)
+        DuckDBConfig(path=str(db_path), query_timeout_seconds=5, max_rows=2, read_only=False)
     )
 
     async with DuckDBQueryTargetDatabase.get_connection() as conn:
@@ -93,7 +93,7 @@ async def test_duckdb_query_target_sync_max_rows(tmp_path, monkeypatch):
 
     db_path = tmp_path / "duckdb-guardrail.duckdb"
     await DuckDBQueryTargetDatabase.init(
-        DuckDBConfig(path=str(db_path), query_timeout_seconds=5, max_rows=3)
+        DuckDBConfig(path=str(db_path), query_timeout_seconds=5, max_rows=3, read_only=False)
     )
 
     async with DuckDBQueryTargetDatabase.get_connection() as conn:
