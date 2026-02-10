@@ -168,7 +168,7 @@ def route_after_validation(state: AgentState) -> str:
 
 
 def _retry_policy_mode() -> str:
-    mode = (get_env_str("AGENT_RETRY_POLICY", "static") or "static").strip().lower()
+    mode = (get_env_str("AGENT_RETRY_POLICY", "adaptive") or "adaptive").strip().lower()
     if mode == "adaptive":
         return "adaptive"
     return "static"
@@ -185,7 +185,14 @@ def _max_retry_attempts() -> int:
     return max(1, int(configured))
 
 
-def _adaptive_is_retryable(error_category: str | None) -> bool:
+def _adaptive_is_retryable(
+    error_category: str | None, error_metadata: Optional[dict[str, Any]] = None
+) -> bool:
+    if isinstance(error_metadata, dict):
+        classified_retryable = error_metadata.get("is_retryable")
+        if isinstance(classified_retryable, bool):
+            return classified_retryable
+
     non_retryable = {
         "unsupported_capability",
         "auth",
@@ -276,7 +283,7 @@ def route_after_execution(state: AgentState) -> str:
     }
 
     if retry_policy == "adaptive":
-        is_retryable = _adaptive_is_retryable(error_category)
+        is_retryable = _adaptive_is_retryable(error_category, state.get("error_metadata"))
         retry_summary["is_retryable"] = is_retryable
         retry_decision["is_retryable"] = is_retryable
         if span:
