@@ -89,3 +89,22 @@ async def test_save_state_cross_tenant_rejected(dal, mock_db):
             state_json={"conversation_id": "123", "turns": []},
             version=1,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["load", "save"])
+async def test_conversation_scope_violation_message_consistent(dal, mock_db, operation):
+    """Read/write tenant mismatches should use a consistent deterministic error message."""
+    mock_db.fetchval.return_value = 7
+
+    with pytest.raises(ValueError, match="Tenant mismatch for conversation scope."):
+        if operation == "load":
+            await dal.load_state_async("123", "user-1", 1)
+        else:
+            await dal.save_state_async(
+                conversation_id="123",
+                user_id="user-1",
+                tenant_id=1,
+                state_json={"conversation_id": "123"},
+                version=1,
+            )
