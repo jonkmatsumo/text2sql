@@ -3,6 +3,43 @@
 from agent.graph import route_after_execution
 
 
+def test_default_policy_is_adaptive_and_stops_non_retryable_classification(monkeypatch):
+    """Default retry policy should use adaptive mode and honor classification retryability."""
+    monkeypatch.delenv("AGENT_RETRY_POLICY", raising=False)
+
+    state = {
+        "error": "non-retryable error",
+        "error_category": "unknown",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 0,
+    }
+
+    result = route_after_execution(state)
+
+    assert result == "failed"
+    assert state["retry_summary"]["policy"] == "adaptive"
+    assert state["retry_summary"]["is_retryable"] is False
+    assert state["retry_summary"]["stopped_non_retryable"] is True
+
+
+def test_default_policy_retries_retryable_classification(monkeypatch):
+    """Explicit retryable classification should permit retries under adaptive default."""
+    monkeypatch.delenv("AGENT_RETRY_POLICY", raising=False)
+
+    state = {
+        "error": "transient",
+        "error_category": "invalid_request",
+        "error_metadata": {"is_retryable": True},
+        "retry_count": 0,
+    }
+
+    result = route_after_execution(state)
+
+    assert result == "correct"
+    assert state["retry_summary"]["policy"] == "adaptive"
+    assert state["retry_summary"]["is_retryable"] is True
+
+
 def test_adaptive_policy_stops_non_retryable_categories(monkeypatch):
     """Adaptive retry should fail fast on non-retryable error categories."""
     monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")

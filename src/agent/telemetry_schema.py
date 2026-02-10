@@ -178,41 +178,90 @@ class SpanContract:
         return missing
 
 
-# Predefined contracts for agent nodes
+# Mapping from workflow node names to telemetry span names.
+# Some nodes use legacy span names for backward compatibility.
+AGENT_GRAPH_NODE_SPAN_NAMES: dict[str, str] = {
+    "cache_lookup": "cache_lookup",
+    "router": "router",
+    "clarify": "clarify",
+    "retrieve": "retrieve_context",
+    "plan": "plan_sql",
+    "generate": "generate_sql",
+    "validate": "validate_sql",
+    "execute": "execute_sql",
+    "refresh_schema": "schema_refresh",
+    "correct": "correct_sql",
+    "visualize": "visualize_query",
+    "synthesize": "synthesize_insight",
+}
+
+
+# Predefined contracts for agent node spans
 SPAN_CONTRACTS: dict[str, SpanContract] = {
+    "clarify": SpanContract(
+        name="clarify",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"interrupt_unavailable"}),
+    ),
+    "router": SpanContract(
+        name="router",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"resolution_status"}),
+    ),
+    "plan_sql": SpanContract(
+        name="plan_sql",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"parse_error", "missing_ingredients"}),
+    ),
     "execute_sql": SpanContract(
         name="execute_sql",
-        required=frozenset({"result.is_truncated", "result.rows_returned"}),
+        required=frozenset({"event.name", "result.is_truncated", "result.rows_returned"}),
         optional=frozenset({"result.row_limit", "result.partial_reason", "termination_reason"}),
         required_on_error=frozenset({"error.category"}),
     ),
     "validate_sql": SpanContract(
         name="validate_sql",
-        required=frozenset({"validation.is_valid"}),
+        required=frozenset({"event.name", "validation.is_valid"}),
         optional=frozenset({"validation.violation_count", "validation.schema_bound_enabled"}),
     ),
     "cache_lookup": SpanContract(
         name="cache_lookup",
-        required=frozenset({"cache.hit"}),
+        required=frozenset({"event.name", "cache.hit"}),
         optional=frozenset({"cache.snapshot_mismatch", "cache.cache_id"}),
         required_on_error=frozenset({"error.category"}),
     ),
     "generate_sql": SpanContract(
         name="generate_sql",
-        required=frozenset({"from_cache"}),
-        optional=frozenset({"generation.model", "generation.latency_seconds"}),
+        required=frozenset({"event.name"}),
+        optional=frozenset({"cache_hit", "latency.generate_seconds"}),
         required_on_error=frozenset({"error.category"}),
+    ),
+    "correct_sql": SpanContract(
+        name="correct_sql",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"retry.attempt", "retry.reason_category"}),
+        required_on_error=frozenset({"error.category"}),
+    ),
+    "schema_refresh": SpanContract(
+        name="schema_refresh",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"schema.drift.auto_refresh_attempted", "schema.drift.refresh_count"}),
+    ),
+    "visualize_query": SpanContract(
+        name="visualize_query",
+        required=frozenset({"event.name"}),
+        optional=frozenset({"viz_generated", "viz_type", "result_row_count"}),
     ),
     "synthesize_insight": SpanContract(
         name="synthesize_insight",
-        required=frozenset({"result.is_truncated", "result.rows_returned"}),
+        required=frozenset({"event.name", "result.is_truncated", "result.rows_returned"}),
         optional=frozenset({"result.is_limited", "termination_reason"}),
         required_on_error=frozenset({"error.category"}),
     ),
     "retrieve_context": SpanContract(
         name="retrieve_context",
-        required=frozenset({"event.type"}),
-        optional=frozenset({"retrieval.node_count", "retrieval.table_count"}),
+        required=frozenset({"event.name"}),
+        optional=frozenset({"grounding.canonicalization_applied", "grounding.schema_hints_count"}),
         required_on_error=frozenset({"error.category"}),
     ),
 }

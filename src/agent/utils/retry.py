@@ -40,7 +40,7 @@ def _classify_retryable_error(exception: Exception) -> Optional[ErrorClassificat
 
 
 def _retry_policy_mode() -> str:
-    mode = (get_env_str("AGENT_RETRY_POLICY", "static") or "static").strip().lower()
+    mode = (get_env_str("AGENT_RETRY_POLICY", "adaptive") or "adaptive").strip().lower()
     if mode == "adaptive":
         return "adaptive"
     return "static"
