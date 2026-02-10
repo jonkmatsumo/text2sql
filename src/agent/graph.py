@@ -24,6 +24,7 @@ from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
 from agent.state import AgentState
+from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
@@ -1097,7 +1098,62 @@ async def run_agent_with_tracing(
 
         # Metadata is already handled early and made sticky via telemetry_context
 
-        # 3. Final Flush (Control-plane safety)
+        # 3. Deterministic decision + retry summaries for debuggability
+        decision_summary = build_decision_summary(result)
+        retry_correction_summary = build_retry_correction_summary(result)
+        result["decision_summary"] = decision_summary
+        result["retry_correction_summary"] = retry_correction_summary
+
+        retry_summary = result.get("retry_summary")
+        if not isinstance(retry_summary, dict):
+            retry_summary = {}
+        retry_summary["correction_attempt_count"] = retry_correction_summary.get(
+            "correction_attempt_count", 0
+        )
+        retry_summary["validation_failure_count"] = retry_correction_summary.get(
+            "validation_failure_count", 0
+        )
+        retry_summary["final_stopping_reason"] = retry_correction_summary.get(
+            "final_stopping_reason"
+        )
+        result["retry_summary"] = retry_summary
+
+        summary_attrs = {
+            "decision.selected_tables_count": len(decision_summary.get("selected_tables", [])),
+            "decision.rejected_tables_count": len(decision_summary.get("rejected_tables", [])),
+            "decision.retry_count": int(decision_summary.get("retry_count", 0) or 0),
+            "decision.schema_refresh_events": int(
+                decision_summary.get("schema_refresh_events", 0) or 0
+            ),
+            "retry.correction_attempt_count": int(
+                retry_correction_summary.get("correction_attempt_count", 0) or 0
+            ),
+            "retry.validation_failure_count": int(
+                retry_correction_summary.get("validation_failure_count", 0) or 0
+            ),
+            "retry.final_stopping_reason": str(
+                retry_correction_summary.get("final_stopping_reason") or "unknown"
+            ),
+        }
+        telemetry.update_current_trace(summary_attrs)
+        active_span = telemetry.get_current_span()
+        if active_span:
+            active_span.set_attributes(summary_attrs)
+            active_span.add_event(
+                "agent.decision_summary",
+                {
+                    "summary_json": json.dumps(
+                        {
+                            "decision_summary": decision_summary,
+                            "retry_correction_summary": retry_correction_summary,
+                        },
+                        sort_keys=True,
+                        default=str,
+                    )[:2048]
+                },
+            )
+
+        # 4. Final Flush (Control-plane safety)
         # Ensure traces are sent before returning to avoid loss on rapid process exit
         telemetry.flush(timeout_ms=500)
 

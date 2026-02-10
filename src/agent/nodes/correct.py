@@ -14,11 +14,22 @@ from agent.taxonomy.error_taxonomy import classify_error, generate_correction_st
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.utils.budgeting import update_latency_ema
-from common.config.env import get_env_bool, get_env_float, get_env_str
+from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+
+def _append_bounded_correction_event(state: AgentState, event: dict) -> list[dict]:
+    max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
+    max_events = max(1, int(max_events))
+    events = state.get("correction_attempts") or []
+    if not isinstance(events, list):
+        events = []
+    events = [entry for entry in events if isinstance(entry, dict)]
+    events.append(event)
+    return events[:max_events]
 
 
 def correct_sql_node(state: AgentState) -> dict:
@@ -85,14 +96,23 @@ def correct_sql_node(state: AgentState) -> dict:
         else:
             error_category, category_info = classify_error(error or "")
 
+        correction_event = {
+            "attempt": int(retry),
+            "error_category": str(error_category),
+            "has_retry_after": bool(retry_after_seconds),
+        }
+        correction_attempts = _append_bounded_correction_event(state, correction_event)
+
         # Terminal Error Gating (Phase C)
         if error_category in ("TABLE_INACCESSIBLE", "auth"):
             span.set_attribute("retry.terminated_early", True)
             span.set_attribute("retry.terminal_category", error_category)
+            correction_event["outcome"] = "terminal_stop"
             return {
                 "error": f"Terminal error: {error_category}. No correction possible.",
                 "error_category": error_category,
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
             }
 
         span.set_attribute("error_category", error_category)
@@ -186,10 +206,12 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         budget = TokenBudget.from_dict(state.get("token_budget"))
         if budget and budget.is_exhausted():
             span.set_attribute("budget.exhausted", True)
+            correction_event["outcome"] = "budget_exhausted"
             return {
                 "error": "Token budget exhausted during correction loop.",
                 "error_category": "budget_exhausted",
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
             }
 
         # Detect repeated error signatures to stop infinite fails
@@ -205,10 +227,12 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         if current_sig in signatures:
             span.set_attribute("retry.stopped_due_to_repeat", True)
             span.set_attribute("retry.repeated_signature", current_sig)
+            correction_event["outcome"] = "repeated_error"
             return {
                 "error": f"Stopping correction loop: Repeated error detected ({error_category})",
                 "error_category": "repeated_error",
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
             }
 
         updated_signatures = signatures + [current_sig]
@@ -293,6 +317,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "Correction failed: Structural drift detected "
                             f"(score {similarity:.2f})"
                         )
+                        correction_event["outcome"] = "rejected_drift"
+                        correction_event["similarity_score"] = round(float(similarity), 4)
                         return {
                             "current_sql": current_sql,
                             "retry_count": retry,
@@ -302,6 +328,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "latency_correct_seconds": latency_seconds,
                             "ema_llm_latency_seconds": None,  # Don't update EMA on fail
                             "retry_after_seconds": None,
+                            "correction_attempts": correction_attempts,
                         }
                 else:
                     span.set_attribute("correction.similarity.rejected", False)
@@ -331,6 +358,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": error_category,
             }
         )
+        correction_event["outcome"] = "corrected"
 
         return {
             "current_sql": corrected_sql,
@@ -343,4 +371,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "retry_after_seconds": None,
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
             "error_signatures": updated_signatures,
+            "correction_attempts": correction_attempts,
         }

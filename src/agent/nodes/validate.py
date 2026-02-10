@@ -9,7 +9,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
-from common.config.env import get_env_bool, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
 
 
 def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
@@ -194,6 +194,47 @@ def _resolve_column_allowlist(state: AgentState) -> Dict[str, Set[str]]:
     return allowlist
 
 
+def _append_bounded_event(state: AgentState, key: str, event: dict) -> list[dict]:
+    max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
+    max_events = max(1, int(max_events))
+    events = state.get(key) or []
+    if not isinstance(events, list):
+        events = []
+    events = [entry for entry in events if isinstance(entry, dict)]
+    events.append(event)
+    return events[:max_events]
+
+
+def _extract_rejected_tables(violations: list[dict]) -> list[dict]:
+    rejected_tables: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for violation in violations:
+        if not isinstance(violation, dict):
+            continue
+        details = violation.get("details")
+        if not isinstance(details, dict):
+            continue
+        reason = str(details.get("reason") or "unknown").strip().lower()
+        table = details.get("table")
+        if isinstance(table, str) and table.strip():
+            normalized = table.strip().lower()
+            key = (normalized, reason)
+            if key not in seen:
+                seen.add(key)
+                rejected_tables.append({"table": normalized, "reason": reason})
+        table_list = details.get("tables")
+        if isinstance(table_list, list):
+            for raw_table in table_list:
+                if not isinstance(raw_table, str) or not raw_table.strip():
+                    continue
+                normalized = raw_table.strip().lower()
+                key = (normalized, reason)
+                if key not in seen:
+                    seen.add(key)
+                    rejected_tables.append({"table": normalized, "reason": reason})
+    return rejected_tables
+
+
 async def validate_sql_node(state: AgentState) -> dict:
     """
     Node: ValidateSQL.
@@ -329,12 +370,29 @@ async def validate_sql_node(state: AgentState) -> dict:
                 violation_messages.append(f"[{v.violation_type.value}] {v.message}")
 
             structured_error = "\n".join(violation_messages)
+            violation_dicts = [v.to_dict() for v in result.violations]
+            validation_event = {
+                "retry_count": int(state.get("retry_count", 0) or 0),
+                "violation_types": sorted(
+                    {
+                        violation.get("violation_type")
+                        for violation in violation_dicts
+                        if isinstance(violation, dict) and violation.get("violation_type")
+                    }
+                ),
+                "rejected_tables": _extract_rejected_tables(violation_dicts),
+            }
+            validation_failures = _append_bounded_event(
+                state,
+                "validation_failures",
+                validation_event,
+            )
 
             span.set_outputs(
                 {
                     "is_valid": False,
                     "error": structured_error,
-                    "violations": [v.to_dict() for v in result.violations],
+                    "violations": violation_dicts,
                     "warnings": result.warnings,
                 }
             )
@@ -342,6 +400,7 @@ async def validate_sql_node(state: AgentState) -> dict:
             return {
                 "error": structured_error,
                 "ast_validation_result": result.to_dict(),
+                "validation_failures": validation_failures,
                 # Preserve metadata even on failure for audit
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
                 "column_usage": result.metadata.column_usage if result.metadata else [],

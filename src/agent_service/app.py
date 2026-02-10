@@ -75,6 +75,8 @@ class AgentRunResponse(BaseModel):
     capability_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
     empty_result_guidance: Optional[str] = None
+    decision_summary: Optional[dict] = None
+    retry_correction_summary: Optional[dict] = None
     replay_bundle: Optional[dict[str, Any]] = None
     replay_bundle_json: Optional[str] = None
     replay_metadata: Optional[dict[str, Any]] = None
@@ -226,6 +228,8 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "rows_returned": rows_returned,
             }
 
+        include_decision_debug = get_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False) is True
+
         return AgentRunResponse(
             sql=state.get("current_sql"),
             result=state.get("query_result"),
@@ -254,6 +258,10 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "missing_identifiers": state.get("missing_identifiers"),
             },
             empty_result_guidance=state.get("empty_result_guidance"),
+            decision_summary=state.get("decision_summary") if include_decision_debug else None,
+            retry_correction_summary=(
+                state.get("retry_correction_summary") if include_decision_debug else None
+            ),
             replay_bundle=replay_bundle_payload,
             replay_bundle_json=replay_bundle_json,
             replay_metadata=replay_metadata,

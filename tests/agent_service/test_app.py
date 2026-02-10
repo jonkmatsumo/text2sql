@@ -236,3 +236,47 @@ def test_run_agent_replay_mode_validates_bundle(monkeypatch):
     body = resp.json()
     assert body["error"] is not None
     assert "Invalid replay bundle" in body["error"]
+
+
+def test_run_agent_debug_decision_summary_flag(monkeypatch):
+    """Decision summaries are only returned when debug mode is explicitly enabled."""
+
+    async def fake_run_agent_with_tracing(
+        question,
+        tenant_id,
+        thread_id,
+        timeout_seconds=None,
+        deadline_ts=None,
+        page_token=None,
+        page_size=None,
+        interactive_session=False,
+        **kwargs,
+    ):
+        _ = (
+            question,
+            tenant_id,
+            thread_id,
+            timeout_seconds,
+            deadline_ts,
+            page_token,
+            page_size,
+            interactive_session,
+            kwargs,
+        )
+        return {
+            "messages": [type("Msg", (), {"content": "ok"})()],
+            "error": None,
+            "decision_summary": {"selected_tables": ["orders"]},
+            "retry_correction_summary": {"final_stopping_reason": "success"},
+        }
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+    monkeypatch.setenv("AGENT_DEBUG_DECISION_SUMMARY", "true")
+
+    client = TestClient(agent_app.app)
+    resp = client.post("/agent/run", json={"question": "hi", "tenant_id": 1})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["decision_summary"] == {"selected_tables": ["orders"]}
+    assert body["retry_correction_summary"] == {"final_stopping_reason": "success"}
