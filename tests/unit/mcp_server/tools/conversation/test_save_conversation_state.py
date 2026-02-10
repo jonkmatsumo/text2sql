@@ -1,5 +1,4 @@
-"""Tests for save_conversation_state tool."""
-
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,15 +29,16 @@ class TestSaveConversationState:
             mock_store.save_state_async = save_state_async
             mock_get_store.return_value = mock_store
 
-            result = await handler(
+            response_json = await handler(
                 conversation_id="conv-1",
                 user_id="user-1",
                 state_json={"tables": ["users"]},
                 version=1,
                 ttl_minutes=30,
             )
+            response = json.loads(response_json)
 
-            assert result == "OK"
+            assert response["result"] == "OK"
             assert calls == [("conv-1", "user-1", {"tables": ["users"]}, 1, 30)]
 
     @pytest.mark.asyncio

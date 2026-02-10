@@ -14,6 +14,7 @@ def _minimal_env(monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("SCHEMA_SNAPSHOT_MODE", "fingerprint")
+    monkeypatch.setenv("MCP_USER_ROLE", "ADMIN_ROLE,SQL_ADMIN_ROLE,TABLE_ADMIN_ROLE,SQL_USER_ROLE")
     monkeypatch.delenv("POSTGRES_URL", raising=False)
     yield
 

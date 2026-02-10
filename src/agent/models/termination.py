@@ -11,4 +11,7 @@ class TerminationReason(str, Enum):
     READONLY_VIOLATION = "readonly_violation"
     TIMEOUT = "timeout"
     VALIDATION_FAILED = "validation_failed"
+    TOOL_RESPONSE_MALFORMED = "tool_response_malformed"
+    UNSUPPORTED_CAPABILITY = "unsupported_capability"
+    INVALID_REQUEST = "invalid_request"
     UNKNOWN = "unknown"

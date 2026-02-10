@@ -118,4 +118,5 @@ def test_synthesize_invalid_request_passthrough(mock_telemetry, base_state):
     result = synthesize_insight_node(state)
     content = result["messages"][0].content
 
+    assert "I encountered a validation error" in content
     assert "ARRAY syntax not supported" in content

@@ -289,6 +289,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_partial_reason = envelope.metadata.partial_reason
 
                 result_capability_required = envelope.metadata.capability_required
+                if not result_capability_required and envelope.error:
+                    # Backup from error metadata dict
+                    err_meta = (
+                        envelope.error.to_dict() if hasattr(envelope.error, "to_dict") else {}
+                    )
+                    result_capability_required = err_meta.get(
+                        "required_capability"
+                    ) or err_meta.get("capability_required")
                 result_capability_supported = envelope.metadata.capability_supported
                 result_fallback_policy = envelope.metadata.fallback_policy
                 result_fallback_applied = envelope.metadata.fallback_applied
@@ -380,7 +388,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     elif error_category == "timeout":
                         reason = TerminationReason.TIMEOUT
                     elif error_category == "unsupported_capability":
-                        reason = TerminationReason.VALIDATION_FAILED
+                        reason = TerminationReason.UNSUPPORTED_CAPABILITY
+                    elif error_category == "tool_response_malformed":
+                        reason = TerminationReason.TOOL_RESPONSE_MALFORMED
+                    elif error_category == "invalid_request":
+                        reason = TerminationReason.INVALID_REQUEST
 
                     drift_hint = _maybe_add_schema_drift(error_msg)
                     return {

@@ -109,10 +109,12 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
             raw_data = json.loads(payload)
         except json.JSONDecodeError:
             # Fallback for plain string errors (legacy)
-            return _create_error_envelope(payload)
+            return _create_error_envelope(payload, category="tool_response_malformed")
 
     if not isinstance(raw_data, dict):
-        return _create_error_envelope(f"Invalid payload type: {type(raw_data)}")
+        return _create_error_envelope(
+            f"Invalid payload type: {type(raw_data)}", category="tool_response_malformed"
+        )
 
     # Check if it matches the envelope structure (duck typing)
     if "metadata" in raw_data and "rows" in raw_data:
@@ -136,16 +138,25 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
     # Legacy/Partial formats handling would go here or in the caller
     # For this strict parser, we expect the envelope structure or we try to adapt basic errors
 
-    if "error" in raw_data and isinstance(raw_data["error"], str):
-        # Adapt simple error dict
+    if "error" in raw_data:
+        error_val = raw_data["error"]
+        msg = error_val if isinstance(error_val, str) else error_val.get("message", "Unknown error")
+        category = raw_data.get("error_category")
+        metadata = raw_data.get("error_metadata")
+
+        # If error is a dict, it might contain category/metadata
+        if isinstance(error_val, dict):
+            category = category or error_val.get("category")
+            metadata = metadata or error_val.get("metadata")
+
         return _create_error_envelope(
-            raw_data["error"],
-            category=raw_data.get("error_category"),
-            metadata=raw_data.get("error_metadata"),
+            msg,
+            category=category or "tool_response_malformed",
+            metadata=metadata or raw_data.get("error_metadata") or raw_data.get("metadata"),
         )
 
     # If we really can't parse it, return an error envelope
-    return _create_error_envelope("Malformed response payload")
+    return _create_error_envelope("Malformed response payload", category="tool_response_malformed")
 
 
 class GenericToolMetadata(BaseModel):
@@ -181,13 +192,19 @@ def _create_error_envelope(
     error_meta = ErrorMetadata(
         message=message, category=category or "unknown", provider="unknown", is_retryable=False
     )
+    meta = ExecuteSQLQueryMetadata(rows_returned=0, is_truncated=False)
     if metadata:
-        # Best effort merge of extra metadata
-        pass
+        meta.capability_required = metadata.get("capability_required") or metadata.get(
+            "required_capability"
+        )
+        meta.capability_supported = metadata.get("capability_supported")
+        meta.fallback_policy = metadata.get("fallback_policy")
+        meta.fallback_applied = metadata.get("fallback_applied")
+        meta.fallback_mode = metadata.get("fallback_mode")
 
     return ExecuteSQLQueryResponseEnvelope(
         rows=[],
-        metadata=ExecuteSQLQueryMetadata(rows_returned=0, is_truncated=False),
+        metadata=meta,
         error=error_meta,
         error_message=message,
     )

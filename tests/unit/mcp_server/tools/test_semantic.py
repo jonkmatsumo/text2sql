@@ -111,7 +111,7 @@ class TestGetSemanticSubgraph:
                     "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                     return_value=mock_indexer,
                 ):
-                    result_json = await get_semantic_subgraph("find customers")
+                    result_json = await get_semantic_subgraph(query="find customers", tenant_id=1)
                 result = json.loads(result_json)["result"]
 
                 assert "nodes" in result
@@ -143,7 +143,7 @@ class TestGetSemanticSubgraph:
                     "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                     return_value=mock_indexer,
                 ):
-                    result = await get_semantic_subgraph("query")
+                    result = await get_semantic_subgraph(query="query", tenant_id=1)
                 data = json.loads(result)["result"]
                 assert data["nodes"] == []
                 assert data["relationships"] == []
@@ -166,13 +166,12 @@ class TestGetSemanticSubgraph:
                     "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                     return_value=mock_indexer,
                 ):
-                    result = await get_semantic_subgraph("query")
+                    result = await get_semantic_subgraph(query="query", tenant_id=1)
                 data = json.loads(result)
-                # Unwrap if enveloped
-                if "result" in data:
-                    data = data["result"]
+
                 assert "error" in data
-                assert "Search failed" in data["error"]
+                assert "Search failed" in data["error"]["message"]
+                assert data["error"]["category"] == "invalid_request"
 
     @pytest.mark.asyncio
     async def test_tables_first_strategy(self):
@@ -199,7 +198,7 @@ class TestGetSemanticSubgraph:
                     "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                     return_value=mock_indexer,
                 ):
-                    await get_semantic_subgraph("test query")
+                    await get_semantic_subgraph(query="test query", tenant_id=1)
 
                 # Should search tables first
                 assert call_order[0] == "Table"
@@ -251,7 +250,7 @@ class TestGetSemanticSubgraph:
                         "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                         return_value=mock_indexer,
                     ):
-                        await get_semantic_subgraph("email addresses")
+                        await get_semantic_subgraph(query="email addresses", tenant_id=1)
 
         seed_span = next(span for name, span in spans if name == "seed_selection")
         assert seed_span.attributes["seed_selection.path"] == "column_fallback"
@@ -305,7 +304,7 @@ class TestGetSemanticSubgraph:
                         "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                         return_value=mock_indexer,
                     ):
-                        await get_semantic_subgraph("find users")
+                        await get_semantic_subgraph(query="find users", tenant_id=1)
 
         seed_span = next(span for name, span in spans if name == "seed_selection")
         assert seed_span.attributes["seed_selection.path"] == "table"
@@ -357,6 +356,6 @@ class TestGetSemanticSubgraph:
                     "mcp_server.tools.get_semantic_subgraph.VectorIndexer",
                     return_value=mock_indexer,
                 ):
-                    await get_semantic_subgraph("email addresses")
+                    await get_semantic_subgraph(query="email addresses", tenant_id=1)
 
         assert mock_indexer.search_nodes_with_metadata.call_count == 1

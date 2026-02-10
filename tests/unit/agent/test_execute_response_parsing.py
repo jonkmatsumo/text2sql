@@ -254,8 +254,8 @@ async def test_execute_detects_malformed_string_payload(
     result = await validate_and_execute_node(state)
 
     assert result["query_result"] is None
-    # Random string falls back to unknown category via error envelope
-    assert result["error_category"] == "unknown"
+    # Random string falls back to tool_response_malformed category via error envelope
+    assert result["error_category"] == "tool_response_malformed"
     assert "Trace ID" in result["error"] or "unexpected payload" in result["error"]
 
 

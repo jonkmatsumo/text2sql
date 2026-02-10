@@ -3,6 +3,14 @@
 from typing import Optional
 
 from dal.factory import get_feedback_store
+from mcp_server.utils.envelopes import tool_error_response, tool_success_response
+
+
+class FeedbackLinkageError(Exception):
+    """Raised when feedback cannot be linked to an interaction."""
+
+    pass
+
 
 TOOL_NAME = "submit_feedback"
 TOOL_DESCRIPTION = "Submit user feedback (UP/DOWN) for a specific interaction."
@@ -30,8 +38,6 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
     Returns:
         JSON string with success or error status.
     """
-    from mcp_server.utils.envelopes import tool_error_response, tool_success_response
-
     # Validate interaction_id before attempting write
     if not interaction_id or not interaction_id.strip():
         return tool_error_response("interaction_id is required", category="invalid_request")

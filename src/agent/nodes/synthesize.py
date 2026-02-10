@@ -143,6 +143,8 @@ def synthesize_insight_node(state: AgentState) -> dict:
 
             error_str = redact_sensitive_info(str(error))
 
+            error_category = state.get("error_category")
+
             # 2. Map termination reason to user-facing messages
             if termination_reason == TerminationReason.READONLY_VIOLATION:
                 response_content = (
@@ -169,10 +171,36 @@ def synthesize_insight_node(state: AgentState) -> dict:
                     "The database schema appears to have changed during your request. "
                     "Please try again in a few moments."
                 )
-            elif termination_reason == TerminationReason.VALIDATION_FAILED:
+            elif (
+                termination_reason == TerminationReason.VALIDATION_FAILED
+                or termination_reason == TerminationReason.INVALID_REQUEST
+                or termination_reason == TerminationReason.TIMEOUT
+                or error_category in ("invalid_request", "timeout")
+            ):
                 response_content = (
                     f"I encountered a validation error while processing your request: {error_str}"
                 )
+            elif (
+                termination_reason == TerminationReason.UNSUPPORTED_CAPABILITY
+                or error_category == "unsupported_capability"
+            ):
+                error_metadata = state.get("error_metadata") or {}
+                cap = error_metadata.get("required_capability")
+                if cap:
+                    response_content = (
+                        f"The database backend does not support the required capability '{cap}' "
+                        "for this request."
+                    )
+                else:
+                    response_content = (
+                        "The database backend does not support a required capability "
+                        "for this request."
+                    )
+            elif (
+                termination_reason == TerminationReason.TOOL_RESPONSE_MALFORMED
+                or error_category == "tool_response_malformed"
+            ):
+                response_content = f"I received a malformed response from the database: {error_str}"
             else:
                 # Generic fallback for unknown/other errors
                 response_content = "An internal error occurred while processing your request."

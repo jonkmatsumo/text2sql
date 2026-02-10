@@ -83,7 +83,9 @@ class TestSemanticTraversalGuardrail:
             ),
         ):
 
-            result_json = await get_semantic_subgraph("query is irrelevant with fixed seeds")
+            result_json = await get_semantic_subgraph(
+                query="query is irrelevant with fixed seeds", tenant_id=1
+            )
             response = json.loads(result_json)
             result = response["result"]
 
@@ -140,7 +142,7 @@ class TestSemanticTraversalGuardrail:
             ),
         ):
 
-            result_json = await get_semantic_subgraph("find orders")
+            result_json = await get_semantic_subgraph(query="find orders", tenant_id=1)
             response = json.loads(result_json)
             result = response["result"]
 

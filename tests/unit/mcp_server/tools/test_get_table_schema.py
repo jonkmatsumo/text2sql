@@ -81,9 +81,10 @@ class TestGetTableSchema:
             result = await handler(["users", "missing", "orders"])
 
             data = json.loads(result)["result"]
-            assert len(data) == 2
+            assert len(data) == 3
             assert data[0]["table_name"] == "users"
-            assert data[1]["table_name"] == "orders"
+            assert data[1]["status"] == "TABLE_NOT_FOUND"
+            assert data[2]["table_name"] == "orders"
 
     @pytest.mark.asyncio
     async def test_get_table_schema_empty_list(self):

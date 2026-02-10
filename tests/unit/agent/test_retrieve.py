@@ -206,7 +206,7 @@ class TestRetrieveContextNode:
         result = await retrieve_context_node(state)
 
         # Verify empty context string is returned
-        assert "No relevant tables found" in result["schema_context"]
+        assert "No relevant tables found." in result["schema_context"]
         assert result["table_names"] == []
 
     @pytest.mark.asyncio
@@ -268,7 +268,7 @@ class TestRetrieveContextNode:
 
         # Verify error is handled gracefully (returns error message in context)
         result = await retrieve_context_node(state)
-        assert "Error retrieving context" in result["schema_context"]
+        assert "Error in context retrieval" in result["schema_context"]
 
     @pytest.mark.asyncio
     @patch("agent.nodes.retrieve.telemetry.start_span")
@@ -312,6 +312,7 @@ class TestRetrieveContextNode:
                 "schema_source",
                 "tables_retrieved",
                 "nodes_retrieved",
+                "snapshot_id",
             }
             assert set(extra.keys()).issubset(allowed_keys)
 

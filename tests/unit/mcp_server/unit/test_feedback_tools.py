@@ -3,6 +3,7 @@
 These tests verify the feedback tools work correctly with the DAL layer.
 """
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -19,9 +20,10 @@ async def test_submit_feedback_upvote():
         mock_store.ensure_review_queue = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        result = await submit_feedback(interaction_id="int-1", thumb="UP", comment="Nice")
+        result_json = await submit_feedback(interaction_id="int-1", thumb="UP", comment="Nice")
+        result = json.loads(result_json)
 
-        assert result == "OK"
+        assert result["result"] == "OK"
         mock_store.create_feedback.assert_called_once()
         mock_store.ensure_review_queue.assert_not_called()
 

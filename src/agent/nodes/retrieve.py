@@ -56,6 +56,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
         table_names = []
         graph_data = {}
 
+        existing_snapshot_id = state.get("schema_snapshot_id")
+
         try:
             tools = await get_mcp_tools()
             subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
@@ -63,10 +65,6 @@ async def retrieve_context_node(state: AgentState) -> dict:
             if subgraph_tool:
                 # Execute subgraph retrieval with grounded query
                 payload = {"query": grounded_query}
-                tenant_id = state.get("tenant_id")
-                existing_snapshot_id = state.get("schema_snapshot_id")
-                if tenant_id is not None:
-                    payload["tenant_id"] = tenant_id
                 if existing_snapshot_id:
                     payload["snapshot_id"] = existing_snapshot_id
 
@@ -126,7 +124,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 else:
                     context_str = "No relevant tables found."
             else:
-                context_str = "No relevant tables found."
+                context_str = "Context retrieval tool not available."
 
         except Exception as e:
             logger.exception("Error in retrieve_context_node execution")

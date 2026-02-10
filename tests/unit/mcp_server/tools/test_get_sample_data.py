@@ -27,8 +27,8 @@ async def test_get_sample_data_missing_tenant_id():
     result = json.loads(result_str)
 
     assert "error" in result
-    assert result["error"] == "Tenant ID is required for get_sample_data."
-    assert result["error_category"] == "invalid_request"
+    assert result["error"]["message"] == "Tenant ID is required for get_sample_data."
+    assert result["error"]["category"] == "invalid_request"
 
 
 @pytest.mark.asyncio
@@ -63,12 +63,12 @@ async def test_get_sample_data_invalid_limit():
     result_str = await handler("users", limit=0, tenant_id=1)
     result = json.loads(result_str)
     assert "error" in result
-    assert "Invalid limit" in result["error"]
-    assert result["error_category"] == "invalid_request"
+    assert "Invalid limit" in result["error"]["message"]
+    assert result["error"]["category"] == "invalid_request"
 
     # Test limit > 100
     result_str = await handler("users", limit=101, tenant_id=1)
     result = json.loads(result_str)
     assert "error" in result
-    assert "100" in result["error"]
-    assert result["error_category"] == "invalid_request"
+    assert "100" in result["error"]["message"]
+    assert result["error"]["category"] == "invalid_request"

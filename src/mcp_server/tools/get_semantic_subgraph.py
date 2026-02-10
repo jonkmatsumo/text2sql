@@ -375,71 +375,94 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
 
     start_time = time.monotonic()
 
-    from mcp_server.utils.validation import require_tenant_id
+    # Cache Read
+    try:
+        cache = Database.get_cache_store()
+        embedding = await RagEngine.embed_text(query)
 
-    # Optional but if we want to enforce consistency:
-    # Actually, subgraph can be global or tenant-scoped.
-    # If the test says MUST call, I'll call it.
-    if err := require_tenant_id(tenant_id, TOOL_NAME):
-        return err
-        try:
-            cache = Database.get_cache_store()
-            embedding = await RagEngine.embed_text(query)
-
-            cached = await cache.lookup(embedding, tenant_id, threshold=0.90, cache_type="subgraph")
-            if cached:
-                logger.info(f"✓ Cache Hit for semantic subgraph: {query[:50]}...")
-                return cached.value
-        except Exception as e:
-            logger.warning(f"Cache lookup failed: {e}")
+        cached = await cache.lookup(embedding, tenant_id, threshold=0.90, cache_type="subgraph")
+        if cached:
+            logger.info(f"✓ Cache Hit for semantic subgraph: {query[:50]}...")
+            return cached.value
+    except Exception as e:
+        logger.warning(f"Cache lookup failed: {e}")
 
     # The Work
     try:
-        store = Database.get_graph_store()
+        try:
+            store = Database.get_graph_store()
+        except Exception as e:
+            logger.error(f"Failed to get graph store: {e}")
+            from common.models.error_metadata import ErrorMetadata
+            from common.models.tool_envelopes import ToolResponseEnvelope
+
+            return ToolResponseEnvelope(
+                result={},
+                error=ErrorMetadata(
+                    message="Graph store not authorized or initialized.",
+                    category="dependency_failure",
+                    provider="graph_store",
+                    is_retryable=False,
+                ),
+            ).model_dump_json(exclude_none=True)
+
+        result = await _get_mini_graph(query, store)
+
+        if isinstance(result, dict) and "error" in result:
+            from common.models.error_metadata import ErrorMetadata
+            from common.models.tool_envelopes import ToolResponseEnvelope
+
+            return ToolResponseEnvelope(
+                result={},
+                error=ErrorMetadata(
+                    message=f"Semantic subgraph retrieval failed: {result['error']}",
+                    category="invalid_request",
+                    provider=Database.get_query_target_provider(),
+                    is_retryable=False,
+                ),
+            ).model_dump_json(exclude_none=False)
+
+        execution_time_ms = (time.monotonic() - start_time) * 1000
+
+        from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+
+        envelope = ToolResponseEnvelope(
+            result=result,
+            metadata=GenericToolMetadata(
+                provider=Database.get_query_target_provider(),
+                execution_time_ms=execution_time_ms,
+                snapshot_id=snapshot_id,
+            ),
+        )
+        json_result = envelope.model_dump_json(exclude_none=True)
+
+        # Cache Write
+        if tenant_id and embedding and not result.get("error"):
+            try:
+                cache = Database.get_cache_store()
+                await cache.store(
+                    user_query=query,
+                    generated_sql=json_result,
+                    query_embedding=embedding,
+                    tenant_id=tenant_id,
+                    cache_type="subgraph",
+                )
+                logger.info(f"✓ Cached semantic subgraph for tenant {tenant_id}")
+            except Exception as e:
+                logger.warning(f"Cache store failed: {e}")
+
+        return json_result
     except Exception as e:
-        logger.error(f"Failed to get graph store: {e}")
+        logger.exception("Semantic subgraph retrieval failed")
         from common.models.error_metadata import ErrorMetadata
         from common.models.tool_envelopes import ToolResponseEnvelope
 
         return ToolResponseEnvelope(
             result={},
             error=ErrorMetadata(
-                message="Graph store not authorized or initialized.",
-                category="dependency_failure",
-                provider="graph_store",
+                message=f"Semantic subgraph retrieval failed: {str(e)}",
+                category="invalid_request",
+                provider=Database.get_query_target_provider(),
                 is_retryable=False,
             ),
-        ).model_dump_json(exclude_none=True)
-
-    result = await _get_mini_graph(query, store)
-
-    execution_time_ms = (time.monotonic() - start_time) * 1000
-
-    from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
-
-    envelope = ToolResponseEnvelope(
-        result=result,
-        metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(),
-            execution_time_ms=execution_time_ms,
-            snapshot_id=snapshot_id,
-        ),
-    )
-    json_result = envelope.model_dump_json(exclude_none=True)
-
-    # Cache Write
-    if tenant_id and embedding and not result.get("error"):
-        try:
-            cache = Database.get_cache_store()
-            await cache.store(
-                user_query=query,
-                generated_sql=json_result,
-                query_embedding=embedding,
-                tenant_id=tenant_id,
-                cache_type="subgraph",
-            )
-            logger.info(f"✓ Cached semantic subgraph for tenant {tenant_id}")
-        except Exception as e:
-            logger.warning(f"Cache store failed: {e}")
-
-    return json_result
+        ).model_dump_json(exclude_none=False)

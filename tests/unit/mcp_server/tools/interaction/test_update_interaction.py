@@ -1,5 +1,4 @@
-"""Tests for update_interaction tool."""
-
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,7 +24,7 @@ class TestUpdateInteraction:
             mock_store.update_interaction_result = AsyncMock()
             mock_get_store.return_value = mock_store
 
-            result = await handler(
+            response_json = await handler(
                 interaction_id="int-1",
                 generated_sql="SELECT * FROM users",
                 response_payload='{"rows": []}',
@@ -33,8 +32,9 @@ class TestUpdateInteraction:
                 error_type=None,
                 tables_used=["users"],
             )
+            response = json.loads(response_json)
 
-            assert result == "OK"
+            assert response["result"] == "OK"
             mock_store.update_interaction_result.assert_called_once()
 
     @pytest.mark.asyncio
@@ -47,11 +47,12 @@ class TestUpdateInteraction:
             mock_store.update_interaction_result = AsyncMock()
             mock_get_store.return_value = mock_store
 
-            result = await handler(
+            response_json = await handler(
                 interaction_id="int-1", execution_status="FAILURE", error_type="SYNTAX_ERROR"
             )
+            response = json.loads(response_json)
 
-            assert result == "OK"
+            assert response["result"] == "OK"
             call_args = mock_store.update_interaction_result.call_args[0]
             # Args: interaction_id, generated_sql, response_payload,
             #       execution_status, error_type, tables_used

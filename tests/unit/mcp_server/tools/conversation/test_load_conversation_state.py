@@ -1,5 +1,4 @@
-"""Tests for load_conversation_state tool."""
-
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,9 +30,10 @@ class TestLoadConversationState:
             mock_store.load_state_async = load_state_async
             mock_get_store.return_value = mock_store
 
-            result = await handler(conversation_id="conv-1", user_id="user-1")
+            response_json = await handler(conversation_id="conv-1", user_id="user-1")
+            response = json.loads(response_json)
 
-            assert result == {"tables": ["users"]}
+            assert response["result"] == {"tables": ["users"]}
             assert calls == [("conv-1", "user-1")]
 
     @pytest.mark.asyncio
@@ -52,7 +52,8 @@ class TestLoadConversationState:
             mock_store.load_state_async = load_state_async
             mock_get_store.return_value = mock_store
 
-            result = await handler(conversation_id="conv-1", user_id="user-1")
+            response_json = await handler(conversation_id="conv-1", user_id="user-1")
+            response = json.loads(response_json)
 
-            assert result is None
+            assert response.get("result") is None
             assert calls == [("conv-1", "user-1")]
