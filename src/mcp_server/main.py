@@ -72,6 +72,17 @@ async def lifespan(app):
 
     init_state.start()
 
+    # Startup: Validate runtime configuration combinations (required)
+    try:
+        from common.config.sanity import validate_runtime_configuration
+
+        validate_runtime_configuration()
+        init_state.record_success("config_sanity", required=True)
+    except Exception as e:
+        logger.exception("Runtime configuration sanity check failed")
+        init_state.record_failure("config_sanity", e, required=True)
+        raise RuntimeError("Runtime configuration sanity check failed") from e
+
     # Startup: Initialize database connection pool (required)
     try:
         await Database.init()

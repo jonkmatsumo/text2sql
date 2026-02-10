@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from common.config.env import get_env_int
@@ -20,6 +21,14 @@ def _normalize_table_name(raw: Any) -> str:
     if not isinstance(raw, str):
         return ""
     return raw.strip().lower()
+
+
+def _as_state_mapping(state: Any) -> dict[str, Any]:
+    if isinstance(state, dict):
+        return state
+    if isinstance(state, Mapping):
+        return dict(state)
+    return {}
 
 
 def _resolve_final_stopping_reason(state: dict[str, Any]) -> str:
@@ -45,13 +54,14 @@ def build_retry_correction_summary(
     state: dict[str, Any], *, max_events: int | None = None
 ) -> dict[str, Any]:
     """Build a bounded summary of retry/correction behavior."""
+    normalized_state = _as_state_mapping(state)
     max_items = max_events
     if max_items is None:
         max_items = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
     max_items = max(1, int(max_items))
 
-    raw_corrections = state.get("correction_attempts") or []
-    raw_validation_failures = state.get("validation_failures") or []
+    raw_corrections = normalized_state.get("correction_attempts") or []
+    raw_validation_failures = normalized_state.get("validation_failures") or []
     corrections = _bounded_events(raw_corrections, max_items)
     validation_failures = _bounded_events(raw_validation_failures, max_items)
 
@@ -64,7 +74,7 @@ def build_retry_correction_summary(
         ),
         "correction_attempts": corrections,
         "validation_failures": validation_failures,
-        "final_stopping_reason": _resolve_final_stopping_reason(state),
+        "final_stopping_reason": _resolve_final_stopping_reason(normalized_state),
     }
 
 
@@ -116,13 +126,14 @@ def build_decision_summary(
     state: dict[str, Any], *, max_tables: int | None = None
 ) -> dict[str, Any]:
     """Build a deterministic high-level decision summary from state."""
+    normalized_state = _as_state_mapping(state)
     table_limit = max_tables
     if table_limit is None:
         table_limit = get_env_int("AGENT_DECISION_SUMMARY_MAX_TABLES", 50) or 50
     table_limit = max(1, int(table_limit))
 
     selected_tables: list[str] = []
-    raw_tables = state.get("table_names") or []
+    raw_tables = normalized_state.get("table_names") or []
     if isinstance(raw_tables, list):
         seen = set()
         for table in raw_tables:
@@ -132,11 +143,11 @@ def build_decision_summary(
                 selected_tables.append(normalized)
         selected_tables.sort()
 
-    rejected_tables = _collect_rejected_tables(state, table_limit)
+    rejected_tables = _collect_rejected_tables(normalized_state, table_limit)
 
     return {
         "selected_tables": selected_tables[:table_limit],
         "rejected_tables": rejected_tables,
-        "retry_count": int(state.get("retry_count", 0) or 0),
-        "schema_refresh_events": int(state.get("schema_refresh_count", 0) or 0),
+        "retry_count": int(normalized_state.get("retry_count", 0) or 0),
+        "schema_refresh_events": int(normalized_state.get("schema_refresh_count", 0) or 0),
     }

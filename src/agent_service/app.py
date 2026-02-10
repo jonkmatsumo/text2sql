@@ -42,6 +42,14 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def validate_startup_configuration() -> None:
+    """Fail fast on invalid runtime flag combinations."""
+    from common.config.sanity import validate_runtime_configuration
+
+    validate_runtime_configuration()
+
+
 class AgentRunRequest(BaseModel):
     """Request payload for agent execution."""
 

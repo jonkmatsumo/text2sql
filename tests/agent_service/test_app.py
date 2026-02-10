@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_service import app as agent_app
@@ -280,3 +281,12 @@ def test_run_agent_debug_decision_summary_flag(monkeypatch):
     body = resp.json()
     assert body["decision_summary"] == {"selected_tables": ["orders"]}
     assert body["retry_correction_summary"] == {"final_stopping_reason": "success"}
+
+
+def test_agent_service_startup_fails_on_invalid_runtime_configuration(monkeypatch):
+    """Service startup should fail fast when runtime configuration is invalid."""
+    monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "invalid-mode")
+
+    with pytest.raises(RuntimeError):
+        with TestClient(agent_app.app):
+            pass

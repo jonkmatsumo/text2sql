@@ -705,6 +705,10 @@ async def run_agent_with_tracing(
     if tenant_id is None:
         raise ValueError("tenant_id is required")
 
+    from common.config.sanity import validate_runtime_configuration
+
+    validate_runtime_configuration()
+
     # 0. Centralized Ingress Sanitization
     raw_question = question
     res = sanitize_text(question)
