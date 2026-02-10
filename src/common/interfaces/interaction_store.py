@@ -21,6 +21,7 @@ class InteractionStore(Protocol):
     async def update_interaction_result(
         self,
         interaction_id: str,
+        tenant_id: int,
         generated_sql: Optional[str] = None,
         response_payload: Optional[Any] = None,
         execution_status: str = "SUCCESS",
@@ -39,6 +40,8 @@ class InteractionStore(Protocol):
         """
         ...
 
-    async def get_interaction_detail(self, interaction_id: str) -> Optional[dict]:
+    async def get_interaction_detail(
+        self, interaction_id: str, tenant_id: Optional[int] = None
+    ) -> Optional[dict]:
         """Fetch full details for a single interaction."""
         ...

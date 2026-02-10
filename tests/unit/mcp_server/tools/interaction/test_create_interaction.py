@@ -53,10 +53,25 @@ class TestCreateInteraction:
             mock_get_store.return_value = mock_store
 
             response_json = await handler(
-                conversation_id=None, schema_snapshot_id="snap-1", user_nlq_text="test query"
+                conversation_id=None,
+                schema_snapshot_id="snap-1",
+                user_nlq_text="test query",
+                tenant_id=1,
             )
             response = json.loads(response_json)
 
             assert response["result"] == "int-456"
             call_kwargs = mock_store.create_interaction.call_args[1]
-            assert call_kwargs["tenant_id"] == 1  # default
+            assert call_kwargs["tenant_id"] == 1
+
+    @pytest.mark.asyncio
+    async def test_create_interaction_requires_tenant_id(self):
+        """Missing tenant_id should return deterministic error."""
+        result_json = await handler(
+            conversation_id="conv-1",
+            schema_snapshot_id="snap-1",
+            user_nlq_text="show all users",
+            tenant_id=None,
+        )
+        result = json.loads(result_json)
+        assert result["error"]["sql_state"] == "MISSING_TENANT_ID"

@@ -132,6 +132,26 @@ class TestRedshiftQueryTargetDatabase:
         RedshiftQueryTargetDatabase._pool = None
 
     @pytest.mark.asyncio
+    async def test_get_connection_read_only_sets_session_flag(self):
+        """Read-only connections should set Redshift session read-only mode."""
+        from dal.redshift.query_target import RedshiftQueryTargetDatabase
+
+        mock_conn = AsyncMock()
+        mock_pool = AsyncMock()
+        mock_pool.acquire = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock()
+            )
+        )
+        RedshiftQueryTargetDatabase._pool = mock_pool
+
+        async with RedshiftQueryTargetDatabase.get_connection(read_only=True):
+            pass
+
+        mock_conn.execute.assert_any_call("SET default_transaction_read_only = on")
+        RedshiftQueryTargetDatabase._pool = None
+
+    @pytest.mark.asyncio
     async def test_close_closes_pool(self):
         """Verify close() properly closes the pool."""
         from dal.redshift.query_target import RedshiftQueryTargetDatabase

@@ -14,7 +14,7 @@ def base_state():
     return {
         "messages": [HumanMessage(content="Show me all customers")],
         "schema_context": "Table: customers (id, name, email)",
-        "table_names": ["customers"],
+        "table_names": ["customers", "orders"],
         "current_sql": None,
         "query_result": None,
         "error": None,
@@ -93,6 +93,28 @@ class TestValidateSqlNode:
 
         assert result.get("error") is not None
         assert "forbidden" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_non_allowlisted_table_fails(self, base_state):
+        """Test that table not in schema-derived allowlist is rejected."""
+        base_state["current_sql"] = "SELECT * FROM products"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is not None
+        assert "allowlist" in result["error"].lower()
 
     @pytest.mark.asyncio
     async def test_no_sql_returns_error(self, base_state):

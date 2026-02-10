@@ -182,15 +182,35 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             from agent.utils.schema_fingerprint import validate_sql_against_schema
 
             schema_context = state.get("raw_schema_context") or []
-            pre_exec_passed, missing_tables, pre_exec_warning = validate_sql_against_schema(
+            pre_exec_passed, missing_identifiers, pre_exec_warning = validate_sql_against_schema(
                 rewritten_sql, schema_context
             )
+            pre_exec_blocking = get_env_bool("AGENT_BLOCK_ON_SCHEMA_MISMATCH", False) is True
             span.set_attribute("validation.pre_exec_check_passed", pre_exec_passed)
+            span.set_attribute("validation.pre_exec_blocking", pre_exec_blocking)
             if not pre_exec_passed:
-                span.set_attribute("validation.pre_exec_missing_tables", len(missing_tables))
+                span.set_attribute("validation.pre_exec_missing_tables", len(missing_identifiers))
                 if pre_exec_warning:
                     logger.warning(pre_exec_warning)
                     span.add_event("validation.pre_exec_warning", {"message": pre_exec_warning})
+                if pre_exec_blocking:
+                    error = pre_exec_warning or "Pre-execution schema validation failed."
+                    span.set_attribute("validation.pre_exec_blocked", True)
+                    span.set_outputs(
+                        {
+                            "error": error,
+                            "pre_exec_blocked": True,
+                            "missing_identifiers": sorted(missing_identifiers),
+                        }
+                    )
+                    return {
+                        "error": error,
+                        "error_category": "schema_mismatch",
+                        "query_result": None,
+                        "missing_identifiers": sorted(missing_identifiers),
+                        "termination_reason": TerminationReason.VALIDATION_FAILED,
+                    }
+                span.set_attribute("validation.pre_exec_blocked", False)
 
             # Execute via MCP Tool
             execute_params = [tenant_id] if (tenant_id and "$1" in rewritten_sql) else []

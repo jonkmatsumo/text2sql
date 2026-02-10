@@ -11,6 +11,7 @@ from dal.snowflake.config import SnowflakeConfig
 from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
 from dal.snowflake.param_translation import translate_postgres_params_to_snowflake
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 
 
 class SnowflakeQueryTargetDatabase:
@@ -53,7 +54,12 @@ class SnowflakeQueryTargetDatabase:
     @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
-        """Yield a Snowflake connection wrapper (tenant context is a no-op)."""
+        """Yield a Snowflake connection wrapper (tenant context is a no-op).
+
+        Snowflake does not expose a strict session-level read-only mode through
+        this connector path. We still pass session tags for observability and
+        enforce read-only defensively in the DAL wrapper.
+        """
         _ = tenant_id
         conn = await asyncio.to_thread(_connect, cls, read_only=read_only)
         wrapper = _SnowflakeConnection(
@@ -62,6 +68,7 @@ class SnowflakeQueryTargetDatabase:
             poll_interval_seconds=cls._poll_interval_seconds,
             max_rows=cls._max_rows,
             warn_after_seconds=cls._warn_after_seconds,
+            read_only=read_only,
         )
         try:
             yield wrapper
@@ -79,12 +86,14 @@ class _SnowflakeConnection:
         poll_interval_seconds: int,
         max_rows: int,
         warn_after_seconds: int,
+        read_only: bool,
     ) -> None:
         self._conn = conn
         self._query_timeout_seconds = query_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._max_rows = max_rows
         self._warn_after_seconds = warn_after_seconds
+        self._read_only = read_only
         self._executor = SnowflakeAsyncQueryExecutor(conn)
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
@@ -110,6 +119,7 @@ class _SnowflakeConnection:
         return self._executor
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
 
         async def _run():
@@ -124,6 +134,7 @@ class _SnowflakeConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
         rows = await trace_query_operation(
             "dal.query.execute",
@@ -145,6 +156,7 @@ class _SnowflakeConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
         rows, columns = await trace_query_operation(
             "dal.query.execute",

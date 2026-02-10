@@ -175,6 +175,21 @@ class TestGetSemanticSubgraph:
                 assert data["error"]["category"] == "invalid_request"
 
     @pytest.mark.asyncio
+    async def test_get_semantic_subgraph_oversized_query_rejected(self):
+        """Oversized query should be rejected before embedding/cache work."""
+        oversized_query = "x" * ((10 * 1024) + 1)
+        with patch(
+            "mcp_server.tools.get_semantic_subgraph.RagEngine.embed_text",
+            AsyncMock(return_value=[0.1]),
+        ) as mock_embed:
+            result = await get_semantic_subgraph(query=oversized_query, tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "invalid_request"
+        assert data["error"]["sql_state"] == "INPUT_TOO_LARGE"
+        mock_embed.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_tables_first_strategy(self):
         """Test that tables are searched before columns."""
         mock_indexer = MagicMock()

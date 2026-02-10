@@ -12,7 +12,7 @@ class PersistenceAdapter:
         self.client = mcp_client
 
     async def save_state_async(
-        self, state: ConversationState, user_id: str, ttl_minutes: int = 60
+        self, state: ConversationState, user_id: str, tenant_id: int, ttl_minutes: int = 60
     ) -> None:
         """Serialize and save state via MCP."""
         state_str = state.to_json()
@@ -23,6 +23,7 @@ class PersistenceAdapter:
             {
                 "conversation_id": state.conversation_id,
                 "user_id": user_id,
+                "tenant_id": tenant_id,
                 "state_json": state_dict,
                 "version": state.state_version,
                 "ttl_minutes": ttl_minutes,
@@ -30,11 +31,12 @@ class PersistenceAdapter:
         )
 
     async def load_state_async(
-        self, conversation_id: str, user_id: str
+        self, conversation_id: str, user_id: str, tenant_id: int
     ) -> Optional[ConversationState]:
         """Load and deserialize state via MCP."""
         result = await self.client.call_tool(
-            "load_conversation_state", {"conversation_id": conversation_id, "user_id": user_id}
+            "load_conversation_state",
+            {"conversation_id": conversation_id, "user_id": user_id, "tenant_id": tenant_id},
         )
 
         if not result:
@@ -56,6 +58,7 @@ class InteractionAdapter:
         conversation_id: Optional[str],
         schema_snapshot_id: str,
         user_nlq_text: str,
+        tenant_id: int,
         model_version: Optional[str] = None,
         prompt_version: Optional[str] = None,
         trace_id: Optional[str] = None,
@@ -67,6 +70,7 @@ class InteractionAdapter:
                 "conversation_id": conversation_id,
                 "schema_snapshot_id": schema_snapshot_id,
                 "user_nlq_text": user_nlq_text,
+                "tenant_id": tenant_id,
                 "model_version": model_version,
                 "prompt_version": prompt_version,
                 "trace_id": trace_id,
@@ -78,6 +82,7 @@ class InteractionAdapter:
     async def update_interaction_async(
         self,
         interaction_id: str,
+        tenant_id: int,
         generated_sql: Optional[str] = None,
         response_payload: Optional[Any] = None,
         execution_status: str = "SUCCESS",
@@ -91,6 +96,7 @@ class InteractionAdapter:
             "update_interaction",
             {
                 "interaction_id": interaction_id,
+                "tenant_id": tenant_id,
                 "generated_sql": generated_sql,
                 "response_payload": json.dumps(response_payload) if response_payload else None,
                 "execution_status": execution_status,

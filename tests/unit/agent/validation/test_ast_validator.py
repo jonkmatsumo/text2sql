@@ -135,3 +135,39 @@ class TestASTValidator:
         result = validate_sql(sql)
         assert not result.is_valid
         assert any(v.violation_type == ViolationType.DANGEROUS_PATTERN for v in result.violations)
+
+    def test_validate_sql_union_branch_disallowed_table(self):
+        """UNION branches should be blocked when a branch references a non-allowlisted table."""
+        sql = "SELECT a FROM t1 UNION SELECT b FROM t2"
+        result = validate_sql(sql, allowed_tables={"t1"})
+        assert not result.is_valid
+        assert any(
+            v.details.get("reason") == "set_operation_disallowed_table" for v in result.violations
+        )
+
+    def test_validate_sql_allowlisted_table_passes(self):
+        """Table references in allowlist should pass positive allowlist checks."""
+        result = validate_sql("SELECT * FROM customers", allowed_tables={"customers"})
+        assert result.is_valid
+
+    def test_validate_sql_non_allowlisted_table_fails(self):
+        """Unknown table should fail even when not in static denylist."""
+        result = validate_sql("SELECT * FROM orders", allowed_tables={"customers"})
+        assert not result.is_valid
+        assert any(v.details.get("reason") == "table_not_allowlisted" for v in result.violations)
+
+    def test_validate_sql_nested_cte_union_disallowed_table(self):
+        """Nested CTE set-ops should also enforce allowlist branch checks."""
+        sql = """
+            WITH combined AS (
+                SELECT a FROM t1
+                UNION
+                SELECT b FROM t2
+            )
+            SELECT * FROM combined
+        """
+        result = validate_sql(sql, allowed_tables={"t1"})
+        assert not result.is_valid
+        assert any(
+            v.details.get("reason") == "set_operation_disallowed_table" for v in result.violations
+        )

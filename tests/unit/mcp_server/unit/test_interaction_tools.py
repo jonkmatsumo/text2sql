@@ -23,7 +23,10 @@ async def test_create_interaction_calls_dal():
         mock_get_store.return_value = mock_store
 
         result_json = await create_interaction(
-            conversation_id="conv-1", schema_snapshot_id="snap-1", user_nlq_text="test"
+            conversation_id="conv-1",
+            schema_snapshot_id="snap-1",
+            user_nlq_text="test",
+            tenant_id=1,
         )
         result = json.loads(result_json)
 
@@ -41,11 +44,14 @@ async def test_update_interaction_calls_dal():
         mock_store.update_interaction_result = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        result_json = await update_interaction(interaction_id="id-1", execution_status="FAILURE")
+        result_json = await update_interaction(
+            interaction_id="id-1", tenant_id=1, execution_status="FAILURE"
+        )
         result = json.loads(result_json)
 
         assert result["result"] == "OK"
         mock_store.update_interaction_result.assert_called_once()
         args = mock_store.update_interaction_result.call_args[0]
-        # interaction_id, generated_sql, response_payload, execution_status
-        assert args[3] == "FAILURE"
+        # interaction_id, tenant_id, generated_sql, response_payload, execution_status
+        assert args[1] == 1
+        assert args[4] == "FAILURE"

@@ -1,0 +1,78 @@
+"""Read-only SQL enforcement helpers for query-target connections."""
+
+import re
+
+import sqlglot
+from sqlglot import exp
+
+from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES
+from common.sql.dialect import normalize_sqlglot_dialect
+
+_FALLBACK_MUTATION_PREFIX = {
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "MERGE",
+    "GRANT",
+    "REVOKE",
+}
+_SQL_COMMENT_RE = re.compile(r"(--[^\n]*|/\*.*?\*/)", flags=re.DOTALL)
+
+
+def is_mutating_sql(sql: str, provider: str) -> bool:
+    """Best-effort detection of mutating SQL statements."""
+    if not isinstance(sql, str) or not sql.strip():
+        return True
+
+    dialect = normalize_sqlglot_dialect(provider)
+    try:
+        expressions = sqlglot.parse(sql, read=dialect)
+    except Exception:
+        expressions = None
+
+    if expressions:
+        if len(expressions) != 1:
+            return True
+        expression = expressions[0]
+        if expression is None:
+            return True
+        if expression.key not in ALLOWED_STATEMENT_TYPES:
+            return True
+
+        forbidden_nodes = (
+            exp.Insert,
+            exp.Update,
+            exp.Delete,
+            exp.Drop,
+            exp.Alter,
+            exp.Create,
+            exp.Command,
+            exp.Grant,
+            exp.Merge,
+            exp.TruncateTable,
+        )
+        for node in expression.walk():
+            if isinstance(node, forbidden_nodes):
+                return True
+        return False
+
+    # Fallback lexical guard for parser failures.
+    stripped = _SQL_COMMENT_RE.sub(" ", sql).lstrip()
+    if not stripped:
+        return True
+    first_token = stripped.split(maxsplit=1)[0].upper()
+    return first_token in _FALLBACK_MUTATION_PREFIX
+
+
+def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
+    """Raise PermissionError when a mutating SQL is issued on read-only connection."""
+    if not read_only:
+        return
+    if is_mutating_sql(sql, provider):
+        raise PermissionError(
+            f"Read-only enforcement blocked non-SELECT statement for provider '{provider}'."
+        )

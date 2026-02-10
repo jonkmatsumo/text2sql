@@ -44,9 +44,22 @@ async def handler(
     start_time = time.monotonic()
 
     from mcp_server.utils.errors import build_error_metadata
-    from mcp_server.utils.validation import require_tenant_id, validate_limit
+    from mcp_server.utils.validation import (
+        DEFAULT_MAX_INPUT_BYTES,
+        require_tenant_id,
+        validate_limit,
+        validate_string_length,
+    )
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
+    if err := validate_string_length(
+        user_query,
+        max_bytes=DEFAULT_MAX_INPUT_BYTES,
+        param_name="user_query",
+        tool_name=TOOL_NAME,
+    ):
         return err
 
     if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=50):

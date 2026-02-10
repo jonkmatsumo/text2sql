@@ -102,6 +102,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_fk_enforcement is False
+        assert caps.supports_session_read_only is True
+        assert caps.enforces_statement_read_only is True
 
     def test_snowflake_capabilities(self):
         """Snowflake is async with limited feature support."""
@@ -111,6 +113,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_cost_estimation is False
+        assert caps.supports_session_read_only is False
+        assert caps.enforces_statement_read_only is True
 
     def test_bigquery_capabilities(self):
         """Ensure BigQuery reports async execution and cost estimation."""
@@ -120,6 +124,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_cost_estimation is True
+        assert caps.supports_session_read_only is False
+        assert caps.enforces_statement_read_only is True
 
     def test_athena_capabilities(self):
         """Ensure Athena reports async execution."""

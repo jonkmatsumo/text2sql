@@ -10,6 +10,7 @@ TOOL_DESCRIPTION = "Log the result of an interaction."
 
 async def handler(
     interaction_id: str,
+    tenant_id: int,
     generated_sql: Optional[str] = None,
     response_payload: Optional[str] = None,
     execution_status: str = "SUCCESS",
@@ -31,6 +32,7 @@ async def handler(
 
     Args:
         interaction_id: The unique identifier of the interaction.
+        tenant_id: Tenant identifier.
         generated_sql: The SQL query that was generated.
         response_payload: The final response payload (JSON string or content).
         execution_status: Status of the execution (e.g., SUCCESS, ERROR).
@@ -41,14 +43,28 @@ async def handler(
         JSON-encoded ToolResponseEnvelope with "OK" status.
     """
     from mcp_server.utils.envelopes import tool_success_response
+    from mcp_server.utils.errors import tool_error_response
+    from mcp_server.utils.validation import require_tenant_id
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     store = get_interaction_store()
-    await store.update_interaction_result(
-        interaction_id,
-        generated_sql,
-        response_payload,
-        execution_status,
-        error_type,
-        tables_used,
-    )
+    try:
+        await store.update_interaction_result(
+            interaction_id,
+            tenant_id,
+            generated_sql,
+            response_payload,
+            execution_status,
+            error_type,
+            tables_used,
+        )
+    except ValueError as exc:
+        return tool_error_response(
+            message=str(exc),
+            code="TENANT_SCOPE_VIOLATION",
+            category="invalid_request",
+            provider="interaction_store",
+        )
     return tool_success_response("OK")

@@ -77,6 +77,7 @@ class PostgresInteractionStore(InteractionStore):
     async def update_interaction_result(
         self,
         interaction_id: str,
+        tenant_id: int,
         generated_sql: Optional[str] = None,
         response_payload: Optional[Any] = None,
         execution_status: str = "SUCCESS",
@@ -91,23 +92,27 @@ class PostgresInteractionStore(InteractionStore):
         sql = """
             UPDATE query_interactions
             SET
-                generated_sql = $2,
-                response_payload = $3::jsonb,
-                execution_status = $4,
-                error_type = $5,
-                tables_used = $6
+                generated_sql = $3,
+                response_payload = $4::jsonb,
+                execution_status = $5,
+                error_type = $6,
+                tables_used = $7
             WHERE id = $1::uuid
+              AND tenant_id = $2
         """
         async with self._get_connection() as conn:
-            await conn.execute(
+            status = await conn.execute(
                 sql,
                 interaction_id,
+                tenant_id,
                 generated_sql,
                 payload_json,
                 execution_status,
                 error_type,
                 tables_used,
             )
+        if str(status).endswith("0"):
+            raise ValueError("Interaction not found for tenant scope.")
 
     async def get_recent_interactions(self, limit: int = 50, offset: int = 0) -> List[dict]:
         """Fetch list of user interactions."""
@@ -134,26 +139,52 @@ class PostgresInteractionStore(InteractionStore):
             rows = await conn.fetch(sql, limit, offset)
         return [dict(r) for r in rows]
 
-    async def get_interaction_detail(self, interaction_id: str) -> Optional[dict]:
+    async def get_interaction_detail(
+        self, interaction_id: str, tenant_id: Optional[int] = None
+    ) -> Optional[dict]:
         """Fetch full details for an interaction."""
-        sql = """
-            SELECT
-                id::text,
-                conversation_id,
-                schema_snapshot_id,
-                user_nlq_text,
-                generated_sql,
-                response_payload,
-                execution_status,
-                error_type,
-                tables_used,
-                model_version,
-                prompt_version,
-                trace_id,
-                created_at
-            FROM query_interactions
-            WHERE id = $1::uuid
-        """
+        if tenant_id is None:
+            sql = """
+                SELECT
+                    id::text,
+                    conversation_id,
+                    schema_snapshot_id,
+                    user_nlq_text,
+                    generated_sql,
+                    response_payload,
+                    execution_status,
+                    error_type,
+                    tables_used,
+                    model_version,
+                    prompt_version,
+                    trace_id,
+                    created_at
+                FROM query_interactions
+                WHERE id = $1::uuid
+            """
+        else:
+            sql = """
+                SELECT
+                    id::text,
+                    conversation_id,
+                    schema_snapshot_id,
+                    user_nlq_text,
+                    generated_sql,
+                    response_payload,
+                    execution_status,
+                    error_type,
+                    tables_used,
+                    model_version,
+                    prompt_version,
+                    trace_id,
+                    created_at
+                FROM query_interactions
+                WHERE id = $1::uuid
+                  AND tenant_id = $2
+            """
         async with self._get_connection() as conn:
-            row = await conn.fetchrow(sql, interaction_id)
+            if tenant_id is None:
+                row = await conn.fetchrow(sql, interaction_id)
+            else:
+                row = await conn.fetchrow(sql, interaction_id, tenant_id)
         return dict(row) if row else None

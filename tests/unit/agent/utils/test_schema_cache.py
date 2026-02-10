@@ -2,7 +2,12 @@
 
 import pytest
 
-from agent.utils.schema_cache import MemorySchemaSnapshotCache, get_schema_cache
+from agent.utils.schema_cache import (
+    MemorySchemaSnapshotCache,
+    get_cached_schema_snapshot_id,
+    get_schema_cache,
+    set_cached_schema_snapshot_id,
+)
 
 
 @pytest.mark.asyncio
@@ -43,3 +48,16 @@ async def test_factory_singleton():
     c2 = get_schema_cache()
     assert c1 is c2
     assert isinstance(c1, MemorySchemaSnapshotCache)
+
+
+def test_schema_snapshot_id_ttl_expiry_and_refresh(monkeypatch):
+    """Snapshot IDs should expire after TTL and accept refreshed values."""
+    monkeypatch.setenv("SCHEMA_CACHE_TTL_SECONDS", "1")
+
+    set_cached_schema_snapshot_id(tenant_id=42, snapshot_id="fp-old", now=100.0)
+
+    assert get_cached_schema_snapshot_id(tenant_id=42, now=100.5) == "fp-old"
+    assert get_cached_schema_snapshot_id(tenant_id=42, now=101.0) is None
+
+    set_cached_schema_snapshot_id(tenant_id=42, snapshot_id="fp-new", now=101.1)
+    assert get_cached_schema_snapshot_id(tenant_id=42, now=101.2) == "fp-new"
