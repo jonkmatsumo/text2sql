@@ -164,6 +164,12 @@ class GenericToolMetadata(BaseModel):
 
     provider: str = Field("unknown", description="Database or system provider")
     execution_time_ms: Optional[float] = None
+    is_truncated: Optional[bool] = None
+    truncation_reason: Optional[str] = None
+    items_returned: Optional[int] = None
+    items_total: Optional[int] = None
+    bytes_returned: Optional[int] = None
+    bytes_total: Optional[int] = None
 
 
 class GenericToolResponseEnvelope(BaseModel):

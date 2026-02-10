@@ -125,7 +125,10 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     # 2. Apply Output Bounding (Phase 7)
                     # We only apply this to non-execute tools or if the response is not a string
                     # But most tools return JSON strings.
-                    from mcp_server.utils.tool_output import bound_tool_output
+                    from mcp_server.utils.tool_output import (
+                        apply_truncation_metadata,
+                        bound_tool_output,
+                    )
 
                     actual_response = response
                     is_truncated = False
@@ -140,10 +143,10 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                 bounded_data, meta = bound_tool_output(data)
                                 is_truncated = meta["truncated"]
                                 resp_size = meta["returned_bytes"]
-                                if is_truncated:
-                                    actual_response = json.dumps(
-                                        bounded_data, default=str, separators=(",", ":")
-                                    )
+                                bounded_with_meta = apply_truncation_metadata(bounded_data, meta)
+                                actual_response = json.dumps(
+                                    bounded_with_meta, default=str, separators=(",", ":")
+                                )
                             except Exception:
                                 truncation_parse_failed = True
                                 # Fallback to raw string length if parsing fails
@@ -151,7 +154,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         else:
                             # If it's already an object, bound it
                             bounded_obj, meta = bound_tool_output(response)
-                            actual_response = bounded_obj
+                            actual_response = apply_truncation_metadata(bounded_obj, meta)
                             is_truncated = meta["truncated"]
                             resp_size = meta["returned_bytes"]
                     else:
