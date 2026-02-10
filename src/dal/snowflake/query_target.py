@@ -55,8 +55,7 @@ class SnowflakeQueryTargetDatabase:
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
         """Yield a Snowflake connection wrapper (tenant context is a no-op)."""
         _ = tenant_id
-        _ = read_only
-        conn = await asyncio.to_thread(_connect, cls)
+        conn = await asyncio.to_thread(_connect, cls, read_only=read_only)
         wrapper = _SnowflakeConnection(
             conn,
             query_timeout_seconds=cls._query_timeout_seconds,
@@ -176,8 +175,15 @@ class _SnowflakeConnection:
         return next(iter(row.values()))
 
 
-def _connect(cls: type["SnowflakeQueryTargetDatabase"]) -> snowflake.connector.SnowflakeConnection:
+def _connect(
+    cls: type["SnowflakeQueryTargetDatabase"], read_only: bool = False
+) -> snowflake.connector.SnowflakeConnection:
     session_parameters = {}
+    if read_only:
+        session_parameters["QUERY_TAG"] = "READ_ONLY_SESSION"
+        # Snowflake doesn't have a simple "read_only" session param that blocks
+        # all writes at driver level, but we can try to set it if the provider
+        # supports it or use it for tagging.
     if cls._query_timeout_seconds:
         session_parameters["STATEMENT_TIMEOUT_IN_SECONDS"] = cls._query_timeout_seconds
     return snowflake.connector.connect(

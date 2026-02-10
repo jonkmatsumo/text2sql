@@ -40,7 +40,7 @@ class TestExecuteSqlValidation:
         result = await handler(sql, tenant_id=1)
         data = json.loads(result)
         assert data["error"]["category"] == "invalid_request"
-        assert "Only SELECT is allowed" in data["error"]["message"]
+        assert "Forbidden statement type" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_validate_params_not_list(self):

@@ -183,7 +183,7 @@ SPAN_CONTRACTS: dict[str, SpanContract] = {
     "execute_sql": SpanContract(
         name="execute_sql",
         required=frozenset({"result.is_truncated", "result.rows_returned"}),
-        optional=frozenset({"result.row_limit", "result.partial_reason"}),
+        optional=frozenset({"result.row_limit", "result.partial_reason", "termination_reason"}),
         required_on_error=frozenset({"error.category"}),
     ),
     "validate_sql": SpanContract(
@@ -206,7 +206,7 @@ SPAN_CONTRACTS: dict[str, SpanContract] = {
     "synthesize_insight": SpanContract(
         name="synthesize_insight",
         required=frozenset({"result.is_truncated", "result.rows_returned"}),
-        optional=frozenset({"result.is_limited"}),
+        optional=frozenset({"result.is_limited", "termination_reason"}),
         required_on_error=frozenset({"error.category"}),
     ),
     "retrieve_context": SpanContract(

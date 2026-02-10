@@ -4,15 +4,31 @@ from mcp_server.services.canonicalization.pattern_reload_service import (
 )
 
 TOOL_NAME = "reload_patterns"
+TOOL_DESCRIPTION = "Reload NLP patterns from the database without restarting the application."
 
 
 async def handler() -> str:
     """Reload NLP patterns from the database without restarting the application.
 
-    This tool triggers an atomic reload of the EntityRuler patterns.
-    It returns the status of the reload operation including pattern count.
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the patterns table in the database and write access to the
+        in-memory EntityRuler patterns.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Service Error: If the pattern reload service fails to fetch or apply patterns.
+
+    Returns:
+        JSON string containing the status and details of the reload operation.
     """
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
 
     # Pattern reload service tracks its own duration, but we'll wrap it
     result: ReloadResult = await PatternReloadService.reload(source="admin_tool")

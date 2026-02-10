@@ -33,6 +33,8 @@ jobs:
         run: uv sync --frozen
 
       - name: Run Unit Tests
+        env:
+          TELEMETRY_ENFORCEMENT_MODE: error
         run: uv run pytest -v tests/unit -m "not requires_db and not requires_mcp and not requires_control_db"
 
       - name: Run pre-commit hooks

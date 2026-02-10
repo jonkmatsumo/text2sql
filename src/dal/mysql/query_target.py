@@ -82,6 +82,9 @@ class MysqlQueryTargetDatabase:
             raise RuntimeError("MySQL pool not initialized. Call MysqlQueryTargetDatabase.init().")
 
         async with cls._pool.acquire() as conn:
+            if read_only:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SET TRANSACTION READ ONLY")
             wrapper = _MysqlConnection(conn, max_rows=cls._max_rows)
             yield wrapper
 

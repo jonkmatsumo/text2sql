@@ -36,9 +36,8 @@ class DuckDBQueryTargetDatabase:
         import duckdb
 
         # Connect at context enter time so tests can patch duckdb.connect
-        conn = await asyncio.to_thread(
-            duckdb.connect, cls._config.path, read_only=cls._config.read_only
-        )
+        db_read_only = read_only or cls._config.read_only
+        conn = await asyncio.to_thread(duckdb.connect, cls._config.path, read_only=db_read_only)
         sync_max_rows = get_sync_max_rows()
         wrapper = _DuckDBConnection(
             conn,

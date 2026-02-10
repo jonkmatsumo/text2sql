@@ -41,5 +41,5 @@ class TestGetFewShotExamples:
         result_json = await handler("test query", tenant_id=None)
         result = json.loads(result_json)
         assert "error" in result
-        assert "Tenant ID is required" in result["error"]
-        assert result["error_category"] == "invalid_request"
+        assert "Tenant ID is required" in result["error"]["message"]
+        assert result["error"]["category"] == "invalid_request"

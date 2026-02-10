@@ -5,6 +5,8 @@ from typing import Annotated, Any, Dict, List, Optional, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
+from agent.models.termination import TerminationReason
+
 
 class AgentState(TypedDict):
     """
@@ -87,6 +89,17 @@ class AgentState(TypedDict):
 
     # Tenant identifier for multi-tenant scenarios (required for caching and RLS)
     tenant_id: Optional[int]
+
+    # =========================================================================
+    # Budget and Safety Fields
+    # =========================================================================
+    # Per-request token budget configuration and consumption
+    # Structure: {"max_tokens": int, "consumed_tokens": int}
+    token_budget: Optional[dict]
+
+    # History of error signatures in the current request to detect loops
+    # Signatures are hashes of (category, normalized_message)
+    error_signatures: List[str]
 
     # =========================================================================
     # SQL-of-Thought Planning Fields
@@ -207,3 +220,6 @@ class AgentState(TypedDict):
 
     # Replay bundle for deterministic execution
     replay_bundle: Optional[dict]
+
+    # Explicit termination reason for better observability
+    termination_reason: Optional[TerminationReason]

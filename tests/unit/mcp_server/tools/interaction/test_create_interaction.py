@@ -1,5 +1,4 @@
-"""Tests for create_interaction tool."""
-
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,7 +24,7 @@ class TestCreateInteraction:
             mock_store.create_interaction = AsyncMock(return_value="int-123")
             mock_get_store.return_value = mock_store
 
-            result = await handler(
+            response_json = await handler(
                 conversation_id="conv-1",
                 schema_snapshot_id="snap-1",
                 user_nlq_text="show all users",
@@ -34,8 +33,9 @@ class TestCreateInteraction:
                 prompt_version="p1",
                 trace_id="trace-1",
             )
+            response = json.loads(response_json)
 
-            assert result == "int-123"
+            assert response["result"] == "int-123"
             mock_store.create_interaction.assert_called_once()
             call_kwargs = mock_store.create_interaction.call_args[1]
             assert call_kwargs["conversation_id"] == "conv-1"
@@ -52,10 +52,11 @@ class TestCreateInteraction:
             mock_store.create_interaction = AsyncMock(return_value="int-456")
             mock_get_store.return_value = mock_store
 
-            result = await handler(
+            response_json = await handler(
                 conversation_id=None, schema_snapshot_id="snap-1", user_nlq_text="test query"
             )
+            response = json.loads(response_json)
 
-            assert result == "int-456"
+            assert response["result"] == "int-456"
             call_kwargs = mock_store.create_interaction.call_args[1]
             assert call_kwargs["tenant_id"] == 1  # default

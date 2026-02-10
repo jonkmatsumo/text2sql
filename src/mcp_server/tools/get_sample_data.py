@@ -3,42 +3,52 @@
 from typing import Optional
 
 TOOL_NAME = "get_sample_data"
+TOOL_DESCRIPTION = "Get sample data rows from a table."
 
 
-async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = None) -> str:
+async def handler(
+    table_name: str,
+    limit: int = 3,
+    tenant_id: Optional[int] = None,
+    snapshot_id: Optional[str] = None,
+) -> str:
     """Get sample data rows from a table.
+
+    Authorization:
+        Requires 'TABLE_ADMIN_ROLE' and valid 'tenant_id'.
+
+    Data Access:
+        Read-only access to the scoped tenant database.
+
+    Failure Modes:
+        - Unauthorized: If the required role or tenant_id is missing.
+        - Validation Error: If limit is out of bounds.
+        - Database Error: If the table doesn't exist or connection fails.
 
     Args:
         table_name: The name of the table.
         limit: Number of rows to return (default: 3).
         tenant_id: Tenant identifier (REQUIRED).
+        snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
         JSON string of sample data.
     """
-    import json
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
 
-    # 1. Enforce Tenant ID
-    if tenant_id is None:
-        return json.dumps(
-            {
-                "error": "Tenant ID is required for get_sample_data.",
-                "error_category": "invalid_request",
-            }
-        )
+    if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
+        return err
 
-    # 1.5 Validate Limit
-    if not isinstance(limit, int) or limit <= 0 or limit > 100:
-        return json.dumps(
-            {
-                "error": "Invalid limit. Must be between 1 and 100.",
-                "error_category": "invalid_request",
-            }
-        )
+    # 1. Validate inputs
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+    if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=100):
+        return err
 
     start_time = time.monotonic()
 
@@ -57,6 +67,7 @@ async def handler(table_name: str, limit: int = 3, tenant_id: Optional[int] = No
         metadata=GenericToolMetadata(
             provider=Database.get_query_target_provider(),
             execution_time_ms=execution_time_ms,
+            snapshot_id=snapshot_id,
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

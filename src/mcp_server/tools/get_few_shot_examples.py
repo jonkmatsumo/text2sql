@@ -3,12 +3,22 @@
 from mcp_server.services.rag import get_relevant_examples
 
 TOOL_NAME = "get_few_shot_examples"
+TOOL_DESCRIPTION = "Retrieve similar past queries and their corresponding SQL from the registry."
 
 
 async def handler(query: str, tenant_id: int, limit: int = 3) -> str:
     """Retrieve similar past queries and their corresponding SQL from the registry.
 
-    Use this tool to find examples of how to write SQL for similar questions.
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher) and valid 'tenant_id'.
+
+    Data Access:
+        Read-only access to the few-shot Registry store. Results are scoped by tenant_id.
+
+    Failure Modes:
+        - Unauthorized: If tenant_id is missing or role is insufficient.
+        - Validation Error: If limit is out of bounds.
+        - RAG Error: If the similarity search fails.
 
     Args:
         query: The user query to find similar examples for.
@@ -18,13 +28,13 @@ async def handler(query: str, tenant_id: int, limit: int = 3) -> str:
     Returns:
         JSON string with similar query-SQL pairs.
     """
-    import json
+    from mcp_server.utils.validation import require_tenant_id
 
-    if tenant_id is None:
-        return json.dumps(
-            {
-                "error": "Tenant ID is required for get_few_shot_examples.",
-                "error_category": "invalid_request",
-            }
-        )
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
     return await get_relevant_examples(query, limit, tenant_id)

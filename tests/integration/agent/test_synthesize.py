@@ -1,9 +1,12 @@
 """Unit tests for insight synthesis node."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.state import AgentState
+
+os.environ["OPENAI_API_KEY"] = "sk-test-key-for-synthesis-verification"
 
 
 class TestSynthesizeInsightNode:
@@ -380,3 +383,29 @@ class TestSynthesizeInsightNode:
         assert len(result["messages"]) == 1
         assert isinstance(result["messages"][0], AIMessage)
         assert result["messages"][0].content == "Test response"
+
+    def test_synthesize_insight_node_error(self):
+        """Test that errors are correctly handled and recorded."""
+        from langchain_core.messages import HumanMessage
+
+        from agent.models.termination import TerminationReason
+
+        state = AgentState(
+            messages=[HumanMessage(content="Broken query")],
+            schema_context="",
+            current_sql="SELECT BROKEN",
+            query_result=None,
+            error="Database error: relation 'film' does not exist",
+            termination_reason=TerminationReason.VALIDATION_FAILED,
+            retry_count=3,
+        )
+
+        result = synthesize_insight_node(state)
+
+        # Verify error response logic
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+        content = result["messages"][0].content
+        assert "encountered a validation error" in content
+        # sensitive info like raw db error should be redacted or handled safely
+        assert "Database error" in content

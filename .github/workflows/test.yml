@@ -68,5 +68,6 @@ jobs:
           DB_NAME: control_plane
           DB_USER: postgres
           DB_PASS: test_password
+          TELEMETRY_ENFORCEMENT_MODE: error
         run: |
           uv run pytest -v tests/unit -m "not (requires_db or integration or e2e)"

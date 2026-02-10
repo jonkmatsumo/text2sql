@@ -41,7 +41,7 @@ class TestSemanticWiringVerification:
             ) as MockVectorIndexer,
         ):
 
-            await get_semantic_subgraph("find customers")
+            await get_semantic_subgraph(query="find customers", tenant_id=1)
 
             # Verify VectorIndexer was initialized
             MockVectorIndexer.assert_called_with(store=mock_store)
@@ -92,7 +92,7 @@ class TestSemanticWiringVerification:
             ),
         ):
 
-            await get_semantic_subgraph("find customers")
+            await get_semantic_subgraph(query="find customers", tenant_id=1)
 
             assert mock_indexer.search_nodes_with_metadata.call_count == 2
 

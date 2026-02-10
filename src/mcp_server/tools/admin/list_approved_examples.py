@@ -3,24 +3,45 @@
 from typing import Optional
 
 TOOL_NAME = "list_approved_examples"
+TOOL_DESCRIPTION = "List all few-shot examples in the Registry."
 
 
 async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
     """List all few-shot examples in the Registry.
+
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the few-shot Registry store. Results can be filtered by tenant_id.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Validation Error: If limit is out of bounds.
+        - Database Error: If the registry store is unavailable.
 
     Args:
         tenant_id: Optional tenant identifier to filter by.
         limit: Maximum number of examples to return (default: 50).
 
     Returns:
-        List of example dictionaries with signature_key, question, sql_query, status, created_at.
+        JSON string containing a list of few-shot example dictionaries.
     """
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
 
     start_time = time.monotonic()
+
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
 
     t_id = int(tenant_id) if tenant_id is not None else None
     pairs = await RegistryService.list_examples(tenant_id=t_id, limit=limit)

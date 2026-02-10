@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Optional
 
+from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
 from agent.state.result_completeness import ResultCompleteness
@@ -114,7 +115,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         if not original_sql:
             error = "No SQL query to execute"
             span.set_outputs({"error": error})
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.UNKNOWN,
+            }
 
         # 1. Structural Validation (AST)
         try:
@@ -123,7 +128,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             error = f"Security Policy Violation: {e}"
             logger.warning(f"Blocked unsafe SQL: {original_sql} | Reason: {e}")
             span.set_outputs({"error": error, "validation_failed": True})
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.READONLY_VIOLATION,
+            }
 
         # 2. Tenant Isolation Rewriting
         try:
@@ -150,7 +159,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
             span.set_outputs({"error": error})
             span.set_attribute("error.type", type(e).__name__)
-            return {"error": error, "query_result": None}
+            return {
+                "error": error,
+                "query_result": None,
+                "termination_reason": TerminationReason.PERMISSION_DENIED,
+            }
 
         try:
             tools = await get_mcp_tools()
@@ -162,6 +175,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 return {
                     "error": error,
                     "query_result": None,
+                    "termination_reason": TerminationReason.UNKNOWN,
                 }
 
             # Pre-execution schema validation hook
@@ -275,6 +289,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_partial_reason = envelope.metadata.partial_reason
 
                 result_capability_required = envelope.metadata.capability_required
+                if not result_capability_required and envelope.error:
+                    # Backup from error metadata dict
+                    err_meta = (
+                        envelope.error.to_dict() if hasattr(envelope.error, "to_dict") else {}
+                    )
+                    result_capability_required = err_meta.get(
+                        "required_capability"
+                    ) or err_meta.get("capability_required")
                 result_capability_supported = envelope.metadata.capability_supported
                 result_fallback_policy = envelope.metadata.fallback_policy
                 result_fallback_applied = envelope.metadata.fallback_applied
@@ -324,73 +346,56 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         if error_obj
                         else (envelope.error_message or "Unknown error")
                     )
-                    error_category = error_obj.category if error_obj else None
-                    error_metadata = error_obj.to_dict() if error_obj else None
+                    error_category = error_obj.category if error_obj else "unknown"
+                    error_metadata = error_obj.to_dict() if error_obj else {}
 
-                    if error_msg == "Malformed response payload" or (
-                        error_msg and error_msg.startswith("Invalid payload type")
-                    ):
+                    # Preserve raw malformed string payloads from the tool for diagnostics.
+                    # Only mask parser-generated malformed payloads with a trace-id envelope.
+                    if error_category == "tool_response_malformed":
                         span.set_attribute("tool.response_shape", "malformed")
-                        trace_id = telemetry.get_current_trace_id()
-                        error_msg = (
-                            f"Tool response malformed. Trace ID: {trace_id or 'unavailable'}."
+                        parser_generated_malformed = isinstance(error_msg, str) and (
+                            error_msg == "Malformed response payload"
+                            or error_msg.startswith("Invalid payload type:")
                         )
-                        error_category = "tool_response_malformed"
+                        if parser_generated_malformed:
+                            trace_id = telemetry.get_current_trace_id()
+                            error_msg = (
+                                f"Tool response malformed. Trace ID: {trace_id or 'unavailable'}."
+                            )
                     else:
                         span.set_attribute("tool.response_shape", "error")
 
+                    # Capabilities might be in error_metadata (extra fields) or envelope.metadata
+                    # envelope.metadata is already populated from the envelope at 268+
                     retry_after_seconds = error_obj.retry_after_seconds if error_obj else None
 
-                    if error_metadata:
-                        req_cap = error_metadata.get("required_capability")
-                        if req_cap:
-                            result_capability_required = req_cap
-                            result_capability_supported = error_metadata.get("capability_supported")
-                            result_fallback_policy = error_metadata.get("fallback_policy")
-                            result_fallback_applied = error_metadata.get("fallback_applied")
-                            result_fallback_mode = error_metadata.get("fallback_mode")
-                            provider = error_metadata.get("provider")
-                            if provider:
-                                span.set_attribute("error.provider", provider)
-
-                    span.set_outputs(
-                        {
-                            "error": error_msg,
-                            "error_category": error_category,
-                        }
-                    )
+                    span.set_outputs({"error": error_msg, "error_category": error_category})
                     if error_category:
                         span.set_attribute("error_category", error_category)
                         span.set_attribute("timeout.triggered", error_category == "timeout")
                     if retry_after_seconds is not None:
                         span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
+
                     if error_category == "unsupported_capability":
-                        if result_capability_required:
-                            error_msg = (
-                                "This backend does not support "
-                                f"{result_capability_required} for this request."
-                            )
-                        else:
-                            error_msg = (
-                                "This backend does not support a required capability "
-                                "for this request."
-                            )
-                        if result_capability_required:
-                            span.set_attribute(
-                                "error.required_capability", result_capability_required
-                            )
-                        if result_capability_supported is not None:
-                            span.set_attribute(
-                                "error.capability_supported", bool(result_capability_supported)
-                            )
-                        if result_fallback_policy:
-                            span.set_attribute("error.fallback_policy", str(result_fallback_policy))
-                        if result_fallback_applied is not None:
-                            span.set_attribute(
-                                "error.fallback_applied", bool(result_fallback_applied)
-                            )
-                        if result_fallback_mode:
-                            span.set_attribute("error.fallback_mode", str(result_fallback_mode))
+                        error_msg = (
+                            f"This backend does not support {result_capability_required} "
+                            "for this request."
+                            if result_capability_required
+                            else "This backend does not support a required capability "
+                            "for this request."
+                        )
+
+                    reason = TerminationReason.UNKNOWN
+                    if error_category == "unauthorized":
+                        reason = TerminationReason.PERMISSION_DENIED
+                    elif error_category == "timeout":
+                        reason = TerminationReason.TIMEOUT
+                    elif error_category == "unsupported_capability":
+                        reason = TerminationReason.UNSUPPORTED_CAPABILITY
+                    elif error_category == "tool_response_malformed":
+                        reason = TerminationReason.TOOL_RESPONSE_MALFORMED
+                    elif error_category == "invalid_request":
+                        reason = TerminationReason.INVALID_REQUEST
 
                     drift_hint = _maybe_add_schema_drift(error_msg)
                     return {
@@ -399,6 +404,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "error_category": error_category,
                         "retry_after_seconds": retry_after_seconds,
                         "error_metadata": error_metadata,
+                        "termination_reason": reason,
                         **drift_hint,
                     }
 
@@ -794,7 +800,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                     "result_prefetch_reason": result_prefetch_reason,
                     "retry_after_seconds": None,
-                    "last_tool_output": result if isinstance(result, dict) else None,
+                    "termination_reason": TerminationReason.SUCCESS,
                     "result_completeness": ResultCompleteness.from_parts(
                         rows_returned=rows_returned,
                         is_truncated=bool(result_is_truncated),

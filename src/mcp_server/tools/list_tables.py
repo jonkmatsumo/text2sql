@@ -5,16 +5,25 @@ from typing import Optional
 from dal.database import Database
 
 TOOL_NAME = "list_tables"
+TOOL_DESCRIPTION = "List available tables in the database."
 
 
 async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = None) -> str:
     """List available tables in the database.
 
-    Use this to discover table names.
+    Authorization:
+        Requires 'TABLE_ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read-only access to the metadata store to retrieve table names.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Database Error: If the metadata store is unavailable.
 
     Args:
-        search_term: Optional fuzzy search string to filter table names (e.g. 'pay' -> 'payment').
-        tenant_id: Optional tenant identifier (not required for schema queries).
+        search_term: Optional fuzzy search string to filter table names.
+        tenant_id: Optional tenant identifier.
 
     Returns:
         JSON array of table names as strings.
@@ -22,6 +31,11 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
     import time
 
     start_time = time.monotonic()
+
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
+        return err
 
     store = Database.get_metadata_store()
     tables = await store.list_tables()

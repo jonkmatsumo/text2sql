@@ -3,23 +3,45 @@
 from dal.factory import get_feedback_store
 
 TOOL_NAME = "export_approved_to_fewshot"
+TOOL_DESCRIPTION = "Sync approved interactions to the Few-Shot Registry."
 
 
 async def handler(limit: int = 10) -> str:
     """Sync approved interactions to the Few-Shot Registry.
 
+    Authorization:
+        Requires 'ADMIN_ROLE' for execution.
+
+    Data Access:
+        Read access to the feedback store. Write access to the Few-Shot Registry
+        and the feedback store (to update publish status).
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Validation Error: If limit is out of bounds.
+        - Registry Error: If the few-shot registration fails for an interaction.
+
     Args:
         limit: Maximum number of interactions to export (default: 10).
 
     Returns:
-        Summary of exports with total, published count, and any errors.
+        JSON string containing a summary of exports and any errors encountered.
     """
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
+    from mcp_server.utils.validation import validate_limit
+
+    if err := validate_limit(limit, TOOL_NAME):
+        return err
 
     start_time = time.monotonic()
+
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+        return err
 
     f_store = get_feedback_store()
 

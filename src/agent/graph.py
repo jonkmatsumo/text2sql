@@ -635,6 +635,11 @@ async def run_agent_with_tracing(
             "seed": get_env_int("AGENT_LLM_SEED", None),
             "interactive_session": interactive_session,
             "replay_bundle": replay_bundle,
+            "token_budget": {
+                "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
+                "consumed_tokens": 0,
+            },
+            "error_signatures": [],
         }
 
         # Config with thread_id for checkpointer

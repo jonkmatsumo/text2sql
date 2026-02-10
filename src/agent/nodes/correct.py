@@ -85,6 +85,16 @@ def correct_sql_node(state: AgentState) -> dict:
         else:
             error_category, category_info = classify_error(error or "")
 
+        # Terminal Error Gating (Phase C)
+        if error_category in ("TABLE_INACCESSIBLE", "auth"):
+            span.set_attribute("retry.terminated_early", True)
+            span.set_attribute("retry.terminal_category", error_category)
+            return {
+                "error": f"Terminal error: {error_category}. No correction possible.",
+                "error_category": error_category,
+                "retry_after_seconds": None,
+            }
+
         span.set_attribute("error_category", error_category)
         max_attempts = 3
         span.set_attribute("retry.attempt", retry)
@@ -170,6 +180,38 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 ),
             ]
         )
+
+        from agent.utils.budget import TokenBudget
+
+        budget = TokenBudget.from_dict(state.get("token_budget"))
+        if budget and budget.is_exhausted():
+            span.set_attribute("budget.exhausted", True)
+            return {
+                "error": "Token budget exhausted during correction loop.",
+                "error_category": "budget_exhausted",
+                "retry_after_seconds": None,
+            }
+
+        # Detect repeated error signatures to stop infinite fails
+        from common.utils.hashing import canonical_json_hash
+
+        error_msg_norm = (error or "").strip().lower()
+        # Simple normalization: remove very platform-specific bits if needed,
+        # but here simple trim is okay
+        sig_data = {"category": error_category, "message": error_msg_norm}
+        current_sig = canonical_json_hash(sig_data)
+
+        signatures = state.get("error_signatures", [])
+        if current_sig in signatures:
+            span.set_attribute("retry.stopped_due_to_repeat", True)
+            span.set_attribute("retry.repeated_signature", current_sig)
+            return {
+                "error": f"Stopping correction loop: Repeated error detected ({error_category})",
+                "error_category": "repeated_error",
+                "retry_after_seconds": None,
+            }
+
+        updated_signatures = signatures + [current_sig]
 
         from agent.llm_client import get_llm
         from agent.utils.sql_similarity import compute_sql_similarity
@@ -276,6 +318,12 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         if ema_latency is not None:
             span.set_attribute("retry.budget.ema_latency_seconds", ema_latency)
 
+        if usage_stats and budget:
+            tokens = usage_stats.get("llm.token_usage.total_tokens", 0)
+            budget.consume(tokens)
+            span.set_attribute("budget.consumed_in_step", tokens)
+            span.set_attribute("budget.total_consumed", budget.consumed_tokens)
+
         span.set_outputs(
             {
                 "corrected_sql": corrected_sql,
@@ -293,4 +341,6 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "latency_correct_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,
             "retry_after_seconds": None,
+            "token_budget": budget.to_dict() if budget else state.get("token_budget"),
+            "error_signatures": updated_signatures,
         }

@@ -125,5 +125,5 @@ async def test_recommend_examples_requires_tenant_id():
     response_json = await handler(query="test", tenant_id=None)
     response = json.loads(response_json)
     assert "error" in response
-    assert "Tenant ID is required" in response["error"]
-    assert response["error_category"] == "invalid_request"
+    assert "Tenant ID is required" in response["error"]["message"]
+    assert response["error"]["category"] == "invalid_request"

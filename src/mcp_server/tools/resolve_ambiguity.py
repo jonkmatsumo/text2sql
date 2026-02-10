@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from mcp_server.services.ambiguity.resolver import AmbiguityResolver
 
 TOOL_NAME = "resolve_ambiguity"
+TOOL_DESCRIPTION = "Resolve potential ambiguities in a user query against provided schema context."
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,17 @@ def get_resolver() -> AmbiguityResolver:
 
 async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     """Resolve potential ambiguities in a user query against provided schema context.
+
+    Authorization:
+        Requires 'SQL_USER_ROLE' (or higher).
+
+    Data Access:
+        Read-only access to the internal ambiguity resolution logic and provided
+        schema context.
+
+    Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Resolution Failed: If the resolver encounters internal errors during analysis.
 
     Args:
         query: The user query to analyze for ambiguities.
