@@ -238,6 +238,36 @@ class TestValidateSql:
         assert "metadata" in result_dict
         assert isinstance(result_dict["violations"], list)
 
+    def test_column_allowlist_warn_mode(self):
+        """Column allowlist warn mode should keep query valid but emit warnings."""
+        result = validate_sql(
+            "SELECT c.email FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="warn",
+        )
+        assert result.is_valid is True
+        assert result.violations == []
+        assert any("column allowlist" in warning.lower() for warning in result.warnings)
+
+    def test_column_allowlist_block_mode(self):
+        """Column allowlist block mode should reject non-allowlisted projections."""
+        result = validate_sql(
+            "SELECT c.email FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.violation_type == ViolationType.COLUMN_ALLOWLIST for v in result.violations)
+
+    def test_column_allowlist_allows_valid_projection(self):
+        """Allowlisted projected columns should pass in block mode."""
+        result = validate_sql(
+            "SELECT c.name FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="block",
+        )
+        assert result.is_valid is True
+
 
 class TestSecurityViolation:
     """Tests for SecurityViolation dataclass."""

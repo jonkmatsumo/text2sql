@@ -223,3 +223,66 @@ class TestValidateSqlNode:
 
         assert result.get("error") is None
         assert result["ast_validation_result"]["is_valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_column_allowlist_from_schema_context_blocks_projection(
+        self, base_state, monkeypatch
+    ):
+        """Block mode should reject projected columns not present in schema context allowlist."""
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "block")
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", "true")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["raw_schema_context"] = [
+            {"type": "Table", "name": "customers"},
+            {"type": "Column", "table": "customers", "name": "id"},
+            {"type": "Column", "table": "customers", "name": "name"},
+        ]
+        base_state["current_sql"] = "SELECT customers.email FROM customers"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is not None
+        assert "column allowlist" in result["error"].lower()
+        assert result["ast_validation_result"]["is_valid"] is False
+
+    @pytest.mark.asyncio
+    async def test_column_allowlist_warn_mode_allows_execution(self, base_state, monkeypatch):
+        """Warn mode should not invalidate SQL even if a projected column is not allowlisted."""
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "warn")
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", "true")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["raw_schema_context"] = [
+            {"type": "Table", "name": "customers"},
+            {"type": "Column", "table": "customers", "name": "id"},
+        ]
+        base_state["current_sql"] = "SELECT customers.email FROM customers"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is None
+        assert result["ast_validation_result"]["is_valid"] is True
+        assert result["ast_validation_result"]["warnings"]

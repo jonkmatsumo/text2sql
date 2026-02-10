@@ -89,6 +89,26 @@ def _parse_table_allowlist(raw_allowlist: Optional[str]) -> Set[str]:
     return tables
 
 
+def _parse_column_allowlist(raw_allowlist: Optional[str]) -> Dict[str, Set[str]]:
+    columns: Dict[str, Set[str]] = {}
+    if not raw_allowlist:
+        return columns
+
+    for item in raw_allowlist.split(","):
+        normalized = item.strip().lower()
+        if not normalized:
+            continue
+        if "." not in normalized:
+            continue
+        table_name, column_name = normalized.split(".", 1)
+        table_name = table_name.strip()
+        column_name = column_name.strip()
+        if not table_name or not column_name:
+            continue
+        columns.setdefault(table_name, set()).add(column_name)
+    return columns
+
+
 def _schema_tables_from_state(state: AgentState) -> Set[str]:
     tables: Set[str] = set()
 
@@ -115,6 +135,30 @@ def _schema_tables_from_state(state: AgentState) -> Set[str]:
     return tables
 
 
+def _schema_columns_from_state(state: AgentState) -> Dict[str, Set[str]]:
+    columns: Dict[str, Set[str]] = {}
+    raw_schema_context = state.get("raw_schema_context") or []
+    if not isinstance(raw_schema_context, list):
+        return columns
+
+    for node in raw_schema_context:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type") or "").lower()
+        if node_type != "column":
+            continue
+        table_name = node.get("table")
+        column_name = node.get("name")
+        if not isinstance(table_name, str) or not isinstance(column_name, str):
+            continue
+        normalized_table = table_name.strip().lower()
+        normalized_column = column_name.strip().lower()
+        if not normalized_table or not normalized_column:
+            continue
+        columns.setdefault(normalized_table, set()).add(normalized_column)
+    return columns
+
+
 def _resolve_table_allowlist(state: AgentState) -> Set[str]:
     """Resolve per-tenant table allowlist from config or schema context."""
     tenant_id = state.get("tenant_id")
@@ -126,6 +170,28 @@ def _resolve_table_allowlist(state: AgentState) -> Set[str]:
     if configured_tables:
         return configured_tables
     return _schema_tables_from_state(state)
+
+
+def _resolve_column_allowlist_mode() -> str:
+    mode = (get_env_str("AGENT_COLUMN_ALLOWLIST_MODE", "warn") or "warn").strip().lower()
+    if mode not in {"warn", "block", "off"}:
+        return "warn"
+    return mode
+
+
+def _resolve_column_allowlist(state: AgentState) -> Dict[str, Set[str]]:
+    allowlist: Dict[str, Set[str]] = {}
+
+    use_schema_context = get_env_bool("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", True) is True
+    if use_schema_context:
+        for table_name, columns in _schema_columns_from_state(state).items():
+            allowlist.setdefault(table_name, set()).update(columns)
+
+    configured = _parse_column_allowlist(get_env_str("AGENT_COLUMN_ALLOWLIST", ""))
+    for table_name, columns in configured.items():
+        allowlist.setdefault(table_name, set()).update(columns)
+
+    return allowlist
 
 
 async def validate_sql_node(state: AgentState) -> dict:
@@ -228,7 +294,19 @@ async def validate_sql_node(state: AgentState) -> dict:
         allowlist_enabled = bool(allowed_tables)
         span.set_attribute("validation.table_allowlist_enabled", allowlist_enabled)
         span.set_attribute("validation.table_allowlist_count", len(allowed_tables))
-        result = validate_sql(sql_query, allowed_tables=allowed_tables or None)
+        allowed_columns = _resolve_column_allowlist(state)
+        column_allowlist_mode = _resolve_column_allowlist_mode()
+        span.set_attribute("validation.column_allowlist_mode", column_allowlist_mode)
+        span.set_attribute(
+            "validation.column_allowlist_tables_count",
+            len(allowed_columns),
+        )
+        result = validate_sql(
+            sql_query,
+            allowed_tables=allowed_tables or None,
+            allowed_columns=allowed_columns or None,
+            column_allowlist_mode=column_allowlist_mode,
+        )
 
         # Log validation result
         span.set_attribute("is_valid", str(result.is_valid))

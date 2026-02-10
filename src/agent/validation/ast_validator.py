@@ -33,6 +33,7 @@ class ViolationType(str, Enum):
     SYNTAX_ERROR = "syntax_error"
     COMPLEXITY_LIMIT = "complexity_limit"
     SENSITIVE_COLUMN = "sensitive_column"
+    COLUMN_ALLOWLIST = "column_allowlist"
 
 
 @dataclass
@@ -375,6 +376,129 @@ def _extract_sensitive_columns(ast: exp.Expression) -> list[str]:
     return sorted(sensitive)
 
 
+def _normalize_allowed_columns(
+    allowed_columns: Optional[dict[str, set[str]]],
+) -> dict[str, set[str]]:
+    normalized: dict[str, set[str]] = {}
+    if not allowed_columns:
+        return normalized
+
+    for table_name, columns in allowed_columns.items():
+        normalized_table = str(table_name).strip().lower()
+        if not normalized_table:
+            continue
+        normalized_columns = {
+            str(column_name).strip().lower()
+            for column_name in (columns or set())
+            if str(column_name).strip()
+        }
+        if normalized_columns:
+            normalized[normalized_table] = normalized_columns
+    return normalized
+
+
+def _extract_table_alias_map(ast: exp.Expression, cte_names: set[str]) -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for table in ast.find_all(exp.Table):
+        table_name = table.name.lower() if table.name else ""
+        if not table_name or table_name in cte_names:
+            continue
+        alias = table.alias_or_name.lower() if table.alias_or_name else ""
+        if alias:
+            alias_map[alias] = table_name
+    return alias_map
+
+
+def _validate_column_allowlist(
+    ast: exp.Expression,
+    allowed_columns: Optional[dict[str, set[str]]],
+    mode: str,
+) -> tuple[list[SecurityViolation], list[str]]:
+    """Validate selected columns against an allowlist.
+
+    This guard is intentionally scoped to projection columns to avoid false
+    positives on predicates and join conditions.
+    """
+    normalized_allowed_columns = _normalize_allowed_columns(allowed_columns)
+    if not normalized_allowed_columns or mode == "off":
+        return [], []
+
+    cte_names = _extract_cte_names(ast)
+    alias_map = _extract_table_alias_map(ast, cte_names)
+
+    violations: list[SecurityViolation] = []
+    warnings: list[str] = []
+
+    for select_node in ast.find_all(exp.Select):
+        for projection in select_node.expressions or []:
+            projected_columns: list[exp.Column] = []
+            if isinstance(projection, exp.Star):
+                message = (
+                    "Column allowlist warning: wildcard projection (*) is not explicitly "
+                    "allowlisted."
+                )
+                details = {
+                    "reason": "column_not_allowlisted",
+                    "column": "*",
+                    "table": None,
+                }
+                violation = SecurityViolation(
+                    violation_type=ViolationType.COLUMN_ALLOWLIST,
+                    message=message,
+                    details=details,
+                )
+                if mode == "block":
+                    violations.append(violation)
+                else:
+                    warnings.append(message)
+                continue
+
+            if isinstance(projection, exp.Column):
+                projected_columns = [projection]
+            else:
+                projected_columns = list(projection.find_all(exp.Column))
+
+            for column in projected_columns:
+                column_name = column.name.lower() if column.name else ""
+                if not column_name:
+                    continue
+
+                # Skip unqualified columns to avoid alias/CTE ambiguity.
+                table_ref = column.table.lower() if column.table else ""
+                if not table_ref:
+                    continue
+
+                table_name = alias_map.get(table_ref, table_ref)
+                allowed_for_table = normalized_allowed_columns.get(table_name)
+                # Unknown table mapping is treated as non-enforceable to avoid
+                # false positives on derived tables/CTEs.
+                if allowed_for_table is None:
+                    continue
+                if column_name in allowed_for_table:
+                    continue
+
+                message = (
+                    f"Column allowlist violation: column '{table_name}.{column_name}' "
+                    "is not allowed."
+                )
+                details = {
+                    "reason": "column_not_allowlisted",
+                    "table": table_name,
+                    "column": column_name,
+                }
+                violation = SecurityViolation(
+                    violation_type=ViolationType.COLUMN_ALLOWLIST,
+                    message=message,
+                    details=details,
+                )
+                if mode == "block":
+                    violations.append(violation)
+                else:
+                    warnings.append(message)
+
+    return violations, warnings
+
+
 def extract_metadata(ast: exp.Expression) -> SQLMetadata:
     """
     Extract metadata from SQL AST for audit logging and complexity analysis.
@@ -455,7 +579,11 @@ def validate_complexity(ast: exp.Expression) -> list[SecurityViolation]:
 
 
 def validate_sql(
-    sql: str, dialect: str = "postgres", allowed_tables: Optional[set[str]] = None
+    sql: str,
+    dialect: str = "postgres",
+    allowed_tables: Optional[set[str]] = None,
+    allowed_columns: Optional[dict[str, set[str]]] = None,
+    column_allowlist_mode: str = "warn",
 ) -> ASTValidationResult:
     """
     Complete SQL validation: parse, security check, complexity check, and metadata extraction.
@@ -466,6 +594,8 @@ def validate_sql(
         sql: SQL query string
         dialect: SQL dialect (default: postgres)
         allowed_tables: Optional allowlist used for set-operation branch checks.
+        allowed_columns: Optional table->columns allowlist used for projection checks.
+        column_allowlist_mode: "warn" (default), "block", or "off".
 
     Returns:
         ASTValidationResult with validation status, violations, and metadata
@@ -489,9 +619,22 @@ def validate_sql(
     violations = validate_security(ast, allowed_tables=allowed_tables)
     warnings: list[str] = []
 
+    column_mode = (column_allowlist_mode or "warn").strip().lower()
+    if column_mode not in {"warn", "block", "off"}:
+        column_mode = "warn"
+
     # Validate complexity
     complexity_violations = validate_complexity(ast)
     violations.extend(complexity_violations)
+
+    # Optional column-level allowlist
+    column_violations, column_warnings = _validate_column_allowlist(
+        ast,
+        allowed_columns=allowed_columns,
+        mode=column_mode,
+    )
+    violations.extend(column_violations)
+    warnings.extend(column_warnings)
 
     # Optional sensitive-column guardrail
     sensitive_columns = _extract_sensitive_columns(ast)
