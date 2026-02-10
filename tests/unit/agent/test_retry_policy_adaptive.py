@@ -1,6 +1,7 @@
 """Tests for adaptive retry policy behavior."""
 
 from agent.graph import route_after_execution
+from common.constants.reason_codes import RetryDecisionReason
 
 
 def test_default_policy_is_adaptive_and_stops_non_retryable_classification(monkeypatch):
@@ -179,3 +180,74 @@ def test_retry_suppressed_insufficient_budget(monkeypatch):
             found = True
             assert call[0][1]["reason_code"] == "INSUFFICIENT_BUDGET"
     assert found
+
+
+def test_retry_skip_reason_is_recorded_in_error_metadata(monkeypatch):
+    """Skipped retries should include stable retry_reason metadata."""
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+
+    state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False, "provider": "postgres"},
+        "retry_count": 0,
+    }
+
+    result = route_after_execution(state)
+
+    assert result == "failed"
+    assert state["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    assert (
+        state["error_metadata"]["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    )
+    assert state["error_metadata"]["retry_will_retry"] is False
+
+
+def test_static_vs_adaptive_non_retryable_semantics_are_explicit(monkeypatch):
+    """Static burns retry budget for non-retryable metadata while adaptive stops immediately."""
+    adaptive_state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 0,
+    }
+    static_state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 0,
+    }
+
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    adaptive_decision = route_after_execution(adaptive_state)
+
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "static")
+    static_decision = route_after_execution(static_state)
+
+    assert adaptive_decision == "failed"
+    assert adaptive_state["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    assert static_decision == "correct"
+    assert static_state.get("retry_reason") is None
+
+
+def test_retry_decision_metrics_are_emitted(monkeypatch):
+    """Retry decisions should emit low-cardinality counter/histogram metrics."""
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 2,
+    }
+
+    from unittest.mock import patch
+
+    with (
+        patch("agent.graph.agent_metrics.add_counter") as mock_add_counter,
+        patch("agent.graph.agent_metrics.record_histogram") as mock_record_histogram,
+    ):
+        decision = route_after_execution(state)
+
+    assert decision == "failed"
+    mock_add_counter.assert_called()
+    mock_record_histogram.assert_called()

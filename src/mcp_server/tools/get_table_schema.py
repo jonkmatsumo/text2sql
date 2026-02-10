@@ -51,7 +51,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
 
     for table in table_names:
         try:
-            definition_json = await store.get_table_definition(table)
+            definition_json = await store.get_table_definition(table, tenant_id=tenant_id)
             definition = json.loads(definition_json)
             schema_list.append(definition)
         except Exception as e:

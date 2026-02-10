@@ -7,6 +7,7 @@ This module provides:
 - Structured error objects for the healer loop
 """
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -15,9 +16,12 @@ import sqlglot
 from sqlglot import exp
 
 from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
-from common.config.env import get_env_int
+from common.config.env import get_env_bool, get_env_int
 from common.constants.reason_codes import ValidationRefusalReason
+from common.policy.sql_policy import is_sensitive_column_name
 from common.sql.dialect import normalize_sqlglot_dialect
+
+logger = logging.getLogger(__name__)
 
 
 class ViolationType(str, Enum):
@@ -28,6 +32,7 @@ class ViolationType(str, Enum):
     DANGEROUS_PATTERN = "dangerous_pattern"
     SYNTAX_ERROR = "syntax_error"
     COMPLEXITY_LIMIT = "complexity_limit"
+    SENSITIVE_COLUMN = "sensitive_column"
 
 
 @dataclass
@@ -76,6 +81,7 @@ class ASTValidationResult:
 
     is_valid: bool
     violations: list[SecurityViolation] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     metadata: Optional[SQLMetadata] = None
     parsed_sql: Optional[str] = None  # Normalized/transpiled SQL
 
@@ -84,6 +90,7 @@ class ASTValidationResult:
         return {
             "is_valid": self.is_valid,
             "violations": [v.to_dict() for v in self.violations],
+            "warnings": self.warnings,
             "metadata": self.metadata.to_dict() if self.metadata else None,
             "parsed_sql": self.parsed_sql,
         }
@@ -359,6 +366,15 @@ def _validate_set_operation_allowlist(
     return violations
 
 
+def _extract_sensitive_columns(ast: exp.Expression) -> list[str]:
+    sensitive: set[str] = set()
+    for column in ast.find_all(exp.Column):
+        column_name = column.name.lower() if column.name else ""
+        if is_sensitive_column_name(column_name):
+            sensitive.add(column_name)
+    return sorted(sensitive)
+
+
 def extract_metadata(ast: exp.Expression) -> SQLMetadata:
     """
     Extract metadata from SQL AST for audit logging and complexity analysis.
@@ -471,10 +487,35 @@ def validate_sql(
 
     # Validate security
     violations = validate_security(ast, allowed_tables=allowed_tables)
+    warnings: list[str] = []
 
     # Validate complexity
     complexity_violations = validate_complexity(ast)
     violations.extend(complexity_violations)
+
+    # Optional sensitive-column guardrail
+    sensitive_columns = _extract_sensitive_columns(ast)
+    if sensitive_columns:
+        sensitive_message = (
+            "Sensitive column reference detected: " + ", ".join(sensitive_columns) + "."
+        )
+        if get_env_bool("AGENT_BLOCK_SENSITIVE_COLUMNS", False):
+            violations.append(
+                SecurityViolation(
+                    violation_type=ViolationType.SENSITIVE_COLUMN,
+                    message=sensitive_message,
+                    details={
+                        "columns": sensitive_columns,
+                        "reason": "sensitive_column_reference",
+                    },
+                )
+            )
+        else:
+            warnings.append(sensitive_message)
+            logger.warning(
+                "%s Query allowed because AGENT_BLOCK_SENSITIVE_COLUMNS=false.",
+                sensitive_message,
+            )
 
     # Extract metadata (even if there are violations, for audit purposes)
     metadata = extract_metadata(ast)
@@ -488,6 +529,7 @@ def validate_sql(
     return ASTValidationResult(
         is_valid=len(violations) == 0,
         violations=violations,
+        warnings=warnings,
         metadata=metadata,
         parsed_sql=parsed_sql,
     )

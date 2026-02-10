@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_server.tools.registry import CANONICAL_TOOLS
 from mcp_server.utils.tracing import trace_tool
 
 
@@ -183,3 +184,83 @@ async def test_execute_sql_truncation_parse_failure_is_non_fatal():
 
     assert attrs["mcp.tool.response.truncated"] is False
     assert attrs["mcp.tool.response.truncation_parse_failed"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", sorted(CANONICAL_TOOLS - {"execute_sql_query"}))
+async def test_all_non_execute_tools_emit_bounded_metadata_shape(tool_name: str):
+    """Every non-execute tool should emit consistent truncation metadata shape."""
+    mock_tracer, mock_span = _make_mock_tracer()
+    large_payload = {
+        "result": [{"id": i, "blob": "x" * 256} for i in range(20)],
+        "metadata": {"provider": "postgres"},
+    }
+
+    async def fake_handler(**_kwargs):
+        return json.dumps(large_payload)
+
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=mock_tracer),
+        patch("mcp_server.utils.tool_output.get_env_int", return_value=450),
+    ):
+        traced = trace_tool(tool_name)(fake_handler)
+        response = await traced(tenant_id=11)
+
+    parsed = json.loads(response)
+    metadata = parsed["metadata"]
+
+    assert "is_truncated" in metadata
+    assert "items_returned" in metadata
+    assert "items_total" in metadata
+    assert "bytes_returned" in metadata
+    assert "bytes_total" in metadata
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call[0]
+        attrs[key] = value
+    assert attrs["mcp.tool.response.truncation_parse_failed"] is False
+
+
+@pytest.mark.asyncio
+async def test_non_execute_raw_string_payload_is_wrapped_and_bounded():
+    """Raw string outputs should still be bounded with truncation metadata."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+
+    async def raw_handler():
+        return "y" * 2000
+
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=mock_tracer),
+        patch("mcp_server.utils.tool_output.get_env_int", return_value=300),
+    ):
+        traced = trace_tool("reload_patterns")(raw_handler)
+        response = await traced()
+
+    parsed = json.loads(response)
+    assert "metadata" in parsed
+    assert parsed["metadata"]["is_truncated"] is True
+    assert parsed["metadata"]["bytes_total"] >= parsed["metadata"]["bytes_returned"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_metrics_emitted_for_non_execute_tool():
+    """Truncated non-execute responses should emit truncation metrics."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+
+    async def bounded_handler():
+        return json.dumps(
+            {"result": [{"blob": "x" * 400} for _ in range(10)], "metadata": {"provider": "pg"}}
+        )
+
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=mock_tracer),
+        patch("mcp_server.utils.tool_output.get_env_int", return_value=300),
+        patch("mcp_server.utils.tracing.mcp_metrics.add_counter") as mock_add_counter,
+        patch("mcp_server.utils.tracing.mcp_metrics.record_histogram") as mock_record_histogram,
+    ):
+        traced = trace_tool("list_tables")(bounded_handler)
+        await traced()
+
+    mock_record_histogram.assert_called()
+    mock_add_counter.assert_called()

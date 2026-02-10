@@ -61,3 +61,12 @@ def test_schema_snapshot_id_ttl_expiry_and_refresh(monkeypatch):
 
     set_cached_schema_snapshot_id(tenant_id=42, snapshot_id="fp-new", now=101.1)
     assert get_cached_schema_snapshot_id(tenant_id=42, now=101.2) == "fp-new"
+
+
+def test_schema_snapshot_id_ignores_stale_race_writes():
+    """Older racing writes should not overwrite a newer snapshot."""
+    set_cached_schema_snapshot_id(tenant_id=9, snapshot_id="fp-old", now=200.0)
+    set_cached_schema_snapshot_id(tenant_id=9, snapshot_id="fp-new", now=201.0)
+    set_cached_schema_snapshot_id(tenant_id=9, snapshot_id="fp-stale", now=200.5)
+
+    assert get_cached_schema_snapshot_id(tenant_id=9, now=201.1) == "fp-new"

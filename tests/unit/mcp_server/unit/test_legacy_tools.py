@@ -26,8 +26,9 @@ class TestLegacyTools:
         """Test list_tables uses MetadataStore."""
         calls = {"count": 0}
 
-        async def list_tables_async():
+        async def list_tables_async(*, tenant_id):
             calls["count"] += 1
+            assert tenant_id == 1
             return ["users", "orders"]
 
         mock_store = MagicMock()
@@ -46,8 +47,9 @@ class TestLegacyTools:
         """Test get_table_schema uses MetadataStore."""
         calls = {"tables": []}
 
-        async def get_table_definition_async(table_name):
+        async def get_table_definition_async(table_name, *, tenant_id):
             calls["tables"].append(table_name)
+            assert tenant_id == 1
             return json.dumps({"table_name": "t1", "columns": []})
 
         mock_store = MagicMock()

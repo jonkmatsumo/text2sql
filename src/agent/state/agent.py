@@ -83,6 +83,7 @@ class AgentState(TypedDict):
     error: Optional[str]
     error_metadata: Optional[dict]
     retry_after_seconds: Optional[float]
+    retry_reason: Optional[str]
 
     # Counter to track retries and prevent infinite loops
     retry_count: int

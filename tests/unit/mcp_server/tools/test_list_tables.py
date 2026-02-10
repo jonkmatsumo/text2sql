@@ -35,7 +35,7 @@ class TestListTables:
         ):
             result = await handler(tenant_id=1)
 
-            mock_store.list_tables.assert_called_once()
+            mock_store.list_tables.assert_called_once_with(tenant_id=1)
             data = json.loads(result)
             assert data["schema_version"] == "1.0"
             assert len(data["result"]) == 3

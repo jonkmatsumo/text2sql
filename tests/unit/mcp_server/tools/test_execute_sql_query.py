@@ -301,3 +301,32 @@ class TestExecuteSqlQuery:
         assert data["error"]["category"] == "invalid_request"
         assert "Forbidden function" in data["error"]["message"]
         assert "PG_SLEEP" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "provider,sql_query",
+        [
+            ("snowflake", "UPDATE users SET name = 'x' WHERE id = 1"),
+            ("bigquery", "INSERT INTO dataset.users(id) VALUES (1)"),
+            ("redshift", "DELETE FROM users WHERE id = 1"),
+        ],
+    )
+    async def test_provider_mutation_policy_rejects_before_execution(
+        self, provider: str, sql_query: str
+    ):
+        """Mutations must be blocked deterministically before provider execution starts."""
+        from dal.database import Database
+
+        Database._query_target_provider = provider
+        mock_get_connection = MagicMock()
+
+        with patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+        ):
+            result = await handler(sql_query, tenant_id=7)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "invalid_request"
+        assert data["error"]["provider"] == provider
+        assert "Forbidden statement type" in data["error"]["message"]
+        mock_get_connection.assert_not_called()

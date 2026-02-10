@@ -10,6 +10,9 @@ from typing import Optional, Set
 import sqlglot
 from sqlglot import exp
 
+from common.config.env import get_env_bool
+from common.policy.sql_policy import is_sensitive_column_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +121,8 @@ class PolicyEnforcer:
         allowed_tables = cls.get_allowed_tables()
 
         for statement in parsed:
+            sensitive_columns: set[str] = set()
+
             # 1. Enforce specific statement types
             if statement.key not in cls.ALLOWED_STATEMENT_TYPES:
                 # Allow specific SET commands if needed for session config, but generally block
@@ -163,6 +168,21 @@ class PolicyEnforcer:
                         actual_name = node.name.lower()
                         if actual_name in cls.BLOCKED_FUNCTIONS:
                             raise ValueError(f"Function '{actual_name}' is restricted.")
+
+                if isinstance(node, exp.Column):
+                    column_name = node.name.lower() if node.name else ""
+                    if is_sensitive_column_name(column_name):
+                        sensitive_columns.add(column_name)
+
+            if sensitive_columns:
+                sensitive_list = ", ".join(sorted(sensitive_columns))
+                message = f"Sensitive column reference detected: {sensitive_list}."
+                if get_env_bool("AGENT_BLOCK_SENSITIVE_COLUMNS", False):
+                    raise ValueError(message)
+                logger.warning(
+                    "%s Query allowed because AGENT_BLOCK_SENSITIVE_COLUMNS=false.",
+                    message,
+                )
 
         return True
 

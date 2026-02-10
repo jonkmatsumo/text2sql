@@ -266,3 +266,52 @@ def apply_truncation_metadata(payload: Any, meta: Dict[str, Any]) -> Any:
 
     out["metadata"] = metadata
     return out
+
+
+def _normalize_non_execute_payload(response: Any) -> tuple[Any, str]:
+    """Normalize non-execute responses into a JSON-like payload for bounding."""
+    if isinstance(response, str):
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, (dict, list)):
+                return parsed, "json_string"
+        except Exception:
+            pass
+        return {"result": response, "metadata": {}}, "raw_string"
+
+    if isinstance(response, (dict, list)):
+        return response, "native"
+
+    if hasattr(response, "model_dump"):
+        try:
+            dumped = response.model_dump(exclude_none=True)
+            if isinstance(dumped, (dict, list)):
+                return dumped, "model"
+        except Exception:
+            pass
+
+    return {"result": response, "metadata": {}}, "opaque"
+
+
+def bound_non_execute_tool_response(response: Any) -> tuple[Any, Dict[str, Any]]:
+    """Bound non-execute responses and return metadata for telemetry attributes."""
+    payload, payload_kind = _normalize_non_execute_payload(response)
+    bounded_payload, meta = bound_tool_output(payload)
+    bounded_payload = apply_truncation_metadata(bounded_payload, meta)
+
+    if payload_kind in {"json_string", "raw_string"}:
+        final_response = json.dumps(bounded_payload, default=str, separators=(",", ":"))
+    elif payload_kind == "model" and hasattr(type(response), "model_validate"):
+        try:
+            final_response = type(response).model_validate(bounded_payload)
+        except Exception:
+            final_response = bounded_payload
+    else:
+        final_response = bounded_payload
+
+    return final_response, {
+        "truncated": bool(meta.get("truncated", False)),
+        "returned_bytes": int(meta.get("returned_bytes") or 0),
+        "payload_kind": payload_kind,
+        "parse_failed": payload_kind == "raw_string",
+    }

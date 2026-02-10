@@ -31,9 +31,10 @@ class _LazyEngine:
 def get_engine():
     """Return the SQLAlchemy engine, initializing it lazily when needed."""
     global _engine
+    # Always honor explicit engine overrides (e.g., unit tests patching module.engine)
+    if engine is not None and not isinstance(engine, _LazyEngine):
+        return engine
     if _engine is None:
-        if engine is not None and not isinstance(engine, _LazyEngine):
-            return engine
         _engine = create_engine(settings.POSTGRES_URL)
     return _engine
 

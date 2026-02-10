@@ -233,6 +233,46 @@ class TestSpanContract:
         ]
         assert missing == []
 
+    def test_workflow_nodes_have_span_contracts(self):
+        """Workflow graph nodes must map to telemetry span contracts."""
+        from agent.graph import create_workflow
+        from agent.telemetry_schema import AGENT_GRAPH_NODE_SPAN_NAMES, SPAN_CONTRACTS
+
+        workflow = create_workflow()
+        node_names = sorted(workflow.nodes.keys())
+
+        unmapped_nodes = [node for node in node_names if node not in AGENT_GRAPH_NODE_SPAN_NAMES]
+        assert unmapped_nodes == []
+
+        missing_contracts = []
+        for node in node_names:
+            span_name = AGENT_GRAPH_NODE_SPAN_NAMES[node]
+            if span_name not in SPAN_CONTRACTS:
+                missing_contracts.append(node)
+        assert missing_contracts == []
+
+    def test_span_contract_required_fields_are_non_empty_and_stable(self):
+        """Span contracts should define stable required fields for enforcement."""
+        from agent.telemetry_schema import SPAN_CONTRACTS
+
+        for span_name, contract in SPAN_CONTRACTS.items():
+            assert contract.name == span_name
+            assert contract.required
+            assert "event.name" in contract.required
+
+            all_required = set(contract.required) | set(contract.required_on_error)
+            for field in all_required:
+                assert isinstance(field, str)
+                assert field.strip()
+                assert field == field.strip()
+
+        assert {"result.is_truncated", "result.rows_returned"}.issubset(
+            SPAN_CONTRACTS["execute_sql"].required
+        )
+        assert {"result.is_truncated", "result.rows_returned"}.issubset(
+            SPAN_CONTRACTS["synthesize_insight"].required
+        )
+
     def test_span_contracts_are_frozen(self):
         """Test that SpanContract instances are immutable."""
         from agent.telemetry_schema import SpanContract

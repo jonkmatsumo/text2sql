@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.nodes.cache_lookup import cache_lookup_node, reset_cache_state
 from agent.state import AgentState
+from agent.utils.schema_cache import set_cached_schema_snapshot_id
 
 
 def _mock_span_ctx(mock_start_span):
@@ -147,3 +148,57 @@ async def test_cache_hit_without_snapshot_allowed(mock_get_tools, mock_start_spa
 
     assert result["from_cache"] is True
     assert result["current_sql"] == "SELECT 1"
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.cache_lookup.telemetry.start_span")
+@patch("agent.nodes.cache_lookup.get_mcp_tools")
+async def test_cache_snapshot_ttl_expiry_forces_refresh_during_long_run(
+    mock_get_tools, mock_start_span, monkeypatch
+):
+    """Expired snapshot cache should trigger a fresh schema lookup during cache validation."""
+    _mock_span_ctx(mock_start_span)
+    reset_cache_state()
+    monkeypatch.setenv("SCHEMA_CACHE_TTL_SECONDS", "1")
+    set_cached_schema_snapshot_id(tenant_id=1, snapshot_id="fp-old", now=100.0)
+
+    cache_tool = AsyncMock()
+    cache_tool.name = "lookup_cache"
+    cache_tool.ainvoke = AsyncMock(
+        return_value=json.dumps(
+            {
+                "cache_id": "cache-1",
+                "value": "SELECT 1",
+                "similarity": 1.0,
+                "metadata": {"schema_snapshot_id": "fp-old"},
+            }
+        )
+    )
+
+    subgraph_tool = AsyncMock()
+    subgraph_tool.name = "get_semantic_subgraph"
+    subgraph_tool.ainvoke = AsyncMock(
+        return_value=json.dumps({"nodes": [{"type": "Table", "name": "t2"}]})
+    )
+    mock_get_tools.return_value = [cache_tool, subgraph_tool]
+
+    state = AgentState(
+        messages=[HumanMessage(content="Show data")],
+        schema_context="",
+        current_sql=None,
+        query_result=None,
+        error=None,
+        retry_count=0,
+        tenant_id=1,
+    )
+
+    with (
+        patch("agent.nodes.cache_lookup.get_env_bool", return_value=True),
+        patch("agent.utils.schema_fingerprint.resolve_schema_snapshot_id", return_value="fp-new"),
+        patch("agent.utils.schema_cache.time.monotonic", return_value=102.0),
+    ):
+        result = await cache_lookup_node(state)
+
+    assert result["from_cache"] is False
+    assert result["rejected_cache_context"]["reason"] == "schema_snapshot_mismatch"
+    subgraph_tool.ainvoke.assert_awaited_once()

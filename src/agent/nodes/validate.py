@@ -234,6 +234,7 @@ async def validate_sql_node(state: AgentState) -> dict:
         span.set_attribute("is_valid", str(result.is_valid))
         span.set_attribute("validation.is_valid", result.is_valid)
         span.set_attribute("violation_count", str(len(result.violations)))
+        span.set_attribute("validation.warning_count", len(result.warnings))
 
         if result.metadata:
             span.set_attribute("table_count", str(len(result.metadata.table_lineage)))
@@ -252,6 +253,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                     "is_valid": False,
                     "error": structured_error,
                     "violations": [v.to_dict() for v in result.violations],
+                    "warnings": result.warnings,
                 }
             )
 
@@ -272,6 +274,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "is_valid": True,
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
                 "column_usage": result.metadata.column_usage if result.metadata else [],
+                "warnings": result.warnings,
             }
         )
 
