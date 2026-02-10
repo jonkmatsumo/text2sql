@@ -27,6 +27,9 @@ class ErrorMetadata(BaseModel):
     retry_after_seconds: Optional[float] = Field(
         None, description="Suggested delay before retrying"
     )
+    retry_reason: Optional[str] = Field(
+        None, description="Stable reason code when retry is skipped or stopped"
+    )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses/telemetry."""

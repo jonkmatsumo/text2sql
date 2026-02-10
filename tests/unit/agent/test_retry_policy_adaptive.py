@@ -1,6 +1,7 @@
 """Tests for adaptive retry policy behavior."""
 
 from agent.graph import route_after_execution
+from common.constants.reason_codes import RetryDecisionReason
 
 
 def test_default_policy_is_adaptive_and_stops_non_retryable_classification(monkeypatch):
@@ -179,3 +180,24 @@ def test_retry_suppressed_insufficient_budget(monkeypatch):
             found = True
             assert call[0][1]["reason_code"] == "INSUFFICIENT_BUDGET"
     assert found
+
+
+def test_retry_skip_reason_is_recorded_in_error_metadata(monkeypatch):
+    """Skipped retries should include stable retry_reason metadata."""
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+
+    state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False, "provider": "postgres"},
+        "retry_count": 0,
+    }
+
+    result = route_after_execution(state)
+
+    assert result == "failed"
+    assert state["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    assert (
+        state["error_metadata"]["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    )
+    assert state["error_metadata"]["retry_will_retry"] is False
