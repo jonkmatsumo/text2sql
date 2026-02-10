@@ -5,6 +5,7 @@ via the central registry.
 """
 
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -38,6 +39,16 @@ def setup_telemetry():
     """Initialize OTEL SDK for MCP Server."""
     resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
     provider = TracerProvider(resource=resource)
+
+    # In pytest or explicit disable mode, skip OTLP exporter to avoid retry
+    # noise when the collector/worker is unavailable (common in CI).
+    if os.environ.get("OTEL_DISABLE_EXPORTER", "").lower() == "true" or (
+        "pytest" in sys.modules and os.environ.get("OTEL_ENABLE_IN_TESTS", "").lower() != "true"
+    ):
+        trace.set_tracer_provider(provider)
+        logger.info("OTEL initialized without exporter")
+        return
+
     exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
     processor = BatchSpanProcessor(exporter)
     provider.add_span_processor(processor)
