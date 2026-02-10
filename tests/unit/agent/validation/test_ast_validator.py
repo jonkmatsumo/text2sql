@@ -171,3 +171,25 @@ class TestASTValidator:
         assert any(
             v.details.get("reason") == "set_operation_disallowed_table" for v in result.violations
         )
+
+    def test_validate_sql_sensitive_column_warns_by_default(self, monkeypatch):
+        """Sensitive columns should emit warnings without blocking when flag is off."""
+        monkeypatch.delenv("AGENT_BLOCK_SENSITIVE_COLUMNS", raising=False)
+
+        result = validate_sql("SELECT password FROM users")
+
+        assert result.is_valid
+        assert result.violations == []
+        assert result.warnings
+        assert "password" in result.warnings[0]
+
+    def test_validate_sql_sensitive_column_blocks_when_flag_enabled(self, monkeypatch):
+        """Sensitive column checks should apply across UNION branches in blocking mode."""
+        monkeypatch.setenv("AGENT_BLOCK_SENSITIVE_COLUMNS", "true")
+        sql = "SELECT id FROM users UNION SELECT api_key FROM users"
+
+        result = validate_sql(sql)
+
+        assert not result.is_valid
+        assert any(v.violation_type == ViolationType.SENSITIVE_COLUMN for v in result.violations)
+        assert any("api_key" in v.message for v in result.violations)

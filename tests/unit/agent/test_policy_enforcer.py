@@ -140,3 +140,31 @@ class TestPolicyEnforcerCTESupport:
             SELECT * FROM my_cte
         """
         assert PolicyEnforcer.validate_sql(sql) is True
+
+
+class TestPolicyEnforcerSensitiveColumns:
+    """Tests for sensitive column guardrails."""
+
+    def setup_method(self):
+        """Configure allowed tables for sensitive-column tests."""
+        PolicyEnforcer.set_allowed_tables({"customer"})
+
+    def teardown_method(self):
+        """Reset table overrides after sensitive-column tests."""
+        PolicyEnforcer.set_allowed_tables(None)
+
+    def test_sensitive_columns_warn_by_default(self, monkeypatch, caplog):
+        """Sensitive references should warn without blocking by default."""
+        monkeypatch.delenv("AGENT_BLOCK_SENSITIVE_COLUMNS", raising=False)
+
+        with caplog.at_level("WARNING"):
+            assert PolicyEnforcer.validate_sql("SELECT password FROM customer") is True
+
+        assert any("Sensitive column reference detected" in rec.message for rec in caplog.records)
+
+    def test_sensitive_columns_block_when_flag_enabled(self, monkeypatch):
+        """Sensitive guardrail should block even when reference is in a UNION branch."""
+        monkeypatch.setenv("AGENT_BLOCK_SENSITIVE_COLUMNS", "true")
+        sql = "SELECT id FROM customer UNION SELECT api_key FROM customer"
+        with pytest.raises(ValueError, match="Sensitive column reference detected"):
+            PolicyEnforcer.validate_sql(sql)
