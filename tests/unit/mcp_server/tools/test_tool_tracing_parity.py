@@ -52,6 +52,9 @@ async def test_non_sql_tool_emits_required_span_attributes():
     assert attrs["mcp.tenant_id"] == "42", "tenant_id must be recorded when present"
     assert "mcp.tool.response.size_bytes" in attrs, "response size must be recorded"
     assert "mcp.tool.response.truncated" in attrs, "truncation flag must be recorded"
+    assert (
+        "mcp.tool.response.truncation_parse_failed" in attrs
+    ), "truncation parse status must be recorded"
     assert "mcp.tool.request.size_bytes" in attrs, "request size must be recorded"
 
 
@@ -117,3 +120,66 @@ async def test_truncation_detected_for_large_payload():
 
     assert "mcp.tool.response.truncated" in attrs, "truncation flag must always be present"
     assert isinstance(attrs["mcp.tool.response.truncated"], bool), "truncated must be boolean"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_truncation_detected_from_dict_payload():
+    """execute_sql_query truncation should be detected from structured dict payloads."""
+    mock_tracer, mock_span = _make_mock_tracer()
+
+    async def execute_handler():
+        return {"rows": [], "metadata": {"is_truncated": True}}
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("execute_sql_query")(execute_handler)
+        await traced()
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call[0]
+        attrs[key] = value
+
+    assert attrs["mcp.tool.response.truncated"] is True
+    assert attrs["mcp.tool.response.truncation_parse_failed"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_truncation_detected_from_json_string():
+    """execute_sql_query truncation should be detected from JSON string payloads."""
+    mock_tracer, mock_span = _make_mock_tracer()
+
+    async def execute_handler():
+        return json.dumps({"rows": [], "metadata": {"is_truncated": True}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("execute_sql_query")(execute_handler)
+        await traced()
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call[0]
+        attrs[key] = value
+
+    assert attrs["mcp.tool.response.truncated"] is True
+    assert attrs["mcp.tool.response.truncation_parse_failed"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_truncation_parse_failure_is_non_fatal():
+    """Malformed execute response should not crash and must flag parse failure."""
+    mock_tracer, mock_span = _make_mock_tracer()
+
+    async def execute_handler():
+        return '{"metadata":{"is_truncated":tru'
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("execute_sql_query")(execute_handler)
+        await traced()
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call[0]
+        attrs[key] = value
+
+    assert attrs["mcp.tool.response.truncated"] is False
+    assert attrs["mcp.tool.response.truncation_parse_failed"] is True
