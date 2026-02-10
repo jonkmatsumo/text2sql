@@ -1,12 +1,10 @@
 """MCP tool: list_approved_examples - List all few-shot examples from Registry."""
 
-from typing import Optional
-
 TOOL_NAME = "list_approved_examples"
 TOOL_DESCRIPTION = "List all few-shot examples in the Registry."
 
 
-async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
+async def handler(tenant_id: int, limit: int = 50) -> str:
     """List all few-shot examples in the Registry.
 
     Authorization:
@@ -21,7 +19,7 @@ async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
         - Database Error: If the registry store is unavailable.
 
     Args:
-        tenant_id: Optional tenant identifier to filter by.
+        tenant_id: Tenant identifier to filter by.
         limit: Maximum number of examples to return (default: 50).
 
     Returns:
@@ -31,7 +29,10 @@ async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
-    from mcp_server.utils.validation import validate_limit
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_limit(limit, TOOL_NAME):
         return err
@@ -43,7 +44,7 @@ async def handler(tenant_id: Optional[int] = None, limit: int = 50) -> str:
     if err := validate_role("ADMIN_ROLE", TOOL_NAME):
         return err
 
-    t_id = int(tenant_id) if tenant_id is not None else None
+    t_id = int(tenant_id)
     pairs = await RegistryService.list_examples(tenant_id=t_id, limit=limit)
 
     result_list = [

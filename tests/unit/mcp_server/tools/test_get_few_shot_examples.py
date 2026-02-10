@@ -27,10 +27,7 @@ class TestGetFewShotExamples:
 
             result = await handler("show all users", tenant_id=1, limit=3)
 
-            mock_svc.assert_called_once_with("show all users", 3, 1)
-            assert result == mock_result
-
-            mock_svc.assert_called_once_with("show all users", 3, 1)
+            mock_svc.assert_called_once_with("show all users", tenant_id=1, limit=3)
             assert result == mock_result
 
     @pytest.mark.asyncio

@@ -8,7 +8,7 @@ TOOL_NAME = "list_tables"
 TOOL_DESCRIPTION = "List available tables in the database."
 
 
-async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = None) -> str:
+async def handler(tenant_id: int, search_term: Optional[str] = None) -> str:
     """List available tables in the database.
 
     Authorization:
@@ -22,8 +22,8 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
         - Database Error: If the metadata store is unavailable.
 
     Args:
+        tenant_id: Tenant identifier.
         search_term: Optional fuzzy search string to filter table names.
-        tenant_id: Optional tenant identifier.
 
     Returns:
         JSON array of table names as strings.
@@ -33,6 +33,10 @@ async def handler(search_term: Optional[str] = None, tenant_id: Optional[int] = 
     start_time = time.monotonic()
 
     from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.validation import require_tenant_id
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
         return err

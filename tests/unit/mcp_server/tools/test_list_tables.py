@@ -17,6 +17,14 @@ class TestListTables:
         assert TOOL_NAME == "list_tables"
 
     @pytest.mark.asyncio
+    async def test_list_tables_requires_tenant_id(self):
+        """Test list_tables rejects missing tenant."""
+        result = await handler(tenant_id=None)
+        data = json.loads(result)
+        assert data["error"]["message"] == "Tenant ID is required for list_tables."
+        assert data["error"]["category"] == "invalid_request"
+
+    @pytest.mark.asyncio
     async def test_list_tables_returns_all_tables(self):
         """Test list_tables returns all tables when no filter."""
         mock_store = AsyncMock()
@@ -25,7 +33,7 @@ class TestListTables:
         with patch(
             "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler()
+            result = await handler(tenant_id=1)
 
             mock_store.list_tables.assert_called_once()
             data = json.loads(result)
@@ -44,7 +52,7 @@ class TestListTables:
         with patch(
             "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(search_term="user")
+            result = await handler(tenant_id=1, search_term="user")
 
             data = json.loads(result)["result"]
             assert len(data) == 2
@@ -61,7 +69,7 @@ class TestListTables:
         with patch(
             "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(search_term="USER")
+            result = await handler(tenant_id=1, search_term="USER")
 
             data = json.loads(result)["result"]
             assert len(data) == 2
@@ -77,7 +85,7 @@ class TestListTables:
         with patch(
             "mcp_server.tools.list_tables.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(search_term="nonexistent")
+            result = await handler(tenant_id=1, search_term="nonexistent")
 
             data = json.loads(result)["result"]
             assert data == []

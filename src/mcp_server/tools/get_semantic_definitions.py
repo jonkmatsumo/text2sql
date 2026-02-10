@@ -1,14 +1,12 @@
 """MCP tool: get_semantic_definitions - Retrieve business metric definitions."""
 
-from typing import Optional
-
 from dal.database import Database
 
 TOOL_NAME = "get_semantic_definitions"
 TOOL_DESCRIPTION = "Retrieve business metric definitions from the semantic layer."
 
 
-async def handler(terms: list[str], tenant_id: Optional[int] = None) -> str:
+async def handler(terms: list[str], tenant_id: int) -> str:
     """Retrieve business metric definitions from the semantic layer.
 
     Authorization:
@@ -23,7 +21,7 @@ async def handler(terms: list[str], tenant_id: Optional[int] = None) -> str:
 
     Args:
         terms: List of term names to look up (e.g. ['High Value Customer', 'Churned']).
-        tenant_id: Optional tenant identifier.
+        tenant_id: Tenant identifier.
 
     Returns:
         JSON string mapping term names to their definitions and SQL logic.
@@ -31,8 +29,12 @@ async def handler(terms: list[str], tenant_id: Optional[int] = None) -> str:
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.validation import require_tenant_id
 
     start_time = time.monotonic()
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if not terms:
         return ToolResponseEnvelope(

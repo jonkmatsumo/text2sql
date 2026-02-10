@@ -31,6 +31,7 @@ async def handler(limit: int = 10) -> str:
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.services.registry.service import RegistryService
+    from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import validate_limit
 
     if err := validate_limit(limit, TOOL_NAME):
@@ -69,7 +70,19 @@ async def handler(limit: int = 10) -> str:
             await f_store.set_published_status(item["interaction_id"])
             results["published"] += 1
         except Exception as e:
-            results["errors"].append({"id": item["interaction_id"], "error": str(e)})
+            _ = e  # keep local exception for logging/debugging only
+            results["errors"].append(
+                {
+                    "id": item["interaction_id"],
+                    "error": build_error_metadata(
+                        message="Failed to export interaction to few-shot registry.",
+                        category="registry_error",
+                        provider="registry_service",
+                        retryable=False,
+                        code="EXPORT_FAILED",
+                    ).to_dict(),
+                }
+            )
 
     return ToolResponseEnvelope(
         result=results,

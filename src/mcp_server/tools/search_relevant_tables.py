@@ -13,8 +13,8 @@ TOOL_DESCRIPTION = (
 
 async def handler(
     user_query: str,
+    tenant_id: int,
     limit: int = 5,
-    tenant_id: Optional[int] = None,
     snapshot_id: Optional[str] = None,
 ) -> str:
     """Search for tables relevant to a natural language query using semantic similarity.
@@ -32,8 +32,8 @@ async def handler(
 
     Args:
         user_query: Natural language question (e.g., "Show me customer payments")
+        tenant_id: Tenant identifier.
         limit: Maximum number of relevant tables to return (default: 5)
-        tenant_id: Optional tenant identifier.
         snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
@@ -43,7 +43,11 @@ async def handler(
 
     start_time = time.monotonic()
 
-    from mcp_server.utils.validation import validate_limit
+    from mcp_server.utils.errors import build_error_metadata
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=50):
         return err
@@ -61,6 +65,7 @@ async def handler(
 
     structured_results = []
     introspector = Database.get_schema_introspector()
+    provider = Database.get_query_target_provider()
 
     for result in results:
         table_name = result["table_name"]
@@ -88,16 +93,27 @@ async def handler(
         except Exception as e:
             error_msg = str(e).lower()
             status = "error"
+            category = "metadata_lookup_failed"
+            message = "Failed to retrieve table metadata."
             if "not found" in error_msg or "does not exist" in error_msg:
                 status = "TABLE_NOT_FOUND"
+                category = "invalid_request"
+                message = "Requested table was not found."
             elif "permission" in error_msg or "access denied" in error_msg:
                 status = "TABLE_INACCESSIBLE"
+                category = "auth"
+                message = "Requested table is inaccessible."
 
             structured_results.append(
                 {
                     "table_name": table_name,
                     "status": status,
-                    "error": str(e),
+                    "error": build_error_metadata(
+                        message=message,
+                        category=category,
+                        provider=provider,
+                        code=status,
+                    ).to_dict(),
                 }
             )
 

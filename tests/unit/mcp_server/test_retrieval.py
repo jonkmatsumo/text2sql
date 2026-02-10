@@ -10,6 +10,12 @@ class TestRetrieval:
     """Test suite for retrieval module."""
 
     @pytest.mark.asyncio
+    async def test_get_relevant_examples_requires_tenant_id(self):
+        """Retrieval API should require an explicit tenant_id."""
+        with pytest.raises(TypeError, match="tenant_id"):
+            await get_relevant_examples("query")
+
+    @pytest.mark.asyncio
     async def test_get_relevant_examples(self):
         """Test retrieving examples via RegistryService."""
         mock_example = MagicMock()
@@ -25,7 +31,7 @@ class TestRetrieval:
             new=_fake_get_examples,
         ):
 
-            result_json = await get_relevant_examples("query")
+            result_json = await get_relevant_examples("query", tenant_id=42)
 
             results = json.loads(result_json)
             assert len(results) == 1
@@ -45,5 +51,5 @@ class TestRetrieval:
             new=_fake_get_examples,
         ):
 
-            result = await get_relevant_examples("query")
+            result = await get_relevant_examples("query", tenant_id=42)
             assert result == ""

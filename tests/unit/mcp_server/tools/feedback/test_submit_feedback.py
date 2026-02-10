@@ -76,6 +76,7 @@ class TestSubmitFeedback:
 
         assert result["error"]["message"] == "interaction_id is required"
         assert result["error"]["category"] == "invalid_request"
+        assert result["error"]["sql_state"] == "INVALID_INTERACTION_ID"
 
     @pytest.mark.asyncio
     async def test_submit_feedback_empty_interaction_id_fails(self):
@@ -85,6 +86,7 @@ class TestSubmitFeedback:
 
         assert result["error"]["message"] == "interaction_id is required"
         assert result["error"]["category"] == "invalid_request"
+        assert result["error"]["sql_state"] == "INVALID_INTERACTION_ID"
 
     @pytest.mark.asyncio
     async def test_submit_feedback_fk_violation_surfaced(self):
@@ -103,3 +105,24 @@ class TestSubmitFeedback:
 
             assert "does not exist" in result["error"]["message"]
             assert result["error"]["category"] == "invalid_request"
+            assert result["error"]["sql_state"] == "INTERACTION_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_internal_error_is_sanitized(self):
+        """Unexpected errors should be non-leaky and deterministic."""
+        with patch(
+            "mcp_server.tools.feedback.submit_feedback.get_feedback_store"
+        ) as mock_get_store:
+            mock_store = AsyncMock()
+            mock_store.create_feedback = AsyncMock(
+                side_effect=Exception("password=secret-token: underlying failure")
+            )
+            mock_get_store.return_value = mock_store
+
+            result_json = await handler(interaction_id="int-1", thumb="UP")
+            result = json.loads(result_json)
+
+            assert result["error"]["message"] == "Failed to submit feedback."
+            assert result["error"]["category"] == "internal_error"
+            assert result["error"]["sql_state"] == "SUBMIT_FEEDBACK_FAILED"
+            assert "password=secret-token" not in result["error"]["message"]

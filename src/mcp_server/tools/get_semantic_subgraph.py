@@ -342,7 +342,12 @@ async def _get_mini_graph(query_text: str, store: MemgraphStore) -> dict:
 
     except Exception as e:
         logger.exception(f"Error in get_semantic_subgraph: {e}")
-        return {"error": str(e)}
+        return {
+            "error": {
+                "code": "SEMANTIC_SUBGRAPH_QUERY_FAILED",
+                "message": "Failed to retrieve semantic subgraph.",
+            }
+        }
 
 
 async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] = None) -> str:
@@ -368,6 +373,7 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
+    from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import require_tenant_id
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
@@ -398,32 +404,42 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
             store = Database.get_graph_store()
         except Exception as e:
             logger.error(f"Failed to get graph store: {e}")
-            from common.models.error_metadata import ErrorMetadata
             from common.models.tool_envelopes import ToolResponseEnvelope
 
             return ToolResponseEnvelope(
                 result={},
-                error=ErrorMetadata(
+                error=build_error_metadata(
                     message="Graph store not authorized or initialized.",
                     category="dependency_failure",
                     provider="graph_store",
-                    is_retryable=False,
+                    retryable=False,
+                    code="GRAPH_STORE_UNAVAILABLE",
                 ),
             ).model_dump_json(exclude_none=True)
 
         result = await _get_mini_graph(query, store)
 
         if isinstance(result, dict) and "error" in result:
-            from common.models.error_metadata import ErrorMetadata
             from common.models.tool_envelopes import ToolResponseEnvelope
+
+            error_code = "SEMANTIC_SUBGRAPH_QUERY_FAILED"
+            error_message = "Semantic subgraph retrieval failed."
+            if isinstance(result["error"], dict):
+                code_val = result["error"].get("code")
+                msg_val = result["error"].get("message")
+                if isinstance(code_val, str) and code_val.strip():
+                    error_code = code_val
+                if isinstance(msg_val, str) and msg_val.strip():
+                    error_message = msg_val
 
             return ToolResponseEnvelope(
                 result={},
-                error=ErrorMetadata(
-                    message=f"Semantic subgraph retrieval failed: {result['error']}",
+                error=build_error_metadata(
+                    message=error_message,
                     category="invalid_request",
                     provider=Database.get_query_target_provider(),
-                    is_retryable=False,
+                    retryable=False,
+                    code=error_code,
                 ),
             ).model_dump_json(exclude_none=False)
 
@@ -458,16 +474,17 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
 
         return json_result
     except Exception as e:
+        _ = e  # keep local exception for logging/debugging only
         logger.exception("Semantic subgraph retrieval failed")
-        from common.models.error_metadata import ErrorMetadata
         from common.models.tool_envelopes import ToolResponseEnvelope
 
         return ToolResponseEnvelope(
             result={},
-            error=ErrorMetadata(
-                message=f"Semantic subgraph retrieval failed: {str(e)}",
+            error=build_error_metadata(
+                message="Semantic subgraph retrieval failed.",
                 category="invalid_request",
                 provider=Database.get_query_target_provider(),
-                is_retryable=False,
+                retryable=False,
+                code="SEMANTIC_SUBGRAPH_FAILED",
             ),
         ).model_dump_json(exclude_none=False)

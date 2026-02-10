@@ -47,9 +47,9 @@ async def handler(
     """
     import time
 
-    from common.models.error_metadata import ErrorMetadata
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import require_tenant_id
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
@@ -156,12 +156,15 @@ async def handler(
         ).model_dump_json(exclude_none=True)
 
     except Exception as e:
+        _ = e  # keep local exception for logging/debugging only
+        error_code = "RULE_MANAGEMENT_FAILED"
         return ToolResponseEnvelope(
-            result={"success": False, "error": str(e)},
-            error=ErrorMetadata(
-                message=str(e),
+            result={"success": False, "error": {"code": error_code}},
+            error=build_error_metadata(
+                message="Failed to manage pin rules.",
                 category="rule_management_failed",
                 provider="pinned_recommendation_store",
-                is_retryable=False,
+                retryable=False,
+                code=error_code,
             ),
         ).model_dump_json(exclude_none=True)

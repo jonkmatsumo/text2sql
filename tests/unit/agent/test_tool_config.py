@@ -48,7 +48,7 @@ async def test_create_interaction_receives_config():
             mock_sanitize.return_value.sanitized = "test question"
 
             with patch("agent.tools.unpack_mcp_result", return_value="interaction_123"):
-                await run_agent_with_tracing("test question", thread_id="thread_123")
+                await run_agent_with_tracing("test question", tenant_id=1, thread_id="thread_123")
 
         # Assertions
         assert mock_create_tool.ainvoke.call_count == 1
@@ -95,7 +95,7 @@ async def test_update_interaction_receives_config():
             mock_sanitize.return_value.sanitized = "test question"
 
             with patch("agent.tools.unpack_mcp_result", return_value="interaction_123"):
-                await run_agent_with_tracing("test question", thread_id="thread_123")
+                await run_agent_with_tracing("test question", tenant_id=1, thread_id="thread_123")
 
         # Assertions for update tool
         if mock_update_tool.ainvoke.call_count > 0:
@@ -143,6 +143,7 @@ async def test_interaction_logging_uses_state_schema_snapshot_id():
             with patch("agent.tools.unpack_mcp_result", return_value="interaction_123"):
                 await run_agent_with_tracing(
                     "test question",
+                    tenant_id=1,
                     thread_id="thread_123",
                     schema_snapshot_id="fp-1234",
                 )

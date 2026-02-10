@@ -30,9 +30,9 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
     """
     import time
 
-    from common.models.error_metadata import ErrorMetadata
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import require_tenant_id
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
@@ -51,12 +51,15 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
             ),
         ).model_dump_json(exclude_none=True)
     except Exception as e:
+        _ = e  # keep local exception for logging/debugging only
+        error_code = "CACHE_UPDATE_FAILED"
         return ToolResponseEnvelope(
-            result={"success": False, "error": str(e)},
-            error=ErrorMetadata(
-                message=str(e),
+            result={"success": False, "error": {"code": error_code}},
+            error=build_error_metadata(
+                message="Failed to update semantic cache.",
                 category="cache_update_failed",
                 provider="cache_service",
-                is_retryable=False,
+                retryable=False,
+                code=error_code,
             ),
         ).model_dump_json(exclude_none=True)

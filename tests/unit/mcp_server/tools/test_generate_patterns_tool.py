@@ -68,4 +68,5 @@ async def test_generate_patterns_tool_failure():
 
         data = json.loads(result)
         assert data["result"]["success"] is False
-        assert "LLM capacity exceeded" in data["result"]["error"]
+        assert data["result"]["error"]["code"] == "PATTERN_GENERATION_FAILED"
+        assert data["error"]["message"] == "Pattern generation failed."

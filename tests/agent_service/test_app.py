@@ -76,6 +76,16 @@ def test_run_agent_error(monkeypatch):
     assert body["trace_id"] is None
 
 
+def test_run_agent_requires_tenant_id():
+    """Request validation should reject missing tenant_id."""
+    client = TestClient(agent_app.app)
+    resp = client.post("/agent/run", json={"question": "hi"})
+    assert resp.status_code == 422
+
+    body = resp.json()
+    assert body["detail"][0]["loc"][-1] == "tenant_id"
+
+
 def test_entrypoint_sets_deadline_ts(monkeypatch):
     """Ensure deadline_ts and timeout_seconds are passed through."""
     captured = {}
