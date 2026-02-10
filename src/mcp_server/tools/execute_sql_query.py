@@ -142,8 +142,8 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
 
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"
-    except Exception as e:
-        return f"SQL Validation Error: {str(e)}"
+    except Exception:
+        return "SQL Validation Error."
 
     return None
 

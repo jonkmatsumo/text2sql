@@ -29,8 +29,8 @@ async def handler(dry_run: bool = False) -> str:
     # We collect the logs but primary goal is to return the final run status
     import time
 
-    from common.models.error_metadata import ErrorMetadata
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.errors import build_error_metadata
 
     start_time = time.monotonic()
 
@@ -89,16 +89,19 @@ async def handler(dry_run: bool = False) -> str:
         ).model_dump_json(exclude_none=True)
 
     except Exception as e:
+        _ = e  # keep local exception for logging/debugging only
+        error_code = "PATTERN_GENERATION_FAILED"
         return ToolResponseEnvelope(
             result={
                 "success": False,
-                "error": str(e),
+                "error": {"code": error_code},
                 "run_id": run_id,
             },
-            error=ErrorMetadata(
-                message=str(e),
+            error=build_error_metadata(
+                message="Pattern generation failed.",
                 category="generation_failed",
                 provider="pattern_generator",
-                is_retryable=False,
+                retryable=False,
+                code=error_code,
             ),
         ).model_dump_json(exclude_none=True)

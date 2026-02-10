@@ -170,7 +170,8 @@ class TestGetSemanticSubgraph:
                 data = json.loads(result)
 
                 assert "error" in data
-                assert "Search failed" in data["error"]["message"]
+                assert data["error"]["message"] == "Failed to retrieve semantic subgraph."
+                assert data["error"]["sql_state"] == "SEMANTIC_SUBGRAPH_QUERY_FAILED"
                 assert data["error"]["category"] == "invalid_request"
 
     @pytest.mark.asyncio

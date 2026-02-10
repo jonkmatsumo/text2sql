@@ -8,6 +8,43 @@ from typing import Optional
 
 from common.models.error_metadata import ErrorMetadata
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+from common.sanitization.text import redact_sensitive_info
+
+MAX_ERROR_MESSAGE_LENGTH = 2048
+
+
+def sanitize_error_message(message: str, fallback: str = "Request failed.") -> str:
+    """Redact and bound user-facing error text."""
+    safe_text = redact_sensitive_info((message or "").strip())
+    if not safe_text:
+        safe_text = fallback
+    return safe_text[:MAX_ERROR_MESSAGE_LENGTH]
+
+
+def build_error_metadata(
+    *,
+    message: str,
+    category: str,
+    provider: str,
+    retryable: bool = False,
+    retry_after_seconds: Optional[float] = None,
+    code: Optional[str] = None,
+    hint: Optional[str] = None,
+) -> ErrorMetadata:
+    """Build bounded, redacted ErrorMetadata."""
+    safe_message = sanitize_error_message(message)
+    safe_hint = sanitize_error_message(hint, fallback="") if hint else None
+    if safe_hint == "":
+        safe_hint = None
+    return ErrorMetadata(
+        message=safe_message,
+        category=category,
+        provider=provider,
+        is_retryable=retryable,
+        retry_after_seconds=retry_after_seconds,
+        sql_state=code,
+        hint=safe_hint,
+    )
 
 
 def tool_error_response(
@@ -36,13 +73,13 @@ def tool_error_response(
     envelope = ToolResponseEnvelope(
         result=None,
         metadata=GenericToolMetadata(provider=provider),
-        error=ErrorMetadata(
-            message=message[:2048],
+        error=build_error_metadata(
+            message=message,
             category=category,
             provider=provider,
-            is_retryable=retryable,
+            retryable=retryable,
             retry_after_seconds=retry_after_seconds,
-            sql_state=code,  # reuse sql_state for machine-readable code
+            code=code,
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

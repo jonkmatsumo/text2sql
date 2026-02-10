@@ -65,16 +65,17 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     except Exception as e:
         logger.error(f"Ambiguity resolution failed: {e}")
         # Build a manual error envelope
-        from common.models.error_metadata import ErrorMetadata
         from common.models.tool_envelopes import ToolResponseEnvelope
+        from mcp_server.utils.errors import build_error_metadata
 
         envelope = ToolResponseEnvelope(
             result={"status": "ERROR", "resolved_bindings": {}, "ambiguities": []},
-            error=ErrorMetadata(
-                message=str(e),
+            error=build_error_metadata(
+                message="Ambiguity resolution failed.",
                 category="ambiguity_resolution_failed",
                 provider="ambiguity_resolver",
-                is_retryable=False,
+                retryable=False,
+                code="AMBIGUITY_RESOLUTION_FAILED",
             ),
         )
         return envelope.model_dump_json(exclude_none=True)
