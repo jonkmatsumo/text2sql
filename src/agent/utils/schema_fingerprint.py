@@ -69,17 +69,10 @@ def _pre_exec_validation_enabled() -> bool:
     return get_env_bool("AGENT_PRE_EXEC_SCHEMA_VALIDATION", True) is True
 
 
-def extract_sql_tables(sql: str) -> frozenset[str]:
-    """Extract table names from SQL query.
-
-    Args:
-        sql: SQL query string
-
-    Returns:
-        frozenset of lowercase table names, empty set if parsing fails
-    """
+def extract_sql_identifiers(sql: str) -> tuple[frozenset[str], frozenset[tuple[str, str]]]:
+    """Extract referenced tables and qualified columns from SQL query."""
     if not sql:
-        return frozenset()
+        return frozenset(), frozenset()
 
     try:
         import sqlglot
@@ -87,12 +80,23 @@ def extract_sql_tables(sql: str) -> frozenset[str]:
 
         ast = sqlglot.parse_one(sql)
         tables = set()
+        columns = set()
         for table in ast.find_all(exp.Table):
             if table.name:
                 tables.add(table.name.lower())
-        return frozenset(tables)
+        for column in ast.find_all(exp.Column):
+            # Restrict to qualified refs to avoid alias/implicit-column false positives.
+            if column.table and column.name:
+                columns.add((column.table.lower(), column.name.lower()))
+        return frozenset(tables), frozenset(columns)
     except Exception:
-        return frozenset()
+        return frozenset(), frozenset()
+
+
+def extract_sql_tables(sql: str) -> frozenset[str]:
+    """Backward-compatible table extraction helper."""
+    tables, _ = extract_sql_identifiers(sql)
+    return tables
 
 
 def validate_sql_against_schema(
@@ -115,30 +119,45 @@ def validate_sql_against_schema(
         # No schema context - can't validate, pass through
         return (True, frozenset(), None)
 
-    sql_tables = extract_sql_tables(sql)
+    sql_tables, sql_columns = extract_sql_identifiers(sql)
     if not sql_tables:
         # No tables found or parse failed - pass through
         return (True, frozenset(), None)
 
-    # Build set of known table names from schema context
+    # Build set of known table/column names from schema context
     known_tables: set[str] = set()
+    known_columns: dict[str, set[str]] = {}
     for item in schema_context:
         if isinstance(item, dict):
-            table_name = item.get("table_name") or item.get("name") or item.get("table")
-            if table_name:
-                known_tables.add(str(table_name).lower())
+            item_type = str(item.get("type") or "").lower()
+            if item_type == "column":
+                table_name = item.get("table")
+                column_name = item.get("name")
+                if table_name and column_name:
+                    normalized_table = str(table_name).lower()
+                    known_tables.add(normalized_table)
+                    known_columns.setdefault(normalized_table, set()).add(str(column_name).lower())
+            else:
+                table_name = item.get("table_name") or item.get("name") or item.get("table")
+                if table_name:
+                    normalized_table = str(table_name).lower()
+                    known_tables.add(normalized_table)
 
     # Check for tables in SQL that aren't in schema context
-    missing = sql_tables - known_tables
+    missing_tables = sql_tables - known_tables
+    missing_columns = {
+        f"{table}.{column}"
+        for table, column in sql_columns
+        if table in known_columns and column not in known_columns[table]
+    }
+    missing = set(missing_tables) | missing_columns
 
     if missing:
         missing_list = sorted(missing)[:5]
-        warning = (
-            f"Pre-execution validation: {len(missing)} table(s) not in schema context: "
-            f"{', '.join(missing_list)}"
-        )
+        warning = f"Pre-execution validation: {len(missing)} identifier(s) not in schema context: "
+        warning += ", ".join(missing_list)
         if len(missing) > 5:
             warning += f" (+{len(missing) - 5} more)"
-        return (False, frozenset(missing), warning)
+        return (False, frozenset(sorted(missing)), warning)
 
     return (True, frozenset(), None)
