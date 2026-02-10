@@ -201,3 +201,30 @@ def test_retry_skip_reason_is_recorded_in_error_metadata(monkeypatch):
         state["error_metadata"]["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
     )
     assert state["error_metadata"]["retry_will_retry"] is False
+
+
+def test_static_vs_adaptive_non_retryable_semantics_are_explicit(monkeypatch):
+    """Static burns retry budget for non-retryable metadata while adaptive stops immediately."""
+    adaptive_state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 0,
+    }
+    static_state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 0,
+    }
+
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    adaptive_decision = route_after_execution(adaptive_state)
+
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "static")
+    static_decision = route_after_execution(static_state)
+
+    assert adaptive_decision == "failed"
+    assert adaptive_state["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
+    assert static_decision == "correct"
+    assert static_state.get("retry_reason") is None
