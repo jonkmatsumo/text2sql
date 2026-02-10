@@ -222,6 +222,17 @@ class TestSpanContract:
         contract = get_span_contract("unknown_span_name")
         assert contract is None
 
+    def test_span_contracts_cover_all_agent_graph_nodes(self):
+        """All graph nodes should map to span contracts."""
+        from agent.telemetry_schema import AGENT_GRAPH_NODE_SPAN_NAMES, SPAN_CONTRACTS
+
+        missing = [
+            node_name
+            for node_name, span_name in AGENT_GRAPH_NODE_SPAN_NAMES.items()
+            if span_name not in SPAN_CONTRACTS
+        ]
+        assert missing == []
+
     def test_span_contracts_are_frozen(self):
         """Test that SpanContract instances are immutable."""
         from agent.telemetry_schema import SpanContract

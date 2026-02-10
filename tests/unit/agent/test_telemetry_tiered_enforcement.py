@@ -1,4 +1,4 @@
-"""Tests for tiered telemetry contract enforcement."""
+"""Tests for telemetry contract enforcement modes."""
 
 from unittest.mock import MagicMock
 
@@ -7,35 +7,31 @@ import pytest
 from agent.telemetry import OTELTelemetryBackend, SpanType
 
 
-def test_critical_span_fails_on_missing_attributes():
-    """Verify that critical spans raise ValueError if required attributes are missing."""
+def test_contract_violations_warn_by_default(monkeypatch, caplog):
+    """Default warn mode should emit warning without raising."""
+    monkeypatch.setenv("AGENT_TELEMETRY_CONTRACT_ENFORCE", "warn")
+    monkeypatch.setattr("agent.telemetry._CONTRACT_ENFORCE_MODE", None)
+
     backend = OTELTelemetryBackend()
-    # Mocking ensure_tracer to return a mock tracer
     mock_tracer = MagicMock()
     backend._tracer = mock_tracer
 
-    # "execute_sql" is a critical span.
-    # Its contract requires {"result.is_truncated", "result.rows_returned"}
+    with caplog.at_level("WARNING"):
+        with backend.start_span("execute_sql", span_type=SpanType.TOOL):
+            pass
+
+    assert "Span contract violation for 'execute_sql': missing" in caplog.text
+
+
+def test_contract_violations_raise_in_error_mode(monkeypatch):
+    """Error mode should raise for missing required contract attributes."""
+    monkeypatch.setenv("AGENT_TELEMETRY_CONTRACT_ENFORCE", "error")
+    monkeypatch.setattr("agent.telemetry._CONTRACT_ENFORCE_MODE", None)
+
+    backend = OTELTelemetryBackend()
+    mock_tracer = MagicMock()
+    backend._tracer = mock_tracer
 
     with pytest.raises(ValueError, match="Span contract violation for 'execute_sql': missing"):
         with backend.start_span("execute_sql", span_type=SpanType.TOOL):
-            # Setting only one of the required attributes
-            telemetry_span = backend.get_current_span()
-            telemetry_span.set_attribute("result.rows_returned", 10)
-            # result.is_truncated is missing!
-
-
-def test_non_critical_span_warns_on_missing_attributes(caplog):
-    """Verify that non-critical spans only warn if required attributes are missing."""
-    backend = OTELTelemetryBackend()
-    mock_tracer = MagicMock()
-    backend._tracer = mock_tracer
-
-    # "cache_lookup" is NOT a critical span.
-    # Its contract requires {"cache.hit"}
-
-    with backend.start_span("cache_lookup", span_type=SpanType.TOOL):
-        # cache.hit is missing!
-        pass
-
-    assert "Span contract violation for 'cache_lookup': missing ['cache.hit']" in caplog.text
+            pass

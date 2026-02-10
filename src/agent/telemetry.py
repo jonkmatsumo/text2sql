@@ -294,10 +294,6 @@ def _get_contract_enforce_mode() -> str:
     return _CONTRACT_ENFORCE_MODE
 
 
-# Spans that must strictly adhere to the contract to ensure pipeline stability
-CRITICAL_SPANS = {"execute_sql", "validate_sql", "generate_sql", "synthesize_insight"}
-
-
 def validate_span_contract(
     span_name: str, span: OTELTelemetrySpan, otel_span: Optional[Any] = None
 ) -> None:
@@ -311,10 +307,6 @@ def validate_span_contract(
     enforce_mode = _get_contract_enforce_mode()
     if enforce_mode == "off":
         return
-
-    # Tiered enforcement: escalate 'warn' to 'error' for critical spans
-    if span_name in CRITICAL_SPANS and enforce_mode == "warn":
-        enforce_mode = "error"
 
     from agent.telemetry_schema import get_span_contract
 
