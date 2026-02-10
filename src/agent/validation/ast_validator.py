@@ -148,7 +148,9 @@ def parse_sql(
         return None, f"SQL syntax error: {str(e)}"
 
 
-def validate_security(ast: exp.Expression) -> list[SecurityViolation]:
+def validate_security(
+    ast: exp.Expression, allowed_tables: Optional[set[str]] = None
+) -> list[SecurityViolation]:
     """
     Validate SQL AST for security violations.
 
@@ -248,6 +250,79 @@ def validate_security(ast: exp.Expression) -> list[SecurityViolation]:
                 )
             )
 
+    # Enforce allowlist for UNION / INTERSECT / EXCEPT branches when provided.
+    violations.extend(_validate_set_operation_allowlist(ast, allowed_tables))
+
+    return violations
+
+
+def _normalize_allowed_tables(allowed_tables: Optional[set[str]]) -> set[str]:
+    if not allowed_tables:
+        return set()
+    return {str(table).strip().lower() for table in allowed_tables if str(table).strip()}
+
+
+def _is_table_in_allowlist(table: exp.Table, allowed_tables: set[str]) -> bool:
+    if not allowed_tables:
+        return True
+
+    table_name = table.name.lower() if table.name else ""
+    schema_name = table.db.lower() if table.db else ""
+    full_name = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
+
+    return table_name in allowed_tables or full_name in allowed_tables
+
+
+def _disallowed_tables_in_branch(
+    branch: Optional[exp.Expression], allowed_tables: set[str]
+) -> list[str]:
+    if branch is None or not allowed_tables:
+        return []
+
+    disallowed = set()
+    for table in branch.find_all(exp.Table):
+        if not _is_table_in_allowlist(table, allowed_tables):
+            table_name = table.name.lower() if table.name else ""
+            schema_name = table.db.lower() if table.db else ""
+            full_name = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
+            if full_name:
+                disallowed.add(full_name)
+    return sorted(disallowed)
+
+
+def _validate_set_operation_allowlist(
+    ast: exp.Expression,
+    allowed_tables: Optional[set[str]],
+) -> list[SecurityViolation]:
+    """Block set-operation branches that reference non-allowlisted tables."""
+    normalized_allowed = _normalize_allowed_tables(allowed_tables)
+    if not normalized_allowed:
+        return []
+
+    violations: list[SecurityViolation] = []
+    set_operations = tuple(ast.find_all((exp.Union, exp.Intersect, exp.Except)))
+    for set_op in set_operations:
+        operation = type(set_op).__name__.upper()
+        branches = {"left": set_op.left, "right": set_op.right}
+        for branch_name, branch_ast in branches.items():
+            disallowed_tables = _disallowed_tables_in_branch(branch_ast, normalized_allowed)
+            if not disallowed_tables:
+                continue
+            violations.append(
+                SecurityViolation(
+                    violation_type=ViolationType.RESTRICTED_TABLE,
+                    message=(
+                        f"Security Violation: {operation} branch references tables "
+                        f"outside allowed set: {', '.join(disallowed_tables)}."
+                    ),
+                    details={
+                        "operation": operation,
+                        "branch": branch_name,
+                        "tables": disallowed_tables,
+                        "reason": "set_operation_disallowed_table",
+                    },
+                )
+            )
     return violations
 
 
@@ -330,7 +405,9 @@ def validate_complexity(ast: exp.Expression) -> list[SecurityViolation]:
     return violations
 
 
-def validate_sql(sql: str, dialect: str = "postgres") -> ASTValidationResult:
+def validate_sql(
+    sql: str, dialect: str = "postgres", allowed_tables: Optional[set[str]] = None
+) -> ASTValidationResult:
     """
     Complete SQL validation: parse, security check, complexity check, and metadata extraction.
 
@@ -339,6 +416,7 @@ def validate_sql(sql: str, dialect: str = "postgres") -> ASTValidationResult:
     Args:
         sql: SQL query string
         dialect: SQL dialect (default: postgres)
+        allowed_tables: Optional allowlist used for set-operation branch checks.
 
     Returns:
         ASTValidationResult with validation status, violations, and metadata
@@ -359,7 +437,7 @@ def validate_sql(sql: str, dialect: str = "postgres") -> ASTValidationResult:
         )
 
     # Validate security
-    violations = validate_security(ast)
+    violations = validate_security(ast, allowed_tables=allowed_tables)
 
     # Validate complexity
     complexity_violations = validate_complexity(ast)
