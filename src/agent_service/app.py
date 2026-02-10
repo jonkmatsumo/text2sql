@@ -90,6 +90,15 @@ class AgentRunResponse(BaseModel):
     replay_metadata: Optional[dict[str, Any]] = None
 
 
+class AgentDiagnosticsResponse(BaseModel):
+    """Operator-safe runtime diagnostics."""
+
+    active_database_provider: Optional[str] = None
+    retry_policy: dict[str, Any]
+    schema_cache_ttl_seconds: int
+    enabled_flags: dict[str, Any]
+
+
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -280,3 +289,11 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         from common.sanitization.text import redact_sensitive_info as _redact
 
         return AgentRunResponse(error=_redact(str(exc)), trace_id=None)
+
+
+@app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
+def get_agent_diagnostics() -> AgentDiagnosticsResponse:
+    """Return non-sensitive runtime diagnostics for operators."""
+    from common.config.diagnostics import build_operator_diagnostics
+
+    return AgentDiagnosticsResponse(**build_operator_diagnostics())

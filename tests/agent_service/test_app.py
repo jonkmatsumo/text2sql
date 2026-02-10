@@ -290,3 +290,24 @@ def test_agent_service_startup_fails_on_invalid_runtime_configuration(monkeypatc
     with pytest.raises(RuntimeError):
         with TestClient(agent_app.app):
             pass
+
+
+def test_agent_diagnostics_endpoint(monkeypatch):
+    """Diagnostics endpoint should return non-sensitive operator configuration."""
+    monkeypatch.setenv("QUERY_TARGET_BACKEND", "snowflake")
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    monkeypatch.setenv("AGENT_MAX_RETRIES", "5")
+    monkeypatch.setenv("SCHEMA_CACHE_TTL_SECONDS", "600")
+    monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "warn")
+    monkeypatch.setenv("AGENT_CARTESIAN_JOIN_MODE", "warn")
+
+    with TestClient(agent_app.app) as client:
+        resp = client.get("/agent/diagnostics")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["active_database_provider"] == "snowflake"
+    assert body["retry_policy"] == {"mode": "adaptive", "max_retries": 5}
+    assert body["schema_cache_ttl_seconds"] == 600
+    assert "enabled_flags" in body
+    assert "OPENAI_API_KEY" not in str(body)
