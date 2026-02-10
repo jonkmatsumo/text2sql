@@ -70,8 +70,10 @@ async def test_interaction_requires_schema_snapshot_id(dal, mock_db):
 async def test_update_interaction_result(dal, mock_db):
     """Verify updating execution results."""
     interaction_id = "int-1"
+    mock_db.execute.return_value = "UPDATE 1"
     await dal.update_interaction_result(
         interaction_id=interaction_id,
+        tenant_id=1,
         generated_sql="SELECT 1",
         execution_status="SUCCESS",
         response_payload='{"text": "hi"}',
@@ -82,6 +84,15 @@ async def test_update_interaction_result(dal, mock_db):
     sql = mock_db.execute.call_args[0][0]
     assert "UPDATE query_interactions" in sql
     assert "generated_sql" in sql
+    assert "tenant_id = $2" in sql
+
+
+@pytest.mark.asyncio
+async def test_update_interaction_result_cross_tenant_rejected(dal, mock_db):
+    """Verify update rejects cross-tenant interaction_id access."""
+    mock_db.execute.return_value = "UPDATE 0"
+    with pytest.raises(ValueError, match="tenant scope"):
+        await dal.update_interaction_result(interaction_id="int-1", tenant_id=999)
 
 
 @pytest.mark.asyncio

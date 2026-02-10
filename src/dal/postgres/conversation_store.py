@@ -27,6 +27,7 @@ class PostgresConversationStore(ConversationStore):
         self,
         conversation_id: str,
         user_id: str,
+        tenant_id: int,
         state_json: Dict[str, Any],
         version: int,
         ttl_minutes: int = 60,
@@ -35,33 +36,47 @@ class PostgresConversationStore(ConversationStore):
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         state_str = json.dumps(state_json)
 
+        check_sql = "SELECT tenant_id FROM conversation_states WHERE conversation_id = $1"
         sql = """
             INSERT INTO conversation_states (
-                conversation_id, user_id, state_version, state_json, updated_at, expires_at
+                conversation_id, user_id, tenant_id,
+                state_version, state_json, updated_at, expires_at
             ) VALUES (
-                $1, $2, $3, $4, NOW(), $5
+                $1, $2, $3, $4, $5, NOW(), $6
             )
             ON CONFLICT (conversation_id) DO UPDATE SET
                 state_version = EXCLUDED.state_version,
                 state_json = EXCLUDED.state_json,
+                tenant_id = EXCLUDED.tenant_id,
                 updated_at = NOW(),
                 expires_at = EXCLUDED.expires_at
         """
         async with self._get_connection() as conn:
-            await conn.execute(sql, conversation_id, user_id, version, state_str, expires_at)
+            existing_tenant = await conn.fetchval(check_sql, conversation_id)
+            if existing_tenant is not None and int(existing_tenant) != int(tenant_id):
+                raise ValueError("Tenant mismatch for conversation scope.")
+
+            await conn.execute(
+                sql, conversation_id, user_id, tenant_id, version, state_str, expires_at
+            )
 
     async def load_state_async(
-        self, conversation_id: str, user_id: str
+        self, conversation_id: str, user_id: str, tenant_id: int
     ) -> Optional[Dict[str, Any]]:
         """Load state if exists and not expired."""
+        scope_sql = "SELECT tenant_id FROM conversation_states WHERE conversation_id = $1"
         sql = """
             SELECT state_json FROM conversation_states
             WHERE conversation_id = $1
               AND user_id = $2
+              AND tenant_id = $3
               AND expires_at > NOW()
         """
         async with self._get_connection() as conn:
-            result = await conn.fetchrow(sql, conversation_id, user_id)
+            existing_tenant = await conn.fetchval(scope_sql, conversation_id)
+            if existing_tenant is not None and int(existing_tenant) != int(tenant_id):
+                raise ValueError("Tenant mismatch for conversation scope.")
+            result = await conn.fetchrow(sql, conversation_id, user_id, tenant_id)
 
         if result and result.get("state_json"):
             raw = result["state_json"]

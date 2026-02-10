@@ -12,7 +12,7 @@ async def handler(
     conversation_id: Optional[str],
     schema_snapshot_id: str,
     user_nlq_text: str,
-    tenant_id: int = 1,
+    tenant_id: Optional[int] = None,
     model_version: Optional[str] = None,
     prompt_version: Optional[str] = None,
     trace_id: Optional[str] = None,

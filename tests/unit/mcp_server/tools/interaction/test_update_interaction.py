@@ -26,6 +26,7 @@ class TestUpdateInteraction:
 
             response_json = await handler(
                 interaction_id="int-1",
+                tenant_id=1,
                 generated_sql="SELECT * FROM users",
                 response_payload='{"rows": []}',
                 execution_status="SUCCESS",
@@ -48,7 +49,10 @@ class TestUpdateInteraction:
             mock_get_store.return_value = mock_store
 
             response_json = await handler(
-                interaction_id="int-1", execution_status="FAILURE", error_type="SYNTAX_ERROR"
+                interaction_id="int-1",
+                tenant_id=1,
+                execution_status="FAILURE",
+                error_type="SYNTAX_ERROR",
             )
             response = json.loads(response_json)
 
@@ -57,5 +61,30 @@ class TestUpdateInteraction:
             # Args: interaction_id, generated_sql, response_payload,
             #       execution_status, error_type, tables_used
             assert call_args[0] == "int-1"
-            assert call_args[3] == "FAILURE"
-            assert call_args[4] == "SYNTAX_ERROR"
+            assert call_args[1] == 1
+            assert call_args[4] == "FAILURE"
+            assert call_args[5] == "SYNTAX_ERROR"
+
+    @pytest.mark.asyncio
+    async def test_update_interaction_requires_tenant_id(self):
+        """Missing tenant_id should be rejected."""
+        response_json = await handler(interaction_id="int-1", tenant_id=None)
+        response = json.loads(response_json)
+        assert response["error"]["sql_state"] == "MISSING_TENANT_ID"
+
+    @pytest.mark.asyncio
+    async def test_update_interaction_rejects_cross_tenant_access(self):
+        """Tenant mismatch should return deterministic scoped error."""
+        with patch(
+            "mcp_server.tools.interaction.update_interaction.get_interaction_store"
+        ) as mock_get_store:
+            mock_store = AsyncMock()
+            mock_store.update_interaction_result = AsyncMock(
+                side_effect=ValueError("Interaction not found for tenant scope.")
+            )
+            mock_get_store.return_value = mock_store
+
+            response_json = await handler(interaction_id="int-1", tenant_id=9)
+            response = json.loads(response_json)
+
+            assert response["error"]["sql_state"] == "TENANT_SCOPE_VIOLATION"

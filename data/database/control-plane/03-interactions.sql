@@ -13,13 +13,14 @@ CREATE TABLE query_interactions (
     prompt_version TEXT,
     tables_used TEXT[], -- Array of strings
     trace_id TEXT,      -- Link to OTEL trace
-    tenant_id INTEGER   -- Multi-tenancy support
+    tenant_id INTEGER NOT NULL DEFAULT 1  -- Multi-tenancy support
 );
 
 -- Indexes for common lookups
 CREATE INDEX idx_interactions_conversation ON query_interactions(conversation_id);
 CREATE INDEX idx_interactions_created ON query_interactions(created_at DESC);
 CREATE INDEX idx_interactions_status ON query_interactions(execution_status);
+CREATE INDEX idx_interactions_tenant ON query_interactions(tenant_id);
 
 -- Enable RLS (though usually open for this system)
 ALTER TABLE query_interactions ENABLE ROW LEVEL SECURITY;

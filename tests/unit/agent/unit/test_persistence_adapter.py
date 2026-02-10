@@ -26,7 +26,7 @@ async def test_save_state(adapter, mock_mcp_client):
     """Test serializing and saving state via MCP tool."""
     state = ConversationState(conversation_id="123", schema_snapshot_id="snap-1")
 
-    await adapter.save_state_async(state, user_id="user-1")
+    await adapter.save_state_async(state, user_id="user-1", tenant_id=9)
 
     mock_mcp_client.call_tool.assert_called_once()
     args = mock_mcp_client.call_tool.call_args
@@ -36,6 +36,7 @@ async def test_save_state(adapter, mock_mcp_client):
     tool_args = args[0][1]
     assert tool_args["conversation_id"] == "123"
     assert tool_args["user_id"] == "user-1"
+    assert tool_args["tenant_id"] == 9
     assert tool_args["version"] == 1
     # Check JSON structure
     assert "turns" in tool_args["state_json"]
@@ -55,7 +56,7 @@ async def test_load_state_found(adapter, mock_mcp_client):
     }
     mock_mcp_client.call_tool.return_value = state_json
 
-    state = await adapter.load_state_async("123", "user-1")
+    state = await adapter.load_state_async("123", "user-1", 5)
 
     assert state is not None
     assert isinstance(state, ConversationState)
@@ -67,5 +68,5 @@ async def test_load_state_found(adapter, mock_mcp_client):
 async def test_load_state_not_found(adapter, mock_mcp_client):
     """Test return None if tool returns None."""
     mock_mcp_client.call_tool.return_value = None
-    state = await adapter.load_state_async("999", "user-1")
+    state = await adapter.load_state_async("999", "user-1", 1)
     assert state is None

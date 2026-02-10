@@ -733,6 +733,7 @@ async def run_agent_with_tracing(
                                 "conversation_id": session_id or thread_id,
                                 "schema_snapshot_id": schema_snapshot_id or "unknown",
                                 "user_nlq_text": question,
+                                "tenant_id": tenant_id,
                                 "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
                                 "prompt_version": "v1.0",
                                 "trace_id": final_trace_id,
@@ -867,6 +868,7 @@ async def run_agent_with_tracing(
                         # Capture update payload for retry closure
                         update_payload = {
                             "interaction_id": interaction_id,
+                            "tenant_id": tenant_id,
                             "generated_sql": result.get("current_sql"),
                             "response_payload": json.dumps(
                                 {"text": last_msg, "error": result.get("error")}
