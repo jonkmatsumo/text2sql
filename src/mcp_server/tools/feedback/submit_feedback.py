@@ -3,7 +3,8 @@
 from typing import Optional
 
 from dal.factory import get_feedback_store
-from mcp_server.utils.envelopes import tool_error_response, tool_success_response
+from mcp_server.utils.envelopes import tool_success_response
+from mcp_server.utils.errors import tool_error_response
 
 
 class FeedbackLinkageError(Exception):
@@ -40,7 +41,11 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
     """
     # Validate interaction_id before attempting write
     if not interaction_id or not interaction_id.strip():
-        return tool_error_response("interaction_id is required", category="invalid_request")
+        return tool_error_response(
+            message="interaction_id is required",
+            code="INVALID_INTERACTION_ID",
+            category="invalid_request",
+        )
 
     store = get_feedback_store()
 
@@ -61,10 +66,14 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
             or "references" in error_msg
         ):
             return tool_error_response(
-                f"Interaction '{interaction_id}' does not exist", category="invalid_request"
+                message=f"Interaction '{interaction_id}' does not exist",
+                code="INTERACTION_NOT_FOUND",
+                category="invalid_request",
             )
 
         # Re-raise other errors or return standardized error
         return tool_error_response(
-            f"Failed to submit feedback: {str(e)}", category="internal_error"
+            message=f"Failed to submit feedback: {str(e)}",
+            code="SUBMIT_FEEDBACK_FAILED",
+            category="internal_error",
         )
