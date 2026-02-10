@@ -268,6 +268,33 @@ class TestValidateSql:
         )
         assert result.is_valid is True
 
+    def test_cartesian_join_warn_mode(self):
+        """Cartesian joins should warn by default without blocking execution."""
+        result = validate_sql(
+            "SELECT * FROM customers CROSS JOIN orders",
+            cartesian_join_mode="warn",
+        )
+        assert result.is_valid is True
+        assert any("cartesian join" in warning.lower() for warning in result.warnings)
+
+    def test_cartesian_join_block_mode(self):
+        """Cartesian joins should block when configured."""
+        result = validate_sql(
+            "SELECT * FROM customers CROSS JOIN orders",
+            cartesian_join_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.violation_type == ViolationType.CARTESIAN_JOIN for v in result.violations)
+
+    def test_constant_join_predicate_block_mode(self):
+        """Constant join predicates should be treated as Cartesian risks in block mode."""
+        result = validate_sql(
+            "SELECT * FROM customers c JOIN orders o ON 1 = 1",
+            cartesian_join_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.details.get("reason") == "join_constant_condition" for v in result.violations)
+
 
 class TestSecurityViolation:
     """Tests for SecurityViolation dataclass."""

@@ -301,6 +301,10 @@ async def validate_sql_node(state: AgentState) -> dict:
             "validation.column_allowlist_tables_count",
             len(allowed_columns),
         )
+        span.set_attribute(
+            "validation.cartesian_join_mode",
+            (get_env_str("AGENT_CARTESIAN_JOIN_MODE", "warn") or "warn").strip().lower(),
+        )
         result = validate_sql(
             sql_query,
             allowed_tables=allowed_tables or None,

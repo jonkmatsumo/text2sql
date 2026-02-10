@@ -16,7 +16,7 @@ import sqlglot
 from sqlglot import exp
 
 from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
-from common.config.env import get_env_bool, get_env_int
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import ValidationRefusalReason
 from common.policy.sql_policy import is_sensitive_column_name
 from common.sql.dialect import normalize_sqlglot_dialect
@@ -34,6 +34,7 @@ class ViolationType(str, Enum):
     COMPLEXITY_LIMIT = "complexity_limit"
     SENSITIVE_COLUMN = "sensitive_column"
     COLUMN_ALLOWLIST = "column_allowlist"
+    CARTESIAN_JOIN = "cartesian_join"
 
 
 @dataclass
@@ -578,12 +579,58 @@ def validate_complexity(ast: exp.Expression) -> list[SecurityViolation]:
     return violations
 
 
+def _detect_cartesian_join_patterns(
+    ast: exp.Expression, mode: str
+) -> tuple[list[SecurityViolation], list[str]]:
+    """Detect likely Cartesian joins and constant join predicates."""
+    normalized_mode = (mode or "warn").strip().lower()
+    if normalized_mode not in {"warn", "block"}:
+        return [], []
+
+    violations: list[SecurityViolation] = []
+    warnings: list[str] = []
+
+    for join in ast.find_all(exp.Join):
+        on_clause = join.args.get("on")
+        using_clause = join.args.get("using")
+
+        reason = None
+        if on_clause is None and using_clause is None:
+            reason = "join_without_predicate"
+        elif on_clause is not None and not any(on_clause.find_all(exp.Column)):
+            reason = "join_constant_condition"
+
+        if reason is None:
+            continue
+
+        message = (
+            "Potential Cartesian join detected: "
+            f"{reason.replace('_', ' ')}. Add an explicit join predicate."
+        )
+        details = {
+            "reason": reason,
+            "join_sql": join.sql(dialect="postgres")[:300],
+        }
+        violation = SecurityViolation(
+            violation_type=ViolationType.CARTESIAN_JOIN,
+            message=message,
+            details=details,
+        )
+        if normalized_mode == "block":
+            violations.append(violation)
+        else:
+            warnings.append(message)
+
+    return violations, warnings
+
+
 def validate_sql(
     sql: str,
     dialect: str = "postgres",
     allowed_tables: Optional[set[str]] = None,
     allowed_columns: Optional[dict[str, set[str]]] = None,
     column_allowlist_mode: str = "warn",
+    cartesian_join_mode: Optional[str] = None,
 ) -> ASTValidationResult:
     """
     Complete SQL validation: parse, security check, complexity check, and metadata extraction.
@@ -596,6 +643,7 @@ def validate_sql(
         allowed_tables: Optional allowlist used for set-operation branch checks.
         allowed_columns: Optional table->columns allowlist used for projection checks.
         column_allowlist_mode: "warn" (default), "block", or "off".
+        cartesian_join_mode: "warn" (default), "block", or "off".
 
     Returns:
         ASTValidationResult with validation status, violations, and metadata
@@ -622,6 +670,13 @@ def validate_sql(
     column_mode = (column_allowlist_mode or "warn").strip().lower()
     if column_mode not in {"warn", "block", "off"}:
         column_mode = "warn"
+    cartesian_mode = (
+        (cartesian_join_mode or get_env_str("AGENT_CARTESIAN_JOIN_MODE", "warn") or "warn")
+        .strip()
+        .lower()
+    )
+    if cartesian_mode not in {"warn", "block", "off"}:
+        cartesian_mode = "warn"
 
     # Validate complexity
     complexity_violations = validate_complexity(ast)
@@ -635,6 +690,14 @@ def validate_sql(
     )
     violations.extend(column_violations)
     warnings.extend(column_warnings)
+
+    if cartesian_mode != "off":
+        cartesian_violations, cartesian_warnings = _detect_cartesian_join_patterns(
+            ast,
+            mode=cartesian_mode,
+        )
+        violations.extend(cartesian_violations)
+        warnings.extend(cartesian_warnings)
 
     # Optional sensitive-column guardrail
     sensitive_columns = _extract_sensitive_columns(ast)

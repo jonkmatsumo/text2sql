@@ -286,3 +286,28 @@ class TestValidateSqlNode:
         assert result.get("error") is None
         assert result["ast_validation_result"]["is_valid"] is True
         assert result["ast_validation_result"]["warnings"]
+
+    @pytest.mark.asyncio
+    async def test_cartesian_join_block_mode_rejects_query(self, base_state, monkeypatch):
+        """Block mode should reject likely Cartesian joins."""
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        monkeypatch.setenv("AGENT_CARTESIAN_JOIN_MODE", "block")
+        base_state["current_sql"] = "SELECT * FROM customers CROSS JOIN orders"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is not None
+        assert "cartesian join" in result["error"].lower()
+        assert result["ast_validation_result"]["is_valid"] is False
