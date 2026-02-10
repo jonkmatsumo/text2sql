@@ -9,9 +9,7 @@ TOOL_NAME = "get_table_schema"
 TOOL_DESCRIPTION = "Retrieve the schema (columns, data types, foreign keys) for a list of tables."
 
 
-async def handler(
-    table_names: list[str], tenant_id: Optional[int] = None, snapshot_id: Optional[str] = None
-) -> str:
+async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[str] = None) -> str:
     """Retrieve the schema (columns, data types, foreign keys) for a list of tables.
 
     Authorization:
@@ -27,7 +25,7 @@ async def handler(
 
     Args:
         table_names: A list of exact table names (e.g. ['film', 'actor']).
-        tenant_id: Optional tenant identifier.
+        tenant_id: Tenant identifier.
         snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
@@ -38,6 +36,10 @@ async def handler(
     start_time = time.monotonic()
 
     from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.validation import require_tenant_id
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
         return err

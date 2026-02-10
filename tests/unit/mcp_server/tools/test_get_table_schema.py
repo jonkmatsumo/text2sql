@@ -17,6 +17,14 @@ class TestGetTableSchema:
         assert TOOL_NAME == "get_table_schema"
 
     @pytest.mark.asyncio
+    async def test_get_table_schema_requires_tenant_id(self):
+        """Test get_table_schema rejects missing tenant."""
+        result = await handler(["users"], tenant_id=None)
+        data = json.loads(result)
+        assert data["error"]["message"] == "Tenant ID is required for get_table_schema."
+        assert data["error"]["category"] == "invalid_request"
+
+    @pytest.mark.asyncio
     async def test_get_table_schema_single_table(self):
         """Test get_table_schema with a single table."""
         mock_store = AsyncMock()
@@ -31,7 +39,7 @@ class TestGetTableSchema:
         with patch(
             "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(["users"])
+            result = await handler(["users"], tenant_id=1)
 
             mock_store.get_table_definition.assert_called_once_with("users")
             data = json.loads(result)["result"]
@@ -57,7 +65,7 @@ class TestGetTableSchema:
         with patch(
             "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(["users", "orders"])
+            result = await handler(["users", "orders"], tenant_id=1)
 
             assert mock_store.get_table_definition.call_count == 2
             data = json.loads(result)["result"]
@@ -78,7 +86,7 @@ class TestGetTableSchema:
         with patch(
             "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler(["users", "missing", "orders"])
+            result = await handler(["users", "missing", "orders"], tenant_id=1)
 
             data = json.loads(result)["result"]
             assert len(data) == 3
@@ -94,7 +102,7 @@ class TestGetTableSchema:
         with patch(
             "mcp_server.tools.get_table_schema.Database.get_metadata_store", return_value=mock_store
         ):
-            result = await handler([])
+            result = await handler([], tenant_id=1)
 
             mock_store.get_table_definition.assert_not_called()
             data = json.loads(result)["result"]

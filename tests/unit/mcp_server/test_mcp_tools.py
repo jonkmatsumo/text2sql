@@ -145,6 +145,16 @@ class TestGetSemanticDefinitions:
     """Unit tests for get_semantic_definitions function."""
 
     @pytest.mark.asyncio
+    async def test_get_semantic_definitions_requires_tenant_id(self):
+        """Test get_semantic_definitions rejects missing tenant."""
+        from mcp_server.tools.get_semantic_definitions import handler
+
+        result = await handler(["High Value Customer"], tenant_id=None)
+        data = json.loads(result)
+        assert data["error"]["message"] == "Tenant ID is required for get_semantic_definitions."
+        assert data["error"]["category"] == "invalid_request"
+
+    @pytest.mark.asyncio
     async def test_get_semantic_definitions_single_term(self):
         """Test retrieving definition for a single term."""
         from mcp_server.tools.get_semantic_definitions import handler
@@ -162,7 +172,7 @@ class TestGetSemanticDefinitions:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
 
         with patch("dal.database.Database.get_connection", return_value=mock_conn):
-            result = await handler(["High Value Customer"])
+            result = await handler(["High Value Customer"], tenant_id=1)
             data = json.loads(result)["result"]
             assert "High Value Customer" in data
             assert (
@@ -173,6 +183,16 @@ class TestGetSemanticDefinitions:
 
 class TestSearchRelevantTables:
     """Unit tests for search_relevant_tables function."""
+
+    @pytest.mark.asyncio
+    async def test_search_relevant_tables_requires_tenant_id(self):
+        """Test search_relevant_tables rejects missing tenant."""
+        from mcp_server.tools.search_relevant_tables import handler
+
+        result = await handler("movies about space", tenant_id=None)
+        data = json.loads(result)
+        assert data["error"]["message"] == "Tenant ID is required for search_relevant_tables."
+        assert data["error"]["category"] == "invalid_request"
 
     @pytest.mark.asyncio
     async def test_search_relevant_tables_success(self):
@@ -198,7 +218,7 @@ class TestSearchRelevantTables:
                 Database, "get_schema_introspector", MagicMock(return_value=mock_introspector)
             ),
         ):
-            result = await handler("movies about space")
+            result = await handler("movies about space", tenant_id=1)
             data = json.loads(result)["result"]
             assert len(data) == 1
             assert data[0]["table_name"] == "film"

@@ -34,7 +34,7 @@ class TestLegacyTools:
         mock_store.list_tables = list_tables_async
 
         with patch.object(list_tables_mod.Database, "get_metadata_store", return_value=mock_store):
-            response = await list_tables(search_term="order")
+            response = await list_tables(tenant_id=1, search_term="order")
             result = json.loads(response)["result"]
 
             assert calls["count"] == 1
@@ -56,7 +56,7 @@ class TestLegacyTools:
         with patch.object(
             get_table_schema_mod.Database, "get_metadata_store", return_value=mock_store
         ):
-            result = await get_table_schema(["t1"])
+            result = await get_table_schema(["t1"], tenant_id=1)
 
             assert calls["tables"] == ["t1"]
             response = json.loads(result)
@@ -100,7 +100,7 @@ class TestLegacyTools:
             ),
         ):
 
-            result = await search_relevant_tables("query")
+            result = await search_relevant_tables("query", tenant_id=1)
 
             assert calls["tables"] == ["t1"]
             assert calls["tables"] == ["t1"]

@@ -13,8 +13,8 @@ TOOL_DESCRIPTION = (
 
 async def handler(
     user_query: str,
+    tenant_id: int,
     limit: int = 5,
-    tenant_id: Optional[int] = None,
     snapshot_id: Optional[str] = None,
 ) -> str:
     """Search for tables relevant to a natural language query using semantic similarity.
@@ -32,8 +32,8 @@ async def handler(
 
     Args:
         user_query: Natural language question (e.g., "Show me customer payments")
+        tenant_id: Tenant identifier.
         limit: Maximum number of relevant tables to return (default: 5)
-        tenant_id: Optional tenant identifier.
         snapshot_id: Optional schema snapshot identifier to verify consistency.
 
     Returns:
@@ -43,7 +43,10 @@ async def handler(
 
     start_time = time.monotonic()
 
-    from mcp_server.utils.validation import validate_limit
+    from mcp_server.utils.validation import require_tenant_id, validate_limit
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_limit(limit, TOOL_NAME, min_val=1, max_val=50):
         return err
