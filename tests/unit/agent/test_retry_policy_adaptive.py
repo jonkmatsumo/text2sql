@@ -228,3 +228,26 @@ def test_static_vs_adaptive_non_retryable_semantics_are_explicit(monkeypatch):
     assert adaptive_state["retry_reason"] == RetryDecisionReason.NON_RETRYABLE_CATEGORY.value
     assert static_decision == "correct"
     assert static_state.get("retry_reason") is None
+
+
+def test_retry_decision_metrics_are_emitted(monkeypatch):
+    """Retry decisions should emit low-cardinality counter/histogram metrics."""
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    state = {
+        "error": "permission denied",
+        "error_category": "auth",
+        "error_metadata": {"is_retryable": False},
+        "retry_count": 2,
+    }
+
+    from unittest.mock import patch
+
+    with (
+        patch("agent.graph.agent_metrics.add_counter") as mock_add_counter,
+        patch("agent.graph.agent_metrics.record_histogram") as mock_record_histogram,
+    ):
+        decision = route_after_execution(state)
+
+    assert decision == "failed"
+    mock_add_counter.assert_called()
+    mock_record_histogram.assert_called()

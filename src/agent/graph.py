@@ -27,6 +27,7 @@ from agent.state import AgentState
 from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
+from common.observability.metrics import agent_metrics
 from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ def _set_retry_reason(
     reason_code: RetryDecisionReason,
     will_retry: bool,
     retry_policy: Optional[str],
+    retry_count: int,
     span: Optional[Any],
 ) -> None:
     """Persist stable retry reason metadata and emit structured telemetry attributes."""
@@ -239,6 +241,24 @@ def _set_retry_reason(
                 "policy": retry_policy or "unknown",
             },
         )
+
+    metric_attributes = {
+        "policy": retry_policy or "unknown",
+        "reason": reason_value,
+        "will_retry": bool(will_retry),
+    }
+    agent_metrics.add_counter(
+        "agent.retry.decisions_total",
+        attributes=metric_attributes,
+        description="Count of retry decision outcomes",
+    )
+    agent_metrics.record_histogram(
+        "agent.retry.attempt_number",
+        value=float(retry_count),
+        unit="attempt",
+        description="Observed retry attempt index for retry decisions",
+        attributes=metric_attributes,
+    )
 
 
 def route_after_execution(state: AgentState) -> str:
@@ -270,6 +290,7 @@ def route_after_execution(state: AgentState) -> str:
             reason_code=RetryDecisionReason.UNSUPPORTED_CAPABILITY,
             will_retry=False,
             retry_policy=retry_policy,
+            retry_count=int(state.get("retry_count", 0) or 0),
             span=span,
         )
         if span:
@@ -345,6 +366,7 @@ def route_after_execution(state: AgentState) -> str:
                 reason_code=RetryDecisionReason.NON_RETRYABLE_CATEGORY,
                 will_retry=False,
                 retry_policy=retry_policy,
+                retry_count=retry_count,
                 span=span,
             )
 
@@ -382,6 +404,7 @@ def route_after_execution(state: AgentState) -> str:
                     reason_code=RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER,
                     will_retry=False,
                     retry_policy=retry_policy,
+                    retry_count=retry_count,
                     span=span,
                 )
 
@@ -433,6 +456,7 @@ def route_after_execution(state: AgentState) -> str:
                 reason_code=RetryDecisionReason.INSUFFICIENT_BUDGET,
                 will_retry=False,
                 retry_policy=retry_policy,
+                retry_count=retry_count,
                 span=span,
             )
 
@@ -460,6 +484,7 @@ def route_after_execution(state: AgentState) -> str:
             reason_code=RetryDecisionReason.DEADLINE_EXCEEDED,
             will_retry=False,
             retry_policy=retry_policy,
+            retry_count=retry_count,
             span=span,
         )
 
@@ -482,6 +507,7 @@ def route_after_execution(state: AgentState) -> str:
             reason_code=RetryDecisionReason.MAX_RETRIES_REACHED,
             will_retry=False,
             retry_policy=retry_policy,
+            retry_count=retry_count,
             span=span,
         )
 
@@ -498,6 +524,26 @@ def route_after_execution(state: AgentState) -> str:
     state["retry_summary"] = retry_summary
     retry_decision["reason_code"] = RetryDecisionReason.PROCEED_TO_CORRECTION.value
     retry_decision["will_retry"] = True
+    agent_metrics.add_counter(
+        "agent.retry.decisions_total",
+        attributes={
+            "policy": retry_policy,
+            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "will_retry": True,
+        },
+        description="Count of retry decision outcomes",
+    )
+    agent_metrics.record_histogram(
+        "agent.retry.attempt_number",
+        value=float(retry_count),
+        unit="attempt",
+        description="Observed retry attempt index for retry decisions",
+        attributes={
+            "policy": retry_policy,
+            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "will_retry": True,
+        },
+    )
 
     decision_summary = format_decision_summary(
         action="retry",

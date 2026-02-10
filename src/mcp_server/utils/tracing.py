@@ -7,6 +7,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
+from common.observability.metrics import mcp_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,25 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     span.set_attribute(
                         "mcp.tool.response.truncation_parse_failed", truncation_parse_failed
                     )
+
+                    tool_kind = "execute" if tool_name == "execute_sql_query" else "non_execute"
+                    metric_attributes = {"tool_kind": tool_kind, "truncated": bool(is_truncated)}
+                    mcp_metrics.record_histogram(
+                        "mcp.tool.response_size_bytes",
+                        float(resp_size),
+                        unit="By",
+                        description="Bounded MCP tool response size",
+                        attributes=metric_attributes,
+                    )
+                    if is_truncated:
+                        mcp_metrics.add_counter(
+                            "mcp.tool.truncation_total",
+                            description="Count of truncated MCP tool responses",
+                            attributes={
+                                "tool_kind": tool_kind,
+                                "parse_failed": bool(truncation_parse_failed),
+                            },
+                        )
 
                     return actual_response
 

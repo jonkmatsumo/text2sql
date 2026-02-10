@@ -9,6 +9,7 @@ from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output, unwrap_envelope
 from common.config.env import get_env_bool
+from common.observability.metrics import agent_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,14 @@ async def cache_lookup_node(state: AgentState) -> dict:
         name="cache_lookup",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+
+        def _record_cache_outcome(outcome: str) -> None:
+            agent_metrics.add_counter(
+                "agent.cache.lookup_total",
+                attributes={"outcome": outcome},
+                description="Cache lookup outcomes (hit/miss/error)",
+            )
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "cache_lookup")
         messages = state["messages"]
@@ -82,6 +91,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
             logger.warning("lookup_cache tool not found")
             span.set_attribute("lookup_mode", "error")
             span.set_attribute("cache.hit", False)
+            _record_cache_outcome("error")
             return {"cached_sql": None, "from_cache": False}
 
         try:
@@ -95,6 +105,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
+                _record_cache_outcome("miss")
                 return {"cached_sql": None, "from_cache": False}
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
@@ -108,12 +119,14 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
+                _record_cache_outcome("miss")
                 return {"cached_sql": None, "from_cache": False}
 
             if not cache_data.get("value"):
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
                 span.set_outputs({"hit": False})
+                _record_cache_outcome("miss")
                 return {"cached_sql": None, "from_cache": False}
 
             # Cache Hit!
@@ -150,6 +163,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
                                 },
                             )
                             span.set_outputs({"hit": False, "reason": "schema_snapshot_mismatch"})
+                            _record_cache_outcome("miss")
                             return {
                                 "cached_sql": None,
                                 "from_cache": False,
@@ -164,6 +178,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
             logger.info(f"✓ Cache hit validated by MCP. ID: {cache_id}, Sim: {similarity:.4f}")
             span.set_outputs({"hit": True, "sql": cached_sql})
+            _record_cache_outcome("hit")
             return {
                 "current_sql": cached_sql,
                 "from_cache": True,
@@ -181,6 +196,7 @@ async def cache_lookup_node(state: AgentState) -> dict:
             span.set_attribute("error", str(e))
             span.set_attribute("error.type", type(e).__name__)
             span.set_attribute("cache.hit", False)
+            _record_cache_outcome("error")
             return {"cached_sql": None, "from_cache": False}
 
 

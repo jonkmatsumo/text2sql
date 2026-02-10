@@ -241,3 +241,26 @@ async def test_non_execute_raw_string_payload_is_wrapped_and_bounded():
     assert "metadata" in parsed
     assert parsed["metadata"]["is_truncated"] is True
     assert parsed["metadata"]["bytes_total"] >= parsed["metadata"]["bytes_returned"]
+
+
+@pytest.mark.asyncio
+async def test_truncation_metrics_emitted_for_non_execute_tool():
+    """Truncated non-execute responses should emit truncation metrics."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+
+    async def bounded_handler():
+        return json.dumps(
+            {"result": [{"blob": "x" * 400} for _ in range(10)], "metadata": {"provider": "pg"}}
+        )
+
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=mock_tracer),
+        patch("mcp_server.utils.tool_output.get_env_int", return_value=300),
+        patch("mcp_server.utils.tracing.mcp_metrics.add_counter") as mock_add_counter,
+        patch("mcp_server.utils.tracing.mcp_metrics.record_histogram") as mock_record_histogram,
+    ):
+        traced = trace_tool("list_tables")(bounded_handler)
+        await traced()
+
+    mock_record_histogram.assert_called()
+    mock_add_counter.assert_called()
