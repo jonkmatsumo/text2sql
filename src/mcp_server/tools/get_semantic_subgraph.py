@@ -368,6 +368,11 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
+    from mcp_server.utils.validation import require_tenant_id
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
     # Cache Read
     # Cache Read
     embedding = None

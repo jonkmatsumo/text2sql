@@ -349,16 +349,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     error_category = error_obj.category if error_obj else "unknown"
                     error_metadata = error_obj.to_dict() if error_obj else {}
 
-                    # Check for malformed response based on error_category or msg
-                    if (
-                        error_category == "tool_response_malformed"
-                        or error_msg == "Malformed response payload"
-                    ):
+                    # Preserve raw malformed string payloads from the tool for diagnostics.
+                    # Only mask parser-generated malformed payloads with a trace-id envelope.
+                    if error_category == "tool_response_malformed":
                         span.set_attribute("tool.response_shape", "malformed")
-                        trace_id = telemetry.get_current_trace_id()
-                        error_msg = (
-                            f"Tool response malformed. Trace ID: {trace_id or 'unavailable'}."
+                        parser_generated_malformed = isinstance(error_msg, str) and (
+                            error_msg == "Malformed response payload"
+                            or error_msg.startswith("Invalid payload type:")
                         )
+                        if parser_generated_malformed:
+                            trace_id = telemetry.get_current_trace_id()
+                            error_msg = (
+                                f"Tool response malformed. Trace ID: {trace_id or 'unavailable'}."
+                            )
                     else:
                         span.set_attribute("tool.response_shape", "error")
 
