@@ -9,7 +9,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
-from common.config.env import get_env_bool
+from common.config.env import get_env_bool, get_env_str
 
 
 def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
@@ -76,6 +76,56 @@ def _extract_identifiers(sql_query: str) -> Tuple[Set[str], Set[Tuple[str, str]]
         if column.table and column.name:
             columns.add((column.table, column.name))
     return tables, columns
+
+
+def _parse_table_allowlist(raw_allowlist: Optional[str]) -> Set[str]:
+    if not raw_allowlist:
+        return set()
+    tables = set()
+    for item in raw_allowlist.split(","):
+        normalized = item.strip().lower()
+        if normalized:
+            tables.add(normalized)
+    return tables
+
+
+def _schema_tables_from_state(state: AgentState) -> Set[str]:
+    tables: Set[str] = set()
+
+    table_names = state.get("table_names") or []
+    if isinstance(table_names, list):
+        for table in table_names:
+            if isinstance(table, str) and table.strip():
+                tables.add(table.strip().lower())
+
+    raw_schema_context = state.get("raw_schema_context") or []
+    if isinstance(raw_schema_context, list):
+        for node in raw_schema_context:
+            if not isinstance(node, dict):
+                continue
+            node_type = str(node.get("type") or "").lower()
+            if node_type == "table":
+                name = node.get("name") or node.get("table_name")
+                if isinstance(name, str) and name.strip():
+                    tables.add(name.strip().lower())
+            if node_type == "column":
+                table_name = node.get("table")
+                if isinstance(table_name, str) and table_name.strip():
+                    tables.add(table_name.strip().lower())
+    return tables
+
+
+def _resolve_table_allowlist(state: AgentState) -> Set[str]:
+    """Resolve per-tenant table allowlist from config or schema context."""
+    tenant_id = state.get("tenant_id")
+    tenant_allowlist = None
+    if tenant_id is not None:
+        tenant_allowlist = get_env_str(f"AGENT_TABLE_ALLOWLIST_TENANT_{tenant_id}", "")
+    configured_allowlist = tenant_allowlist or get_env_str("AGENT_TABLE_ALLOWLIST", "")
+    configured_tables = _parse_table_allowlist(configured_allowlist)
+    if configured_tables:
+        return configured_tables
+    return _schema_tables_from_state(state)
 
 
 async def validate_sql_node(state: AgentState) -> dict:
@@ -173,8 +223,12 @@ async def validate_sql_node(state: AgentState) -> dict:
             else:
                 span.set_attribute("validation.schema_bound", False)
 
-        # Run AST validation
-        result = validate_sql(sql_query)
+        # Run AST validation with positive table allowlist.
+        allowed_tables = _resolve_table_allowlist(state)
+        allowlist_enabled = bool(allowed_tables)
+        span.set_attribute("validation.table_allowlist_enabled", allowlist_enabled)
+        span.set_attribute("validation.table_allowlist_count", len(allowed_tables))
+        result = validate_sql(sql_query, allowed_tables=allowed_tables or None)
 
         # Log validation result
         span.set_attribute("is_valid", str(result.is_valid))

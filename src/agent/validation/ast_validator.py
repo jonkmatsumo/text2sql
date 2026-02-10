@@ -167,6 +167,8 @@ def validate_security(
         List of SecurityViolation objects (empty if valid)
     """
     violations = []
+    normalized_allowed_tables = _normalize_allowed_tables(allowed_tables)
+    cte_names = _extract_cte_names(ast)
 
     # 1. Enforce strict Root Node Policy (SELECT / CTE / UNION)
     # Only allow read-only query structures at the root level
@@ -203,6 +205,23 @@ def validate_security(
         table_name = table.name.lower() if table.name else ""
         schema_name = table.db.lower() if table.db else ""
         full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+
+        if table_name in cte_names:
+            continue
+
+        if normalized_allowed_tables and not _is_table_in_allowlist(
+            table, normalized_allowed_tables
+        ):
+            violations.append(
+                SecurityViolation(
+                    violation_type=ViolationType.RESTRICTED_TABLE,
+                    message=(
+                        f"Security Violation: Access to table '{full_name}' is not allowed. "
+                        "Please use only tables from the approved allowlist."
+                    ),
+                    details={"table": full_name, "reason": "table_not_allowlisted"},
+                )
+            )
 
         # Check exact matches
         if table_name in RESTRICTED_TABLES:
@@ -262,6 +281,15 @@ def _normalize_allowed_tables(allowed_tables: Optional[set[str]]) -> set[str]:
     return {str(table).strip().lower() for table in allowed_tables if str(table).strip()}
 
 
+def _extract_cte_names(ast: exp.Expression) -> set[str]:
+    cte_names: set[str] = set()
+    for cte in ast.find_all(exp.CTE):
+        alias = cte.alias_or_name
+        if isinstance(alias, str) and alias.strip():
+            cte_names.add(alias.strip().lower())
+    return cte_names
+
+
 def _is_table_in_allowlist(table: exp.Table, allowed_tables: set[str]) -> bool:
     if not allowed_tables:
         return True
@@ -274,15 +302,17 @@ def _is_table_in_allowlist(table: exp.Table, allowed_tables: set[str]) -> bool:
 
 
 def _disallowed_tables_in_branch(
-    branch: Optional[exp.Expression], allowed_tables: set[str]
+    branch: Optional[exp.Expression], allowed_tables: set[str], cte_names: set[str]
 ) -> list[str]:
     if branch is None or not allowed_tables:
         return []
 
     disallowed = set()
     for table in branch.find_all(exp.Table):
+        table_name = table.name.lower() if table.name else ""
+        if table_name in cte_names:
+            continue
         if not _is_table_in_allowlist(table, allowed_tables):
-            table_name = table.name.lower() if table.name else ""
             schema_name = table.db.lower() if table.db else ""
             full_name = f"{schema_name}.{table_name}" if schema_name and table_name else table_name
             if full_name:
@@ -298,6 +328,7 @@ def _validate_set_operation_allowlist(
     normalized_allowed = _normalize_allowed_tables(allowed_tables)
     if not normalized_allowed:
         return []
+    cte_names = _extract_cte_names(ast)
 
     violations: list[SecurityViolation] = []
     set_operations = tuple(ast.find_all((exp.Union, exp.Intersect, exp.Except)))
@@ -305,7 +336,9 @@ def _validate_set_operation_allowlist(
         operation = type(set_op).__name__.upper()
         branches = {"left": set_op.left, "right": set_op.right}
         for branch_name, branch_ast in branches.items():
-            disallowed_tables = _disallowed_tables_in_branch(branch_ast, normalized_allowed)
+            disallowed_tables = _disallowed_tables_in_branch(
+                branch_ast, normalized_allowed, cte_names
+            )
             if not disallowed_tables:
                 continue
             violations.append(
