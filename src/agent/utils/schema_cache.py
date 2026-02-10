@@ -97,13 +97,27 @@ def set_cached_schema_snapshot_id(
     *,
     now: Optional[float] = None,
 ) -> None:
-    """Store schema snapshot id with timestamp for TTL expiry checks."""
+    """Store schema snapshot id with timestamp for TTL expiry checks.
+
+    Stale writes (older timestamps than the current cached entry) are ignored
+    to reduce race-condition regressions between refresh and execute flows.
+    """
     if not isinstance(snapshot_id, str) or not snapshot_id:
         return
     cache_key = int(tenant_id or 0)
+    cached_at = now if now is not None else time.monotonic()
+
+    existing_entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
+    if existing_entry:
+        existing_cached_at = existing_entry.get("cached_at")
+        if isinstance(existing_cached_at, (int, float)) and float(cached_at) < float(
+            existing_cached_at
+        ):
+            return
+
     _SCHEMA_SNAPSHOT_ID_CACHE[cache_key] = {
         "snapshot_id": snapshot_id,
-        "cached_at": now if now is not None else time.monotonic(),
+        "cached_at": cached_at,
     }
 
 
