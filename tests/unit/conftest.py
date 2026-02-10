@@ -23,6 +23,7 @@ def _minimal_env(monkeypatch):
 def _reset_database_state():
     """Reset global Database state after each test."""
     from dal.database import Database
+    from dal.factory import reset_singletons
 
     # Snapshot current state
     original_pool = Database._pool
@@ -49,3 +50,7 @@ def _reset_database_state():
     Database._schema_store = original_schema
     Database._schema_introspector = original_introspector
     Database._metadata_store = original_metadata
+
+    # Reset DAL factory singletons so provider-specific stores/introspectors
+    # don't leak across tests with different QUERY_TARGET_BACKEND values.
+    reset_singletons()

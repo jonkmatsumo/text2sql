@@ -85,8 +85,10 @@ async def test_cockroach_uses_postgres_pool_path():
 
     # Connection should come from the pool (fallthrough to Postgres path)
     async with Database.get_connection() as acquired_conn:
-        # Verify we got the connection from the pool
-        assert acquired_conn is conn
+        # Verify we got the connection from the pool. It may be wrapped for
+        # tracing/row-limit guardrails depending on env.
+        underlying_conn = getattr(acquired_conn, "_conn", acquired_conn)
+        assert underlying_conn is conn
 
     # Verify capabilities are correctly applied
     caps = Database.get_query_target_capabilities()
