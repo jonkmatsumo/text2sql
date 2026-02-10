@@ -41,7 +41,7 @@ class TestGetTableSchema:
         ):
             result = await handler(["users"], tenant_id=1)
 
-            mock_store.get_table_definition.assert_called_once_with("users")
+            mock_store.get_table_definition.assert_called_once_with("users", tenant_id=1)
             data = json.loads(result)["result"]
             assert len(data) == 1
             assert data[0]["table_name"] == "users"
@@ -51,7 +51,8 @@ class TestGetTableSchema:
         """Test get_table_schema with multiple tables."""
         mock_store = AsyncMock()
 
-        def get_def(table):
+        def get_def(table, tenant_id=None):
+            _ = tenant_id
             return json.dumps(
                 {
                     "table_name": table,
@@ -68,6 +69,8 @@ class TestGetTableSchema:
             result = await handler(["users", "orders"], tenant_id=1)
 
             assert mock_store.get_table_definition.call_count == 2
+            mock_store.get_table_definition.assert_any_call("users", tenant_id=1)
+            mock_store.get_table_definition.assert_any_call("orders", tenant_id=1)
             data = json.loads(result)["result"]
             assert len(data) == 2
 
@@ -76,7 +79,8 @@ class TestGetTableSchema:
         """Test get_table_schema silently skips missing tables."""
         mock_store = AsyncMock()
 
-        def get_def(table):
+        def get_def(table, tenant_id=None):
+            _ = tenant_id
             if table == "missing":
                 raise Exception("Table not found")
             return json.dumps({"table_name": table, "columns": [], "foreign_keys": []})

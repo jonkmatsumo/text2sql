@@ -42,7 +42,7 @@ async def handler(tenant_id: int, search_term: Optional[str] = None) -> str:
         return err
 
     store = Database.get_metadata_store()
-    tables = await store.list_tables()
+    tables = await store.list_tables(tenant_id=tenant_id)
 
     if search_term:
         search_term = search_term.lower()

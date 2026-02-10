@@ -15,12 +15,14 @@ class PostgresMetadataStore(MetadataStore):
         """Initialize the metadata store with a schema introspector."""
         self._introspector = PostgresSchemaIntrospector()
 
-    async def list_tables(self, schema: str = "public") -> List[str]:
+    async def list_tables(self, schema: str = "public", tenant_id: int | None = None) -> List[str]:
         """List all available tables."""
+        _ = tenant_id  # Reserved for future tenant-aware metadata routing.
         return await self._introspector.list_table_names(schema)
 
-    async def get_table_definition(self, table_name: str) -> str:
+    async def get_table_definition(self, table_name: str, tenant_id: int | None = None) -> str:
         """Get the table schema formatted as the legacy tool expects (JSON)."""
+        _ = tenant_id  # Reserved for future tenant-aware metadata routing.
         table_def = await self._introspector.get_table_def(table_name)
 
         # Format to match legacy.py output methodology
