@@ -16,6 +16,10 @@ class BackendCapabilities:
     supports_fk_enforcement: bool = True
     supports_cost_estimation: bool = False
     supports_schema_cache: bool = False
+    # Can provider/session enforce DB-level read-only mode?
+    supports_session_read_only: bool = False
+    # Does DAL apply defensive statement-level read-only guard?
+    enforces_statement_read_only: bool = False
 
 
 PAGINATION_PROVIDERS: set[str] = set()
@@ -34,6 +38,8 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=False,
             supports_fk_enforcement=False,
             supports_schema_cache=False,
+            supports_session_read_only=True,
+            enforces_statement_read_only=True,
         )
     if normalized == "mysql":
         return BackendCapabilities(
@@ -44,12 +50,14 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
+            supports_session_read_only=True,
         )
     if normalized == "postgres":
         return BackendCapabilities(
             execution_model="sync",
             supports_cancel=True,
             supports_pagination=supports_pagination,
+            supports_session_read_only=True,
         )
     if normalized == "sqlite":
         return BackendCapabilities(
@@ -61,6 +69,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
+            supports_session_read_only=True,
         )
     if normalized == "snowflake":
         return BackendCapabilities(
@@ -71,6 +80,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_json_ops=False,
             supports_transactions=False,
             supports_fk_enforcement=False,
+            enforces_statement_read_only=True,
         )
     if normalized == "bigquery":
         return BackendCapabilities(
@@ -83,6 +93,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_fk_enforcement=False,
             supports_cost_estimation=True,
             supports_schema_cache=False,
+            enforces_statement_read_only=True,
         )
     if normalized == "athena":
         return BackendCapabilities(
@@ -126,6 +137,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
+            supports_session_read_only=True,
         )
     if normalized == "clickhouse":
         return BackendCapabilities(

@@ -9,6 +9,7 @@ from dal.bigquery.config import BigQueryConfig
 from dal.bigquery.executor import BigQueryAsyncQueryExecutor
 from dal.bigquery.param_translation import translate_postgres_params_to_bigquery
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 
 
 class BigQueryQueryTargetDatabase:
@@ -29,9 +30,12 @@ class BigQueryQueryTargetDatabase:
     @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
-        """Yield a BigQuery connection wrapper (tenant context is a no-op)."""
+        """Yield a BigQuery connection wrapper (tenant context is a no-op).
+
+        BigQuery jobs don't expose a session-level read-only switch, so
+        statement-level read-only checks are enforced in the DAL wrapper.
+        """
         _ = tenant_id
-        _ = read_only
         if cls._config is None:
             raise RuntimeError(
                 "BigQuery config not initialized. Call BigQueryQueryTargetDatabase.init()."
@@ -47,6 +51,7 @@ class BigQueryQueryTargetDatabase:
             query_timeout_seconds=cls._config.query_timeout_seconds,
             poll_interval_seconds=cls._config.poll_interval_seconds,
             max_rows=cls._config.max_rows,
+            read_only=read_only,
         )
         yield wrapper
 
@@ -60,11 +65,13 @@ class _BigQueryConnection:
         query_timeout_seconds: int,
         poll_interval_seconds: int,
         max_rows: int,
+        read_only: bool,
     ) -> None:
         self._executor = executor
         self._query_timeout_seconds = query_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -84,6 +91,7 @@ class _BigQueryConnection:
         self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, provider="bigquery", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_bigquery(sql, list(params))
 
         async def _run():
@@ -105,6 +113,7 @@ class _BigQueryConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, provider="bigquery", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_bigquery(sql, list(params))
         rows = await trace_query_operation(
             "dal.query.execute",
@@ -125,6 +134,7 @@ class _BigQueryConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, provider="bigquery", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_bigquery(sql, list(params))
         rows, columns = await trace_query_operation(
             "dal.query.execute",

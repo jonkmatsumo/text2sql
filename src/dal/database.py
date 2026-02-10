@@ -598,55 +598,73 @@ class Database:
         if cls._query_target_provider == "sqlite":
             from dal.sqlite import SqliteQueryTargetDatabase
 
-            async with SqliteQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with SqliteQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "mysql":
             from dal.mysql import MysqlQueryTargetDatabase
 
-            async with MysqlQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with MysqlQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "snowflake":
             from dal.snowflake import SnowflakeQueryTargetDatabase
 
-            async with SnowflakeQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with SnowflakeQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "redshift":
             from dal.redshift import RedshiftQueryTargetDatabase
 
-            async with RedshiftQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with RedshiftQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "bigquery":
             from dal.bigquery import BigQueryQueryTargetDatabase
 
-            async with BigQueryQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with BigQueryQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "athena":
             from dal.athena import AthenaQueryTargetDatabase
 
-            async with AthenaQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with AthenaQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "databricks":
             from dal.databricks import DatabricksQueryTargetDatabase
 
-            async with DatabricksQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with DatabricksQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "duckdb":
             from dal.duckdb import DuckDBQueryTargetDatabase
 
-            async with DuckDBQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with DuckDBQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
         if cls._query_target_provider == "clickhouse":
             from dal.clickhouse import ClickHouseQueryTargetDatabase
 
-            async with ClickHouseQueryTargetDatabase.get_connection(tenant_id=tenant_id) as conn:
+            async with ClickHouseQueryTargetDatabase.get_connection(
+                tenant_id=tenant_id, read_only=read_only
+            ) as conn:
                 yield conn
             return
 

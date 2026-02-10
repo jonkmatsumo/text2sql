@@ -1,10 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata
+
+logger = logging.getLogger(__name__)
 
 
 class RedshiftQueryTargetDatabase:
@@ -74,22 +78,32 @@ class RedshiftQueryTargetDatabase:
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
         """Yield a Redshift connection wrapper (tenant context is a no-op)."""
         _ = tenant_id
-        _ = read_only
         if cls._pool is None:
             raise RuntimeError(
                 "Redshift pool not initialized. Call RedshiftQueryTargetDatabase.init()."
             )
 
         async with cls._pool.acquire() as conn:
-            yield _RedshiftConnection(conn, max_rows=cls._max_rows)
+            if read_only:
+                # Redshift is Postgres-compatible enough to accept this in most deployments.
+                # Keep a defensive SQL guard below in case cluster settings reject it.
+                try:
+                    await conn.execute("SET default_transaction_read_only = on")
+                except Exception:
+                    logger.warning(
+                        "Redshift session read-only setting failed; using statement guard only.",
+                        exc_info=True,
+                    )
+            yield _RedshiftConnection(conn, max_rows=cls._max_rows, read_only=read_only)
 
 
 class _RedshiftConnection:
     """Adapter providing asyncpg-like helpers over Redshift."""
 
-    def __init__(self, conn: asyncpg.Connection, max_rows: int) -> None:
+    def __init__(self, conn: asyncpg.Connection, max_rows: int, read_only: bool) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -104,6 +118,8 @@ class _RedshiftConnection:
         return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
+
         async def _run():
             return await self._conn.execute(sql, *params)
 
@@ -116,6 +132,8 @@ class _RedshiftConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
+
         async def _run():
             rows = await self._conn.fetch(sql, *params)
             capped_rows, truncated = cap_rows_with_metadata(
@@ -135,6 +153,7 @@ class _RedshiftConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
 
         async def _run():
             from dal.util.column_metadata import columns_from_asyncpg_attributes
