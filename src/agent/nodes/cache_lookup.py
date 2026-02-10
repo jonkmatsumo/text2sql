@@ -1,7 +1,6 @@
 """Node for looking up queries in the semantic cache."""
 
 import logging
-import time
 from typing import Optional
 
 from agent.state import AgentState
@@ -12,18 +11,16 @@ from agent.utils.parsing import parse_tool_output, unwrap_envelope
 from common.config.env import get_env_bool
 
 logger = logging.getLogger(__name__)
-_SCHEMA_SNAPSHOT_TTL_SECONDS = 60.0
-_SCHEMA_SNAPSHOT_CACHE = {}
 
 
 async def _get_current_schema_snapshot_id(
     tools, user_query: str, tenant_id: Optional[int]
 ) -> Optional[str]:
-    now = time.monotonic()
-    cache_key = tenant_id or 0
-    cached = _SCHEMA_SNAPSHOT_CACHE.get(cache_key)
-    if cached and now - cached["ts"] < _SCHEMA_SNAPSHOT_TTL_SECONDS:
-        return cached["value"]
+    from agent.utils.schema_cache import get_cached_schema_snapshot_id
+
+    cached_snapshot_id = get_cached_schema_snapshot_id(tenant_id)
+    if cached_snapshot_id:
+        return cached_snapshot_id
 
     subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
     if not subgraph_tool:
@@ -51,10 +48,11 @@ async def _get_current_schema_snapshot_id(
     parsed = unwrap_envelope(parsed)
 
     nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
+    from agent.utils.schema_cache import set_cached_schema_snapshot_id
     from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
 
     snapshot_id = resolve_schema_snapshot_id(nodes)
-    _SCHEMA_SNAPSHOT_CACHE[cache_key] = {"value": snapshot_id, "ts": now}
+    set_cached_schema_snapshot_id(tenant_id, snapshot_id)
     return snapshot_id
 
 
@@ -188,5 +186,6 @@ async def cache_lookup_node(state: AgentState) -> dict:
 
 def reset_cache_state() -> None:
     """Reset the internal schema snapshot cache (test utility)."""
-    global _SCHEMA_SNAPSHOT_CACHE
-    _SCHEMA_SNAPSHOT_CACHE.clear()
+    from agent.utils.schema_cache import reset_schema_cache
+
+    reset_schema_cache()
