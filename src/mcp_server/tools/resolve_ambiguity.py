@@ -45,6 +45,43 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     """
     import time
 
+    from mcp_server.utils.errors import tool_error_response
+    from mcp_server.utils.validation import (
+        DEFAULT_MAX_INPUT_BYTES,
+        DEFAULT_MAX_LIST_ITEMS,
+        validate_string_length,
+        validate_string_list_length,
+    )
+
+    if err := validate_string_length(
+        query,
+        max_bytes=DEFAULT_MAX_INPUT_BYTES,
+        param_name="query",
+        tool_name=TOOL_NAME,
+    ):
+        return err
+
+    if not isinstance(schema_context, list):
+        return tool_error_response(
+            message=f"Parameter 'schema_context' must be a list for {TOOL_NAME}.",
+            code="INVALID_PARAMETER_TYPE",
+            category="invalid_request",
+        )
+
+    schema_names = []
+    for item in schema_context:
+        if isinstance(item, dict):
+            name = item.get("name")
+            if isinstance(name, str) and name:
+                schema_names.append(name)
+    if err := validate_string_list_length(
+        schema_names,
+        max_items=DEFAULT_MAX_LIST_ITEMS,
+        param_name="schema_context",
+        tool_name=TOOL_NAME,
+    ):
+        return err
+
     start_time = time.monotonic()
 
     try:

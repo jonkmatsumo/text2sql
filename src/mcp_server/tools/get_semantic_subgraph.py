@@ -374,9 +374,21 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
         JSON string containing nodes and relationships of the subgraph.
     """
     from mcp_server.utils.errors import build_error_metadata
-    from mcp_server.utils.validation import require_tenant_id
+    from mcp_server.utils.validation import (
+        DEFAULT_MAX_INPUT_BYTES,
+        require_tenant_id,
+        validate_string_length,
+    )
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
+
+    if err := validate_string_length(
+        query,
+        max_bytes=DEFAULT_MAX_INPUT_BYTES,
+        param_name="query",
+        tool_name=TOOL_NAME,
+    ):
         return err
 
     # Cache Read
