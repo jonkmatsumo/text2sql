@@ -19,6 +19,7 @@ def test_envelope_creation_valid():
     assert env.rows == [{"id": 1}]
     assert env.metadata.rows_returned == 1
     assert not env.metadata.is_truncated
+    assert env.metadata.tool_version == "v1"
     assert env.schema_version == "1.0"
 
 
@@ -42,6 +43,7 @@ def test_parse_dict():
     payload = {"rows": [{"a": 1}], "metadata": {"rows_returned": 1}}
     env = parse_execute_sql_response(payload)
     assert isinstance(env, ExecuteSQLQueryResponseEnvelope)
+    assert env.metadata.tool_version == "v1"
 
 
 def test_parse_error_string():
@@ -65,6 +67,7 @@ def test_parse_error_dict():
 def test_metadata_defaults():
     """Test metadata default values."""
     meta = ExecuteSQLQueryMetadata(rows_returned=5)
+    assert meta.tool_version == "v1"
     assert not meta.is_truncated
     assert not meta.is_limited
     assert not meta.cap_detected

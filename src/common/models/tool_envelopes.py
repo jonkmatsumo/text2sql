@@ -8,11 +8,16 @@ from common.models.error_metadata import ErrorMetadata
 
 # Current schema version for future-proofing
 CURRENT_SCHEMA_VERSION = "1.0"
+CURRENT_TOOL_VERSION = "v1"
 
 
 class ExecuteSQLQueryMetadata(BaseModel):
     """Metadata for SQL query execution results."""
 
+    tool_version: str = Field(
+        default=CURRENT_TOOL_VERSION,
+        description="Semantic version for execute_sql_query response contract",
+    )
     rows_returned: int = Field(..., description="Number of rows in the current page")
     is_truncated: bool = Field(False, description="Whether the result was truncated")
     is_limited: bool = Field(False, description="Whether the result was limited by LIMIT clause")
@@ -162,6 +167,10 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
 class GenericToolMetadata(BaseModel):
     """Generic metadata for tool responses."""
 
+    tool_version: str = Field(
+        default=CURRENT_TOOL_VERSION,
+        description="Semantic version for tool response contract",
+    )
     provider: str = Field("unknown", description="Database or system provider")
     execution_time_ms: Optional[float] = None
     is_truncated: Optional[bool] = None
