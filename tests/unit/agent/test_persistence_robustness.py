@@ -46,7 +46,7 @@ async def test_run_agent_persists_on_crash():
         mock_telemetry.get_current_span.return_value = None
 
         # Run the agent
-        result = await run_agent_with_tracing("My question")
+        result = await run_agent_with_tracing("My question", tenant_id=1)
 
         # Verify result contains error
         # Under TaskGroup/LangGraph, exceptions might be wrapped
@@ -114,7 +114,7 @@ async def test_run_agent_persists_on_success():
         mock_telemetry.get_current_span.return_value = None
 
         # Run the agent
-        result = await run_agent_with_tracing("My question")
+        result = await run_agent_with_tracing("My question", tenant_id=1)
 
         # Verify success
         assert result["current_sql"] == "SELECT * FROM table"

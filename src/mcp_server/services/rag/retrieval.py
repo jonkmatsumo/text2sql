@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 async def get_relevant_examples(
     user_query: str,
+    tenant_id: int,
     limit: int = 3,
-    tenant_id: int = 1,
 ) -> str:
     """
     Retrieve few-shot examples similar to the user's query from the Registry.
@@ -17,7 +17,7 @@ async def get_relevant_examples(
     Args:
         user_query: The user's natural language question
         limit: Maximum number of examples to retrieve (default: 3)
-        tenant_id: Tenant ID (default: 1)
+        tenant_id: Tenant ID
 
     Returns:
         Formatted JSON string with examples, or empty string if none found

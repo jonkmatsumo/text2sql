@@ -33,7 +33,7 @@ async def test_best_effort_mode_marks_persistence_failure():
             mock_telemetry.get_current_trace_id.return_value = None
             mock_telemetry.get_current_span.return_value = None
 
-            result = await run_agent_with_tracing("My question")
+            result = await run_agent_with_tracing("My question", tenant_id=1)
             assert result.get("interaction_persisted") is False
 
 
@@ -57,4 +57,4 @@ async def test_strict_mode_raises_on_persistence_failure():
             mock_telemetry.get_current_span.return_value = None
 
             with pytest.raises(RuntimeError):
-                await run_agent_with_tracing("My question")
+                await run_agent_with_tracing("My question", tenant_id=1)

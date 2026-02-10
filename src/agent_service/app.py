@@ -46,7 +46,7 @@ class AgentRunRequest(BaseModel):
     """Request payload for agent execution."""
 
     question: str
-    tenant_id: int = Field(default=1, ge=1)
+    tenant_id: int = Field(..., ge=1)
     thread_id: Optional[str] = None
     timeout_seconds: Optional[float] = Field(default=None, gt=0)
     page_token: Optional[str] = None

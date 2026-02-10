@@ -14,6 +14,16 @@ async def mock_mcp_context():
 
 
 @pytest.mark.asyncio
+async def test_run_agent_requires_tenant_id():
+    """Agent entrypoint should reject missing tenant_id deterministically."""
+    with pytest.raises(ValueError, match="tenant_id is required"):
+        await graph_mod.run_agent_with_tracing("show me all tables", tenant_id=None)
+
+    with pytest.raises(TypeError, match="tenant_id"):
+        await graph_mod.run_agent_with_tracing("show me all tables")
+
+
+@pytest.mark.asyncio
 async def test_ingress_sanitization_applied():
     """Assert user input is sanitized at ingress."""
     # Input with trailing spaces and mixed case
@@ -39,7 +49,7 @@ async def test_ingress_sanitization_applied():
         mock_app.ainvoke = AsyncMock(return_value={"messages": [], "raw_user_input": raw_input})
 
         with patch("agent.tools.mcp_tools_context", side_effect=mock_mcp_context):
-            await graph_mod.run_agent_with_tracing(raw_input)
+            await graph_mod.run_agent_with_tracing(raw_input, tenant_id=1)
 
         # 1. Assert sanitization invoked exactly once
         assert mock_sanitize.call_count == 1
@@ -68,7 +78,7 @@ async def test_normal_input_behavior():
 
         # We also need to mock the tools context to avoid MCP connection attempts
         with patch("agent.tools.mcp_tools_context", side_effect=mock_mcp_context):
-            await graph_mod.run_agent_with_tracing(normal_input)
+            await graph_mod.run_agent_with_tracing(normal_input, tenant_id=1)
 
         # Verify calls on our mock
         assert mock_app.ainvoke.called

@@ -47,7 +47,7 @@ class TestCreateInteractionFailure:
 
                 # Should raise RuntimeError because default is fail-closed
                 with pytest.raises(RuntimeError) as exc_info:
-                    await run_agent_with_tracing("My question")
+                    await run_agent_with_tracing("My question", tenant_id=1)
 
                 assert "Interaction creation failed" in str(exc_info.value)
                 assert "DB connection failed" in str(exc_info.value)
@@ -98,7 +98,7 @@ class TestCreateInteractionFailure:
                 mock_telemetry.get_current_span.return_value = None
 
                 # Should NOT raise - continues with interaction_id=None
-                result = await run_agent_with_tracing("My question")
+                result = await run_agent_with_tracing("My question", tenant_id=1)
 
                 # Workflow should complete
                 assert result.get("current_sql") == "SELECT 1"
@@ -140,7 +140,7 @@ class TestCreateInteractionFailure:
                 mock_telemetry.get_current_trace_id.return_value = None
                 mock_telemetry.get_current_span.return_value = None
 
-                await run_agent_with_tracing("My question")
+                await run_agent_with_tracing("My question", tenant_id=1)
 
                 # Verify structured error was logged
                 mock_logger.error.assert_called_once()

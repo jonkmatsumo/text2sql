@@ -549,7 +549,7 @@ app = create_workflow().compile(checkpointer=memory)
 # Wrapper function with MLflow tracing
 async def run_agent_with_tracing(
     question: str,
-    tenant_id: int = 1,
+    tenant_id: int,
     session_id: str = None,
     user_id: str = None,
     thread_id: str = None,
@@ -565,6 +565,9 @@ async def run_agent_with_tracing(
     from langchain_core.messages import HumanMessage
 
     from common.sanitization import sanitize_text
+
+    if tenant_id is None:
+        raise ValueError("tenant_id is required")
 
     # 0. Centralized Ingress Sanitization
     raw_question = question
