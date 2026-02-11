@@ -183,6 +183,10 @@ class AgentState(TypedDict):
     retry_summary: Optional[dict]
     correction_attempts: Optional[List[dict]]
     validation_failures: Optional[List[dict]]
+    correction_attempts_truncated: Optional[bool]
+    validation_failures_truncated: Optional[bool]
+    correction_attempts_dropped: Optional[int]
+    validation_failures_dropped: Optional[int]
     retry_correction_summary: Optional[dict]
     decision_summary: Optional[dict]
 

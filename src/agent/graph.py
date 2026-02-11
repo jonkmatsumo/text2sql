@@ -1121,6 +1121,18 @@ async def run_agent_with_tracing(
         retry_summary["final_stopping_reason"] = retry_correction_summary.get(
             "final_stopping_reason"
         )
+        retry_summary["correction_attempts_truncated"] = bool(
+            retry_correction_summary.get("correction_attempts_truncated", False)
+        )
+        retry_summary["validation_failures_truncated"] = bool(
+            retry_correction_summary.get("validation_failures_truncated", False)
+        )
+        retry_summary["correction_attempts_dropped"] = int(
+            retry_correction_summary.get("correction_attempts_dropped", 0) or 0
+        )
+        retry_summary["validation_failures_dropped"] = int(
+            retry_correction_summary.get("validation_failures_dropped", 0) or 0
+        )
         result["retry_summary"] = retry_summary
         validation_report = (
             result.get("validation_report")
@@ -1184,6 +1196,18 @@ async def run_agent_with_tracing(
             ),
             "retry.final_stopping_reason": str(
                 retry_correction_summary.get("final_stopping_reason") or "unknown"
+            ),
+            "retry.correction_attempts_truncated": bool(
+                retry_correction_summary.get("correction_attempts_truncated", False)
+            ),
+            "retry.validation_failures_truncated": bool(
+                retry_correction_summary.get("validation_failures_truncated", False)
+            ),
+            "retry.correction_attempts_dropped": int(
+                retry_correction_summary.get("correction_attempts_dropped", 0) or 0
+            ),
+            "retry.validation_failures_dropped": int(
+                retry_correction_summary.get("validation_failures_dropped", 0) or 0
             ),
             "validation.report.failed_rules_count": int(
                 len(validation_report.get("failed_rules", []))

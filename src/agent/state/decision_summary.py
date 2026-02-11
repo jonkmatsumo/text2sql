@@ -64,6 +64,16 @@ def build_retry_correction_summary(
     raw_validation_failures = normalized_state.get("validation_failures") or []
     corrections = _bounded_events(raw_corrections, max_items)
     validation_failures = _bounded_events(raw_validation_failures, max_items)
+    correction_truncated = bool(normalized_state.get("correction_attempts_truncated")) or (
+        len(corrections) < len(raw_corrections) if isinstance(raw_corrections, list) else False
+    )
+    validation_truncated = bool(normalized_state.get("validation_failures_truncated")) or (
+        len(validation_failures) < len(raw_validation_failures)
+        if isinstance(raw_validation_failures, list)
+        else False
+    )
+    correction_dropped = int(normalized_state.get("correction_attempts_dropped", 0) or 0)
+    validation_dropped = int(normalized_state.get("validation_failures_dropped", 0) or 0)
 
     return {
         "correction_attempt_count": (
@@ -74,6 +84,10 @@ def build_retry_correction_summary(
         ),
         "correction_attempts": corrections,
         "validation_failures": validation_failures,
+        "correction_attempts_truncated": correction_truncated,
+        "validation_failures_truncated": validation_truncated,
+        "correction_attempts_dropped": correction_dropped,
+        "validation_failures_dropped": validation_dropped,
         "final_stopping_reason": _resolve_final_stopping_reason(normalized_state),
     }
 

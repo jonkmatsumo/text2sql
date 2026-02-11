@@ -99,6 +99,10 @@ def test_build_retry_correction_summary_counts_all_events_and_bounds_payloads():
     assert summary["validation_failures"] == [
         {"retry_count": 0, "violation_types": ["restricted_table"]}
     ]
+    assert summary["correction_attempts_truncated"] is True
+    assert summary["validation_failures_truncated"] is True
+    assert summary["correction_attempts_dropped"] == 0
+    assert summary["validation_failures_dropped"] == 0
     assert summary["final_stopping_reason"] == "max_retries_reached"
 
 
@@ -130,3 +134,22 @@ def test_build_retry_correction_summary_falls_back_to_termination_reason():
     summary = build_retry_correction_summary(state, max_events=5)
 
     assert summary["final_stopping_reason"] == "completed"
+
+
+def test_build_retry_correction_summary_surfaces_truncation_metadata():
+    """State-provided truncation metadata should surface in the retry summary."""
+    state = {
+        "correction_attempts": [{"attempt": 2, "outcome": "corrected"}],
+        "validation_failures": [{"retry_count": 1, "violation_types": ["schema_mismatch"]}],
+        "correction_attempts_truncated": True,
+        "validation_failures_truncated": True,
+        "correction_attempts_dropped": 4,
+        "validation_failures_dropped": 3,
+    }
+
+    summary = build_retry_correction_summary(state, max_events=5)
+
+    assert summary["correction_attempts_truncated"] is True
+    assert summary["validation_failures_truncated"] is True
+    assert summary["correction_attempts_dropped"] == 4
+    assert summary["validation_failures_dropped"] == 3

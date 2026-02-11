@@ -21,15 +21,26 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-def _append_bounded_correction_event(state: AgentState, event: dict) -> list[dict]:
+def _append_bounded_correction_event(
+    state: AgentState, event: dict
+) -> tuple[list[dict], bool, int]:
     max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
     max_events = max(1, int(max_events))
+    existing_truncated = bool(state.get("correction_attempts_truncated"))
+    existing_dropped_raw = state.get("correction_attempts_dropped", 0)
+    existing_dropped = (
+        int(existing_dropped_raw) if isinstance(existing_dropped_raw, (int, float)) else 0
+    )
     events = state.get("correction_attempts") or []
     if not isinstance(events, list):
         events = []
     events = [entry for entry in events if isinstance(entry, dict)]
     events.append(event)
-    return events[:max_events]
+    dropped_now = max(0, len(events) - max_events)
+    if dropped_now:
+        events = events[dropped_now:]
+    total_dropped = existing_dropped + dropped_now
+    return events, (existing_truncated or dropped_now > 0), total_dropped
 
 
 def correct_sql_node(state: AgentState) -> dict:
@@ -112,7 +123,11 @@ def correct_sql_node(state: AgentState) -> dict:
             "error_category": str(error_category),
             "has_retry_after": bool(retry_after_seconds),
         }
-        correction_attempts = _append_bounded_correction_event(state, correction_event)
+        (
+            correction_attempts,
+            correction_attempts_truncated,
+            correction_attempts_dropped,
+        ) = _append_bounded_correction_event(state, correction_event)
 
         # Terminal Error Gating (Phase C)
         if error_category in ("TABLE_INACCESSIBLE", "auth"):
@@ -124,6 +139,8 @@ def correct_sql_node(state: AgentState) -> dict:
                 "error_category": error_category,
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
                 **_correction_loop_payload(),
             }
 
@@ -224,6 +241,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": "budget_exhausted",
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
                 **_correction_loop_payload(),
             }
 
@@ -246,6 +265,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": "repeated_error",
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
                 **_correction_loop_payload(),
             }
 
@@ -343,6 +364,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "ema_llm_latency_seconds": None,  # Don't update EMA on fail
                             "retry_after_seconds": None,
                             "correction_attempts": correction_attempts,
+                            "correction_attempts_truncated": correction_attempts_truncated,
+                            "correction_attempts_dropped": correction_attempts_dropped,
                             **_correction_loop_payload(latency_seconds),
                         }
                 else:
@@ -387,5 +410,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
             "error_signatures": updated_signatures,
             "correction_attempts": correction_attempts,
+            "correction_attempts_truncated": correction_attempts_truncated,
+            "correction_attempts_dropped": correction_attempts_dropped,
             **_correction_loop_payload(latency_seconds),
         }

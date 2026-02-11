@@ -196,15 +196,26 @@ def _resolve_column_allowlist(state: AgentState) -> Dict[str, Set[str]]:
     return allowlist
 
 
-def _append_bounded_event(state: AgentState, key: str, event: dict) -> list[dict]:
+def _append_bounded_event(state: AgentState, key: str, event: dict) -> tuple[list[dict], bool, int]:
     max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
     max_events = max(1, int(max_events))
+    truncated_key = f"{key}_truncated"
+    dropped_key = f"{key}_dropped"
+    existing_truncated = bool(state.get(truncated_key))
+    existing_dropped_raw = state.get(dropped_key, 0)
+    existing_dropped = (
+        int(existing_dropped_raw) if isinstance(existing_dropped_raw, (int, float)) else 0
+    )
     events = state.get(key) or []
     if not isinstance(events, list):
         events = []
     events = [entry for entry in events if isinstance(entry, dict)]
     events.append(event)
-    return events[:max_events]
+    dropped_now = max(0, len(events) - max_events)
+    if dropped_now:
+        events = events[dropped_now:]
+    total_dropped = existing_dropped + dropped_now
+    return events, (existing_truncated or dropped_now > 0), total_dropped
 
 
 def _extract_rejected_tables(violations: list[dict]) -> list[dict]:
@@ -510,10 +521,12 @@ async def validate_sql_node(state: AgentState) -> dict:
                 ),
                 "rejected_tables": _extract_rejected_tables(violation_dicts),
             }
-            validation_failures = _append_bounded_event(
-                state,
-                "validation_failures",
-                validation_event,
+            validation_failures, validation_failures_truncated, validation_failures_dropped = (
+                _append_bounded_event(
+                    state,
+                    "validation_failures",
+                    validation_event,
+                )
             )
 
             span.set_outputs(
@@ -530,6 +543,8 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "ast_validation_result": result.to_dict(),
                 "validation_report": validation_report,
                 "validation_failures": validation_failures,
+                "validation_failures_truncated": validation_failures_truncated,
+                "validation_failures_dropped": validation_failures_dropped,
                 **query_metrics,
                 # Preserve metadata even on failure for audit
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
@@ -554,6 +569,10 @@ async def validate_sql_node(state: AgentState) -> dict:
             "error": None,  # Clear any previous validation errors
             "ast_validation_result": result.to_dict(),
             "validation_report": validation_report,
+            "validation_failures_truncated": bool(
+                state.get("validation_failures_truncated", False)
+            ),
+            "validation_failures_dropped": int(state.get("validation_failures_dropped", 0) or 0),
             **query_metrics,
             "table_lineage": result.metadata.table_lineage if result.metadata else [],
             "column_usage": result.metadata.column_usage if result.metadata else [],
