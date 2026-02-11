@@ -35,14 +35,12 @@ async def test_execute_tool_rejects_include_columns_when_unsupported():
         payload = await handler("SELECT 1", tenant_id=1, include_columns=True)
 
         result = json.loads(payload)
-        # It should be unsupported_capability if negotiated properly
-        # Error details nested in 'error' object
         error_obj = result["error"]
+        assert error_obj["category"] in ["unsupported_capability", "unknown"]
         if error_obj["category"] == "unsupported_capability":
-            assert "required_capability" in error_obj
-            assert error_obj["required_capability"] == "column_metadata"
-        else:
-            assert error_obj["category"] == "unknown"
+            details = error_obj.get("details_safe") or {}
+            required = details.get("required_capability") or details.get("capability_required")
+            assert required == "column_metadata"
 
 
 @pytest.mark.asyncio
