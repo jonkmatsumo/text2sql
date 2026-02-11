@@ -1,4 +1,15 @@
-"""Deterministic summary builders for agent decision transparency."""
+"""Deterministic summary builders for agent decision transparency.
+
+Semantics captured here are intentionally stable for operator/debug tooling:
+
+- Query complexity score is a relative heuristic from AST metadata:
+  `(join_count * 3) + (estimated_table_count * 2) + (union_count * 4)`.
+  It is not a cost-based optimizer estimate.
+- `latency_breakdown_ms` fields are stage-local timings and may not sum exactly
+  to end-to-end request latency due to orchestration overhead.
+- `rejected_plan_candidates[].reason_code` uses canonical low-cardinality values
+  from `RejectedPlanCandidateReason` with `unknown` fallback.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +17,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from common.config.env import get_env_int
+from common.constants.reason_codes import RejectedPlanCandidateReason
+from common.sanitization.text import redact_sensitive_info
+
+_MAX_REASON_TEXT_LENGTH = 96
 
 
 def _bounded_events(events: Any, max_items: int) -> list[dict]:
@@ -21,6 +36,13 @@ def _normalize_table_name(raw: Any) -> str:
     if not isinstance(raw, str):
         return ""
     return raw.strip().lower()
+
+
+def _normalize_reason_text(raw: Any) -> str:
+    redacted = redact_sensitive_info(str(raw or "")).strip().lower()
+    if not redacted:
+        return RejectedPlanCandidateReason.UNKNOWN.value
+    return redacted[:_MAX_REASON_TEXT_LENGTH]
 
 
 def _as_state_mapping(state: Any) -> dict[str, Any]:
@@ -104,7 +126,7 @@ def _collect_rejected_tables(state: dict[str, Any], max_tables: int) -> list[dic
                 if not isinstance(rejected_table, dict):
                     continue
                 table = _normalize_table_name(rejected_table.get("table"))
-                reason = str(rejected_table.get("reason") or "unknown").strip().lower()
+                reason = _normalize_reason_text(rejected_table.get("reason"))
                 if not table:
                     continue
                 rejected[(table, reason)] = {"table": table, "reason": reason}
@@ -117,7 +139,7 @@ def _collect_rejected_tables(state: dict[str, Any], max_tables: int) -> list[dic
             details = violation.get("details")
             if not isinstance(details, dict):
                 continue
-            reason = str(details.get("reason") or "unknown").strip().lower()
+            reason = _normalize_reason_text(details.get("reason"))
             tables = details.get("tables")
             if isinstance(tables, list):
                 for table in tables:
@@ -137,16 +159,16 @@ def _collect_rejected_tables(state: dict[str, Any], max_tables: int) -> list[dic
 
 
 def _reason_to_reason_code(reason: Any) -> str:
-    raw = str(reason or "").strip().lower()
+    raw = _normalize_reason_text(reason)
     if not raw:
-        return "unknown"
+        return RejectedPlanCandidateReason.UNKNOWN.value
     if "allowlist" in raw:
-        return "allowlist"
+        return RejectedPlanCandidateReason.ALLOWLIST.value
     if "schema" in raw or "missing" in raw or "not_found" in raw or "unknown_table" in raw:
-        return "schema_mismatch"
+        return RejectedPlanCandidateReason.SCHEMA_MISMATCH.value
     if "similarity" in raw or "threshold" in raw:
-        return "similarity_threshold"
-    return "validation_rule"
+        return RejectedPlanCandidateReason.SIMILARITY_THRESHOLD.value
+    return RejectedPlanCandidateReason.VALIDATION_RULE.value
 
 
 def _collect_rejected_plan_candidates(
@@ -164,9 +186,9 @@ def _collect_rejected_plan_candidates(
             table = _normalize_table_name(raw_candidate)
             if not table or table in selected:
                 continue
-            rejected[(table, "similarity_threshold")] = {
+            rejected[(table, RejectedPlanCandidateReason.SIMILARITY_THRESHOLD.value)] = {
                 "table": table,
-                "reason_code": "similarity_threshold",
+                "reason_code": RejectedPlanCandidateReason.SIMILARITY_THRESHOLD.value,
             }
 
     for rejected_table in _collect_rejected_tables(state, max(max_candidates * 2, 50)):
@@ -210,6 +232,12 @@ def _extract_query_complexity(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_latency_breakdown(state: dict[str, Any]) -> dict[str, float]:
+    """Extract stage-local latencies in milliseconds from state.
+
+    Each value is independently measured around a pipeline stage. Values are
+    non-negative and deterministic for the captured state snapshot.
+    """
+
     def _as_ms(value: Any) -> float:
         if isinstance(value, (int, float)):
             return max(0.0, float(value))

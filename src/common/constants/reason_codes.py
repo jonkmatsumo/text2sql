@@ -78,3 +78,34 @@ class DriftDetectionMethod(str, Enum):
     AST = "ast"
     REGEX_FALLBACK = "regex_fallback"
     HYBRID = "hybrid"
+
+
+class RejectedPlanCandidateReason(str, Enum):
+    """Canonical reason codes for rejected planning candidates."""
+
+    SIMILARITY_THRESHOLD = "similarity_threshold"
+    ALLOWLIST = "allowlist"
+    SCHEMA_MISMATCH = "schema_mismatch"
+    VALIDATION_RULE = "validation_rule"
+    UNKNOWN = "unknown"
+
+
+class ValidationReportRuleId(str, Enum):
+    """Stable rule identifiers emitted in structured validation reports."""
+
+    RESTRICTED_TABLE = "restricted_table"
+    FORBIDDEN_COMMAND = "forbidden_command"
+    DANGEROUS_PATTERN = "dangerous_pattern"
+    SYNTAX_ERROR = "syntax_error"
+    COMPLEXITY_LIMIT = "complexity_limit"
+    SENSITIVE_COLUMN = "sensitive_column"
+    COLUMN_ALLOWLIST = "column_allowlist"
+    CARTESIAN_JOIN = "cartesian_join"
+    UNKNOWN = "unknown"
+
+
+class ToolVersionNegotiationErrorCode(str, Enum):
+    """Error codes for MCP tool-version negotiation outcomes."""
+
+    UNSUPPORTED_TOOL_VERSION = "UNSUPPORTED_TOOL_VERSION"
+    INVALID_TOOL_VERSION_REQUEST = "INVALID_TOOL_VERSION_REQUEST"

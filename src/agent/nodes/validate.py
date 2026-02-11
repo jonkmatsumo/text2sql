@@ -12,6 +12,8 @@ from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
 from common.config.env import get_env_bool, get_env_int, get_env_str
+from common.constants.reason_codes import ValidationReportRuleId
+from common.sanitization.text import redact_sensitive_info
 
 
 def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
@@ -253,12 +255,33 @@ def _validation_report_limit() -> int:
     return max(1, int(limit))
 
 
+def _validation_report_message_limit() -> int:
+    limit = get_env_int("AGENT_VALIDATION_REPORT_MAX_MESSAGE_CHARS", 256) or 256
+    return max(32, int(limit))
+
+
+def _sanitize_report_text(value: object, *, max_chars: int) -> str:
+    text = redact_sensitive_info(str(value or "")).strip()
+    if not text:
+        return ""
+    return text[:max_chars]
+
+
+def _normalize_validation_rule_id(value: object) -> str:
+    raw_rule = str(value or "").strip().lower()
+    if not raw_rule:
+        return ValidationReportRuleId.UNKNOWN.value
+    allowed = {rule.value for rule in ValidationReportRuleId}
+    if raw_rule in allowed:
+        return raw_rule
+    return ValidationReportRuleId.UNKNOWN.value
+
+
 def _bounded_strings(values: list[str], max_items: int) -> list[str]:
     bounded: list[str] = []
+    max_chars = _validation_report_message_limit()
     for value in values:
-        if not isinstance(value, str):
-            continue
-        normalized = value.strip()
+        normalized = _sanitize_report_text(value, max_chars=max_chars)
         if normalized:
             bounded.append(normalized)
         if len(bounded) >= max_items:
@@ -267,9 +290,17 @@ def _bounded_strings(values: list[str], max_items: int) -> list[str]:
 
 
 def _build_validation_report(result, max_items: int) -> dict:
+    """Build a bounded, operator-safe validation report.
+
+    Contract:
+    - `failed_rules[]`: stable rule IDs + bounded messages.
+    - `warnings[]`: bounded and redacted warning text.
+    - `affected_tables[]`: normalized table names.
+    """
     violation_dicts = [violation.to_dict() for violation in result.violations]
     failed_rules = []
     affected_tables: set[str] = set()
+    max_chars = _validation_report_message_limit()
 
     metadata = result.metadata.to_dict() if result.metadata else {}
     if isinstance(metadata, dict):
@@ -282,8 +313,8 @@ def _build_validation_report(result, max_items: int) -> dict:
     for violation in violation_dicts:
         if not isinstance(violation, dict):
             continue
-        rule = str(violation.get("violation_type") or "unknown").strip().lower()
-        message = str(violation.get("message") or "").strip()
+        rule = _normalize_validation_rule_id(violation.get("violation_type"))
+        message = _sanitize_report_text(violation.get("message"), max_chars=max_chars)
         details = violation.get("details")
         if len(failed_rules) < max_items:
             failed_rules.append(
