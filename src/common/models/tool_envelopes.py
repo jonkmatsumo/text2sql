@@ -1,15 +1,16 @@
 """Typed envelope models for tool IO."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
 
-from common.models.error_metadata import ErrorMetadata
+from common.models.error_metadata import ToolError
 from common.models.tool_versions import DEFAULT_TOOL_VERSION
 
 # Current schema version for future-proofing
 CURRENT_SCHEMA_VERSION = "1.0"
 CURRENT_TOOL_VERSION = DEFAULT_TOOL_VERSION
+T = TypeVar("T")
 
 
 class ExecuteSQLQueryMetadata(BaseModel):
@@ -54,7 +55,7 @@ class ExecuteSQLQueryResponseEnvelope(BaseModel):
     rows: List[Dict[str, Any]] = Field(default_factory=list)
     columns: Optional[List[Dict[str, Any]]] = None
     metadata: ExecuteSQLQueryMetadata
-    error: Optional[ErrorMetadata] = None
+    error: Optional[ToolError] = None
 
     # Optional raw error message for simple cases (legacy support)
     error_message: Optional[str] = None
@@ -182,20 +183,20 @@ class GenericToolMetadata(BaseModel):
     bytes_total: Optional[int] = None
 
 
-class GenericToolResponseEnvelope(BaseModel):
+class GenericToolResponseEnvelope(BaseModel, Generic[T]):
     """Standardized envelope for miscellaneous tool responses."""
 
     schema_version: str = Field(default=CURRENT_SCHEMA_VERSION)
-    result: Any = Field(..., description="The tool's main output payload")
+    result: Optional[T] = Field(default=None, description="The tool's main output payload")
     metadata: GenericToolMetadata = Field(default_factory=GenericToolMetadata)
-    error: Optional[ErrorMetadata] = None
+    error: Optional[ToolError] = None
 
     def model_dump_json(self, **kwargs) -> str:
         """Dump model to JSON string."""
         return super().model_dump_json(**kwargs)
 
 
-class ToolResponseEnvelope(GenericToolResponseEnvelope):
+class ToolResponseEnvelope(GenericToolResponseEnvelope[T], Generic[T]):
     """Alias for GenericToolResponseEnvelope for backward compatibility/clarity."""
 
     pass
@@ -205,8 +206,12 @@ def _create_error_envelope(
     message: str, category: str = "unknown", metadata: Optional[Dict[str, Any]] = None
 ) -> ExecuteSQLQueryResponseEnvelope:
     """Create an error envelope helper."""
-    error_meta = ErrorMetadata(
-        message=message, category=category or "unknown", provider="unknown", is_retryable=False
+    error_meta = ToolError(
+        category=category or "unknown",
+        code="TOOL_ERROR",
+        message=message,
+        retryable=False,
+        provider="unknown",
     )
     meta = ExecuteSQLQueryMetadata(rows_returned=0, is_truncated=False)
     if metadata:
