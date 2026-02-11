@@ -9,6 +9,7 @@ from opentelemetry.trace import Status, StatusCode
 from common.config.env import get_env_str
 from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
+from mcp_server.utils.errors import tool_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,14 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 span_name,
                 kind=trace.SpanKind.SERVER,
             ) as span:
+                requested_tool_version = kwargs.pop("requested_tool_version", None)
+                supported_tool_version = get_tool_version(tool_name)
+
                 # 1. Record basic attributes
                 span.set_attribute("mcp.tool.name", tool_name)
+                span.set_attribute("mcp.tool.supported_version", supported_tool_version)
+                if requested_tool_version is not None:
+                    span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
 
                 # Capture tenant_id if present
                 tenant_id = kwargs.get("tenant_id")
@@ -149,6 +156,24 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         )
 
                 try:
+                    if requested_tool_version:
+                        is_supported = str(requested_tool_version).strip() == supported_tool_version
+                        span.set_attribute("mcp.tool.version_compatible", is_supported)
+                        if not is_supported:
+                            return tool_error_response(
+                                message=(
+                                    f"Requested tool_version '{requested_tool_version}' is not "
+                                    f"supported for tool '{tool_name}'. "
+                                    f"Supported version: '{supported_tool_version}'."
+                                ),
+                                code="UNSUPPORTED_TOOL_VERSION",
+                                category="tool_version_unsupported",
+                                provider=tool_name,
+                                retryable=False,
+                            )
+                    else:
+                        span.set_attribute("mcp.tool.version_compatible", True)
+
                     # Execute the tool
                     response = await func(*args, **kwargs)
 
