@@ -9,8 +9,10 @@ from agent.mcp_client.manager import (
     McpClientManager,
     McpClientSession,
     RetryConfig,
+    is_retryable_tool_error,
     is_transient_error,
 )
+from common.models.error_metadata import ToolError
 
 
 class TestIsTransientError:
@@ -143,6 +145,87 @@ class TestMcpClientSession:
 
         # Initial attempt + 2 retries = 3 calls
         assert mock_mcp.call_tool.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_call_tool_retries_structured_retryable_error(self):
+        """Structured retryable tool errors should trigger retries."""
+        mock_mcp = MagicMock()
+        mock_mcp.call_tool = AsyncMock(
+            side_effect=[
+                {
+                    "schema_version": "1.0",
+                    "result": None,
+                    "metadata": {"provider": "mcp_server"},
+                    "error": {
+                        "category": "timeout",
+                        "code": "TIMEOUT",
+                        "message": "Timed out.",
+                        "retryable": True,
+                    },
+                },
+                {"schema_version": "1.0", "result": {"ok": True}, "metadata": {}},
+            ]
+        )
+
+        config = RetryConfig(max_retries=2, base_delay_seconds=0.01)
+        session = McpClientSession(mock_mcp, config)
+        result = await session.call_tool_with_retry("test_tool", {"arg": "value"})
+
+        assert result["result"] == {"ok": True}
+        assert mock_mcp.call_tool.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_call_tool_does_not_retry_structured_non_retryable_error(self):
+        """Structured non-retryable tool errors should return immediately."""
+        first_result = {
+            "schema_version": "1.0",
+            "result": None,
+            "metadata": {"provider": "mcp_server"},
+            "error": {
+                "category": "invalid_request",
+                "code": "INVALID",
+                "message": "Bad input.",
+                "retryable": False,
+            },
+        }
+        mock_mcp = MagicMock()
+        mock_mcp.call_tool = AsyncMock(
+            side_effect=[
+                first_result,
+                {"schema_version": "1.0", "result": {"ok": True}, "metadata": {}},
+            ]
+        )
+
+        config = RetryConfig(max_retries=2, base_delay_seconds=0.01)
+        session = McpClientSession(mock_mcp, config)
+        result = await session.call_tool_with_retry("test_tool", {"arg": "value"})
+
+        assert result == first_result
+        assert mock_mcp.call_tool.call_count == 1
+
+
+class TestStructuredErrorRetryability:
+    """Tests for structured ToolError retryability classification."""
+
+    def test_structured_retryable_flag_true(self):
+        """Explicit retryable=True should always be retried."""
+        err = ToolError(
+            category="invalid_request",
+            code="X",
+            message="x",
+            retryable=True,
+        )
+        assert is_retryable_tool_error(err) is True
+
+    def test_structured_retryable_flag_false(self):
+        """Explicit retryable=False should never be retried."""
+        err = ToolError(
+            category="timeout",
+            code="TIMEOUT",
+            message="Timed out.",
+            retryable=False,
+        )
+        assert is_retryable_tool_error(err) is False
 
 
 class TestMcpClientManager:
