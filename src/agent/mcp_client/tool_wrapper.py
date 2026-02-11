@@ -11,6 +11,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
 
+from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+from common.models.tool_errors import tool_error_invalid_request
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +40,10 @@ class MCPToolWrapper:
     _invoke_fn: Optional[Callable[[dict], Coroutine[Any, Any, Any]]] = field(
         default=None, repr=False
     )
+    _schema_validator: Optional[Callable[[dict], None]] = field(
+        default=None, init=False, repr=False
+    )
+    _schema_validator_ready: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self):
         """Merge input_schema into metadata for compatibility."""
@@ -62,9 +69,66 @@ class MCPToolWrapper:
                 "Use MCPClient.get_tools() to create bound wrappers."
             )
 
+        validation_error = self._validate_input(input)
+        if validation_error is not None:
+            return ToolResponseEnvelope(
+                result=None,
+                metadata=GenericToolMetadata(provider="agent_mcp_client"),
+                error=validation_error,
+            ).model_dump(exclude_none=True)
+
         # Config is accepted for LangGraph compatibility but not used by MCP
         # Telemetry wrapping is handled by tools.py _wrap_tool()
         return await self._invoke_fn(input)
+
+    def _validate_input(self, input_payload: Any):
+        """Validate outgoing tool arguments against MCP input_schema."""
+        if not isinstance(input_payload, dict):
+            return tool_error_invalid_request(
+                code="TOOL_INPUT_SCHEMA_VIOLATION",
+                message=f"Tool '{self.name}' expects a JSON object input.",
+                reason_code="tool_input_schema_violation",
+                provider="agent_mcp_client",
+            )
+
+        schema = self.input_schema or self.metadata.get("input_schema")
+        if not isinstance(schema, dict) or not schema:
+            return None
+
+        validator = self._get_schema_validator(schema)
+        if validator is None:
+            return None
+
+        try:
+            validator(input_payload)
+            return None
+        except Exception as exc:
+            return tool_error_invalid_request(
+                code="TOOL_INPUT_SCHEMA_VIOLATION",
+                message=f"Tool input validation failed for '{self.name}'.",
+                reason_code="tool_input_schema_violation",
+                provider="agent_mcp_client",
+                details_safe={"tool_name": self.name, "validation_error": str(exc)},
+            )
+
+    def _get_schema_validator(self, schema: dict) -> Optional[Callable[[dict], None]]:
+        """Return a cached jsonschema validator callable for this wrapper."""
+        if self._schema_validator_ready:
+            return self._schema_validator
+
+        self._schema_validator_ready = True
+        try:
+            from jsonschema import validators
+
+            validator_cls = validators.validator_for(schema)
+            validator_cls.check_schema(schema)
+            compiled = validator_cls(schema)
+            self._schema_validator = compiled.validate
+        except Exception as exc:
+            logger.warning("Failed to compile input schema for tool '%s': %s", self.name, exc)
+            self._schema_validator = None
+
+        return self._schema_validator
 
     # Provide _arun for backward compatibility with StructuredTool interface
     async def _arun(self, *args, config=None, **kwargs) -> Any:
