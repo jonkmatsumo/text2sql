@@ -7,6 +7,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
+from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,34 @@ def _extract_truncation_signal(response: Any) -> tuple[bool, bool]:
         return False, False
 
     return False, False
+
+
+def _inject_tool_version(response: Any, tool_name: str) -> Any:
+    """Inject tool_version into envelope metadata using central registry."""
+    tool_version = get_tool_version(tool_name)
+
+    def _apply_to_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            payload["metadata"] = metadata
+        metadata["tool_version"] = tool_version
+        return payload
+
+    if isinstance(response, dict):
+        return _apply_to_payload(dict(response))
+
+    if isinstance(response, str):
+        try:
+            payload = json.loads(response)
+        except Exception:
+            return response
+        if not isinstance(payload, dict):
+            return response
+        payload = _apply_to_payload(payload)
+        return json.dumps(payload, separators=(",", ":"))
+
+    return response
 
 
 def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
@@ -136,11 +165,12 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         actual_response = bounded_response
                         is_truncated = bool(bound_meta.get("truncated", False))
                         truncation_parse_failed = bool(bound_meta.get("parse_failed", False))
-                        resp_size = int(bound_meta.get("returned_bytes", 0))
                     else:
                         # For execute_sql_query, we just record the size (it handles truncation)
-                        resp_size = len(str(response).encode("utf-8"))
                         is_truncated, truncation_parse_failed = _extract_truncation_signal(response)
+
+                    actual_response = _inject_tool_version(actual_response, tool_name)
+                    resp_size = len(str(actual_response).encode("utf-8"))
 
                     # 3. Record response attributes
                     span.set_attribute("mcp.tool.response.size_bytes", resp_size)

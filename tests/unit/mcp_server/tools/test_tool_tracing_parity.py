@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from common.models.tool_versions import get_tool_version
 from mcp_server.tools.registry import CANONICAL_TOOLS
 from mcp_server.utils.tracing import trace_tool
 
@@ -40,7 +41,10 @@ async def test_non_sql_tool_emits_required_span_attributes():
 
     with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
         traced = trace_tool("get_sample_data")(fake_handler)
-        await traced(query="test", tenant_id=42)
+        response = await traced(query="test", tenant_id=42)
+
+    parsed = json.loads(response)
+    assert parsed["metadata"]["tool_version"] == get_tool_version("get_sample_data")
 
     # Collect all set_attribute calls into a dict for easy assertion
     attrs = {}

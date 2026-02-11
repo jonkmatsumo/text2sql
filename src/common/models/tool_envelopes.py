@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from common.models.error_metadata import ErrorMetadata
+from common.models.tool_versions import DEFAULT_TOOL_VERSION
 
 # Current schema version for future-proofing
 CURRENT_SCHEMA_VERSION = "1.0"
-CURRENT_TOOL_VERSION = "v1"
+CURRENT_TOOL_VERSION = DEFAULT_TOOL_VERSION
 
 
 class ExecuteSQLQueryMetadata(BaseModel):

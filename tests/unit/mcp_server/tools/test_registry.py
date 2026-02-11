@@ -1,5 +1,10 @@
 """Tests for the MCP tools registry."""
 
+from common.models.tool_versions import (
+    DEFAULT_TOOL_VERSION,
+    TOOL_VERSION_REGISTRY,
+    get_tool_version,
+)
 from mcp_server.tools.registry import CANONICAL_TOOLS, get_all_tool_names, validate_tool_names
 
 
@@ -48,6 +53,15 @@ class TestRegistry:
             "list_approved_examples",
         }
         assert expected.issubset(CANONICAL_TOOLS)
+
+    def test_tool_version_registry_covers_all_canonical_tools(self):
+        """Version registry must stay aligned with canonical tool list."""
+        assert set(TOOL_VERSION_REGISTRY.keys()) == set(CANONICAL_TOOLS)
+
+    def test_tool_version_registry_defaults_to_v1_for_all_canonical_tools(self):
+        """Current tool contracts are pinned at v1 unless explicitly version-bumped."""
+        for tool_name in CANONICAL_TOOLS:
+            assert get_tool_version(tool_name) == DEFAULT_TOOL_VERSION
 
 
 class TestToolModuleStructure:
