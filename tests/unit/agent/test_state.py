@@ -104,6 +104,8 @@ class TestAgentStateStructure:
             "deadline_ts",
             "timeout_seconds",
             "schema_snapshot_id",
+            "schema_fingerprint",
+            "schema_version_ts",
         ]
         for field in metadata_fields:
             assert field in AgentState.__annotations__, f"Missing AgentState key: {field}"

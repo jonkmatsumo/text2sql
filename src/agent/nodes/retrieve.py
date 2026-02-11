@@ -65,6 +65,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
         graph_data = {}
 
         existing_snapshot_id = state.get("schema_snapshot_id")
+        existing_schema_fingerprint = state.get("schema_fingerprint")
+        existing_schema_version_ts = state.get("schema_version_ts")
 
         try:
             tools = await get_mcp_tools()
@@ -141,19 +143,39 @@ async def retrieve_context_node(state: AgentState) -> dict:
 
         # Drift Detection Logic
         raw_nodes = graph_data.get("nodes", []) if isinstance(graph_data, dict) else []
-        from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+        from agent.utils.schema_fingerprint import (
+            fingerprint_schema_nodes,
+            resolve_schema_snapshot_id,
+        )
 
         new_snapshot_id = resolve_schema_snapshot_id(raw_nodes)
+        new_schema_fingerprint = fingerprint_schema_nodes(raw_nodes) if raw_nodes else None
+        new_schema_version_ts = int(time.time()) if new_schema_fingerprint else None
         refresh_count = state.get("schema_refresh_count", 0)
+        drift_detected = False
+        if (
+            existing_schema_fingerprint
+            and new_schema_fingerprint
+            and existing_schema_fingerprint != new_schema_fingerprint
+        ):
+            drift_detected = True
 
         if (
-            existing_snapshot_id
+            not drift_detected
+            and existing_snapshot_id
             and existing_snapshot_id != "unknown"
             and new_snapshot_id != existing_snapshot_id
         ):
+            drift_detected = True
+
+        if drift_detected:
             span.set_attribute("schema.drift_detected", True)
             span.set_attribute("schema.old_snapshot_id", existing_snapshot_id)
             span.set_attribute("schema.new_snapshot_id", new_snapshot_id)
+            if existing_schema_fingerprint:
+                span.set_attribute("schema.old_fingerprint", existing_schema_fingerprint)
+            if new_schema_fingerprint:
+                span.set_attribute("schema.new_fingerprint", new_schema_fingerprint)
 
             if refresh_count >= 1:
                 # Hard fail if already refreshed once
@@ -172,10 +194,24 @@ async def retrieve_context_node(state: AgentState) -> dict:
             return {
                 "schema_refresh_count": refresh_count + 1,
                 "schema_snapshot_id": new_snapshot_id,
+                "schema_fingerprint": new_schema_fingerprint,
+                "schema_version_ts": new_schema_version_ts,
                 "schema_drift_suspected": True,
                 "error": "Schema drift detected",  # Triggers retry logic
                 **_latency_payload(),
             }
+
+        pinned_snapshot_id = (
+            existing_snapshot_id
+            if existing_snapshot_id and existing_snapshot_id != "unknown"
+            else new_snapshot_id
+        )
+        pinned_schema_fingerprint = existing_schema_fingerprint or new_schema_fingerprint
+        pinned_schema_version_ts = (
+            existing_schema_version_ts
+            if existing_schema_version_ts is not None
+            else new_schema_version_ts
+        )
 
         logger.info(
             "Schema retrieval completed",
@@ -184,7 +220,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 "schema_source": "semantic_subgraph",
                 "tables_retrieved": len(table_names),
                 "nodes_retrieved": len(raw_nodes),
-                "snapshot_id": new_snapshot_id,
+                "snapshot_id": pinned_snapshot_id,
             },
         )
 
@@ -192,6 +228,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
             "schema_context": context_str,
             "raw_schema_context": raw_nodes,
             "table_names": table_names,
-            "schema_snapshot_id": new_snapshot_id,
+            "schema_snapshot_id": pinned_snapshot_id,
+            "schema_fingerprint": pinned_schema_fingerprint,
+            "schema_version_ts": pinned_schema_version_ts,
             **_latency_payload(),
         }

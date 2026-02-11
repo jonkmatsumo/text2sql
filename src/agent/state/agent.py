@@ -78,6 +78,8 @@ class AgentState(TypedDict):
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]
+    schema_fingerprint: Optional[str]
+    schema_version_ts: Optional[int]
 
     # Error message from the last execution attempt (if any)
     error: Optional[str]

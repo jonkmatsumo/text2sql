@@ -776,6 +776,8 @@ async def run_agent_with_tracing(
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
+            "schema_fingerprint": None,
+            "schema_version_ts": None,
             "deadline_ts": deadline_ts,
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
