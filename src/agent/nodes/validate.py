@@ -1,5 +1,6 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
+import json
 import time
 from typing import Dict, Optional, Set, Tuple
 
@@ -236,6 +237,69 @@ def _extract_rejected_tables(violations: list[dict]) -> list[dict]:
     return rejected_tables
 
 
+def _validation_report_limit() -> int:
+    limit = get_env_int("AGENT_VALIDATION_REPORT_MAX_ITEMS", 20) or 20
+    return max(1, int(limit))
+
+
+def _bounded_strings(values: list[str], max_items: int) -> list[str]:
+    bounded: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if normalized:
+            bounded.append(normalized)
+        if len(bounded) >= max_items:
+            break
+    return bounded
+
+
+def _build_validation_report(result, max_items: int) -> dict:
+    violation_dicts = [violation.to_dict() for violation in result.violations]
+    failed_rules = []
+    affected_tables: set[str] = set()
+
+    metadata = result.metadata.to_dict() if result.metadata else {}
+    if isinstance(metadata, dict):
+        lineage = metadata.get("table_lineage")
+        if isinstance(lineage, list):
+            for table_name in lineage:
+                if isinstance(table_name, str) and table_name.strip():
+                    affected_tables.add(table_name.strip().lower())
+
+    for violation in violation_dicts:
+        if not isinstance(violation, dict):
+            continue
+        rule = str(violation.get("violation_type") or "unknown").strip().lower()
+        message = str(violation.get("message") or "").strip()
+        details = violation.get("details")
+        if len(failed_rules) < max_items:
+            failed_rules.append(
+                {
+                    "rule": rule,
+                    "message": message,
+                }
+            )
+        if isinstance(details, dict):
+            table = details.get("table")
+            if isinstance(table, str) and table.strip():
+                affected_tables.add(table.strip().lower())
+            tables = details.get("tables")
+            if isinstance(tables, list):
+                for raw_table in tables:
+                    if isinstance(raw_table, str) and raw_table.strip():
+                        affected_tables.add(raw_table.strip().lower())
+
+    warnings = _bounded_strings(result.warnings or [], max_items)
+    bounded_tables = sorted(affected_tables)[:max_items]
+    return {
+        "failed_rules": failed_rules,
+        "warnings": warnings,
+        "affected_tables": bounded_tables,
+    }
+
+
 async def validate_sql_node(state: AgentState) -> dict:
     """
     Node: ValidateSQL.
@@ -362,6 +426,26 @@ async def validate_sql_node(state: AgentState) -> dict:
             allowed_columns=allowed_columns or None,
             column_allowlist_mode=column_allowlist_mode,
         )
+        validation_report = _build_validation_report(result, _validation_report_limit())
+        span.set_attribute(
+            "validation.report.failed_rules_count",
+            len(validation_report.get("failed_rules", [])),
+        )
+        span.set_attribute(
+            "validation.report.warnings_count",
+            len(validation_report.get("warnings", [])),
+        )
+        span.set_attribute(
+            "validation.report.affected_tables_count",
+            len(validation_report.get("affected_tables", [])),
+        )
+        if hasattr(span, "add_event"):
+            span.add_event(
+                "validation.report",
+                {
+                    "report_json": json.dumps(validation_report, sort_keys=True)[:1024],
+                },
+            )
 
         # Log validation result
         span.set_attribute("is_valid", str(result.is_valid))
@@ -444,6 +528,7 @@ async def validate_sql_node(state: AgentState) -> dict:
             return {
                 "error": structured_error,
                 "ast_validation_result": result.to_dict(),
+                "validation_report": validation_report,
                 "validation_failures": validation_failures,
                 **query_metrics,
                 # Preserve metadata even on failure for audit
@@ -468,6 +553,7 @@ async def validate_sql_node(state: AgentState) -> dict:
         return {
             "error": None,  # Clear any previous validation errors
             "ast_validation_result": result.to_dict(),
+            "validation_report": validation_report,
             **query_metrics,
             "table_lineage": result.metadata.table_lineage if result.metadata else [],
             "column_usage": result.metadata.column_usage if result.metadata else [],

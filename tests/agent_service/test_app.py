@@ -269,6 +269,11 @@ def test_run_agent_debug_decision_summary_flag(monkeypatch):
             "error": None,
             "decision_summary": {"selected_tables": ["orders"]},
             "retry_correction_summary": {"final_stopping_reason": "success"},
+            "validation_report": {
+                "failed_rules": [],
+                "warnings": [],
+                "affected_tables": ["orders"],
+            },
         }
 
     monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
@@ -281,6 +286,11 @@ def test_run_agent_debug_decision_summary_flag(monkeypatch):
     body = resp.json()
     assert body["decision_summary"] == {"selected_tables": ["orders"]}
     assert body["retry_correction_summary"] == {"final_stopping_reason": "success"}
+    assert body["validation_report"] == {
+        "failed_rules": [],
+        "warnings": [],
+        "affected_tables": ["orders"],
+    }
 
 
 def test_agent_service_startup_fails_on_invalid_runtime_configuration(monkeypatch):

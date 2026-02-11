@@ -48,6 +48,11 @@ class TestValidateSqlNode:
         assert result.get("error") is None
         assert result.get("ast_validation_result") is not None
         assert result["ast_validation_result"]["is_valid"] is True
+        assert result["validation_report"] == {
+            "failed_rules": [],
+            "warnings": [],
+            "affected_tables": ["customers"],
+        }
 
     @pytest.mark.asyncio
     async def test_restricted_table_fails(self, base_state):
@@ -71,6 +76,8 @@ class TestValidateSqlNode:
         assert result.get("error") is not None
         assert "restricted" in result["error"].lower() or "security" in result["error"].lower()
         assert result["ast_validation_result"]["is_valid"] is False
+        assert result["validation_report"]["failed_rules"]
+        assert "payroll" in result["validation_report"]["affected_tables"]
 
     @pytest.mark.asyncio
     async def test_forbidden_command_fails(self, base_state):

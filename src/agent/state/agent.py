@@ -121,6 +121,7 @@ class AgentState(TypedDict):
 
     # Complete AST validation result including violations
     ast_validation_result: Optional[dict]
+    validation_report: Optional[dict]
 
     # Tables accessed (for audit logging and lineage tracking)
     table_lineage: Optional[List[str]]

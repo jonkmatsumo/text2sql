@@ -82,6 +82,7 @@ class AgentRunResponse(BaseModel):
     retry_summary: Optional[dict] = None
     capability_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
+    validation_report: Optional[dict] = None
     empty_result_guidance: Optional[str] = None
     decision_summary: Optional[dict] = None
     retry_correction_summary: Optional[dict] = None
@@ -275,6 +276,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "schema_drift_suspected": state.get("schema_drift_suspected"),
                 "missing_identifiers": state.get("missing_identifiers"),
             },
+            validation_report=state.get("validation_report") if include_decision_debug else None,
             empty_result_guidance=state.get("empty_result_guidance"),
             decision_summary=state.get("decision_summary") if include_decision_debug else None,
             retry_correction_summary=(

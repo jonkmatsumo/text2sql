@@ -1122,6 +1122,11 @@ async def run_agent_with_tracing(
             "final_stopping_reason"
         )
         result["retry_summary"] = retry_summary
+        validation_report = (
+            result.get("validation_report")
+            if isinstance(result.get("validation_report"), dict)
+            else {}
+        )
 
         summary_attrs = {
             "decision.selected_tables_count": len(decision_summary.get("selected_tables", [])),
@@ -1175,6 +1180,21 @@ async def run_agent_with_tracing(
             ),
             "retry.final_stopping_reason": str(
                 retry_correction_summary.get("final_stopping_reason") or "unknown"
+            ),
+            "validation.report.failed_rules_count": int(
+                len(validation_report.get("failed_rules", []))
+                if isinstance(validation_report.get("failed_rules"), list)
+                else 0
+            ),
+            "validation.report.warnings_count": int(
+                len(validation_report.get("warnings", []))
+                if isinstance(validation_report.get("warnings"), list)
+                else 0
+            ),
+            "validation.report.affected_tables_count": int(
+                len(validation_report.get("affected_tables", []))
+                if isinstance(validation_report.get("affected_tables"), list)
+                else 0
             ),
         }
         record_stage_latency_breakdown(decision_summary.get("latency_breakdown_ms"))
