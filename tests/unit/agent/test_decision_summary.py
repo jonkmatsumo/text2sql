@@ -52,6 +52,11 @@ def test_build_decision_summary_is_deterministic_and_bounded():
         {"table": "inventory", "reason": "table_not_allowlisted"},
         {"table": "orders", "reason": "restricted_table"},
     ]
+    assert summary["rejected_plan_candidates"] == [
+        {"table": "archive.orders", "reason_code": "validation_rule"},
+        {"table": "inventory", "reason_code": "allowlist"},
+        {"table": "orders", "reason_code": "validation_rule"},
+    ]
     assert summary["retry_count"] == 2
     assert summary["schema_refresh_events"] == 1
     assert summary["query_complexity"] == {
@@ -95,6 +100,23 @@ def test_build_retry_correction_summary_counts_all_events_and_bounds_payloads():
         {"retry_count": 0, "violation_types": ["restricted_table"]}
     ]
     assert summary["final_stopping_reason"] == "max_retries_reached"
+
+
+def test_build_decision_summary_includes_similarity_threshold_rejections():
+    """Candidates from retrieval that are not selected should be tagged as similarity_threshold."""
+    state = {
+        "table_names": ["orders", "users", "payments"],
+        "table_lineage": ["orders", "users"],
+        "retry_count": 0,
+        "schema_refresh_count": 0,
+    }
+
+    summary = build_decision_summary(state, max_tables=10)
+
+    assert summary["selected_tables"] == ["orders", "users"]
+    assert summary["rejected_plan_candidates"] == [
+        {"table": "payments", "reason_code": "similarity_threshold"}
+    ]
 
 
 def test_build_retry_correction_summary_falls_back_to_termination_reason():

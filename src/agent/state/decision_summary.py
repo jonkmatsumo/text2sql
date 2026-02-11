@@ -122,6 +122,53 @@ def _collect_rejected_tables(state: dict[str, Any], max_tables: int) -> list[dic
     return ordered[:max_tables]
 
 
+def _reason_to_reason_code(reason: Any) -> str:
+    raw = str(reason or "").strip().lower()
+    if not raw:
+        return "unknown"
+    if "allowlist" in raw:
+        return "allowlist"
+    if "schema" in raw or "missing" in raw or "not_found" in raw or "unknown_table" in raw:
+        return "schema_mismatch"
+    if "similarity" in raw or "threshold" in raw:
+        return "similarity_threshold"
+    return "validation_rule"
+
+
+def _collect_rejected_plan_candidates(
+    state: dict[str, Any],
+    selected_tables: list[str],
+    max_candidates: int,
+) -> list[dict[str, str]]:
+    selected = {_normalize_table_name(table) for table in selected_tables}
+    selected.discard("")
+    rejected: dict[tuple[str, str], dict[str, str]] = {}
+
+    raw_candidates = state.get("table_names") or []
+    if isinstance(raw_candidates, list):
+        for raw_candidate in raw_candidates:
+            table = _normalize_table_name(raw_candidate)
+            if not table or table in selected:
+                continue
+            rejected[(table, "similarity_threshold")] = {
+                "table": table,
+                "reason_code": "similarity_threshold",
+            }
+
+    for rejected_table in _collect_rejected_tables(state, max(max_candidates * 2, 50)):
+        table = _normalize_table_name(rejected_table.get("table"))
+        if not table:
+            continue
+        reason_code = _reason_to_reason_code(rejected_table.get("reason"))
+        rejected[(table, reason_code)] = {
+            "table": table,
+            "reason_code": reason_code,
+        }
+
+    ordered = [rejected[key] for key in sorted(rejected.keys())]
+    return ordered[:max_candidates]
+
+
 def _extract_query_complexity(state: dict[str, Any]) -> dict[str, Any]:
     ast_result = state.get("ast_validation_result")
     metadata = ast_result.get("metadata") if isinstance(ast_result, dict) else {}
@@ -175,7 +222,15 @@ def build_decision_summary(
     table_limit = max(1, int(table_limit))
 
     selected_tables: list[str] = []
-    raw_tables = normalized_state.get("table_names") or []
+    raw_tables = normalized_state.get("table_lineage")
+    if not isinstance(raw_tables, list) or not raw_tables:
+        ast_result = normalized_state.get("ast_validation_result")
+        if isinstance(ast_result, dict):
+            metadata = ast_result.get("metadata")
+            if isinstance(metadata, dict) and isinstance(metadata.get("table_lineage"), list):
+                raw_tables = metadata.get("table_lineage")
+    if not isinstance(raw_tables, list) or not raw_tables:
+        raw_tables = normalized_state.get("table_names") or []
     if isinstance(raw_tables, list):
         seen = set()
         for table in raw_tables:
@@ -186,10 +241,16 @@ def build_decision_summary(
         selected_tables.sort()
 
     rejected_tables = _collect_rejected_tables(normalized_state, table_limit)
+    rejected_plan_candidates = _collect_rejected_plan_candidates(
+        normalized_state,
+        selected_tables,
+        table_limit,
+    )
 
     return {
         "selected_tables": selected_tables[:table_limit],
         "rejected_tables": rejected_tables,
+        "rejected_plan_candidates": rejected_plan_candidates,
         "retry_count": int(normalized_state.get("retry_count", 0) or 0),
         "schema_refresh_events": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "query_complexity": _extract_query_complexity(normalized_state),

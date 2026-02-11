@@ -1126,6 +1126,9 @@ async def run_agent_with_tracing(
         summary_attrs = {
             "decision.selected_tables_count": len(decision_summary.get("selected_tables", [])),
             "decision.rejected_tables_count": len(decision_summary.get("rejected_tables", [])),
+            "decision.rejected_plan_candidates_count": len(
+                decision_summary.get("rejected_plan_candidates", [])
+            ),
             "decision.retry_count": int(decision_summary.get("retry_count", 0) or 0),
             "decision.schema_refresh_events": int(
                 decision_summary.get("schema_refresh_events", 0) or 0
