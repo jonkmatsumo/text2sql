@@ -113,3 +113,7 @@ The system is designed for high availability and large result sets:
 - **Hot Reload**: Bind-mounted source for UI and MCP servers.
 - **Cleanup**: Use `make docker-clean` or `make docker-nuke` for environment resets.
 - **Testing**: Run unit tests via `pytest tests/unit/` and integration tests via `docker compose -f docker-compose.test.yml up`.
+- **OTEL Unit Tests**: Unit tests default to `OTEL_TEST_EXPORTER=in_memory` so OTEL coverage runs without a live collector.
+- **Explicit OTEL Skip Switch**: Set `SKIP_OTEL_WORKER_TESTS=1` only when you intentionally need to bypass OTEL-worker-specific unit tests.
+- **Live OTEL Smoke Test**: Set `ENABLE_OTEL_SMOKE_TEST=true` (and point `OTEL_WORKER_URL`) to run the real worker ingestion smoke test.
+- **Strict Runtime Mode**: Set `OTEL_WORKER_REQUIRED=true` to fail fast if OTEL exporter initialization fails.
