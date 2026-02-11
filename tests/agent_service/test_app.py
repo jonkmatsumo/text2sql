@@ -319,6 +319,8 @@ def test_agent_diagnostics_endpoint(monkeypatch):
     assert body["active_database_provider"] == "snowflake"
     assert body["retry_policy"] == {"mode": "adaptive", "max_retries": 5}
     assert body["schema_cache_ttl_seconds"] == 600
+    assert "runtime_indicators" in body
+    assert "active_schema_cache_size" in body["runtime_indicators"]
     assert "enabled_flags" in body
     assert "OPENAI_API_KEY" not in str(body)
 

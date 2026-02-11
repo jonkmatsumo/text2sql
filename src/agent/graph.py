@@ -23,7 +23,11 @@ from agent.nodes.router import router_node
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
-from agent.runtime_metrics import record_stage_latency_breakdown
+from agent.runtime_metrics import (
+    record_query_complexity_score,
+    record_stage_latency_breakdown,
+    record_truncation_event,
+)
 from agent.state import AgentState
 from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
@@ -1225,6 +1229,10 @@ async def run_agent_with_tracing(
                 else 0
             ),
         }
+        record_query_complexity_score(
+            decision_summary.get("query_complexity", {}).get("query_complexity_score", 0)
+        )
+        record_truncation_event(result.get("result_is_truncated", False))
         record_stage_latency_breakdown(decision_summary.get("latency_breakdown_ms"))
         telemetry.update_current_trace(summary_attrs)
         active_span = telemetry.get_current_span()

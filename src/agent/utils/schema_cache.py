@@ -50,6 +50,7 @@ _CACHE_BACKEND: Optional[SchemaSnapshotCache] = None
 _SCHEMA_SNAPSHOT_ID_CACHE: Dict[int, Dict[str, Any]] = {}
 _SCHEMA_REFRESH_LOCKS: Dict[Tuple[int, int], asyncio.Lock] = {}
 _SCHEMA_REFRESH_COLLISIONS: int = 0
+_LAST_SCHEMA_REFRESH_TIMESTAMP: Optional[float] = None
 _STATE_LOCK = threading.Lock()
 
 
@@ -89,6 +90,18 @@ def get_schema_refresh_collision_count() -> int:
         return int(_SCHEMA_REFRESH_COLLISIONS)
 
 
+def get_schema_snapshot_cache_size() -> int:
+    """Return number of active tenant snapshot entries currently cached."""
+    with _STATE_LOCK:
+        return len(_SCHEMA_SNAPSHOT_ID_CACHE)
+
+
+def get_last_schema_refresh_timestamp() -> Optional[float]:
+    """Return unix timestamp for last successful snapshot refresh write."""
+    with _STATE_LOCK:
+        return _LAST_SCHEMA_REFRESH_TIMESTAMP
+
+
 def get_schema_cache_ttl_seconds() -> int:
     """Return schema snapshot cache TTL in seconds from env.
 
@@ -113,23 +126,27 @@ def get_cached_schema_snapshot_id(
 ) -> Optional[str]:
     """Get cached schema snapshot id for tenant when TTL is still valid."""
     cache_key = _tenant_cache_key(tenant_id)
-    entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
+    with _STATE_LOCK:
+        entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
     if not entry:
         return None
 
     cached_at = entry.get("cached_at")
     if not isinstance(cached_at, (int, float)):
-        _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
+        with _STATE_LOCK:
+            _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
         return None
 
     now_value = now if now is not None else time.monotonic()
     if now_value - float(cached_at) >= get_schema_cache_ttl_seconds():
-        _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
+        with _STATE_LOCK:
+            _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
         return None
 
     snapshot_id = entry.get("snapshot_id")
     if not isinstance(snapshot_id, str) or not snapshot_id:
-        _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
+        with _STATE_LOCK:
+            _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
         return None
     return snapshot_id
 
@@ -147,10 +164,12 @@ def set_cached_schema_snapshot_id(
     """
     if not isinstance(snapshot_id, str) or not snapshot_id:
         return
+    global _LAST_SCHEMA_REFRESH_TIMESTAMP
     cache_key = _tenant_cache_key(tenant_id)
     cached_at = now if now is not None else time.monotonic()
 
-    existing_entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
+    with _STATE_LOCK:
+        existing_entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
     if existing_entry:
         existing_cached_at = existing_entry.get("cached_at")
         if isinstance(existing_cached_at, (int, float)) and float(cached_at) < float(
@@ -158,10 +177,12 @@ def set_cached_schema_snapshot_id(
         ):
             return
 
-    _SCHEMA_SNAPSHOT_ID_CACHE[cache_key] = {
-        "snapshot_id": snapshot_id,
-        "cached_at": cached_at,
-    }
+    with _STATE_LOCK:
+        _SCHEMA_SNAPSHOT_ID_CACHE[cache_key] = {
+            "snapshot_id": snapshot_id,
+            "cached_at": cached_at,
+        }
+        _LAST_SCHEMA_REFRESH_TIMESTAMP = time.time()
 
 
 async def get_or_refresh_schema_snapshot_id(
@@ -202,8 +223,10 @@ def reset_schema_cache() -> None:
     """Reset the pluggable schema cache backend (test utility)."""
     global _CACHE_BACKEND
     global _SCHEMA_REFRESH_COLLISIONS
+    global _LAST_SCHEMA_REFRESH_TIMESTAMP
     _CACHE_BACKEND = None
     with _STATE_LOCK:
         _SCHEMA_SNAPSHOT_ID_CACHE.clear()
         _SCHEMA_REFRESH_LOCKS.clear()
         _SCHEMA_REFRESH_COLLISIONS = 0
+        _LAST_SCHEMA_REFRESH_TIMESTAMP = None

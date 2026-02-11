@@ -97,6 +97,7 @@ class AgentDiagnosticsResponse(BaseModel):
     active_database_provider: Optional[str] = None
     retry_policy: dict[str, Any]
     schema_cache_ttl_seconds: int
+    runtime_indicators: dict[str, Any]
     enabled_flags: dict[str, Any]
     debug: Optional[dict[str, Any]] = None
 
