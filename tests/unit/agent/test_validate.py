@@ -322,3 +322,31 @@ class TestValidateSqlNode:
         assert result.get("error") is not None
         assert "cartesian join" in result["error"].lower()
         assert result["ast_validation_result"]["is_valid"] is False
+
+    @pytest.mark.asyncio
+    async def test_validation_failures_memory_cap_sets_truncation_metadata(
+        self, base_state, monkeypatch
+    ):
+        """Validation failure history should remain bounded with truncation metadata."""
+        monkeypatch.setenv("AGENT_RETRY_SUMMARY_MAX_EVENTS", "1")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["current_sql"] = "SELECT * FROM payroll"
+        base_state["validation_failures"] = [{"retry_count": 0, "violation_types": ["seed"]}]
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert len(result["validation_failures"]) == 1
+        assert result["validation_failures_truncated"] is True
+        assert result["validation_failures_dropped"] >= 1

@@ -329,3 +329,23 @@ class TestCorrectSqlNode:
 
         assert result["error_category"] == "repeated_error"
         assert result["correction_attempts"][-1]["outcome"] == "repeated_error"
+
+    def test_correction_attempts_memory_cap_sets_truncation_metadata(self, monkeypatch):
+        """Correction history should stay bounded and expose truncation metadata."""
+        monkeypatch.setenv("AGENT_RETRY_SUMMARY_MAX_EVENTS", "1")
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error="syntax error",
+            retry_count=0,
+            token_budget={"max_tokens": 10, "consumed_tokens": 10},
+            correction_attempts=[{"attempt": 0, "outcome": "seed"}],
+        )
+
+        result = correct_sql_node(state)
+
+        assert len(result["correction_attempts"]) == 1
+        assert result["correction_attempts_truncated"] is True
+        assert result["correction_attempts_dropped"] >= 1
