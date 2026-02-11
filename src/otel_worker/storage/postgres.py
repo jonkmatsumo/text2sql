@@ -71,6 +71,7 @@ class SafeIngestQueue:
     def stop(self):
         """Stop the background drain worker."""
         self._stopping = True
+        self._flush_buffer_sync()
         if self._worker_thread and self._worker_thread.is_alive():
             timeout = max(0.1, float(settings.SAFE_QUEUE_STOP_TIMEOUT_SECONDS))
             self._worker_thread.join(timeout=timeout)
@@ -92,6 +93,27 @@ class SafeIngestQueue:
     def dropped_items(self) -> int:
         """Return number of items dropped due to fallback buffer saturation."""
         return int(self._dropped_items)
+
+    def _flush_buffer_sync(self) -> int:
+        """Flush buffered items best-effort during shutdown."""
+        flushed = 0
+        while True:
+            with self._lock:
+                if not self.buffer:
+                    break
+                item = self.buffer[0]
+            try:
+                enqueue_ingestion_direct(item["payload"], item["trace_id"])
+            except Exception:
+                # Preserve buffered data for potential out-of-process recovery.
+                break
+            with self._lock:
+                if self.buffer:
+                    self.buffer.popleft()
+            flushed += 1
+        if flushed:
+            logger.info("SafeIngestQueue flushed %s buffered items during shutdown", flushed)
+        return flushed
 
     def _drain_loop(self):
         """Periodically flush memory buffer to Postgres."""

@@ -74,3 +74,21 @@ def test_worker_required_fails_fast_on_startup_error(monkeypatch):
             ):
                 with TestClient(worker_app.app):
                     pass
+
+
+def test_worker_shutdown_flushes_tracer_provider(monkeypatch):
+    """Worker shutdown should flush and shutdown tracer provider best-effort."""
+    monkeypatch.setattr(worker_app.settings, "OTEL_WORKER_ENABLED", True)
+    monkeypatch.setattr(worker_app.settings, "OTEL_WORKER_REQUIRED", False)
+
+    fake_provider = MagicMock(force_flush=MagicMock(), shutdown=MagicMock())
+    with _patch_worker_components():
+        with (
+            patch.object(worker_app, "init_db"),
+            patch.object(worker_app.trace, "get_tracer_provider", return_value=fake_provider),
+        ):
+            with TestClient(worker_app.app):
+                pass
+
+    assert fake_provider.force_flush.call_count >= 1
+    assert fake_provider.shutdown.call_count >= 1

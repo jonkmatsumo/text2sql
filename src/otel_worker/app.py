@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
 
 from otel_worker.config import settings
 from otel_worker.ingestion.limiter import limiter
@@ -100,6 +101,18 @@ async def _run_component_step(
         return False
 
 
+def _flush_otel_provider(timeout_ms: int = 2000) -> None:
+    """Flush and shutdown tracer provider best-effort for clean worker shutdown."""
+    try:
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush(timeout_millis=timeout_ms)
+        if hasattr(provider, "shutdown"):
+            provider.shutdown()
+    except Exception as exc:
+        logger.exception("Failed to flush OTEL tracer provider during shutdown: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for storage and background workers."""
@@ -111,6 +124,7 @@ async def lifespan(app: FastAPI):
     if not settings.OTEL_WORKER_ENABLED:
         logger.warning("OTEL worker startup skipped: OTEL_WORKER_ENABLED=false")
         yield
+        _flush_otel_provider()
         return
 
     startup_plan: list[tuple[str, Callable[[], Any]]] = [
@@ -178,6 +192,7 @@ async def lifespan(app: FastAPI):
                 await result
         except Exception as exc:
             logger.exception("OTEL worker shutdown step failed (%s): %s", component_name, exc)
+    _flush_otel_provider()
 
 
 app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)

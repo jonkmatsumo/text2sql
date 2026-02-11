@@ -31,6 +31,21 @@ class TestDurability(unittest.TestCase):
             self.assertEqual(len(queue.buffer), 1)
             self.assertEqual(queue.buffer[0]["trace_id"], "t1")
 
+    def test_safe_ingest_queue_flushes_buffer_on_stop(self):
+        """Stopping the queue should synchronously flush recoverable buffered items."""
+        queue = SafeIngestQueue(max_buffer_size=10)
+        payload = {"test": "data"}
+
+        with patch(
+            "otel_worker.storage.postgres.enqueue_ingestion_direct",
+            side_effect=[Exception("DB Down"), 1],
+        ):
+            queue.enqueue(payload, trace_id="t1")
+            self.assertEqual(len(queue.buffer), 1)
+            queue.stop()
+
+        self.assertEqual(len(queue.buffer), 0)
+
     def test_find_orphan_minio_objects(self):
         """Test orphan identification logic."""
         mock_engine = MagicMock()
