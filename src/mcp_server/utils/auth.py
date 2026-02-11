@@ -39,17 +39,13 @@ def validate_role(
     context = ToolContext.from_env(tenant_id=tenant_id)
 
     if not context.has_role(required_role):
-        from common.models.error_metadata import ErrorMetadata
-        from common.models.tool_envelopes import ToolResponseEnvelope
+        from mcp_server.utils.errors import tool_error_response
 
-        envelope = ToolResponseEnvelope(
-            result=None,
-            error=ErrorMetadata(
-                message=f"Unauthorized: Role '{required_role}' required for tool '{tool_name}'.",
-                category="auth",
-                provider="mcp_server",
-                is_retryable=False,
-            ),
+        return tool_error_response(
+            message=f"Unauthorized: Role '{required_role}' required for tool '{tool_name}'.",
+            code="UNAUTHORIZED_ROLE",
+            category="unauthorized",
+            provider="mcp_server",
+            retryable=False,
         )
-        return envelope.model_dump_json(exclude_none=True)
     return None

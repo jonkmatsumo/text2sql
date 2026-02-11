@@ -28,8 +28,8 @@ async def handler(interaction_id: str) -> str:
     """
     import time
 
-    from common.models.error_metadata import ErrorMetadata
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.errors import tool_error_response
 
     start_time = time.monotonic()
 
@@ -43,15 +43,13 @@ async def handler(interaction_id: str) -> str:
 
     interaction = await i_store.get_interaction_detail(interaction_id)
     if not interaction:
-        return ToolResponseEnvelope(
-            result={},
-            error=ErrorMetadata(
-                message=f"Interaction {interaction_id} not found",
-                category="not_found",
-                provider="interaction_store",
-                is_retryable=False,
-            ),
-        ).model_dump_json(exclude_none=True)
+        return tool_error_response(
+            message=f"Interaction {interaction_id} not found",
+            code="INTERACTION_NOT_FOUND",
+            category="not_found",
+            provider="interaction_store",
+            retryable=False,
+        )
 
     feedback = await f_store.get_feedback_for_interaction(interaction_id)
     interaction["feedback"] = feedback

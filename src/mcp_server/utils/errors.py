@@ -6,8 +6,14 @@ error parsing across different tools.
 
 from typing import Optional
 
-from common.models.error_metadata import ErrorMetadata
+from common.models.error_metadata import ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+from common.models.tool_errors import (
+    tool_error_internal,
+    tool_error_invalid_request,
+    tool_error_timeout,
+    tool_error_unsupported_capability,
+)
 from common.sanitization.text import redact_sensitive_info
 
 MAX_ERROR_MESSAGE_LENGTH = 2048
@@ -30,21 +36,67 @@ def build_error_metadata(
     retry_after_seconds: Optional[float] = None,
     code: Optional[str] = None,
     hint: Optional[str] = None,
-) -> ErrorMetadata:
-    """Build bounded, redacted ErrorMetadata."""
+) -> ToolError:
+    """Build bounded, redacted ToolError."""
     safe_message = sanitize_error_message(message)
     safe_hint = sanitize_error_message(hint, fallback="") if hint else None
     if safe_hint == "":
         safe_hint = None
-    return ErrorMetadata(
-        message=safe_message,
-        category=category,
-        provider=provider,
-        is_retryable=retryable,
-        retry_after_seconds=retry_after_seconds,
-        sql_state=code,
-        hint=safe_hint,
-    )
+    normalized_category = (category or "internal_error").strip().lower()
+    error_code = code or "TOOL_ERROR"
+    safe_details = {"hint": safe_hint} if safe_hint else None
+
+    if normalized_category == "invalid_request":
+        err = tool_error_invalid_request(
+            code=error_code,
+            message=safe_message,
+            provider=provider,
+            details_safe=safe_details,
+        )
+    elif normalized_category == "unsupported_capability":
+        err = tool_error_unsupported_capability(
+            code=error_code,
+            message=safe_message,
+            provider=provider,
+            details_safe=safe_details,
+        )
+    elif normalized_category == "timeout":
+        err = tool_error_timeout(
+            code=error_code,
+            message=safe_message,
+            provider=provider,
+            details_safe=safe_details,
+            retry_after_seconds=retry_after_seconds,
+        )
+    elif normalized_category in {"internal_error", "unknown"}:
+        err = tool_error_internal(
+            code=error_code,
+            message=safe_message,
+            provider=provider,
+            details_safe=safe_details,
+        )
+    else:
+        err = ToolError(
+            category=normalized_category,
+            code=error_code,
+            message=safe_message,
+            retryable=retryable,
+            provider=provider,
+            details_safe=safe_details,
+            retry_after_seconds=retry_after_seconds,
+        )
+
+    updates = {}
+    if bool(retryable) != bool(err.retryable):
+        updates["retryable"] = bool(retryable)
+    if retry_after_seconds is not None and err.retry_after_seconds != retry_after_seconds:
+        updates["retry_after_seconds"] = retry_after_seconds
+    if safe_hint:
+        updates["hint"] = safe_hint
+    if updates:
+        err = err.model_copy(update=updates)
+
+    return err
 
 
 def tool_error_response(
