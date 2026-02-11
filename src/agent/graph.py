@@ -817,17 +817,14 @@ async def run_agent_with_tracing(
                 if snapshot_mode == "static":
                     schema_snapshot_id = "v1.0"
                 elif snapshot_mode == "fingerprint":
-                    from agent.utils.schema_cache import (
-                        get_cached_schema_snapshot_id,
-                        set_cached_schema_snapshot_id,
-                    )
+                    from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
 
-                    schema_snapshot_id = get_cached_schema_snapshot_id(tenant_id)
-                    if not schema_snapshot_id:
-                        subgraph_tool = next(
-                            (t for t in tools if t.name == "get_semantic_subgraph"), None
-                        )
-                        if subgraph_tool:
+                    subgraph_tool = next(
+                        (t for t in tools if t.name == "get_semantic_subgraph"), None
+                    )
+                    if subgraph_tool:
+
+                        async def _refresh_snapshot_id() -> Optional[str]:
                             try:
                                 payload = {"query": question}
                                 if tenant_id is not None:
@@ -842,13 +839,16 @@ async def run_agent_with_tracing(
                                 if isinstance(parsed, list) and parsed:
                                     parsed = parsed[0]
                                 nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
-                                schema_snapshot_id = resolve_schema_snapshot_id(nodes)
-                                if schema_snapshot_id and schema_snapshot_id != "unknown":
-                                    set_cached_schema_snapshot_id(tenant_id, schema_snapshot_id)
+                                return resolve_schema_snapshot_id(nodes)
                             except Exception:
                                 logger.warning(
                                     "Failed to compute schema snapshot id", exc_info=True
                                 )
+                                return None
+
+                        schema_snapshot_id = await get_or_refresh_schema_snapshot_id(
+                            tenant_id, _refresh_snapshot_id
+                        )
                 schema_snapshot_id = schema_snapshot_id or "unknown"
                 inputs["schema_snapshot_id"] = schema_snapshot_id
 
@@ -1127,6 +1127,9 @@ async def run_agent_with_tracing(
             if isinstance(result.get("validation_report"), dict)
             else {}
         )
+        from agent.utils.schema_cache import get_schema_refresh_collision_count
+
+        schema_refresh_collisions = get_schema_refresh_collision_count()
 
         summary_attrs = {
             "decision.selected_tables_count": len(decision_summary.get("selected_tables", [])),
@@ -1138,6 +1141,7 @@ async def run_agent_with_tracing(
             "decision.schema_refresh_events": int(
                 decision_summary.get("schema_refresh_events", 0) or 0
             ),
+            "schema.refresh_collisions": int(schema_refresh_collisions),
             "query.join_count": int(
                 decision_summary.get("query_complexity", {}).get("join_count", 0) or 0
             ),

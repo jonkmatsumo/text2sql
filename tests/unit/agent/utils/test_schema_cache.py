@@ -1,11 +1,16 @@
 """Tests for schema snapshot cache."""
 
+import asyncio
+
 import pytest
 
 from agent.utils.schema_cache import (
     MemorySchemaSnapshotCache,
     get_cached_schema_snapshot_id,
+    get_or_refresh_schema_snapshot_id,
     get_schema_cache,
+    get_schema_refresh_collision_count,
+    reset_schema_cache,
     set_cached_schema_snapshot_id,
 )
 
@@ -70,3 +75,24 @@ def test_schema_snapshot_id_ignores_stale_race_writes():
     set_cached_schema_snapshot_id(tenant_id=9, snapshot_id="fp-stale", now=200.5)
 
     assert get_cached_schema_snapshot_id(tenant_id=9, now=201.1) == "fp-new"
+
+
+@pytest.mark.asyncio
+async def test_schema_snapshot_refresh_single_flight_prevents_duplicate_refreshes():
+    """Concurrent refreshes for one tenant should execute refresh_fn once."""
+    reset_schema_cache()
+    calls = {"count": 0}
+
+    async def refresh_fn():
+        calls["count"] += 1
+        await asyncio.sleep(0.01)
+        return "fp-concurrent"
+
+    results = await asyncio.gather(
+        get_or_refresh_schema_snapshot_id(tenant_id=77, refresh_fn=refresh_fn),
+        get_or_refresh_schema_snapshot_id(tenant_id=77, refresh_fn=refresh_fn),
+    )
+
+    assert results == ["fp-concurrent", "fp-concurrent"]
+    assert calls["count"] == 1
+    assert get_schema_refresh_collision_count() >= 1
