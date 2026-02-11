@@ -42,9 +42,9 @@ async def handler(
 
     start_time = time.monotonic()
 
-    from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.auth import require_admin
 
-    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+    if err := require_admin(TOOL_NAME):
         return err
 
     store = get_feedback_store()

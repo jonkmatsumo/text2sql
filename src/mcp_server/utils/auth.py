@@ -49,3 +49,29 @@ def validate_role(
             retryable=False,
         )
     return None
+
+
+def require_admin(tool_name: str, tenant_id: Optional[int] = None) -> Optional[str]:
+    """Require ADMIN_ROLE and request-scoped internal auth for admin tools."""
+    if err := validate_role("ADMIN_ROLE", tool_name, tenant_id=tenant_id):
+        return err
+
+    # Reuse internal auth token hardening for privileged tool invocations.
+    internal_token = (get_env_str("INTERNAL_AUTH_TOKEN", "") or "").strip()
+    if not internal_token:
+        return None
+
+    from mcp_server.utils.request_auth_context import is_internal_auth_verified
+
+    if is_internal_auth_verified():
+        return None
+
+    from mcp_server.utils.errors import tool_error_response
+
+    return tool_error_response(
+        message=f"Unauthorized: Internal auth token required for tool '{tool_name}'.",
+        code="UNAUTHORIZED_ADMIN_TOKEN",
+        category="unauthorized",
+        provider="mcp_server",
+        retryable=False,
+    )

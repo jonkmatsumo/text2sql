@@ -25,9 +25,9 @@ async def handler() -> str:
         JSON string containing the status and details of the reload operation.
     """
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
-    from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.auth import require_admin
 
-    if err := validate_role("ADMIN_ROLE", TOOL_NAME):
+    if err := require_admin(TOOL_NAME):
         return err
 
     # Pattern reload service tracks its own duration, but we'll wrap it

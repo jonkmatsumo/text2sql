@@ -109,7 +109,9 @@ def test_tool_invariants(tool_name, handler):
                 call_names.append(call.func.id)
             elif isinstance(call.func, ast.Attribute):
                 call_names.append(call.func.attr)
-        assert "validate_role" in call_names, f"Admin tool '{tool_name}' MUST call validate_role()"
+        assert (
+            "require_admin" in call_names or "validate_role" in call_names
+        ), f"Admin tool '{tool_name}' MUST call require_admin() or validate_role()"
 
     # 7. Check for limit default value
     if "limit" in handler_args:
