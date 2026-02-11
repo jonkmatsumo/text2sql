@@ -97,6 +97,7 @@ class AgentDiagnosticsResponse(BaseModel):
     retry_policy: dict[str, Any]
     schema_cache_ttl_seconds: int
     enabled_flags: dict[str, Any]
+    debug: Optional[dict[str, Any]] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -292,8 +293,8 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
 
 @app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
-def get_agent_diagnostics() -> AgentDiagnosticsResponse:
+def get_agent_diagnostics(debug: bool = False) -> AgentDiagnosticsResponse:
     """Return non-sensitive runtime diagnostics for operators."""
     from common.config.diagnostics import build_operator_diagnostics
 
-    return AgentDiagnosticsResponse(**build_operator_diagnostics())
+    return AgentDiagnosticsResponse(**build_operator_diagnostics(debug=debug))

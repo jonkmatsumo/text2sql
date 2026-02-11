@@ -101,8 +101,7 @@ class TestPlanSqlNode:
         ):
             result = await plan_sql_node(base_state)
 
-        # Should return empty dict for empty query
-        assert result == {}
+        assert result["latency_planning_ms"] == 0.0
 
     @pytest.mark.asyncio
     async def test_plan_with_clarification(self, base_state):

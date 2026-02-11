@@ -216,6 +216,13 @@ async def generate_sql_node(state: AgentState) -> dict:
         name="generate_sql",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.generation_ms", latency_ms)
+            return {"latency_generation_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "generate_sql")
         messages = state["messages"]
@@ -373,6 +380,7 @@ Rules:
                 "error_category": "budget_exhausted",
                 "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
                 "retry_after_seconds": None,
+                **_latency_payload(),
             }
 
         from agent.llm_client import get_llm
@@ -433,4 +441,5 @@ Rules:
             "latency_generate_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
+            **_latency_payload(),
         }

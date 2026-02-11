@@ -1,5 +1,6 @@
 """Unit tests for operator diagnostics payload helpers."""
 
+from agent.runtime_metrics import record_stage_latency_breakdown, reset_runtime_metrics
 from common.config.diagnostics import build_operator_diagnostics
 
 
@@ -27,3 +28,22 @@ def test_build_operator_diagnostics_falls_back_on_invalid_ints(monkeypatch):
     diagnostics = build_operator_diagnostics()
 
     assert diagnostics["retry_policy"]["max_retries"] == 3
+
+
+def test_build_operator_diagnostics_debug_includes_stage_latency_breakdown():
+    """Debug mode should expose bounded stage-latency breakdown."""
+    reset_runtime_metrics()
+    record_stage_latency_breakdown(
+        {
+            "retrieval_ms": 11.0,
+            "planning_ms": 22.0,
+            "generation_ms": 33.0,
+            "validation_ms": 44.0,
+            "execution_ms": 55.0,
+            "correction_loop_ms": 66.0,
+        }
+    )
+
+    diagnostics = build_operator_diagnostics(debug=True)
+
+    assert diagnostics["debug"]["latency_breakdown_ms"]["execution_ms"] == 55.0

@@ -170,6 +170,12 @@ class AgentState(TypedDict):
     latency_generate_seconds: Optional[float]
     latency_correct_seconds: Optional[float]
     ema_llm_latency_seconds: Optional[float]
+    latency_retrieval_ms: Optional[float]
+    latency_planning_ms: Optional[float]
+    latency_generation_ms: Optional[float]
+    latency_validation_ms: Optional[float]
+    latency_execution_ms: Optional[float]
+    latency_correction_loop_ms: Optional[float]
 
     # Retry history for debugging and telemetry
     # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}

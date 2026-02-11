@@ -23,6 +23,7 @@ from agent.nodes.router import router_node
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
+from agent.runtime_metrics import record_stage_latency_breakdown
 from agent.state import AgentState
 from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
@@ -1144,6 +1145,25 @@ async def run_agent_with_tracing(
             "query.query_complexity_score": int(
                 decision_summary.get("query_complexity", {}).get("query_complexity_score", 0) or 0
             ),
+            "latency.retrieval_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("retrieval_ms", 0.0) or 0.0
+            ),
+            "latency.planning_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("planning_ms", 0.0) or 0.0
+            ),
+            "latency.generation_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("generation_ms", 0.0) or 0.0
+            ),
+            "latency.validation_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("validation_ms", 0.0) or 0.0
+            ),
+            "latency.execution_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("execution_ms", 0.0) or 0.0
+            ),
+            "latency.correction_loop_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("correction_loop_ms", 0.0)
+                or 0.0
+            ),
             "retry.correction_attempt_count": int(
                 retry_correction_summary.get("correction_attempt_count", 0) or 0
             ),
@@ -1154,6 +1174,7 @@ async def run_agent_with_tracing(
                 retry_correction_summary.get("final_stopping_reason") or "unknown"
             ),
         }
+        record_stage_latency_breakdown(decision_summary.get("latency_breakdown_ms"))
         telemetry.update_current_trace(summary_attrs)
         active_span = telemetry.get_current_span()
         if active_span:

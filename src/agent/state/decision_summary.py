@@ -148,6 +148,22 @@ def _extract_query_complexity(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_latency_breakdown(state: dict[str, Any]) -> dict[str, float]:
+    def _as_ms(value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return max(0.0, float(value))
+        return 0.0
+
+    return {
+        "retrieval_ms": _as_ms(state.get("latency_retrieval_ms")),
+        "planning_ms": _as_ms(state.get("latency_planning_ms")),
+        "generation_ms": _as_ms(state.get("latency_generation_ms")),
+        "validation_ms": _as_ms(state.get("latency_validation_ms")),
+        "execution_ms": _as_ms(state.get("latency_execution_ms")),
+        "correction_loop_ms": _as_ms(state.get("latency_correction_loop_ms")),
+    }
+
+
 def build_decision_summary(
     state: dict[str, Any], *, max_tables: int | None = None
 ) -> dict[str, Any]:
@@ -177,4 +193,5 @@ def build_decision_summary(
         "retry_count": int(normalized_state.get("retry_count", 0) or 0),
         "schema_refresh_events": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "query_complexity": _extract_query_complexity(normalized_state),
+        "latency_breakdown_ms": _extract_latency_breakdown(normalized_state),
     }

@@ -311,3 +311,18 @@ def test_agent_diagnostics_endpoint(monkeypatch):
     assert body["schema_cache_ttl_seconds"] == 600
     assert "enabled_flags" in body
     assert "OPENAI_API_KEY" not in str(body)
+
+
+def test_agent_diagnostics_endpoint_debug(monkeypatch):
+    """Debug diagnostics should include recent stage-latency breakdown."""
+    from agent.runtime_metrics import record_stage_latency_breakdown, reset_runtime_metrics
+
+    reset_runtime_metrics()
+    record_stage_latency_breakdown({"execution_ms": 12.5, "validation_ms": 3.0})
+
+    with TestClient(agent_app.app) as client:
+        resp = client.get("/agent/diagnostics?debug=true")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["debug"]["latency_breakdown_ms"]["execution_ms"] == 12.5

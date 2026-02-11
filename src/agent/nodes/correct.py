@@ -64,6 +64,17 @@ def correct_sql_node(state: AgentState) -> dict:
         retry_after_seconds = state.get("retry_after_seconds")
         procedural_plan = state.get("procedural_plan", "")
         ast_validation_result = state.get("ast_validation_result")
+        existing_loop_ms_raw = state.get("latency_correction_loop_ms")
+        existing_loop_ms = (
+            float(existing_loop_ms_raw) if isinstance(existing_loop_ms_raw, (int, float)) else 0.0
+        )
+
+        def _correction_loop_payload(attempt_latency_seconds: float | None = None) -> dict:
+            total_ms = max(0.0, existing_loop_ms)
+            if attempt_latency_seconds is not None:
+                total_ms += max(0.0, float(attempt_latency_seconds) * 1000.0)
+            span.set_attribute("latency.correction_loop_ms", total_ms)
+            return {"latency_correction_loop_ms": total_ms}
 
         span.set_inputs(
             {
@@ -113,6 +124,7 @@ def correct_sql_node(state: AgentState) -> dict:
                 "error_category": error_category,
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                **_correction_loop_payload(),
             }
 
         span.set_attribute("error_category", error_category)
@@ -212,6 +224,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": "budget_exhausted",
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                **_correction_loop_payload(),
             }
 
         # Detect repeated error signatures to stop infinite fails
@@ -233,6 +246,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": "repeated_error",
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
+                **_correction_loop_payload(),
             }
 
         updated_signatures = signatures + [current_sig]
@@ -329,6 +343,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "ema_llm_latency_seconds": None,  # Don't update EMA on fail
                             "retry_after_seconds": None,
                             "correction_attempts": correction_attempts,
+                            **_correction_loop_payload(latency_seconds),
                         }
                 else:
                     span.set_attribute("correction.similarity.rejected", False)
@@ -372,4 +387,5 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
             "error_signatures": updated_signatures,
             "correction_attempts": correction_attempts,
+            **_correction_loop_payload(latency_seconds),
         }

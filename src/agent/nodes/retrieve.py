@@ -1,6 +1,7 @@
 """Context retrieval node for RAG-based schema lookup with MLflow tracing."""
 
 import logging
+import time
 
 from agent.models.termination import TerminationReason
 from agent.state import AgentState
@@ -28,6 +29,13 @@ async def retrieve_context_node(state: AgentState) -> dict:
         name="retrieve_context",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.retrieval_ms", latency_ms)
+            return {"latency_retrieval_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "retrieve_context")
         # Extract query: use active_query from state (set by router), or fallback
@@ -92,6 +100,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                             return {
                                 "schema_context": context_str,
                                 "termination_reason": TerminationReason.PERMISSION_DENIED,
+                                **_latency_payload(),
                             }
                         elif isinstance(graph_data, dict):
                             # Extract table names from nodes
@@ -154,6 +163,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                     "error_category": "schema_changed_during_request",
                     "retry_after_seconds": None,
                     "termination_reason": TerminationReason.SCHEMA_CHANGED,
+                    **_latency_payload(),
                 }
 
             # Trigger one-time refresh by clearing context and returning flag
@@ -164,6 +174,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
                 "schema_snapshot_id": new_snapshot_id,
                 "schema_drift_suspected": True,
                 "error": "Schema drift detected",  # Triggers retry logic
+                **_latency_payload(),
             }
 
         logger.info(
@@ -182,4 +193,5 @@ async def retrieve_context_node(state: AgentState) -> dict:
             "raw_schema_context": raw_nodes,
             "table_names": table_names,
             "schema_snapshot_id": new_snapshot_id,
+            **_latency_payload(),
         }

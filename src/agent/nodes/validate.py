@@ -1,5 +1,6 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
+import time
 from typing import Dict, Optional, Set, Tuple
 
 import sqlglot
@@ -256,6 +257,13 @@ async def validate_sql_node(state: AgentState) -> dict:
         name="validate_sql",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.validation_ms", latency_ms)
+            return {"latency_validation_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "validate_sql")
         sql_query = state.get("current_sql")
@@ -267,6 +275,7 @@ async def validate_sql_node(state: AgentState) -> dict:
             return {
                 "error": "No SQL query to validate",
                 "ast_validation_result": None,
+                **_latency_payload(),
             }
 
         is_limited, limit_value = _extract_limit(sql_query)
@@ -324,6 +333,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                             "ast_validation_result": {"is_valid": False},
                             "result_is_limited": is_limited,
                             "result_limit": limit_value,
+                            **_latency_payload(),
                         }
                 else:
                     span.set_attribute("validation.schema_bound_blocked", False)
@@ -442,6 +452,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "join_complexity": result.metadata.join_complexity if result.metadata else 0,
                 "result_is_limited": is_limited,
                 "result_limit": limit_value,
+                **_latency_payload(),
             }
 
         # Validation passed - enrich state with metadata
@@ -465,4 +476,5 @@ async def validate_sql_node(state: AgentState) -> dict:
             "result_limit": limit_value,
             # Optionally use normalized SQL
             "current_sql": result.parsed_sql if result.parsed_sql else sql_query,
+            **_latency_payload(),
         }

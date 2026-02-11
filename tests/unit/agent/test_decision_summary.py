@@ -9,6 +9,12 @@ def test_build_decision_summary_is_deterministic_and_bounded():
         "table_names": ["Orders", "users", "orders"],
         "retry_count": 2,
         "schema_refresh_count": 1,
+        "latency_retrieval_ms": 10.0,
+        "latency_planning_ms": 20.0,
+        "latency_generation_ms": 30.0,
+        "latency_validation_ms": 40.0,
+        "latency_execution_ms": 50.0,
+        "latency_correction_loop_ms": 5.0,
         "validation_failures": [
             {
                 "rejected_tables": [
@@ -55,6 +61,14 @@ def test_build_decision_summary_is_deterministic_and_bounded():
         "union_count": 1,
         "detected_cartesian_flag": False,
         "query_complexity_score": 16,
+    }
+    assert summary["latency_breakdown_ms"] == {
+        "retrieval_ms": 10.0,
+        "planning_ms": 20.0,
+        "generation_ms": 30.0,
+        "validation_ms": 40.0,
+        "execution_ms": 50.0,
+        "correction_loop_ms": 5.0,
     }
 
 

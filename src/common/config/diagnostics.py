@@ -32,11 +32,11 @@ def _safe_mode(name: str, default: str) -> str:
     return raw_value.strip().lower()
 
 
-def build_operator_diagnostics() -> dict[str, Any]:
+def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
     """Build a non-sensitive runtime diagnostics payload for operators."""
     from agent.utils.schema_cache import get_schema_cache_ttl_seconds
 
-    return {
+    diagnostics = {
         "active_database_provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
         "retry_policy": {
             "mode": _safe_mode("AGENT_RETRY_POLICY", "adaptive"),
@@ -56,3 +56,10 @@ def build_operator_diagnostics() -> dict[str, Any]:
             "decision_summary_debug": _safe_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False),
         },
     }
+    if debug:
+        from agent.runtime_metrics import get_stage_latency_breakdown
+
+        diagnostics["debug"] = {
+            "latency_breakdown_ms": get_stage_latency_breakdown(),
+        }
+    return diagnostics

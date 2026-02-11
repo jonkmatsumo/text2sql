@@ -96,6 +96,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         name="execute_sql",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.execution_ms", latency_ms)
+            return {"latency_execution_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "execute_sql")
         # Initialize required contract attributes to satisfy enforcement on early exits
@@ -155,6 +162,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "error": error,
                 "query_result": None,
                 "termination_reason": TerminationReason.UNKNOWN,
+                **_latency_payload(),
             }
 
         # 1. Structural Validation (AST)
@@ -168,6 +176,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "error": error,
                 "query_result": None,
                 "termination_reason": TerminationReason.READONLY_VIOLATION,
+                **_latency_payload(),
             }
 
         # 2. Tenant Isolation Rewriting
@@ -199,6 +208,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 "error": error,
                 "query_result": None,
                 "termination_reason": TerminationReason.PERMISSION_DENIED,
+                **_latency_payload(),
             }
 
         try:
@@ -212,6 +222,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "error": error,
                     "query_result": None,
                     "termination_reason": TerminationReason.UNKNOWN,
+                    **_latency_payload(),
                 }
 
             # Pre-execution schema validation hook
@@ -245,6 +256,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "query_result": None,
                         "missing_identifiers": sorted(missing_identifiers),
                         "termination_reason": TerminationReason.VALIDATION_FAILED,
+                        **_latency_payload(),
                     }
                 span.set_attribute("validation.pre_exec_blocked", False)
 
@@ -264,6 +276,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "error": error,
                         "error_category": "timeout",
                         "query_result": None,
+                        **_latency_payload(),
                     }
 
             execute_payload = {
@@ -462,6 +475,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "error_metadata": error_metadata,
                         "termination_reason": reason,
                         **drift_hint,
+                        **_latency_payload(),
                     }
 
                 # Success path
@@ -876,6 +890,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         prefetch_scheduled=bool(result_prefetch_scheduled),
                         prefetch_reason=result_prefetch_reason,
                     ).to_dict(),
+                    **_latency_payload(),
                 }
 
         except Exception as e:
@@ -889,4 +904,5 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             return {
                 "error": error,
                 "query_result": None,
+                **_latency_payload(),
             }
