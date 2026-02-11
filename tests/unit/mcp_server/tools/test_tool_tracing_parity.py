@@ -307,3 +307,63 @@ async def test_requested_tool_version_unsupported_returns_compatibility_error():
     parsed = json.loads(response)
     assert parsed["error"]["category"] == "tool_version_unsupported"
     assert parsed["error"]["sql_state"] == "UNSUPPORTED_TOOL_VERSION"
+
+
+@pytest.mark.asyncio
+async def test_missing_requested_tool_version_defaults_to_supported_version():
+    """Missing requested_tool_version should execute normally."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced()
+
+    assert calls["count"] == 1
+    parsed = json.loads(response)
+    assert parsed["metadata"]["tool_version"] == get_tool_version("list_tables")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested_tool_version", ["", "2", "latest", "v0", "v-1"])
+async def test_malformed_requested_tool_version_returns_validation_error(requested_tool_version):
+    """Malformed requested_tool_version should fail deterministically."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version=requested_tool_version)
+
+    assert calls["count"] == 0
+    parsed = json.loads(response)
+    assert parsed["error"]["category"] == "tool_version_invalid"
+    assert parsed["error"]["sql_state"] == "INVALID_TOOL_VERSION_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_higher_requested_tool_version_is_unsupported():
+    """Higher requested_tool_version values should produce compatibility errors."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version="v99")
+
+    assert calls["count"] == 0
+    parsed = json.loads(response)
+    assert parsed["error"]["category"] == "tool_version_unsupported"
+    assert parsed["error"]["sql_state"] == "UNSUPPORTED_TOOL_VERSION"

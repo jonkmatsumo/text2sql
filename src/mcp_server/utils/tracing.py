@@ -1,12 +1,22 @@
+"""Tracing wrapper for MCP tools.
+
+Tool-version negotiation semantics:
+- Missing `requested_tool_version`: execute with current supported version.
+- Well-formed but unsupported version: return compatibility error envelope.
+- Malformed version string: return deterministic validation error envelope.
+"""
+
 import functools
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
+from common.constants.reason_codes import ToolVersionNegotiationErrorCode
 from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
 from mcp_server.utils.errors import tool_error_response
@@ -15,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 R = TypeVar("R")
+_TOOL_VERSION_PATTERN = re.compile(r"^v[1-9]\d*$")
 
 
 def _coerce_bool(value: Any) -> bool | None:
@@ -99,6 +110,24 @@ def _inject_tool_version(response: Any, tool_name: str) -> Any:
     return response
 
 
+def _normalize_requested_tool_version(value: Any) -> tuple[str | None, str | None]:
+    """Normalize and validate requested tool version input.
+
+    Returns:
+        (normalized_version, error_code)
+        - If no version is requested, returns (None, None).
+        - If malformed, returns (None, INVALID_TOOL_VERSION_REQUEST).
+    """
+    if value is None:
+        return None, None
+    normalized = str(value).strip()
+    if not normalized:
+        return None, ToolVersionNegotiationErrorCode.INVALID_TOOL_VERSION_REQUEST.value
+    if not _TOOL_VERSION_PATTERN.fullmatch(normalized):
+        return None, ToolVersionNegotiationErrorCode.INVALID_TOOL_VERSION_REQUEST.value
+    return normalized, None
+
+
 def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Add OpenTelemetry tracing to an MCP tool handler.
 
@@ -129,6 +158,9 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
             ) as span:
                 requested_tool_version = kwargs.pop("requested_tool_version", None)
                 supported_tool_version = get_tool_version(tool_name)
+                normalized_version, version_parse_error = _normalize_requested_tool_version(
+                    requested_tool_version
+                )
 
                 # 1. Record basic attributes
                 span.set_attribute("mcp.tool.name", tool_name)
@@ -156,23 +188,41 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         )
 
                 try:
-                    if requested_tool_version:
-                        is_supported = str(requested_tool_version).strip() == supported_tool_version
+                    if version_parse_error:
+                        span.set_attribute("mcp.tool.version_compatible", False)
+                        span.set_attribute("mcp.tool.version_error", version_parse_error)
+                        return tool_error_response(
+                            message=(
+                                "requested_tool_version must match format 'v<positive-integer>' "
+                                f"(for example '{supported_tool_version}')."
+                            ),
+                            code=ToolVersionNegotiationErrorCode.INVALID_TOOL_VERSION_REQUEST.value,
+                            category="tool_version_invalid",
+                            provider=tool_name,
+                            retryable=False,
+                        )
+
+                    if normalized_version is None:
+                        span.set_attribute("mcp.tool.version_compatible", True)
+                    else:
+                        is_supported = normalized_version == supported_tool_version
                         span.set_attribute("mcp.tool.version_compatible", is_supported)
                         if not is_supported:
+                            span.set_attribute(
+                                "mcp.tool.version_error",
+                                ToolVersionNegotiationErrorCode.UNSUPPORTED_TOOL_VERSION.value,
+                            )
                             return tool_error_response(
                                 message=(
-                                    f"Requested tool_version '{requested_tool_version}' is not "
+                                    f"Requested tool_version '{normalized_version}' is not "
                                     f"supported for tool '{tool_name}'. "
                                     f"Supported version: '{supported_tool_version}'."
                                 ),
-                                code="UNSUPPORTED_TOOL_VERSION",
+                                code=ToolVersionNegotiationErrorCode.UNSUPPORTED_TOOL_VERSION.value,
                                 category="tool_version_unsupported",
                                 provider=tool_name,
                                 retryable=False,
                             )
-                    else:
-                        span.set_attribute("mcp.tool.version_compatible", True)
 
                     # Execute the tool
                     response = await func(*args, **kwargs)
