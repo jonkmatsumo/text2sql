@@ -100,6 +100,7 @@ class AgentDiagnosticsResponse(BaseModel):
     runtime_indicators: dict[str, Any]
     enabled_flags: dict[str, Any]
     debug: Optional[dict[str, Any]] = None
+    self_test: Optional[dict[str, Any]] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -296,8 +297,12 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
 
 @app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
-def get_agent_diagnostics(debug: bool = False) -> AgentDiagnosticsResponse:
+def get_agent_diagnostics(debug: bool = False, self_test: bool = False) -> AgentDiagnosticsResponse:
     """Return non-sensitive runtime diagnostics for operators."""
     from common.config.diagnostics import build_operator_diagnostics
+    from common.config.diagnostics_self_test import run_diagnostics_self_test
 
-    return AgentDiagnosticsResponse(**build_operator_diagnostics(debug=debug))
+    payload = build_operator_diagnostics(debug=debug)
+    if self_test:
+        payload["self_test"] = run_diagnostics_self_test()
+    return AgentDiagnosticsResponse(**payload)

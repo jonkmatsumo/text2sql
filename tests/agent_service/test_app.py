@@ -338,3 +338,15 @@ def test_agent_diagnostics_endpoint_debug(monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["debug"]["latency_breakdown_ms"]["execution_ms"] == 12.5
+
+
+def test_agent_diagnostics_endpoint_self_test():
+    """Self-test mode should return fake-path validation/execution health checks."""
+    with TestClient(agent_app.app) as client:
+        resp = client.get("/agent/diagnostics?self_test=true")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["self_test"]["status"] in {"ok", "degraded"}
+    assert body["self_test"]["validation"]["status"] in {"ok", "degraded"}
+    assert body["self_test"]["execution"]["status"] in {"ok", "degraded"}
