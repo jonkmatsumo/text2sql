@@ -14,6 +14,7 @@ from agent.taxonomy.error_taxonomy import classify_error, generate_correction_st
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.utils.budgeting import update_latency_ema
+from agent.utils.prompt_budget import consume_prompt_budget
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         from agent.utils.budget import TokenBudget
 
         budget = TokenBudget.from_dict(state.get("token_budget"))
+        prompt_bytes_used = int(state.get("llm_prompt_bytes_used") or 0)
         if budget and budget.is_exhausted():
             span.set_attribute("budget.exhausted", True)
             correction_event["outcome"] = "budget_exhausted"
@@ -243,6 +245,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "correction_attempts": correction_attempts,
                 "correction_attempts_truncated": correction_attempts_truncated,
                 "correction_attempts_dropped": correction_attempts_dropped,
+                "llm_prompt_bytes_used": prompt_bytes_used,
+                "llm_budget_exceeded": bool(state.get("llm_budget_exceeded", False)),
                 **_correction_loop_payload(),
             }
 
@@ -289,6 +293,47 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
 
             # If we are retrying due to drift, append warning.
             # Ideally we append to system or user. Append to user prompt for visibility.
+
+            (
+                prompt_bytes_used,
+                prompt_bytes_increment,
+                prompt_budget_exceeded,
+                prompt_bytes_limit,
+            ) = consume_prompt_budget(
+                prompt_bytes_used,
+                {
+                    "correction_strategy": correction_strategy,
+                    "taxonomy_context": taxonomy_context,
+                    "plan_context": plan_context,
+                    "ast_context": ast_context,
+                    "schema_context": schema_context,
+                    "bad_query": current_sql,
+                    "error_msg": current_error_msg,
+                },
+            )
+            span.set_attribute("llm.prompt_bytes.increment", prompt_bytes_increment)
+            span.set_attribute("llm.prompt_bytes.used", prompt_bytes_used)
+            span.set_attribute("llm.prompt_bytes.limit", prompt_bytes_limit)
+            span.set_attribute("llm.prompt_bytes.exceeded", prompt_budget_exceeded)
+            if prompt_budget_exceeded:
+                correction_event["outcome"] = "prompt_budget_exhausted"
+                return {
+                    "error": "LLM prompt budget exceeded during correction loop.",
+                    "error_category": "budget_exhausted",
+                    "retry_after_seconds": None,
+                    "correction_attempts": correction_attempts,
+                    "correction_attempts_truncated": correction_attempts_truncated,
+                    "correction_attempts_dropped": correction_attempts_dropped,
+                    "llm_prompt_bytes_used": prompt_bytes_used,
+                    "llm_budget_exceeded": True,
+                    "error_metadata": {
+                        "reason_code": "llm_prompt_budget_exceeded",
+                        "llm_prompt_bytes_used": prompt_bytes_used,
+                        "llm_prompt_bytes_limit": prompt_bytes_limit,
+                        "is_retryable": False,
+                    },
+                    **_correction_loop_payload(),
+                }
 
             chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
@@ -366,6 +411,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "correction_attempts": correction_attempts,
                             "correction_attempts_truncated": correction_attempts_truncated,
                             "correction_attempts_dropped": correction_attempts_dropped,
+                            "llm_prompt_bytes_used": prompt_bytes_used,
+                            "llm_budget_exceeded": False,
                             **_correction_loop_payload(latency_seconds),
                         }
                 else:
@@ -408,6 +455,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "ema_llm_latency_seconds": ema_latency,
             "retry_after_seconds": None,
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
+            "llm_prompt_bytes_used": prompt_bytes_used,
+            "llm_budget_exceeded": False,
             "error_signatures": updated_signatures,
             "correction_attempts": correction_attempts,
             "correction_attempts_truncated": correction_attempts_truncated,

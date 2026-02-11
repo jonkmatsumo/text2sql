@@ -12,6 +12,7 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.utils.budgeting import update_latency_ema
+from agent.utils.prompt_budget import consume_prompt_budget
 from common.config.env import get_env_float
 
 load_dotenv()
@@ -383,6 +384,42 @@ Rules:
                 **_latency_payload(),
             }
 
+        prompt_bytes_used = int(state.get("llm_prompt_bytes_used") or 0)
+        (
+            prompt_bytes_used,
+            prompt_bytes_increment,
+            prompt_budget_exceeded,
+            prompt_bytes_limit,
+        ) = consume_prompt_budget(
+            prompt_bytes_used,
+            {
+                "system_prompt": system_prompt,
+                "schema_context": schema_context_to_use,
+                "question": user_query,
+            },
+        )
+        span.set_attribute("llm.prompt_bytes.increment", prompt_bytes_increment)
+        span.set_attribute("llm.prompt_bytes.used", prompt_bytes_used)
+        span.set_attribute("llm.prompt_bytes.limit", prompt_bytes_limit)
+        span.set_attribute("llm.prompt_bytes.exceeded", prompt_budget_exceeded)
+        if prompt_budget_exceeded:
+            span.set_attribute("budget.exhausted", True)
+            return {
+                "error": "LLM prompt budget exceeded for this request.",
+                "error_category": "budget_exhausted",
+                "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                "retry_after_seconds": None,
+                "llm_prompt_bytes_used": prompt_bytes_used,
+                "llm_budget_exceeded": True,
+                "error_metadata": {
+                    "reason_code": "llm_prompt_budget_exceeded",
+                    "llm_prompt_bytes_used": prompt_bytes_used,
+                    "llm_prompt_bytes_limit": prompt_bytes_limit,
+                    "is_retryable": False,
+                },
+                **_latency_payload(),
+            }
+
         from agent.llm_client import get_llm
 
         chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
@@ -441,5 +478,7 @@ Rules:
             "latency_generate_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
+            "llm_prompt_bytes_used": prompt_bytes_used,
+            "llm_budget_exceeded": False,
             **_latency_payload(),
         }

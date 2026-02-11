@@ -66,6 +66,37 @@ class TestCorrectSqlNode:
 
     @patch("agent.llm_client.get_llm")
     @patch("agent.nodes.correct.ChatPromptTemplate")
+    def test_correct_sql_node_prompt_budget_exceeded(
+        self, mock_prompt_class, mock_llm, monkeypatch
+    ):
+        """Prompt-byte budget should stop correction before invoking the LLM."""
+        monkeypatch.setenv("AGENT_MAX_PROMPT_BYTES_PER_RUN", "200")
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        state = AgentState(
+            messages=[],
+            schema_context=("x" * 5000),
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error='relation "films" does not exist',
+            retry_count=0,
+            llm_prompt_bytes_used=0,
+            llm_budget_exceeded=False,
+        )
+
+        result = correct_sql_node(state)
+
+        mock_chain.invoke.assert_not_called()
+        mock_llm.assert_not_called()
+        assert result["error_category"] == "budget_exhausted"
+        assert result["llm_budget_exceeded"] is True
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.correct.ChatPromptTemplate")
     def test_correct_sql_node_retry_count_increment(self, mock_prompt_class, mock_llm):
         """Test that retry_count is incremented."""
         mock_prompt = MagicMock()

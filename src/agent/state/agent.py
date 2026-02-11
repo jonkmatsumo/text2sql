@@ -99,6 +99,8 @@ class AgentState(TypedDict):
     # Per-request token budget configuration and consumption
     # Structure: {"max_tokens": int, "consumed_tokens": int}
     token_budget: Optional[dict]
+    llm_prompt_bytes_used: Optional[int]
+    llm_budget_exceeded: Optional[bool]
 
     # History of error signatures in the current request to detect loops
     # Signatures are hashes of (category, normalized_message)

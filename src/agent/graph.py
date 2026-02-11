@@ -789,6 +789,8 @@ async def run_agent_with_tracing(
                 "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
                 "consumed_tokens": 0,
             },
+            "llm_prompt_bytes_used": 0,
+            "llm_budget_exceeded": False,
             "error_signatures": [],
         }
 
