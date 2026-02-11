@@ -122,6 +122,32 @@ def _collect_rejected_tables(state: dict[str, Any], max_tables: int) -> list[dic
     return ordered[:max_tables]
 
 
+def _extract_query_complexity(state: dict[str, Any]) -> dict[str, Any]:
+    ast_result = state.get("ast_validation_result")
+    metadata = ast_result.get("metadata") if isinstance(ast_result, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    return {
+        "join_count": int(state.get("query_join_count") or metadata.get("join_count") or 0),
+        "estimated_table_count": int(
+            state.get("query_estimated_table_count") or metadata.get("estimated_table_count") or 0
+        ),
+        "estimated_scan_columns": int(
+            state.get("query_estimated_scan_columns") or metadata.get("estimated_scan_columns") or 0
+        ),
+        "union_count": int(state.get("query_union_count") or metadata.get("union_count") or 0),
+        "detected_cartesian_flag": bool(
+            state.get("query_detected_cartesian_flag")
+            or metadata.get("detected_cartesian_flag")
+            or False
+        ),
+        "query_complexity_score": int(
+            state.get("query_complexity_score") or metadata.get("query_complexity_score") or 0
+        ),
+    }
+
+
 def build_decision_summary(
     state: dict[str, Any], *, max_tables: int | None = None
 ) -> dict[str, Any]:
@@ -150,4 +176,5 @@ def build_decision_summary(
         "rejected_tables": rejected_tables,
         "retry_count": int(normalized_state.get("retry_count", 0) or 0),
         "schema_refresh_events": int(normalized_state.get("schema_refresh_count", 0) or 0),
+        "query_complexity": _extract_query_complexity(normalized_state),
     }

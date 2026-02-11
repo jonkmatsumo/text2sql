@@ -61,6 +61,12 @@ class SQLMetadata:
     table_lineage: list[str] = field(default_factory=list)
     column_usage: list[str] = field(default_factory=list)
     join_complexity: int = 0
+    join_count: int = 0
+    estimated_table_count: int = 0
+    estimated_scan_columns: int = 0
+    union_count: int = 0
+    detected_cartesian_flag: bool = False
+    query_complexity_score: int = 0
     has_aggregation: bool = False
     has_subquery: bool = False
     has_window_function: bool = False
@@ -71,6 +77,12 @@ class SQLMetadata:
             "table_lineage": self.table_lineage,
             "column_usage": self.column_usage,
             "join_complexity": self.join_complexity,
+            "join_count": self.join_count,
+            "estimated_table_count": self.estimated_table_count,
+            "estimated_scan_columns": self.estimated_scan_columns,
+            "union_count": self.union_count,
+            "detected_cartesian_flag": self.detected_cartesian_flag,
+            "query_complexity_score": self.query_complexity_score,
             "has_aggregation": self.has_aggregation,
             "has_subquery": self.has_subquery,
             "has_window_function": self.has_window_function,
@@ -500,7 +512,7 @@ def _validate_column_allowlist(
     return violations, warnings
 
 
-def extract_metadata(ast: exp.Expression) -> SQLMetadata:
+def extract_metadata(ast: exp.Expression, *, detected_cartesian_flag: bool = False) -> SQLMetadata:
     """
     Extract metadata from SQL AST for audit logging and complexity analysis.
 
@@ -528,6 +540,16 @@ def extract_metadata(ast: exp.Expression) -> SQLMetadata:
 
     # Count join complexity
     metadata.join_complexity = count_joins(ast)
+    metadata.join_count = metadata.join_complexity
+    metadata.estimated_table_count = len(metadata.table_lineage)
+    metadata.estimated_scan_columns = len(metadata.column_usage)
+    metadata.union_count = len(list(ast.find_all(exp.Union)))
+    metadata.detected_cartesian_flag = bool(detected_cartesian_flag)
+    metadata.query_complexity_score = (
+        (metadata.join_count * 3)
+        + (metadata.estimated_table_count * 2)
+        + (metadata.union_count * 4)
+    )
 
     # Check for aggregation
     agg_funcs = (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max, exp.AggFunc)
@@ -691,6 +713,8 @@ def validate_sql(
     violations.extend(column_violations)
     warnings.extend(column_warnings)
 
+    cartesian_violations: list[SecurityViolation] = []
+    cartesian_warnings: list[str] = []
     if cartesian_mode != "off":
         cartesian_violations, cartesian_warnings = _detect_cartesian_join_patterns(
             ast,
@@ -698,6 +722,7 @@ def validate_sql(
         )
         violations.extend(cartesian_violations)
         warnings.extend(cartesian_warnings)
+    detected_cartesian_flag = bool(cartesian_violations or cartesian_warnings)
 
     # Optional sensitive-column guardrail
     sensitive_columns = _extract_sensitive_columns(ast)
@@ -724,7 +749,7 @@ def validate_sql(
             )
 
     # Extract metadata (even if there are violations, for audit purposes)
-    metadata = extract_metadata(ast)
+    metadata = extract_metadata(ast, detected_cartesian_flag=detected_cartesian_flag)
 
     # Transpile to normalized form (useful for caching and comparison)
     try:

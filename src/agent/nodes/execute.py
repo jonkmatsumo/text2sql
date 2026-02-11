@@ -112,6 +112,42 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             }
         )
 
+        ast_result = state.get("ast_validation_result")
+        ast_metadata = ast_result.get("metadata") if isinstance(ast_result, dict) else None
+        join_count = int(
+            state.get("query_join_count")
+            or (ast_metadata.get("join_count") if isinstance(ast_metadata, dict) else 0)
+            or 0
+        )
+        estimated_table_count = int(
+            state.get("query_estimated_table_count")
+            or (ast_metadata.get("estimated_table_count") if isinstance(ast_metadata, dict) else 0)
+            or 0
+        )
+        estimated_scan_columns = int(
+            state.get("query_estimated_scan_columns")
+            or (ast_metadata.get("estimated_scan_columns") if isinstance(ast_metadata, dict) else 0)
+            or 0
+        )
+        detected_cartesian_flag = bool(
+            state.get("query_detected_cartesian_flag")
+            or (
+                ast_metadata.get("detected_cartesian_flag")
+                if isinstance(ast_metadata, dict)
+                else False
+            )
+        )
+        query_complexity_score = int(
+            state.get("query_complexity_score")
+            or (ast_metadata.get("query_complexity_score") if isinstance(ast_metadata, dict) else 0)
+            or 0
+        )
+        span.set_attribute("query.join_count", join_count)
+        span.set_attribute("query.estimated_table_count", estimated_table_count)
+        span.set_attribute("query.estimated_scan_columns", estimated_scan_columns)
+        span.set_attribute("query.detected_cartesian_flag", detected_cartesian_flag)
+        span.set_attribute("query.query_complexity_score", query_complexity_score)
+
         if not original_sql:
             error = "No SQL query to execute"
             span.set_outputs({"error": error})

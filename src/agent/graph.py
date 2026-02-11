@@ -1129,6 +1129,21 @@ async def run_agent_with_tracing(
             "decision.schema_refresh_events": int(
                 decision_summary.get("schema_refresh_events", 0) or 0
             ),
+            "query.join_count": int(
+                decision_summary.get("query_complexity", {}).get("join_count", 0) or 0
+            ),
+            "query.estimated_table_count": int(
+                decision_summary.get("query_complexity", {}).get("estimated_table_count", 0) or 0
+            ),
+            "query.estimated_scan_columns": int(
+                decision_summary.get("query_complexity", {}).get("estimated_scan_columns", 0) or 0
+            ),
+            "query.detected_cartesian_flag": bool(
+                decision_summary.get("query_complexity", {}).get("detected_cartesian_flag", False)
+            ),
+            "query.query_complexity_score": int(
+                decision_summary.get("query_complexity", {}).get("query_complexity_score", 0) or 0
+            ),
             "retry.correction_attempt_count": int(
                 retry_correction_summary.get("correction_attempt_count", 0) or 0
             ),

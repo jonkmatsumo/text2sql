@@ -166,6 +166,10 @@ class TestValidateSqlNode:
         assert result.get("table_lineage") is not None
         assert len(result["table_lineage"]) >= 2
         assert result.get("join_complexity") == 1
+        assert result.get("query_join_count") == 1
+        assert result.get("query_estimated_table_count") >= 2
+        assert result.get("query_estimated_scan_columns") >= 2
+        assert result.get("query_complexity_score") >= 7
 
     @pytest.mark.asyncio
     async def test_metadata_preserved_on_failure(self, base_state):

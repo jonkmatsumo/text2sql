@@ -181,6 +181,20 @@ class TestExtractMetadata:
         )
         metadata = extract_metadata(ast)
         assert metadata.join_complexity == 3
+        assert metadata.join_count == 3
+        assert metadata.estimated_table_count >= 3
+        assert metadata.query_complexity_score >= (metadata.join_count * 3)
+
+    def test_complexity_union_and_cartesian_flags(self):
+        """Validation metadata should capture union count and Cartesian-join signal."""
+        result = validate_sql(
+            "SELECT c.id FROM customers c CROSS JOIN orders o UNION SELECT c2.id FROM customers c2",
+            cartesian_join_mode="warn",
+        )
+        assert result.metadata is not None
+        assert result.metadata.union_count == 1
+        assert result.metadata.detected_cartesian_flag is True
+        assert result.metadata.query_complexity_score >= 9
 
     def test_aggregation_detection(self):
         """Test aggregation function detection."""

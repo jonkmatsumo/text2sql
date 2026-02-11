@@ -18,6 +18,14 @@ def test_build_decision_summary_is_deterministic_and_bounded():
             }
         ],
         "ast_validation_result": {
+            "metadata": {
+                "join_count": 2,
+                "estimated_table_count": 3,
+                "estimated_scan_columns": 7,
+                "union_count": 1,
+                "detected_cartesian_flag": False,
+                "query_complexity_score": 16,
+            },
             "violations": [
                 {"details": {"table": "inventory", "reason": "table_not_allowlisted"}},
                 {
@@ -26,7 +34,7 @@ def test_build_decision_summary_is_deterministic_and_bounded():
                         "reason": "set_operation_disallowed_table",
                     }
                 },
-            ]
+            ],
         },
     }
 
@@ -40,6 +48,14 @@ def test_build_decision_summary_is_deterministic_and_bounded():
     ]
     assert summary["retry_count"] == 2
     assert summary["schema_refresh_events"] == 1
+    assert summary["query_complexity"] == {
+        "join_count": 2,
+        "estimated_table_count": 3,
+        "estimated_scan_columns": 7,
+        "union_count": 1,
+        "detected_cartesian_flag": False,
+        "query_complexity_score": 16,
+    }
 
 
 def test_build_retry_correction_summary_counts_all_events_and_bounds_payloads():

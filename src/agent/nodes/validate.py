@@ -362,6 +362,40 @@ async def validate_sql_node(state: AgentState) -> dict:
         if result.metadata:
             span.set_attribute("table_count", str(len(result.metadata.table_lineage)))
             span.set_attribute("join_complexity", str(result.metadata.join_complexity))
+            span.set_attribute("query.join_count", int(result.metadata.join_count or 0))
+            span.set_attribute(
+                "query.estimated_table_count", int(result.metadata.estimated_table_count or 0)
+            )
+            span.set_attribute(
+                "query.estimated_scan_columns",
+                int(result.metadata.estimated_scan_columns or 0),
+            )
+            span.set_attribute("query.union_count", int(result.metadata.union_count or 0))
+            span.set_attribute(
+                "query.detected_cartesian_flag",
+                bool(result.metadata.detected_cartesian_flag),
+            )
+            span.set_attribute(
+                "query.query_complexity_score",
+                int(result.metadata.query_complexity_score or 0),
+            )
+
+        query_metrics = {
+            "query_join_count": int(result.metadata.join_count or 0) if result.metadata else 0,
+            "query_estimated_table_count": (
+                int(result.metadata.estimated_table_count or 0) if result.metadata else 0
+            ),
+            "query_estimated_scan_columns": (
+                int(result.metadata.estimated_scan_columns or 0) if result.metadata else 0
+            ),
+            "query_union_count": int(result.metadata.union_count or 0) if result.metadata else 0,
+            "query_detected_cartesian_flag": (
+                bool(result.metadata.detected_cartesian_flag) if result.metadata else False
+            ),
+            "query_complexity_score": (
+                int(result.metadata.query_complexity_score or 0) if result.metadata else 0
+            ),
+        }
 
         if not result.is_valid:
             # Convert violations to structured error message for healer
@@ -401,6 +435,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                 "error": structured_error,
                 "ast_validation_result": result.to_dict(),
                 "validation_failures": validation_failures,
+                **query_metrics,
                 # Preserve metadata even on failure for audit
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
                 "column_usage": result.metadata.column_usage if result.metadata else [],
@@ -422,6 +457,7 @@ async def validate_sql_node(state: AgentState) -> dict:
         return {
             "error": None,  # Clear any previous validation errors
             "ast_validation_result": result.to_dict(),
+            **query_metrics,
             "table_lineage": result.metadata.table_lineage if result.metadata else [],
             "column_usage": result.metadata.column_usage if result.metadata else [],
             "join_complexity": result.metadata.join_complexity if result.metadata else 0,

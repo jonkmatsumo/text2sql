@@ -130,6 +130,12 @@ class AgentState(TypedDict):
 
     # Join depth score (for complexity analysis)
     join_complexity: Optional[int]
+    query_join_count: Optional[int]
+    query_estimated_table_count: Optional[int]
+    query_estimated_scan_columns: Optional[int]
+    query_union_count: Optional[int]
+    query_detected_cartesian_flag: Optional[bool]
+    query_complexity_score: Optional[int]
 
     # =========================================================================
     # Ambiguity Resolution Fields
