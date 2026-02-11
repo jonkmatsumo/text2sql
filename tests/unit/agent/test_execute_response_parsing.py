@@ -79,6 +79,47 @@ async def test_execute_parses_enveloped_rows_and_metadata(
 
 @pytest.mark.asyncio
 @patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_execute_parses_standardized_truncation_metadata(
+    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture
+):
+    """Agent should treat standardized truncation metadata as first-class signal."""
+    _mock_span_ctx(mock_start_span)
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    payload = _envelope(
+        rows=[{"id": 1}],
+        metadata={
+            "returned_count": 1,
+            "truncated": True,
+            "limit_applied": 1,
+        },
+    )
+    mock_tool.ainvoke = AsyncMock(return_value=payload)
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql=schema_fixture.sample_query,
+        query_result=None,
+        error=None,
+        retry_count=0,
+    )
+
+    result = await validate_and_execute_node(state)
+
+    assert result["query_result"] == [{"id": 1}]
+    assert result["result_is_truncated"] is True
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.telemetry.start_span")
 @patch("agent.nodes.execute.telemetry.get_current_trace_id")
 @patch("agent.nodes.execute.get_mcp_tools")
 @patch("agent.nodes.execute.PolicyEnforcer")

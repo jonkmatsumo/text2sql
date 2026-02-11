@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from common.models.error_metadata import ToolError
 from common.models.tool_versions import DEFAULT_TOOL_VERSION
@@ -22,12 +22,22 @@ class ExecuteSQLQueryMetadata(BaseModel):
     )
     rows_returned: int = Field(..., description="Number of rows in the current page")
     is_truncated: bool = Field(False, description="Whether the result was truncated")
+    truncated: Optional[bool] = Field(
+        None, description="Standardized truncation flag alias for is_truncated"
+    )
     is_limited: bool = Field(False, description="Whether the result was limited by LIMIT clause")
     is_paginated: bool = Field(False, description="Whether the result is part of a paginated set")
     partial_reason: Optional[str] = Field(
         None, description="Reason for partial results (e.g. MAX_ROWS, SIZE_LIMIT)"
     )
     next_page_token: Optional[str] = Field(None, description="Token for fetching the next page")
+    next_cursor: Optional[str] = Field(
+        None, description="Standardized pagination cursor alias for next_page_token"
+    )
+    returned_count: Optional[int] = Field(
+        None, description="Standardized row-count alias for rows_returned"
+    )
+    limit_applied: Optional[int] = Field(None, description="Standardized limit alias for row_limit")
     bytes_returned: Optional[int] = Field(
         None, description="Estimated size of the payload in bytes"
     )
@@ -46,6 +56,51 @@ class ExecuteSQLQueryMetadata(BaseModel):
     cap_detected: bool = False
     cap_mitigation_applied: bool = False
     cap_mitigation_mode: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_standardized_fields(cls, data: Any) -> Any:
+        """Keep legacy and standardized metadata aliases in sync."""
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        if normalized.get("rows_returned") is None and normalized.get("returned_count") is not None:
+            normalized["rows_returned"] = normalized["returned_count"]
+        if normalized.get("returned_count") is None and normalized.get("rows_returned") is not None:
+            normalized["returned_count"] = normalized["rows_returned"]
+
+        if normalized.get("is_truncated") is None and normalized.get("truncated") is not None:
+            normalized["is_truncated"] = normalized["truncated"]
+        if normalized.get("truncated") is None and normalized.get("is_truncated") is not None:
+            normalized["truncated"] = normalized["is_truncated"]
+
+        if normalized.get("row_limit") is None and normalized.get("limit_applied") is not None:
+            normalized["row_limit"] = normalized["limit_applied"]
+        if normalized.get("limit_applied") is None and normalized.get("row_limit") is not None:
+            normalized["limit_applied"] = normalized["row_limit"]
+
+        if normalized.get("next_page_token") is None and normalized.get("next_cursor") is not None:
+            normalized["next_page_token"] = normalized["next_cursor"]
+        if normalized.get("next_cursor") is None and normalized.get("next_page_token") is not None:
+            normalized["next_cursor"] = normalized["next_page_token"]
+
+        return normalized
+
+    @model_validator(mode="after")
+    def sync_standardized_fields(self) -> "ExecuteSQLQueryMetadata":
+        """Fill alias fields when defaults are applied after input normalization."""
+        if self.truncated is None:
+            self.truncated = bool(self.is_truncated)
+        if self.returned_count is None:
+            self.returned_count = int(self.rows_returned)
+        if self.limit_applied is None and self.row_limit is not None:
+            self.limit_applied = int(self.row_limit)
+        if self.next_cursor is None and self.next_page_token is not None:
+            self.next_cursor = self.next_page_token
+        if self.next_page_token is None and self.next_cursor is not None:
+            self.next_page_token = self.next_cursor
+        return self
 
 
 class ExecuteSQLQueryResponseEnvelope(BaseModel):
@@ -175,12 +230,68 @@ class GenericToolMetadata(BaseModel):
     )
     provider: str = Field("unknown", description="Database or system provider")
     execution_time_ms: Optional[float] = None
+    truncated: Optional[bool] = None
+    returned_count: Optional[int] = None
+    limit_applied: Optional[int] = None
+    next_cursor: Optional[str] = None
+    next_page_token: Optional[str] = None
     is_truncated: Optional[bool] = None
     truncation_reason: Optional[str] = None
     items_returned: Optional[int] = None
     items_total: Optional[int] = None
     bytes_returned: Optional[int] = None
     bytes_total: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_standardized_fields(cls, data: Any) -> Any:
+        """Keep generic metadata aliases synchronized."""
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        if normalized.get("is_truncated") is None and normalized.get("truncated") is not None:
+            normalized["is_truncated"] = normalized["truncated"]
+        if normalized.get("truncated") is None and normalized.get("is_truncated") is not None:
+            normalized["truncated"] = normalized["is_truncated"]
+
+        if (
+            normalized.get("items_returned") is None
+            and normalized.get("returned_count") is not None
+        ):
+            normalized["items_returned"] = normalized["returned_count"]
+        if (
+            normalized.get("returned_count") is None
+            and normalized.get("items_returned") is not None
+        ):
+            normalized["returned_count"] = normalized["items_returned"]
+
+        if normalized.get("next_page_token") is None and normalized.get("next_cursor") is not None:
+            normalized["next_page_token"] = normalized["next_cursor"]
+        if normalized.get("next_cursor") is None and normalized.get("next_page_token") is not None:
+            normalized["next_cursor"] = normalized["next_page_token"]
+
+        if normalized.get("limit_applied") is None and normalized.get("row_limit") is not None:
+            normalized["limit_applied"] = normalized["row_limit"]
+
+        return normalized
+
+    @model_validator(mode="after")
+    def sync_standardized_fields(self) -> "GenericToolMetadata":
+        """Fill standardized fields from legacy defaults when omitted."""
+        if self.truncated is None and self.is_truncated is not None:
+            self.truncated = bool(self.is_truncated)
+        if self.is_truncated is None and self.truncated is not None:
+            self.is_truncated = bool(self.truncated)
+        if self.returned_count is None and self.items_returned is not None:
+            self.returned_count = int(self.items_returned)
+        if self.items_returned is None and self.returned_count is not None:
+            self.items_returned = int(self.returned_count)
+        if self.next_cursor is None and self.next_page_token is not None:
+            self.next_cursor = self.next_page_token
+        if self.next_page_token is None and self.next_cursor is not None:
+            self.next_page_token = self.next_cursor
+        return self
 
 
 class GenericToolResponseEnvelope(BaseModel, Generic[T]):

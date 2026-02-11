@@ -214,6 +214,9 @@ async def test_all_non_execute_tools_emit_bounded_metadata_shape(tool_name: str)
     metadata = parsed["metadata"]
 
     assert "is_truncated" in metadata
+    assert "truncated" in metadata
+    assert "returned_count" in metadata
+    assert "limit_applied" in metadata
     assert "items_returned" in metadata
     assert "items_total" in metadata
     assert "bytes_returned" in metadata
@@ -244,6 +247,7 @@ async def test_non_execute_raw_string_payload_is_wrapped_and_bounded():
     parsed = json.loads(response)
     assert "metadata" in parsed
     assert parsed["metadata"]["is_truncated"] is True
+    assert parsed["metadata"]["truncated"] is True
     assert parsed["metadata"]["bytes_total"] >= parsed["metadata"]["bytes_returned"]
 
 

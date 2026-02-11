@@ -252,17 +252,45 @@ def apply_truncation_metadata(payload: Any, meta: Dict[str, Any]) -> Any:
     raw_metadata = out.get("metadata")
     metadata = raw_metadata.copy() if isinstance(raw_metadata, dict) else {}
 
-    metadata["is_truncated"] = bool(meta.get("truncated", False))
+    truncated = bool(meta.get("truncated", False))
+    metadata["truncated"] = truncated
+    metadata["is_truncated"] = truncated
     if meta.get("reason"):
         metadata["truncation_reason"] = meta["reason"]
     if meta.get("returned_items") is not None:
-        metadata["items_returned"] = int(meta["returned_items"])
+        returned_count = int(meta["returned_items"])
+        metadata["returned_count"] = returned_count
+        metadata["items_returned"] = returned_count
+    if "returned_count" not in metadata:
+        metadata["returned_count"] = None
     if meta.get("total_items") is not None:
         metadata["items_total"] = int(meta["total_items"])
     if meta.get("returned_bytes") is not None:
         metadata["bytes_returned"] = int(meta["returned_bytes"])
     if meta.get("original_bytes") is not None:
         metadata["bytes_total"] = int(meta["original_bytes"])
+
+    limit_applied = metadata.get("limit_applied")
+    if limit_applied is None and metadata.get("row_limit") is not None:
+        limit_applied = metadata.get("row_limit")
+    if (
+        limit_applied is None
+        and truncated
+        and metadata.get("returned_count") is not None
+        and metadata.get("items_total") is not None
+        and int(metadata["items_total"]) > int(metadata["returned_count"])
+    ):
+        limit_applied = metadata.get("returned_count")
+    metadata["limit_applied"] = int(limit_applied) if limit_applied is not None else None
+
+    next_cursor = metadata.get("next_cursor")
+    next_page_token = metadata.get("next_page_token")
+    if next_cursor is None and next_page_token is not None:
+        next_cursor = next_page_token
+    if next_page_token is None and next_cursor is not None:
+        next_page_token = next_cursor
+    metadata["next_cursor"] = next_cursor
+    metadata["next_page_token"] = next_page_token
 
     out["metadata"] = metadata
     return out

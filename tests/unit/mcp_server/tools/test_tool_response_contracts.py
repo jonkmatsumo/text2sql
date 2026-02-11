@@ -26,6 +26,9 @@ def _assert_execute_envelope_shape(payload: dict) -> None:
     assert payload["metadata"]["tool_version"] == "v1"
     assert "rows_returned" in payload["metadata"]
     assert "is_truncated" in payload["metadata"]
+    assert "returned_count" in payload["metadata"]
+    assert "truncated" in payload["metadata"]
+    assert "limit_applied" in payload["metadata"]
 
 
 @pytest.fixture(autouse=True)
