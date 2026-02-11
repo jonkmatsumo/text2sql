@@ -65,3 +65,19 @@ class TestExecuteSqlValidation:
         data = json.loads(result)
         assert data["error"]["category"] == "invalid_request"
         assert "unsupported type" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_validate_sql_blocks_restricted_table(self):
+        """Direct MCP execution should reject restricted tables."""
+        result = await handler("SELECT * FROM payroll", tenant_id=1)
+        data = json.loads(result)
+        assert data["error"]["category"] == "invalid_request"
+        assert "Forbidden table" in data["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_validate_sql_blocks_restricted_schema(self):
+        """Direct MCP execution should reject restricted schemas."""
+        result = await handler("SELECT table_name FROM information_schema.tables", tenant_id=1)
+        data = json.loads(result)
+        assert data["error"]["category"] == "invalid_request"
+        assert "Forbidden schema/table reference" in data["error"]["message"]

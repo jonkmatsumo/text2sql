@@ -18,7 +18,7 @@ from sqlglot import exp
 from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
 from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import ValidationRefusalReason
-from common.policy.sql_policy import is_sensitive_column_name
+from common.policy.sql_policy import classify_blocked_table_reference, is_sensitive_column_name
 from common.sql.dialect import normalize_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
@@ -109,20 +109,6 @@ class ASTValidationResult:
             "parsed_sql": self.parsed_sql,
         }
 
-
-# Security configuration
-RESTRICTED_TABLES = frozenset(
-    {
-        "payroll",
-        "credentials",
-        "audit_logs",
-        "user_secrets",
-        "password_history",
-        "api_keys",
-    }
-)
-
-RESTRICTED_TABLE_PREFIXES = ("pg_", "information_schema.")
 
 FORBIDDEN_COMMANDS = frozenset(
     {
@@ -244,8 +230,11 @@ def validate_security(
                 )
             )
 
-        # Check exact matches
-        if table_name in RESTRICTED_TABLES:
+        blocked_reason = classify_blocked_table_reference(
+            table_name=table_name,
+            schema_name=schema_name,
+        )
+        if blocked_reason == "restricted_table":
             violations.append(
                 SecurityViolation(
                     violation_type=ViolationType.RESTRICTED_TABLE,
@@ -253,25 +242,21 @@ def validate_security(
                         f"Security Violation: Access to table '{table_name}' is restricted. "
                         "Please reformulate the query using only permitted tables."
                     ),
-                    details={"table": table_name, "reason": "restricted_table"},
+                    details={"table": table_name, "reason": blocked_reason},
                 )
             )
-
-        # Check prefix matches (system tables)
-        for prefix in RESTRICTED_TABLE_PREFIXES:
-            if full_name.startswith(prefix) or table_name.startswith(prefix):
-                violations.append(
-                    SecurityViolation(
-                        violation_type=ViolationType.RESTRICTED_TABLE,
-                        message=(
-                            f"Security Violation: Access to system table "
-                            f"'{full_name}' is forbidden. Only user-defined "
-                            "tables in the public schema are permitted."
-                        ),
-                        details={"table": full_name, "reason": "system_table"},
-                    )
+        elif blocked_reason in {"system_table", "blocked_schema"}:
+            violations.append(
+                SecurityViolation(
+                    violation_type=ViolationType.RESTRICTED_TABLE,
+                    message=(
+                        f"Security Violation: Access to system table "
+                        f"'{full_name}' is forbidden. Only user-defined "
+                        "tables in the public schema are permitted."
+                    ),
+                    details={"table": full_name, "reason": blocked_reason},
                 )
-                break
+            )
 
     # Check for dangerous UNION patterns with subqueries
     # (these can sometimes be used for SQL injection via UNION-based attacks)

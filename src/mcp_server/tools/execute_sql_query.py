@@ -131,7 +131,11 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
             return "Failed to parse SQL query."
 
         # Use centralized policy
-        from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES, BLOCKED_FUNCTIONS
+        from common.policy.sql_policy import (
+            ALLOWED_STATEMENT_TYPES,
+            BLOCKED_FUNCTIONS,
+            classify_blocked_table_reference,
+        )
 
         if expression.key not in ALLOWED_STATEMENT_TYPES:
             allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
@@ -151,6 +155,21 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
             func_name = node.sql_name().lower()
             if func_name in BLOCKED_FUNCTIONS:
                 return f"Forbidden function: {func_name.upper()} is not allowed."
+
+        # Block restricted/system tables and schemas for direct MCP invocations.
+        for table in expression.find_all(exp.Table):
+            table_name = table.name.lower() if table.name else ""
+            schema_name = table.db.lower() if table.db else ""
+            blocked_reason = classify_blocked_table_reference(
+                table_name=table_name,
+                schema_name=schema_name,
+            )
+            if blocked_reason is None:
+                continue
+            full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+            if blocked_reason == "restricted_table":
+                return f"Forbidden table: {full_name} is not allowed."
+            return f"Forbidden schema/table reference: {full_name} is not allowed."
 
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"
