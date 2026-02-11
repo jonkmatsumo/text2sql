@@ -15,9 +15,9 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 
-from common.config.env import get_env_int, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from dal.database import Database
 from mcp_server.tools.registry import register_all
 
@@ -39,21 +39,48 @@ def setup_telemetry():
     """Initialize OTEL SDK for MCP Server."""
     resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
     provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(provider)
 
-    # In pytest or explicit disable mode, skip OTLP exporter to avoid retry
-    # noise when the collector/worker is unavailable (common in CI).
-    if os.environ.get("OTEL_DISABLE_EXPORTER", "").lower() == "true" or (
-        "pytest" in sys.modules and os.environ.get("OTEL_ENABLE_IN_TESTS", "").lower() != "true"
-    ):
-        trace.set_tracer_provider(provider)
-        logger.info("OTEL initialized without exporter")
+    if not get_env_bool("OTEL_WORKER_ENABLED", True):
+        logger.info("OTEL initialized without exporter (OTEL_WORKER_ENABLED=false)")
         return
 
-    exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
-    processor = BatchSpanProcessor(exporter)
-    provider.add_span_processor(processor)
-    trace.set_tracer_provider(provider)
-    logger.info(f"OTEL initialized for MCP Server: {OTEL_SERVICE_NAME}")
+    if get_env_bool("OTEL_DISABLE_EXPORTER", False):
+        logger.info("OTEL initialized without exporter (OTEL_DISABLE_EXPORTER=true)")
+        return
+
+    worker_required = get_env_bool("OTEL_WORKER_REQUIRED", False)
+    is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+    exporter_mode_default = "in_memory" if is_pytest else "otlp"
+    exporter_mode = (
+        (get_env_str("OTEL_TEST_EXPORTER", exporter_mode_default) or exporter_mode_default)
+        .strip()
+        .lower()
+    )
+
+    try:
+        if exporter_mode == "none":
+            logger.info("OTEL initialized without exporter (OTEL_TEST_EXPORTER=none)")
+            return
+        if exporter_mode == "in_memory":
+            from common.observability.in_memory_exporter import get_or_create_span_exporter
+
+            exporter = get_or_create_span_exporter("mcp")
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
+            logger.info("OTEL initialized with in-memory exporter (scope=mcp)")
+            return
+
+        exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
+        processor = BatchSpanProcessor(exporter)
+        provider.add_span_processor(processor)
+        logger.info(f"OTEL initialized for MCP Server: {OTEL_SERVICE_NAME}")
+    except Exception as exc:
+        if worker_required:
+            raise RuntimeError(
+                "Failed to initialize OTEL exporter while OTEL_WORKER_REQUIRED=true. "
+                "Set OTEL_WORKER_REQUIRED=false for degraded operation."
+            ) from exc
+        logger.exception("Failed to initialize MCP OTEL exporter; continuing degraded: %s", exc)
 
 
 setup_telemetry()
