@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mcp_server.tools.execute_sql_query import handler
+from mcp_server.tools.execute_sql_query import _validate_sql_ast, handler
 
 
 class TestExecuteSqlValidation:
@@ -81,3 +81,23 @@ class TestExecuteSqlValidation:
         data = json.loads(result)
         assert data["error"]["category"] == "invalid_request"
         assert "Forbidden schema/table reference" in data["error"]["message"]
+
+    def test_validate_sql_ignores_block_markers_in_comments(self):
+        """Comment markers should not trigger policy blocks in MCP validator."""
+        sql = """
+        -- payroll pg_sleep in comments should be ignored
+        SELECT 1
+        /* information_schema.tables */
+        """
+        assert _validate_sql_ast(sql, "postgres") is None
+
+    def test_validate_sql_blocks_actual_restricted_table_with_comments(self):
+        """Actual blocked references should still fail after stripping comments."""
+        sql = """
+        /* harmless */
+        SELECT * FROM payroll
+        -- users
+        """
+        error = _validate_sql_ast(sql, "postgres")
+        assert isinstance(error, str)
+        assert "Forbidden table" in error

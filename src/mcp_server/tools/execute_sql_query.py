@@ -115,11 +115,14 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
     import sqlglot
 
+    from common.sql.comments import strip_sql_comments
+
     # Map Text2SQL provider names to sqlglot dialects
     dialect = normalize_sqlglot_dialect(provider)
+    stripped_sql = strip_sql_comments(sql)
 
     try:
-        expressions = sqlglot.parse(sql, read=dialect)
+        expressions = sqlglot.parse(stripped_sql, read=dialect)
         if not expressions:
             return "Empty or invalid SQL query."
 

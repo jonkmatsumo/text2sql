@@ -19,6 +19,7 @@ from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, no
 from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import ValidationRefusalReason
 from common.policy.sql_policy import classify_blocked_table_reference, is_sensitive_column_name
+from common.sql.comments import strip_sql_comments
 from common.sql.dialect import normalize_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
@@ -138,8 +139,9 @@ def parse_sql(
         Tuple of (parsed AST, error message if parse failed)
     """
     dialect = normalize_sqlglot_dialect(dialect)
+    stripped_sql = strip_sql_comments(sql)
     try:
-        expressions = sqlglot.parse(sql, dialect=dialect)
+        expressions = sqlglot.parse(stripped_sql, dialect=dialect)
 
         if not expressions:
             return None, "Empty SQL query"
