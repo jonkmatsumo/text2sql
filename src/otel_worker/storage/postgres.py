@@ -56,9 +56,13 @@ class SafeIngestQueue:
         self._lock = threading.Lock()
         self._worker_thread = None
         self._stopping = False
+        self._dropped_items = 0
 
     def start(self):
         """Start the background drain worker."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            logger.debug("SafeIngestQueue drain worker already running")
+            return
         self._stopping = False
         self._worker_thread = threading.Thread(target=self._drain_loop, daemon=True)
         self._worker_thread.start()
@@ -67,8 +71,10 @@ class SafeIngestQueue:
     def stop(self):
         """Stop the background drain worker."""
         self._stopping = True
-        if self._worker_thread:
-            self._worker_thread.join(timeout=5.0)
+        if self._worker_thread and self._worker_thread.is_alive():
+            timeout = max(0.1, float(settings.SAFE_QUEUE_STOP_TIMEOUT_SECONDS))
+            self._worker_thread.join(timeout=timeout)
+        self._worker_thread = None
 
     def enqueue(self, payload_json: dict, trace_id: str = None):
         """Enqueue the payload to Postgres, falling back to memory if it fails."""
@@ -77,8 +83,15 @@ class SafeIngestQueue:
         except Exception as e:
             logger.warning(f"Postgres ingestion failed, buffering in memory: {e}")
             with self._lock:
+                if len(self.buffer) >= self.buffer.maxlen:
+                    self._dropped_items += 1
                 self.buffer.append({"payload": payload_json, "trace_id": trace_id})
             return -1
+
+    @property
+    def dropped_items(self) -> int:
+        """Return number of items dropped due to fallback buffer saturation."""
+        return int(self._dropped_items)
 
     def _drain_loop(self):
         """Periodically flush memory buffer to Postgres."""

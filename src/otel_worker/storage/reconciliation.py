@@ -100,6 +100,9 @@ class ReconciliationCoordinator:
 
     async def start(self):
         """Start the background task."""
+        if self._task and not self._task.done():
+            logger.debug("Reconciliation coordinator already running")
+            return
         self._stopping = False
         self._task = asyncio.create_task(self._run())
         logger.info(f"Reconciliation coordinator started (Interval: {self.interval_seconds}s)")
@@ -113,6 +116,8 @@ class ReconciliationCoordinator:
                 await self._task
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._task = None
         logger.info("Reconciliation coordinator stopped")
 
     async def _run(self):

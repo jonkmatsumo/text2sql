@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Configuration settings for the OTEL worker."""
 
+    OTEL_WORKER_ENABLED: bool = True
+    OTEL_WORKER_REQUIRED: bool = False
+
     POSTGRES_URL: Optional[str] = None
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "password"
@@ -32,6 +35,8 @@ class Settings(BaseSettings):
     ENABLE_RATE_LIMITING: bool = False
     RATE_LIMIT_RPS: float = 100.0
     RATE_LIMIT_BURST: int = 200
+
+    SAFE_QUEUE_STOP_TIMEOUT_SECONDS: float = 5.0
 
     @model_validator(mode="after")
     def build_postgres_url(self) -> "Settings":

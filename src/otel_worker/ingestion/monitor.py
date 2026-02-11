@@ -30,6 +30,9 @@ class QueueMonitor:
 
     async def start(self):
         """Start background monitoring."""
+        if self._monitoring_task and not self._monitoring_task.done():
+            logger.debug("Queue monitor already running")
+            return
         self._stopping = False
         self._monitoring_task = asyncio.create_task(self._monitor_loop())
         logger.info(
@@ -46,6 +49,8 @@ class QueueMonitor:
                 await self._monitoring_task
             except asyncio.CancelledError:
                 pass
+            finally:
+                self._monitoring_task = None
         logger.info("Queue monitor stopped")
 
     def check_admissibility(self) -> OverflowAction:

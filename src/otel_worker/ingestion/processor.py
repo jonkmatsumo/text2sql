@@ -37,6 +37,9 @@ class PersistenceCoordinator:
 
     async def start(self, num_workers: int = 2):
         """Start background worker tasks."""
+        if any(not task.done() for task in self.worker_tasks):
+            logger.debug("Persistence workers already running")
+            return
         self._stopping = False
         self.worker_tasks = []
         for i in range(num_workers):
@@ -50,10 +53,13 @@ class PersistenceCoordinator:
     async def stop(self):
         """Stop background worker tasks gracefully."""
         self._stopping = True
+        if not self.worker_tasks:
+            return
         logger.info("Stopping background workers...")
         for task in self.worker_tasks:
             task.cancel()
         await asyncio.gather(*self.worker_tasks, return_exceptions=True)
+        self.worker_tasks = []
         logger.info("Background workers stopped")
 
     async def enqueue(self, *args, **kwargs):
