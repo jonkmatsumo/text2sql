@@ -814,9 +814,13 @@ async def run_agent_with_tracing(
     if thread_id is None:
         thread_id = session_id or str(uuid.uuid4())
 
+    # Generate stable run_id for this execution
+    run_id = str(uuid.uuid4())
+
     # Prepare base metadata for all spans
     base_metadata = {
         "tenant_id": str(tenant_id),
+        "run_id": run_id,
         "environment": get_env_str("ENVIRONMENT", "development"),
         "deployment": get_env_str("DEPLOYMENT", "development"),
         "version": "2.0.0",
@@ -844,6 +848,7 @@ async def run_agent_with_tracing(
 
         inputs = {
             "messages": [HumanMessage(content=question)],
+            "run_id": run_id,
             "schema_context": "",
             "current_sql": None,
             "query_result": None,
