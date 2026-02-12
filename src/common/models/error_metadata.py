@@ -12,6 +12,7 @@ class ErrorCategory(str, Enum):
     """Canonical error categories."""
 
     AUTH = "auth"
+    LIMIT_EXCEEDED = "limit_exceeded"
     INVALID_REQUEST = "invalid_request"
     UNSUPPORTED_CAPABILITY = "unsupported_capability"
     TIMEOUT = "timeout"

@@ -1088,8 +1088,27 @@ async def run_agent_with_tracing(
                         },
                         exc_info=True,
                     )
-                    result["error"] = str(execute_err)
-                    result["error_category"] = "SYSTEM_CRASH"
+                    from agent.utils.llm_resilience import LLMRateLimitExceededError
+
+                    if isinstance(execute_err, LLMRateLimitExceededError):
+                        error_message = "LLM rate limit exceeded. Please retry shortly."
+                        result["error"] = error_message
+                        result["error_category"] = execute_err.category
+                        result["retry_after_seconds"] = float(execute_err.retry_after_seconds)
+                        result["error_metadata"] = {
+                            "category": execute_err.category,
+                            "code": "LLM_RATE_LIMIT_EXCEEDED",
+                            "message": error_message,
+                            "is_retryable": True,
+                            "retry_after_seconds": float(execute_err.retry_after_seconds),
+                            "details_safe": {
+                                "llm_global_active": int(execute_err.active_calls),
+                                "llm_global_limit": int(execute_err.limit),
+                            },
+                        }
+                    else:
+                        result["error"] = str(execute_err)
+                        result["error_category"] = "SYSTEM_CRASH"
                     if "messages" not in result:
                         result["messages"] = []
 
