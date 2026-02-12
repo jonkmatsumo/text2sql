@@ -241,6 +241,7 @@ class GenericToolMetadata(BaseModel):
     items_total: Optional[int] = None
     bytes_returned: Optional[int] = None
     bytes_total: Optional[int] = None
+    snapshot_id: Optional[str] = Field(None, description="Schema snapshot ID for lineage tracking")
 
     @model_validator(mode="before")
     @classmethod

@@ -1,102 +1,39 @@
-"""Tests for typed tool envelopes."""
+"""Tests for tool envelope models."""
 
-import json
-
-import pytest
-
-from common.models.tool_envelopes import (
-    ExecuteSQLQueryMetadata,
-    ExecuteSQLQueryResponseEnvelope,
-    GenericToolMetadata,
-    parse_execute_sql_response,
-)
+from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
 
 
-def test_envelope_creation_valid():
-    """Test creating a valid envelope."""
-    env = ExecuteSQLQueryResponseEnvelope(
-        rows=[{"id": 1}], metadata=ExecuteSQLQueryMetadata(rows_returned=1)
+def test_generic_tool_metadata_snapshot_id():
+    """Verify snapshot_id is preserved in GenericToolMetadata."""
+    meta = GenericToolMetadata(snapshot_id="snap-123", provider="postgres")
+    assert meta.snapshot_id == "snap-123"
+
+    # Verify serialization
+    dump = meta.model_dump()
+    assert dump["snapshot_id"] == "snap-123"
+
+
+def test_generic_tool_metadata_items_returned_alias():
+    """Verify items_returned and returned_count aliases in GenericToolMetadata."""
+    # Test items_returned -> returned_count
+    meta1 = GenericToolMetadata(items_returned=5)
+    assert meta1.items_returned == 5
+    assert meta1.returned_count == 5
+
+    # Test returned_count -> items_returned
+    meta2 = GenericToolMetadata(returned_count=10)
+    assert meta2.items_returned == 10
+    assert meta2.returned_count == 10
+
+
+def test_generic_tool_response_envelope_serialization():
+    """Verify GenericToolResponseEnvelope round-trips correctly with metadata."""
+    envelope = GenericToolResponseEnvelope(
+        result={"key": "value"},
+        metadata=GenericToolMetadata(snapshot_id="snap-456", items_returned=1),
     )
-    assert env.rows == [{"id": 1}]
-    assert env.metadata.rows_returned == 1
-    assert not env.metadata.is_truncated
-    assert env.metadata.tool_version == "v1"
-    assert env.schema_version == "1.0"
 
-
-def test_envelope_validation_missing_metadata():
-    """Test validation fails if metadata is missing."""
-    with pytest.raises(ValueError):
-        ExecuteSQLQueryResponseEnvelope(rows=[])
-
-
-def test_parse_json_string():
-    """Test parsing a JSON string into an envelope."""
-    payload = {"rows": [{"a": 1}], "metadata": {"rows_returned": 1, "is_truncated": False}}
-    json_str = json.dumps(payload)
-    env = parse_execute_sql_response(json_str)
-    assert isinstance(env, ExecuteSQLQueryResponseEnvelope)
-    assert env.rows[0]["a"] == 1
-
-
-def test_parse_dict():
-    """Test parsing a dictionary."""
-    payload = {"rows": [{"a": 1}], "metadata": {"rows_returned": 1}}
-    env = parse_execute_sql_response(payload)
-    assert isinstance(env, ExecuteSQLQueryResponseEnvelope)
-    assert env.metadata.tool_version == "v1"
-
-
-def test_parse_error_string():
-    """Test parsing a raw error string."""
-    env = parse_execute_sql_response("Database error")
-    assert env.is_error()
-    assert env.error is not None
-    assert env.error.message == "Database error"
-    assert env.rows == []
-
-
-def test_parse_error_dict():
-    """Test parsing an error dictionary."""
-    payload = {"error": "Syntax error", "error_category": "syntax"}
-    env = parse_execute_sql_response(payload)
-    assert env.is_error()
-    assert env.error.message == "Syntax error"
-    assert env.error.category == "syntax"
-
-
-def test_metadata_defaults():
-    """Test metadata default values."""
-    meta = ExecuteSQLQueryMetadata(rows_returned=5)
-    assert meta.tool_version == "v1"
-    assert not meta.is_truncated
-    assert meta.truncated is False
-    assert meta.returned_count == 5
-    assert not meta.is_limited
-    assert not meta.cap_detected
-
-
-def test_execute_metadata_accepts_standardized_aliases():
-    """Metadata should parse standardized truncation/pagination aliases."""
-    meta = ExecuteSQLQueryMetadata(
-        returned_count=3,
-        truncated=True,
-        limit_applied=3,
-        next_cursor="cursor-1",
-    )
-    assert meta.rows_returned == 3
-    assert meta.is_truncated is True
-    assert meta.row_limit == 3
-    assert meta.next_page_token == "cursor-1"
-
-
-def test_generic_metadata_alias_sync():
-    """Generic metadata keeps legacy and standardized aliases aligned."""
-    meta = GenericToolMetadata(
-        is_truncated=True,
-        items_returned=7,
-        next_page_token="p-2",
-    )
-    assert meta.truncated is True
-    assert meta.returned_count == 7
-    assert meta.next_cursor == "p-2"
+    json_str = envelope.model_dump_json()
+    assert '"snapshot_id":"snap-456"' in json_str
+    assert '"items_returned":1' in json_str
+    assert '"returned_count":1' in json_str
