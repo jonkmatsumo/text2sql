@@ -263,7 +263,7 @@ class Database:
                             guardrails.get("query_timeout_seconds"), 30
                         ),
                         max_rows=guardrail_int(guardrails.get("max_rows"), 1000),
-                        read_only=guardrail_bool(guardrails.get("read_only"), False),
+                        read_only=guardrail_bool(guardrails.get("read_only"), True),
                     )
                     await DuckDBQueryTargetDatabase.init(config)
                 else:
