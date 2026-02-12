@@ -7,7 +7,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 from common.config.env import get_env_int
 from mcp_server.config.control_plane import ControlPlaneDatabase
@@ -30,6 +30,14 @@ class PolicyLoader:
     _policies: Dict[str, PolicyDefinition] = {}
     _last_load_time: float = 0.0
     _CACHE_TTL = 300.0  # 5 minutes
+    _lock: Optional[asyncio.Lock] = None
+
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        """Lazy initializer for the refresh lock."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
 
     @classmethod
     async def get_policies(cls) -> Dict[str, PolicyDefinition]:
@@ -40,20 +48,24 @@ class PolicyLoader:
         """
         now = time.time()
         if not cls._policies or (now - cls._last_load_time) > cls._CACHE_TTL:
-            timeout_ms = get_env_int("AGENT_CONTROL_PLANE_TIMEOUT_MS", 1000)
-            try:
-                await asyncio.wait_for(cls._refresh_policies(), timeout=timeout_ms / 1000.0)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Policy refresh timed out after {timeout_ms}ms. "
-                    "Using existing or default policies."
-                )
-                if not cls._policies:
-                    cls._policies = cls._get_default_policies()
-            except Exception as e:
-                logger.error(f"Policy refresh failed: {e}")
-                if not cls._policies:
-                    cls._policies = cls._get_default_policies()
+            async with cls._get_lock():
+                # Double-check inside lock
+                now = time.time()
+                if not cls._policies or (now - cls._last_load_time) > cls._CACHE_TTL:
+                    timeout_ms = get_env_int("AGENT_CONTROL_PLANE_TIMEOUT_MS", 1000)
+                    try:
+                        await asyncio.wait_for(cls._refresh_policies(), timeout=timeout_ms / 1000.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"Policy refresh timed out after {timeout_ms}ms. "
+                            "Using existing or default policies."
+                        )
+                        if not cls._policies:
+                            cls._policies = cls._get_default_policies()
+                    except Exception as e:
+                        logger.error(f"Policy refresh failed: {e}")
+                        if not cls._policies:
+                            cls._policies = cls._get_default_policies()
 
         return cls._policies
 
