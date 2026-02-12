@@ -30,7 +30,7 @@ async def test_sqlite_query_target_conformance(tmp_path):
         assert value == "alpha"
 
     async with SqliteQueryTargetDatabase.get_connection(read_only=True) as ro_conn:
-        with pytest.raises(sqlite3.OperationalError):
+        with pytest.raises((sqlite3.OperationalError, PermissionError)):
             await ro_conn.execute("INSERT INTO items (name) VALUES ($1)", "gamma")
 
 

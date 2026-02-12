@@ -2,7 +2,7 @@
 
 from agent.taxonomy.error_taxonomy import (
     ERROR_TAXONOMY,
-    ErrorCategory,
+    ErrorTaxonomyEntry,
     classify_error,
     generate_correction_strategy,
 )
@@ -139,7 +139,7 @@ class TestErrorTaxonomy:
     def test_all_categories_have_required_fields(self):
         """Test that all categories have required fields."""
         for key, category in ERROR_TAXONOMY.items():
-            assert isinstance(category, ErrorCategory)
+            assert isinstance(category, ErrorTaxonomyEntry)
             assert category.name is not None
             assert isinstance(category.patterns, list)
             assert len(category.patterns) > 0

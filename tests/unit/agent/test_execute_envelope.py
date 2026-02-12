@@ -25,7 +25,7 @@ def test_parse_error_envelope():
         "metadata": {"rows_returned": 0, "is_truncated": False},
         "error": {
             "message": "DB Error",
-            "category": "system",
+            "category": "internal",
             "is_retryable": False,
             "provider": "test",
         },

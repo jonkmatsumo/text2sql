@@ -99,7 +99,7 @@ async def handler(dry_run: bool = False) -> str:
             },
             error=build_error_metadata(
                 message="Pattern generation failed.",
-                category="generation_failed",
+                category="internal",
                 provider="pattern_generator",
                 retryable=False,
                 code=error_code,

@@ -33,7 +33,7 @@ class TenantRewriter:
             Rewritten SQL string with :tenant_id placeholders.
         """
         # 1. Load policies
-        policies = await PolicyLoader.get_policies()
+        policies = await PolicyLoader.get_instance().get_policies()
         if not policies:
             logger.warning("No policies loaded. Returning original SQL.")
             return sql

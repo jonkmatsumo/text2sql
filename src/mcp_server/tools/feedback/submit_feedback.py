@@ -75,5 +75,5 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
         return tool_error_response(
             message="Failed to submit feedback.",
             code="SUBMIT_FEEDBACK_FAILED",
-            category="internal_error",
+            category="internal",
         )

@@ -30,7 +30,11 @@ async def get_relevant_examples(
         return ""
 
     # 2. Format results
-    return [
-        {"question": ex.question, "sql": ex.sql_query, "signature": ex.signature_key[:8]}
-        for ex in examples
-    ]
+    import json
+
+    return json.dumps(
+        [
+            {"question": ex.question, "sql": ex.sql_query, "signature": ex.signature_key[:8]}
+            for ex in examples
+        ]
+    )

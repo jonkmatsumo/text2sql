@@ -14,9 +14,11 @@ class TestPolicyLoaderConcurrency:
     @pytest.fixture(autouse=True)
     def reset_loader(self):
         """Reset PolicyLoader state before each test."""
-        PolicyLoader._policies = {}
-        PolicyLoader._last_load_time = 0.0
-        PolicyLoader._lock = None
+        loader = PolicyLoader.get_instance()
+        loader._policies = {}
+        loader._last_load_time = 0.0
+        # Re-create lock to avoid closed loop issues if any
+        loader._lock = asyncio.Lock()
         yield
 
     @pytest.mark.asyncio
@@ -31,12 +33,12 @@ class TestPolicyLoaderConcurrency:
             await asyncio.sleep(0.05)
             import time
 
-            PolicyLoader._policies = {"test": "policy"}
-            PolicyLoader._last_load_time = time.time()
+            PolicyLoader.get_instance()._policies = {"test": "policy"}
+            PolicyLoader.get_instance()._last_load_time = time.time()
 
         with patch.object(PolicyLoader, "_refresh_policies", side_effect=mock_refresh):
             # Launch multiple concurrent calls
-            tasks = [PolicyLoader.get_policies() for _ in range(10)]
+            tasks = [PolicyLoader.get_instance().get_policies() for _ in range(10)]
             results = await asyncio.gather(*tasks)
 
             # All calls should return the same policies
@@ -54,23 +56,25 @@ class TestPolicyLoaderConcurrency:
         async def mock_refresh():
             nonlocal refresh_call_count
             refresh_call_count += 1
-            PolicyLoader._policies = {"test": f"policy_{refresh_call_count}"}
+            PolicyLoader.get_instance()._policies = {"test": f"policy_{refresh_call_count}"}
             import time
 
-            PolicyLoader._last_load_time = time.time()
+            PolicyLoader.get_instance()._last_load_time = time.time()
 
         with patch.object(PolicyLoader, "_refresh_policies", side_effect=mock_refresh):
             # First call
-            await PolicyLoader.get_policies()
+            await PolicyLoader.get_instance().get_policies()
             assert refresh_call_count == 1
 
             # Immediate second call (cached)
-            await PolicyLoader.get_policies()
+            await PolicyLoader.get_instance().get_policies()
             assert refresh_call_count == 1
 
             # Simulate TTL expiry
-            PolicyLoader._last_load_time -= PolicyLoader._CACHE_TTL + 1
+            PolicyLoader.get_instance()._last_load_time -= (
+                PolicyLoader.get_instance()._CACHE_TTL + 1
+            )
 
             # Third call (should trigger refresh)
-            await PolicyLoader.get_policies()
+            await PolicyLoader.get_instance().get_policies()
             assert refresh_call_count == 2

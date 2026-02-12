@@ -205,7 +205,7 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
                 return _create_error_envelope(
                     f"Incompatible envelope version: {payload_version} "
                     f"(supported: {CURRENT_SCHEMA_VERSION.split('.')[0]}.x)",
-                    category="invalid_response_version",
+                    category="tool_version_unsupported",
                 )
 
             return envelope
