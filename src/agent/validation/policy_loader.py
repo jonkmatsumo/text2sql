@@ -7,9 +7,10 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
 
 from common.config.env import get_env_int
+from common.lib.otel import get_tracer
 from mcp_server.config.control_plane import ControlPlaneDatabase
 
 logger = logging.getLogger(__name__)
@@ -27,38 +28,74 @@ class PolicyDefinition:
 class PolicyLoader:
     """Loads and caches policies from the database."""
 
-    _policies: Dict[str, PolicyDefinition] = {}
-    _last_load_time: float = 0.0
-    _CACHE_TTL = 300.0  # 5 minutes
+    _instance: Optional["PolicyLoader"] = None
+
+    def __init__(self) -> None:
+        """Initialize the policy loader instance."""
+        self._policies: Dict[str, PolicyDefinition] = {}
+        self._last_load_time: float = 0.0
+        self._CACHE_TTL = 300.0  # 5 minutes
+        self._lock = asyncio.Lock()
+        self._tracer = get_tracer(__name__)
 
     @classmethod
-    async def get_policies(cls) -> Dict[str, PolicyDefinition]:
+    def get_instance(cls) -> "PolicyLoader":
+        """Get or create the singleton loader instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Clear the singleton instance (primarily for tests)."""
+        cls._instance = None
+
+    async def get_policies(self) -> Dict[str, PolicyDefinition]:
         """Get all active policies, reloading from DB if cache expired.
 
         Returns:
             Dict mapping table_name to PolicyDefinition.
         """
         now = time.time()
-        if not cls._policies or (now - cls._last_load_time) > cls._CACHE_TTL:
-            timeout_ms = get_env_int("AGENT_CONTROL_PLANE_TIMEOUT_MS", 1000)
-            try:
-                await asyncio.wait_for(cls._refresh_policies(), timeout=timeout_ms / 1000.0)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Policy refresh timed out after {timeout_ms}ms. "
-                    "Using existing or default policies."
-                )
-                if not cls._policies:
-                    cls._policies = cls._get_default_policies()
-            except Exception as e:
-                logger.error(f"Policy refresh failed: {e}")
-                if not cls._policies:
-                    cls._policies = cls._get_default_policies()
+        is_expired = (now - self._last_load_time) > self._CACHE_TTL
+        if not self._policies or is_expired:
+            async with self._lock:
+                # Double-check inside lock
+                now = time.time()
+                is_expired = (now - self._last_load_time) > self._CACHE_TTL
+                if not self._policies or is_expired:
+                    timeout_ms = get_env_int("AGENT_CONTROL_PLANE_TIMEOUT_MS", 1000)
+                    with self._tracer.start_as_current_span(
+                        "policy.get_policies",
+                        attributes={
+                            "policy.is_expired": is_expired,
+                            "policy.has_cache": bool(self._policies),
+                        },
+                    ) as span:
+                        try:
+                            await asyncio.wait_for(
+                                self._refresh_policies(), timeout=timeout_ms / 1000.0
+                            )
+                            span.set_attribute("policy.refresh_success", True)
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                f"Policy refresh timed out after {timeout_ms}ms. "
+                                "Using existing or default policies."
+                            )
+                            span.set_attribute("policy.refresh_success", False)
+                            span.set_attribute("policy.refresh_error", "timeout")
+                            if not self._policies:
+                                self._policies = self._get_default_policies()
+                        except Exception as e:
+                            logger.error(f"Policy refresh failed: {e}")
+                            span.set_attribute("policy.refresh_success", False)
+                            span.set_attribute("policy.refresh_error", str(e))
+                            if not self._policies:
+                                self._policies = self._get_default_policies()
 
-        return cls._policies
+        return self._policies
 
-    @classmethod
-    async def _refresh_policies(cls) -> None:
+    async def _refresh_policies(self) -> None:
         """Reload policies from the control-plane database."""
         query = """
             SELECT table_name, tenant_column, policy_expression
@@ -66,49 +103,53 @@ class PolicyLoader:
             WHERE is_enabled = TRUE
         """
 
-        try:
-            if not ControlPlaneDatabase.is_enabled():
-                # Fallback to hardcoded defaults if isolation is disabled or DB not reachable
-                # This aligns with the transition plan where we might run without
-                # control-plane initially or in legacy mode.
-                cls._policies = cls._get_default_policies()
-                cls._last_load_time = time.time()
-                return
-
-            if not ControlPlaneDatabase._pool:
-                # Try to init if not already (might happen if agent runs separately)
-                try:
-                    await ControlPlaneDatabase.init()
-                except Exception:
-                    # If generic init fails (e.g. env vars missing), fall back to defaults
-                    logger.warning(
-                        "Could not initialize ControlPlaneDatabase, " "using default policies."
-                    )
-                    cls._policies = cls._get_default_policies()
-                    cls._last_load_time = time.time()
+        with self._tracer.start_as_current_span("policy.refresh_policies") as span:
+            try:
+                if not ControlPlaneDatabase.is_enabled():
+                    # Fallback to hardcoded defaults
+                    self._policies = self._get_default_policies()
+                    self._last_load_time = time.time()
+                    span.set_attribute("policy.source", "defaults")
                     return
 
-            async with ControlPlaneDatabase.get_connection() as conn:
-                rows = await conn.fetch(query)
+                if not ControlPlaneDatabase._pool:
+                    # Try to init if not already (might happen if agent runs separately)
+                    try:
+                        await ControlPlaneDatabase.init()
+                    except Exception:
+                        # If generic init fails (e.g. env vars missing), fall back to defaults
+                        logger.warning(
+                            "Could not initialize ControlPlaneDatabase, " "using default policies."
+                        )
+                        self._policies = self._get_default_policies()
+                        self._last_load_time = time.time()
+                        span.set_attribute("policy.source", "defaults_init_fail")
+                        return
 
-            new_policies = {}
-            for row in rows:
-                definition = PolicyDefinition(
-                    table_name=row["table_name"],
-                    tenant_column=row["tenant_column"],
-                    expression_template=row["policy_expression"],
-                )
-                new_policies[definition.table_name] = definition
+                async with ControlPlaneDatabase.get_connection() as conn:
+                    rows = await conn.fetch(query)
 
-            cls._policies = new_policies
-            cls._last_load_time = time.time()
-            logger.info(f"Loaded {len(cls._policies)} row policies from control-plane.")
+                new_policies = {}
+                for row in rows:
+                    definition = PolicyDefinition(
+                        table_name=row["table_name"],
+                        tenant_column=row["tenant_column"],
+                        expression_template=row["policy_expression"],
+                    )
+                    new_policies[definition.table_name] = definition
 
-        except Exception as e:
-            logger.error(f"Failed to load row policies: {e}")
-            # retain existing policies if refresh fails
-            if not cls._policies:
-                cls._policies = cls._get_default_policies()
+                self._policies = new_policies
+                self._last_load_time = time.time()
+                logger.info(f"Loaded {len(self._policies)} row policies from control-plane.")
+                span.set_attribute("policy.source", "database")
+                span.set_attribute("policy.count", len(new_policies))
+
+            except Exception as e:
+                logger.error(f"Failed to load row policies: {e}")
+                span.record_exception(e)
+                # retain existing policies if refresh fails
+                if not self._policies:
+                    self._policies = self._get_default_policies()
 
     @staticmethod
     def _get_default_policies() -> Dict[str, PolicyDefinition]:

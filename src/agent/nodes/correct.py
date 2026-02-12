@@ -27,6 +27,9 @@ def _append_bounded_correction_event(
 ) -> tuple[list[dict], bool, int]:
     max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
     max_events = max(1, int(max_events))
+    # Character limit for the entire list of dicts serialized
+    max_chars = get_env_int("AGENT_RETRY_SUMMARY_MAX_CHARS", 10000) or 10000
+
     existing_truncated = bool(state.get("correction_attempts_truncated"))
     existing_dropped_raw = state.get("correction_attempts_dropped", 0)
     existing_dropped = (
@@ -36,10 +39,33 @@ def _append_bounded_correction_event(
     if not isinstance(events, list):
         events = []
     events = [entry for entry in events if isinstance(entry, dict)]
+
+    # 1. Append new event
     events.append(event)
-    dropped_now = max(0, len(events) - max_events)
-    if dropped_now:
+
+    # 2. Bound by item count (FIFO)
+    dropped_now = 0
+    if len(events) > max_events:
+        dropped_now = len(events) - max_events
         events = events[dropped_now:]
+
+    # 3. Bound by character count (FIFO)
+    # Estimate size by JSON serialization
+    import json
+
+    def _estimate_size(evs):
+        return len(json.dumps(evs))
+
+    while events and _estimate_size(events) > max_chars:
+        if len(events) == 1:
+            # If a single event is too large, we can't easily truncate the dict
+            # without breaking schema, so we just drop it if it's over the limit.
+            events = []
+            dropped_now += 1
+            break
+        events.pop(0)
+        dropped_now += 1
+
     total_dropped = existing_dropped + dropped_now
     return events, (existing_truncated or dropped_now > 0), total_dropped
 
@@ -277,6 +303,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         updated_signatures = signatures + [current_sig]
 
         from agent.llm_client import get_llm
+        from agent.utils.llm_run_budget import LLMBudgetExceededError, budget_telemetry_attributes
         from agent.utils.sql_similarity import compute_sql_similarity
 
         # Internal loop for drift detection
@@ -338,17 +365,41 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
             start_time = time.monotonic()
-            response = chain.invoke(
-                {
-                    "correction_strategy": correction_strategy,
-                    "taxonomy_context": taxonomy_context,
-                    "plan_context": plan_context,
-                    "ast_context": ast_context,
-                    "schema_context": schema_context,
-                    "bad_query": current_sql,
-                    "error_msg": current_error_msg,
+            try:
+                response = chain.invoke(
+                    {
+                        "correction_strategy": correction_strategy,
+                        "taxonomy_context": taxonomy_context,
+                        "plan_context": plan_context,
+                        "ast_context": ast_context,
+                        "schema_context": schema_context,
+                        "bad_query": current_sql,
+                        "error_msg": current_error_msg,
+                    }
+                )
+            except LLMBudgetExceededError as budget_error:
+                correction_event["outcome"] = "token_budget_exceeded"
+                span.set_attribute("budget.exhausted", True)
+                span.set_attribute("llm.budget.exceeded", True)
+                span.set_attributes(budget_telemetry_attributes(budget_error.state))
+                return {
+                    "error": "LLM token budget exceeded during correction loop.",
+                    "error_category": "budget_exceeded",
+                    "retry_after_seconds": None,
+                    "correction_attempts": correction_attempts,
+                    "correction_attempts_truncated": correction_attempts_truncated,
+                    "correction_attempts_dropped": correction_attempts_dropped,
+                    "llm_budget_exceeded": True,
+                    "error_metadata": {
+                        "reason_code": "llm_token_budget_exceeded",
+                        "is_retryable": False,
+                        "llm_tokens_prompt_total": int(budget_error.state.prompt_total),
+                        "llm_tokens_completion_total": int(budget_error.state.completion_total),
+                        "llm_tokens_budget_limit": int(budget_error.state.max_tokens),
+                        "llm_tokens_requested": int(budget_error.requested_tokens),
+                    },
+                    **_correction_loop_payload(),
                 }
-            )
             latency_seconds = time.monotonic() - start_time
 
             # Capture token usage

@@ -78,6 +78,12 @@ class AgentState(TypedDict):
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]
+    pinned_schema_snapshot_id: Optional[str]
+    pending_schema_snapshot_id: Optional[str]
+    pending_schema_fingerprint: Optional[str]
+    pending_schema_version_ts: Optional[int]
+    schema_snapshot_transition: Optional[dict]
+    schema_snapshot_refresh_applied: Optional[int]
     schema_fingerprint: Optional[str]
     schema_version_ts: Optional[int]
 
@@ -209,6 +215,8 @@ class AgentState(TypedDict):
 
     # Similarity score from cache lookup (0-1 or 0-100 depending on backend)
     cache_similarity: Optional[float]
+    cache_lookup_failed: Optional[bool]
+    cache_lookup_failure_reason: Optional[str]
 
     # Context about a rejected cache hit to guide generation (e.g. "similar query but wrong entity")
     # Structure: {"sql": str, "original_query": str, "reason": str}

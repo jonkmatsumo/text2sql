@@ -163,7 +163,10 @@ def synthesize_insight_node(state: AgentState) -> dict:
                     "I am unable to access the requested data due to insufficient permissions. "
                     "Please contact your administrator if you believe this is an error."
                 )
-            elif termination_reason == TerminationReason.BUDGET_EXHAUSTED:
+            elif termination_reason == TerminationReason.BUDGET_EXHAUSTED or error_category in (
+                "budget_exhausted",
+                "budget_exceeded",
+            ):
                 response_content = (
                     "The processing for this request exceeded the allowed resource budget. "
                     "Please try a simpler or more specific query."

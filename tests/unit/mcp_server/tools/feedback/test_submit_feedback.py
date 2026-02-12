@@ -123,6 +123,6 @@ class TestSubmitFeedback:
             result = json.loads(result_json)
 
             assert result["error"]["message"] == "Failed to submit feedback."
-            assert result["error"]["category"] == "internal_error"
+            assert result["error"]["category"] == "internal"
             assert result["error"]["sql_state"] == "SUBMIT_FEEDBACK_FAILED"
             assert "password=secret-token" not in result["error"]["message"]

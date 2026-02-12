@@ -9,6 +9,13 @@ import pytest
 from mcp_server.tools.execute_sql_query import handler as execute_sql_query_handler
 
 
+@pytest.fixture(autouse=True)
+def mock_policy_enforcer():
+    """Mock PolicyEnforcer to bypass validation."""
+    with patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"):
+        yield
+
+
 @pytest.fixture
 def mock_db_caps():
     """Mock database capabilities."""
@@ -51,6 +58,7 @@ async def test_execute_sql_query_valid_select():
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
         ) as mock_caps,
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         mock_caps.return_value.supports_column_metadata = True
         mock_caps.return_value.execution_model = "sync"
@@ -75,6 +83,7 @@ async def test_execute_sql_query_empty_result():
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
         ) as mock_caps,
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         mock_caps.return_value.supports_column_metadata = True
         mock_caps.return_value.execution_model = "sync"
@@ -102,6 +111,7 @@ async def test_execute_sql_query_size_limit():
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
         ) as mock_caps,
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         mock_caps.return_value.supports_column_metadata = True
         mock_caps.return_value.execution_model = "sync"
@@ -131,6 +141,7 @@ async def test_execute_sql_query_database_error():
             "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
             return_value="postgres",
         ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         mock_caps.return_value.supports_column_metadata = True
         mock_caps.return_value.execution_model = "sync"

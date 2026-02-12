@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from agent.mcp_client.sdk_client import MCPClient
+from agent.telemetry import telemetry
 from common.models.error_metadata import ToolError
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ def _extract_tool_error(payload: Any) -> Optional[ToolError]:
             return None
     if isinstance(error_obj, str):
         return ToolError(
-            category="internal_error",
+            category="internal",
             code="UNSTRUCTURED_TOOL_ERROR",
             message=error_obj,
             retryable=False,
@@ -281,6 +282,12 @@ class McpClientSession:
 
         for attempt in range(config.max_retries + 1):
             try:
+                # Record attempt identifiers in the current span
+                span = telemetry.get_current_span()
+                if span:
+                    span.set_attribute("mcp.attempt_count", attempt + 1)
+                    span.set_attribute("mcp.retry_count", attempt)
+
                 result = await self._mcp.call_tool(name, arguments)
                 structured_error = _extract_tool_error(result)
                 if structured_error is None:

@@ -7,6 +7,7 @@ import asyncpg
 
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
+from common.models.error_metadata import ErrorCategory
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
 from common.sql.dialect import normalize_sqlglot_dialect
 from dal.capability_negotiation import (
@@ -65,7 +66,7 @@ async def _cancel_best_effort(conn: object) -> None:
 
 def _construct_error_response(
     message: str,
-    category: str = "unknown",
+    category: ErrorCategory = ErrorCategory.UNKNOWN,
     metadata: Optional[Dict[str, Any]] = None,
     provider: str = "unknown",
     is_retryable: bool = False,
@@ -249,7 +250,7 @@ async def handler(
     if len(sql_query) > max_sql_len:
         return _construct_error_response(
             message=f"SQL query exceeds maximum length of {max_sql_len} bytes.",
-            category="invalid_request",
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
         )
 
@@ -258,7 +259,19 @@ async def handler(
     if validation_error:
         return _construct_error_response(
             validation_error,
-            category="invalid_request",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+        )
+
+    # 3. Policy Enforcement (Table Allowlist & Sensitive Columns)
+    from agent.validation.policy_enforcer import PolicyEnforcer
+
+    try:
+        PolicyEnforcer.validate_sql(sql_query)
+    except ValueError as e:
+        return _construct_error_response(
+            str(e),
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
         )
 
@@ -267,7 +280,7 @@ async def handler(
     if param_error:
         return _construct_error_response(
             param_error,
-            category="invalid_request",
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
         )
 
@@ -286,7 +299,7 @@ async def handler(
 
         return _construct_error_response(
             message=f"Requested capability is not supported: {required_capability}.",
-            category="unsupported_capability",
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider_name,
             metadata={
                 "required_capability": required_capability,
@@ -375,7 +388,7 @@ async def handler(
         if page_size <= 0:
             return _construct_error_response(
                 "Invalid page_size: must be greater than zero.",
-                category="invalid_request",
+                category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
             )
         if page_size > max_page_size:
@@ -388,7 +401,7 @@ async def handler(
         if errors:
             return _construct_error_response(
                 "Redshift query validation failed.",
-                category="invalid_request",
+                category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"details": errors},
             )
@@ -467,7 +480,7 @@ async def handler(
                 )
             except asyncio.TimeoutError:
                 return _construct_error_response(
-                    "Execution timed out.", category="timeout", provider=provider
+                    "Execution timed out.", category=ErrorCategory.TIMEOUT, provider=provider
                 )
 
             raw_last_truncated = getattr(conn, "last_truncated", False)

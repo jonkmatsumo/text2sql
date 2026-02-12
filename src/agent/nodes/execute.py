@@ -14,9 +14,11 @@ from agent.tools import get_mcp_tools
 from agent.utils.pagination_prefetch import (
     PrefetchManager,
     build_prefetch_cache_key,
+    build_query_signature,
     get_prefetch_config,
-    pop_prefetched_page,
+    pop_prefetched_page_validated,
 )
+from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
 from common.config.env import get_env_bool, get_env_int, get_env_str
@@ -111,6 +113,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         span.set_attribute("error.category", "unknown")
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")
+        pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
 
         span.set_inputs(
             {
@@ -294,6 +297,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
             seed_value = state.get("seed")
             seed = seed_value if isinstance(seed_value, int) else None
+            query_signature = build_query_signature(rewritten_sql)
             existing_completeness = state.get("result_completeness")
             completeness_hint = None
             if isinstance(existing_completeness, dict):
@@ -312,12 +316,27 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         tenant_id=tenant_id,
                         page_token=str(page_token),
                         page_size=execute_payload.get("page_size"),
-                        schema_snapshot_id=state.get("schema_snapshot_id"),
+                        schema_snapshot_id=pinned_snapshot_id,
                         seed=seed,
                         completeness_hint=completeness_hint,
                         scope_id=None,
                     )
-                    prefetched_payload = pop_prefetched_page(prefetched_cache_key)
+                    prefetched_payload, prefetch_discard_reason = pop_prefetched_page_validated(
+                        prefetched_cache_key,
+                        expected_tenant_id=tenant_id,
+                        expected_schema_snapshot_id=pinned_snapshot_id,
+                        expected_query_signature=query_signature,
+                    )
+                    if prefetch_discard_reason is not None:
+                        discard_attrs = {
+                            "reason": str(prefetch_discard_reason),
+                            "prefetch.discarded_due_to_snapshot_mismatch": bool(
+                                prefetch_discard_reason == "snapshot_mismatch"
+                            ),
+                        }
+                        if prefetch_discard_reason == "snapshot_mismatch":
+                            span.set_attribute("prefetch.discarded_due_to_snapshot_mismatch", True)
+                        span.add_event("pagination.prefetch_discarded", discard_attrs)
                     if prefetched_payload is not None:
                         span.add_event(
                             "pagination.prefetch_cache_hit",
@@ -355,7 +374,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_columns = envelope.columns
                 result_next_page_token = envelope.metadata.next_page_token
                 result_page_size = None
-                result_partial_reason = envelope.metadata.partial_reason
+                result_truncation_reason = envelope.metadata.truncation_reason
 
                 result_capability_required = envelope.metadata.capability_required
                 if not result_capability_required and envelope.error:
@@ -404,7 +423,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     return {
                         "schema_drift_suspected": True,
                         "missing_identifiers": identifiers,
-                        "schema_snapshot_id": state.get("schema_snapshot_id"),
+                        "schema_snapshot_id": pinned_snapshot_id,
+                        "pinned_schema_snapshot_id": pinned_snapshot_id,
                         "schema_drift_auto_refresh": auto_refresh,
                     }
 
@@ -488,8 +508,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if auto_pagination_enabled and len(query_result) > auto_max_rows:
                     query_result = query_result[:auto_max_rows]
                     result_is_truncated = True
-                    if not result_partial_reason:
-                        result_partial_reason = "LIMITED"
+                    if not result_truncation_reason:
+                        result_truncation_reason = "LIMITED"
                     result_rows_returned = len(query_result)
                     result_auto_pagination_stopped_reason = PaginationStopReason.MAX_ROWS.value
                 elif (
@@ -603,8 +623,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             if page_meta.rows_returned is not None:
                                 result_rows_returned = page_meta.rows_returned
 
-                            if page_meta.partial_reason:
-                                result_partial_reason = page_meta.partial_reason
+                            if page_meta.truncation_reason:
+                                result_truncation_reason = page_meta.truncation_reason
 
                             if page_meta.capability_required is not None:
                                 result_capability_required = page_meta.capability_required
@@ -637,8 +657,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             if len(aggregated_rows) >= auto_max_rows:
                                 aggregated_rows = aggregated_rows[:auto_max_rows]
                                 result_is_truncated = True
-                                if not result_partial_reason:
-                                    result_partial_reason = "LIMITED"
+                                if not result_truncation_reason:
+                                    result_truncation_reason = "LIMITED"
                                 result_auto_pagination_stopped_reason = (
                                     PaginationStopReason.MAX_ROWS.value
                                 )
@@ -710,9 +730,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     tenant_id=tenant_id,
                                     page_token=next_page_token_for_prefetch,
                                     page_size=int(prefetch_page_size),
-                                    schema_snapshot_id=state.get("schema_snapshot_id"),
+                                    schema_snapshot_id=pinned_snapshot_id,
                                     seed=seed,
-                                    completeness_hint=result_partial_reason,
+                                    completeness_hint=result_truncation_reason,
                                 )
 
                                 async def _fetch_prefetched_page() -> dict | None:
@@ -741,6 +761,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     prefetcher.schedule(
                                         prefetch_key,
                                         _fetch_prefetched_page,
+                                        cache_context={
+                                            "tenant_id": tenant_id,
+                                            "schema_snapshot_id": pinned_snapshot_id,
+                                            "query_signature": query_signature,
+                                        },
                                     )
                                 )
 
@@ -784,8 +809,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     )
                 span.set_attribute("result.columns_available", bool(result_columns))
                 span.set_attribute("timeout.triggered", False)
-                if result_partial_reason:
-                    span.set_attribute("result.partial_reason", result_partial_reason)
+                if result_truncation_reason:
+                    span.set_attribute("result.partial_reason", result_truncation_reason)
                 is_limited = bool(state.get("result_is_limited"))
                 span.set_attribute("result.is_limited", is_limited)
                 if result_capability_required:
@@ -835,7 +860,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                         "query": user_query,
                                         "sql": original_sql,
                                         "tenant_id": tenant_id,
-                                        "schema_snapshot_id": state.get("schema_snapshot_id"),
+                                        "schema_snapshot_id": pinned_snapshot_id,
                                     }
                                 )
                     except Exception:
@@ -879,7 +904,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         query_limit=query_limit,
                         next_page_token=result_next_page_token,
                         page_size=result_page_size,
-                        partial_reason=result_partial_reason,
+                        partial_reason=result_truncation_reason,
                         cap_detected=bool(result_cap_detected),
                         cap_mitigation_applied=bool(result_cap_mitigation_applied),
                         cap_mitigation_mode=result_cap_mitigation_mode,

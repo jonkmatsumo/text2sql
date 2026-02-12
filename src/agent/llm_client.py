@@ -248,6 +248,14 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
 
     from agent.telemetry import telemetry
     from agent.telemetry_schema import SpanKind, TelemetryKeys, truncate_json
+    from agent.utils.llm_run_budget import (
+        LLMBudgetExceededError,
+        budget_telemetry_attributes,
+        consume_completion_tokens,
+        consume_prompt_tokens,
+        estimate_token_count,
+        reconcile_prompt_tokens,
+    )
 
     logger = logging.getLogger(__name__)
 
@@ -275,6 +283,16 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 span.set_attribute(TelemetryKeys.LLM_PROMPT_USER, usr_trunc)
 
             try:
+                estimated_prompt_tokens = estimate_token_count(sys_prompt) + estimate_token_count(
+                    user_prompt
+                )
+                if estimated_prompt_tokens <= 0:
+                    estimated_prompt_tokens = estimate_token_count(input)
+
+                budget_state = consume_prompt_tokens(estimated_prompt_tokens)
+                if budget_state:
+                    span.set_attributes(budget_telemetry_attributes(budget_state))
+
                 response = llm.invoke(input, config, **kwargs)
 
                 # Capture Output
@@ -289,7 +307,24 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 if usage:
                     span.set_attributes(usage)
 
+                budget_state = reconcile_prompt_tokens(
+                    estimated_tokens=estimated_prompt_tokens,
+                    actual_tokens=usage.get("llm.token_usage.input_tokens") if usage else None,
+                )
+                completion_tokens = (
+                    usage.get("llm.token_usage.output_tokens")
+                    if usage
+                    else estimate_token_count(getattr(response, "content", ""))
+                )
+                budget_state = consume_completion_tokens(int(completion_tokens or 0))
+                if budget_state:
+                    span.set_attributes(budget_telemetry_attributes(budget_state))
+
                 return response
+            except LLMBudgetExceededError as e:
+                span.set_attribute("llm.budget.exceeded", True)
+                span.set_attributes(budget_telemetry_attributes(e.state))
+                raise e
             except Exception as e:
                 error_info = {"error": str(e), "type": type(e).__name__}
                 span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
@@ -313,6 +348,16 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 span.set_attribute(TelemetryKeys.LLM_PROMPT_USER, usr_trunc)
 
             try:
+                estimated_prompt_tokens = estimate_token_count(sys_prompt) + estimate_token_count(
+                    user_prompt
+                )
+                if estimated_prompt_tokens <= 0:
+                    estimated_prompt_tokens = estimate_token_count(input)
+
+                budget_state = consume_prompt_tokens(estimated_prompt_tokens)
+                if budget_state:
+                    span.set_attributes(budget_telemetry_attributes(budget_state))
+
                 response = await llm.ainvoke(input, config, **kwargs)
 
                 # Capture Output
@@ -327,7 +372,24 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 if usage:
                     span.set_attributes(usage)
 
+                budget_state = reconcile_prompt_tokens(
+                    estimated_tokens=estimated_prompt_tokens,
+                    actual_tokens=usage.get("llm.token_usage.input_tokens") if usage else None,
+                )
+                completion_tokens = (
+                    usage.get("llm.token_usage.output_tokens")
+                    if usage
+                    else estimate_token_count(getattr(response, "content", ""))
+                )
+                budget_state = consume_completion_tokens(int(completion_tokens or 0))
+                if budget_state:
+                    span.set_attributes(budget_telemetry_attributes(budget_state))
+
                 return response
+            except LLMBudgetExceededError as e:
+                span.set_attribute("llm.budget.exceeded", True)
+                span.set_attributes(budget_telemetry_attributes(e.state))
+                raise e
             except Exception as e:
                 error_info = {"error": str(e), "type": type(e).__name__}
                 span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])

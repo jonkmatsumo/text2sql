@@ -31,6 +31,10 @@ from agent.runtime_metrics import (
 from agent.state import AgentState
 from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
+from agent.utils.schema_snapshot import (
+    apply_pending_schema_snapshot_refresh,
+    resolve_pinned_schema_snapshot_id,
+)
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
 from common.observability.metrics import agent_metrics
@@ -85,9 +89,18 @@ async def schema_refresh_node(state: AgentState) -> dict:
         name="schema_refresh",
         span_type=SpanType.AGENT_NODE,
     ) as span:
+        from agent.tools import get_mcp_tools
+        from agent.utils.parsing import parse_tool_output, unwrap_envelope
+        from agent.utils.schema_fingerprint import (
+            fingerprint_schema_nodes,
+            resolve_schema_snapshot_id,
+        )
+
         refresh_count = state.get("schema_refresh_count", 0)
         span.set_attribute("schema.drift.auto_refresh_attempted", True)
         span.set_attribute("schema.drift.refresh_count", refresh_count + 1)
+        prior_pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+        span.set_attribute("schema.old_snapshot_id", prior_pinned_snapshot_id)
 
         # Invalidate cache for missing identifiers
         from common.config.env import get_env_str
@@ -106,11 +119,73 @@ async def schema_refresh_node(state: AgentState) -> dict:
                 # Fallback: invalidate table in default schema
                 SCHEMA_CACHE.invalidate(provider=provider, table=identifier)
 
+        candidate_snapshot_id = state.get("pending_schema_snapshot_id")
+        candidate_fingerprint = state.get("pending_schema_fingerprint")
+        candidate_version_ts = state.get("pending_schema_version_ts")
+        if not candidate_snapshot_id:
+            active_query = state.get("active_query")
+            if not active_query:
+                messages = state.get("messages") or []
+                if messages:
+                    active_query = getattr(messages[-1], "content", None)
+
+            if active_query:
+                try:
+                    tools = await get_mcp_tools()
+                    subgraph_tool = next(
+                        (
+                            tool
+                            for tool in tools
+                            if getattr(tool, "name", None) == "get_semantic_subgraph"
+                        ),
+                        None,
+                    )
+                    if subgraph_tool is not None:
+                        payload = {"query": active_query}
+                        tenant_id = state.get("tenant_id")
+                        if tenant_id is not None:
+                            payload["tenant_id"] = tenant_id
+
+                        raw_subgraph = await subgraph_tool.ainvoke(payload)
+                        parsed = parse_tool_output(raw_subgraph)
+                        if isinstance(parsed, list) and parsed:
+                            parsed = parsed[0]
+                        parsed = unwrap_envelope(parsed)
+                        nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
+                        resolved_snapshot_id = resolve_schema_snapshot_id(nodes)
+                        if resolved_snapshot_id and resolved_snapshot_id != "unknown":
+                            candidate_snapshot_id = resolved_snapshot_id
+                            candidate_fingerprint = (
+                                fingerprint_schema_nodes(nodes) if nodes else None
+                            )
+                            candidate_version_ts = (
+                                int(time.time()) if candidate_fingerprint else candidate_version_ts
+                            )
+                except Exception:
+                    logger.warning(
+                        "Schema refresh could not resolve updated snapshot id",
+                        exc_info=True,
+                    )
+
+        refresh_state = apply_pending_schema_snapshot_refresh(
+            state,
+            candidate_snapshot_id=candidate_snapshot_id,
+            candidate_fingerprint=candidate_fingerprint,
+            candidate_version_ts=candidate_version_ts,
+            reason="schema_refresh",
+        )
+        span.set_attribute("schema.new_snapshot_id", refresh_state["schema_snapshot_id"])
+        span.set_attribute(
+            "schema.refresh_applied",
+            refresh_state["schema_snapshot_id"] != prior_pinned_snapshot_id,
+        )
+
         return {
             "schema_refresh_count": refresh_count + 1,
             "error": None,  # Clear error to allow re-entry into the flow
             "schema_drift_suspected": False,
             "retry_count": state.get("retry_count", 0),  # Preserve retry count
+            **refresh_state,
         }
 
 
@@ -162,9 +237,13 @@ def route_after_validation(state: AgentState) -> str:
     """
     retry_count = state.get("retry_count", 0)
     max_retries = _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+    error_category = str(state.get("error_category") or "").strip().lower()
 
     ast_result = state.get("ast_validation_result")
     is_invalid = (ast_result and not ast_result.get("is_valid")) or state.get("error")
+
+    if error_category in {"budget_exceeded", "budget_exhausted"}:
+        return "synthesize"
 
     if is_invalid:
         if retry_count < max_retries:
@@ -205,6 +284,8 @@ def _adaptive_is_retryable(
         "auth",
         "invalid_request",
         "tool_response_malformed",
+        "budget_exhausted",
+        "budget_exceeded",
     }
     if not error_category:
         return True
@@ -776,6 +857,12 @@ async def run_agent_with_tracing(
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
+            "pinned_schema_snapshot_id": schema_snapshot_id,
+            "pending_schema_snapshot_id": None,
+            "pending_schema_fingerprint": None,
+            "pending_schema_version_ts": None,
+            "schema_snapshot_transition": None,
+            "schema_snapshot_refresh_applied": 0,
             "schema_fingerprint": None,
             "schema_version_ts": None,
             "deadline_ts": deadline_ts,
@@ -799,6 +886,7 @@ async def run_agent_with_tracing(
 
         # Execute workflow within MCP context to ensure connections are closed
         from agent.tools import mcp_tools_context, unpack_mcp_result
+        from agent.utils.llm_run_budget import llm_run_budget_context
         from agent.utils.retry import retry_with_backoff
 
         # Interaction persistence mode (default: best_effort)
@@ -818,222 +906,90 @@ async def run_agent_with_tracing(
             )
             persistence_mode = "best_effort"
 
-        async with mcp_tools_context() as tools:
-            schema_snapshot_id = inputs.get("schema_snapshot_id")
-            if not schema_snapshot_id:
-                snapshot_mode = get_env_str("SCHEMA_SNAPSHOT_MODE", "fingerprint").strip().lower()
-                if snapshot_mode == "static":
-                    schema_snapshot_id = "v1.0"
-                elif snapshot_mode == "fingerprint":
-                    from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
+        base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
+        llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
 
-                    subgraph_tool = next(
-                        (t for t in tools if t.name == "get_semantic_subgraph"), None
+        with llm_run_budget_context(llm_budget_limit):
+            async with mcp_tools_context() as tools:
+                schema_snapshot_id = inputs.get("schema_snapshot_id")
+                if not schema_snapshot_id:
+                    snapshot_mode = (
+                        get_env_str("SCHEMA_SNAPSHOT_MODE", "fingerprint").strip().lower()
                     )
-                    if subgraph_tool:
+                    if snapshot_mode == "static":
+                        schema_snapshot_id = "v1.0"
+                    elif snapshot_mode == "fingerprint":
+                        from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
 
-                        async def _refresh_snapshot_id() -> Optional[str]:
-                            try:
-                                payload = {"query": question}
-                                if tenant_id is not None:
-                                    payload["tenant_id"] = tenant_id
-                                raw_subgraph = await subgraph_tool.ainvoke(payload)
-                                from agent.utils.parsing import parse_tool_output
-                                from agent.utils.schema_fingerprint import (
-                                    resolve_schema_snapshot_id,
-                                )
-
-                                parsed = parse_tool_output(raw_subgraph)
-                                if isinstance(parsed, list) and parsed:
-                                    parsed = parsed[0]
-                                nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
-                                return resolve_schema_snapshot_id(nodes)
-                            except Exception:
-                                logger.warning(
-                                    "Failed to compute schema snapshot id", exc_info=True
-                                )
-                                return None
-
-                        schema_snapshot_id = await get_or_refresh_schema_snapshot_id(
-                            tenant_id, _refresh_snapshot_id
+                        subgraph_tool = next(
+                            (t for t in tools if t.name == "get_semantic_subgraph"), None
                         )
-                schema_snapshot_id = schema_snapshot_id or "unknown"
-                inputs["schema_snapshot_id"] = schema_snapshot_id
+                        if subgraph_tool:
 
-            # 1. Start Interaction Logging (Pre-execution) with retry
-            interaction_id = None
-            interaction_persisted = False
-            create_tool = next((t for t in tools if t.name == "create_interaction"), None)
-            if create_tool:
-                try:
+                            async def _refresh_snapshot_id() -> Optional[str]:
+                                try:
+                                    payload = {"query": question}
+                                    if tenant_id is not None:
+                                        payload["tenant_id"] = tenant_id
+                                    raw_subgraph = await subgraph_tool.ainvoke(payload)
+                                    from agent.utils.parsing import parse_tool_output
+                                    from agent.utils.schema_fingerprint import (
+                                        resolve_schema_snapshot_id,
+                                    )
 
-                    async def _create_interaction():
-                        # Use canonical OTEL trace_id if available, fallback to thread_id
-                        # This ensures the ID stored in DB matches the trace in Tempo/Grafana
-                        otel_trace_id = telemetry.get_current_trace_id()
-                        final_trace_id = (
-                            otel_trace_id
-                            if otel_trace_id and _TRACE_ID_RE.fullmatch(otel_trace_id)
-                            else None
-                        )
+                                    parsed = parse_tool_output(raw_subgraph)
+                                    if isinstance(parsed, list) and parsed:
+                                        parsed = parsed[0]
+                                    nodes = (
+                                        parsed.get("nodes", []) if isinstance(parsed, dict) else []
+                                    )
+                                    return resolve_schema_snapshot_id(nodes)
+                                except Exception:
+                                    logger.warning(
+                                        "Failed to compute schema snapshot id", exc_info=True
+                                    )
+                                    return None
 
-                        return await create_tool.ainvoke(
-                            {
-                                "conversation_id": session_id or thread_id,
-                                "schema_snapshot_id": schema_snapshot_id or "unknown",
-                                "user_nlq_text": question,
-                                "tenant_id": tenant_id,
-                                "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
-                                "prompt_version": "v1.0",
-                                "trace_id": final_trace_id,
-                            },
-                            config=config,
-                        )
-
-                    if telemetry.get_current_span():
-                        telemetry.get_current_span().add_event("persistence.create.start")
-
-                    persistence_timeout_ms = get_env_int(
-                        "AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", 500
-                    )
-                    persistence_fail_open = get_env_bool(
-                        "AGENT_INTERACTION_PERSISTENCE_FAIL_OPEN", True
-                    )
-
-                    try:
-                        raw_interaction_id = await asyncio.wait_for(
-                            retry_with_backoff(
-                                _create_interaction,
-                                "create_interaction",
-                                extra_context={"trace_id": thread_id},
-                            ),
-                            timeout=persistence_timeout_ms / 1000.0,
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "Interaction creation timed out after %dms", persistence_timeout_ms
-                        )
-                        telemetry.add_event(
-                            "interaction.persistence_timeout",
-                            attributes={"stage": "create", "timeout_ms": persistence_timeout_ms},
-                        )
-                        if not persistence_fail_open:
-                            raise
-                        raw_interaction_id = None
-
-                    if raw_interaction_id:
-                        interaction_id = unpack_mcp_result(raw_interaction_id)
-                        inputs["interaction_id"] = interaction_id
-                        interaction_persisted = True
-                        inputs["interaction_persisted"] = True
-                        # Also make interaction_id sticky
-                        telemetry.update_current_trace({"interaction_id": interaction_id})
-                        if telemetry.get_current_span():
-                            telemetry.get_current_span().add_event(
-                                "persistence.create.success", {"interaction_id": interaction_id}
+                            schema_snapshot_id = await get_or_refresh_schema_snapshot_id(
+                                tenant_id, _refresh_snapshot_id
                             )
-                    else:
-                        interaction_persisted = False
-                        inputs["interaction_persisted"] = False
-                except Exception as e:
-                    # Structured logging with context (retry utility already logged attempts)
-                    logger.error(
-                        "Failed to create interaction after all retries",
-                        extra={
-                            "operation": "create_interaction",
-                            "trace_id": thread_id,
-                            "exception_type": type(e).__name__,
-                            "exception_message": str(e),
-                        },
-                        exc_info=True,
-                    )
-                    if telemetry.get_current_span():
-                        telemetry.get_current_span().add_event(
-                            "persistence.create.failure",
-                            {"exception": str(e), "type": type(e).__name__},
-                        )
-                    if telemetry.get_current_span():
-                        telemetry.get_current_span().add_event(
-                            "interaction.persist_failed",
-                            {"stage": "create", "exception_type": type(e).__name__},
-                        )
-                    interaction_persisted = False
-                    inputs["interaction_persisted"] = False
-                    if persistence_mode == "strict":
-                        raise RuntimeError(f"Interaction creation failed (mode=strict): {e}") from e
-                    logger.warning(
-                        "Continuing without interaction_id (best_effort)",
-                        extra={"trace_id": thread_id},
-                    )
-            else:
-                logger.warning("create_interaction tool not available")
-                inputs["interaction_persisted"] = False
+                    schema_snapshot_id = schema_snapshot_id or "unknown"
+                    inputs["schema_snapshot_id"] = schema_snapshot_id
+                inputs["pinned_schema_snapshot_id"] = schema_snapshot_id
+                telemetry.update_current_trace({"schema_snapshot_id": schema_snapshot_id})
 
-            # Execute workflow
-            result = inputs.copy()
-            try:
-                result = await app.ainvoke(inputs, config=config)
-                if "interaction_persisted" not in result:
-                    result["interaction_persisted"] = interaction_persisted
-            except Exception as execute_err:
-                logger.error(
-                    "Critical error in agent workflow",
-                    extra={
-                        "trace_id": thread_id,
-                        "interaction_id": interaction_id,
-                        "exception_type": type(execute_err).__name__,
-                    },
-                    exc_info=True,
-                )
-                result["error"] = str(execute_err)
-                result["error_category"] = "SYSTEM_CRASH"
-                if "messages" not in result:
-                    result["messages"] = []
-
-            # 2. Update Interaction Logging (Post-execution) with retry
-            if interaction_id:
-                update_tool = next((t for t in tools if t.name == "update_interaction"), None)
-                if update_tool:
+                # 1. Start Interaction Logging (Pre-execution) with retry
+                interaction_id = None
+                interaction_persisted = False
+                create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+                if create_tool:
                     try:
-                        # Determine status
-                        status = "SUCCESS"
-                        if result.get("error"):
-                            status = "FAILURE"
-                        elif result.get("ambiguity_type"):
-                            status = "CLARIFICATION_REQUIRED"
 
-                        # Get last message as response
-                        last_msg = ""
-                        if result.get("messages") and len(result["messages"]) > 0:
-                            last_message_obj = result["messages"][-1]
-                            if hasattr(last_message_obj, "content"):
-                                last_msg = last_message_obj.content
-                            else:
-                                last_msg = str(last_message_obj)
+                        async def _create_interaction():
+                            # Use canonical OTEL trace_id if available, fallback to thread_id
+                            # This ensures the ID stored in DB matches the trace in Tempo/Grafana
+                            otel_trace_id = telemetry.get_current_trace_id()
+                            final_trace_id = (
+                                otel_trace_id
+                                if otel_trace_id and _TRACE_ID_RE.fullmatch(otel_trace_id)
+                                else None
+                            )
 
-                        if not last_msg and result.get("error"):
-                            last_msg = f"System Error: {result['error']}"
-
-                        # Capture update payload for retry closure
-                        update_payload = {
-                            "interaction_id": interaction_id,
-                            "tenant_id": tenant_id,
-                            "generated_sql": result.get("current_sql"),
-                            "response_payload": json.dumps(
-                                {"text": last_msg, "error": result.get("error")}
-                            ),
-                            "execution_status": status,
-                            "error_type": result.get("error_category"),
-                            "tables_used": result.get("table_names", []),
-                        }
-
-                        async def _update_interaction():
-                            return await update_tool.ainvoke(update_payload, config=config)
+                            return await create_tool.ainvoke(
+                                {
+                                    "conversation_id": session_id or thread_id,
+                                    "schema_snapshot_id": schema_snapshot_id or "unknown",
+                                    "user_nlq_text": question,
+                                    "tenant_id": tenant_id,
+                                    "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
+                                    "prompt_version": "v1.0",
+                                    "trace_id": final_trace_id,
+                                },
+                                config=config,
+                            )
 
                         if telemetry.get_current_span():
-                            telemetry.get_current_span().add_event(
-                                "persistence.update.start", {"interaction_id": interaction_id}
-                            )
+                            telemetry.get_current_span().add_event("persistence.create.start")
 
                         persistence_timeout_ms = get_env_int(
                             "AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", 500
@@ -1043,71 +999,219 @@ async def run_agent_with_tracing(
                         )
 
                         try:
-                            await asyncio.wait_for(
+                            raw_interaction_id = await asyncio.wait_for(
                                 retry_with_backoff(
-                                    _update_interaction,
-                                    "update_interaction",
-                                    extra_context={
-                                        "trace_id": thread_id,
-                                        "interaction_id": interaction_id,
-                                    },
+                                    _create_interaction,
+                                    "create_interaction",
+                                    extra_context={"trace_id": thread_id},
                                 ),
                                 timeout=persistence_timeout_ms / 1000.0,
                             )
                         except asyncio.TimeoutError:
                             logger.warning(
-                                "Interaction update timed out after %dms", persistence_timeout_ms
+                                "Interaction creation timed out after %dms", persistence_timeout_ms
                             )
                             telemetry.add_event(
                                 "interaction.persistence_timeout",
                                 attributes={
-                                    "stage": "update",
+                                    "stage": "create",
                                     "timeout_ms": persistence_timeout_ms,
                                 },
                             )
                             if not persistence_fail_open:
                                 raise
+                            raw_interaction_id = None
 
-                        if telemetry.get_current_span():
-                            telemetry.get_current_span().add_event(
-                                "persistence.update.success", {"interaction_id": interaction_id}
-                            )
+                        if raw_interaction_id:
+                            interaction_id = unpack_mcp_result(raw_interaction_id)
+                            inputs["interaction_id"] = interaction_id
+                            interaction_persisted = True
+                            inputs["interaction_persisted"] = True
+                            # Also make interaction_id sticky
+                            telemetry.update_current_trace({"interaction_id": interaction_id})
+                            if telemetry.get_current_span():
+                                telemetry.get_current_span().add_event(
+                                    "persistence.create.success", {"interaction_id": interaction_id}
+                                )
+                        else:
+                            interaction_persisted = False
+                            inputs["interaction_persisted"] = False
                     except Exception as e:
-                        if telemetry.get_current_span():
-                            telemetry.get_current_span().add_event(
-                                "persistence.update.failure",
-                                {"interaction_id": interaction_id, "exception": str(e)},
-                            )
-                            telemetry.get_current_span().add_event(
-                                "interaction.persist_failed",
-                                {"stage": "update", "exception_type": type(e).__name__},
-                            )
-                        # Structured logging - update failure is observable
+                        # Structured logging with context (retry utility already logged attempts)
                         logger.error(
-                            "Failed to update interaction after all retries",
+                            "Failed to create interaction after all retries",
                             extra={
-                                "operation": "update_interaction",
+                                "operation": "create_interaction",
                                 "trace_id": thread_id,
-                                "interaction_id": interaction_id,
                                 "exception_type": type(e).__name__,
                                 "exception_message": str(e),
                             },
                             exc_info=True,
                         )
-                        logger.error("Update failed for %s: %s", interaction_id, e)
-
-                        # Mark result as having persistence failure (observable)
-                        result["persistence_failed"] = True
-                        result["persistence_error"] = str(e)
-                        result["interaction_persisted"] = False
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "persistence.create.failure",
+                                {"exception": str(e), "type": type(e).__name__},
+                            )
+                        if telemetry.get_current_span():
+                            telemetry.get_current_span().add_event(
+                                "interaction.persist_failed",
+                                {"stage": "create", "exception_type": type(e).__name__},
+                            )
+                        interaction_persisted = False
+                        inputs["interaction_persisted"] = False
                         if persistence_mode == "strict":
                             raise RuntimeError(
-                                f"Interaction update failed (mode=strict): {e}"
+                                f"Interaction creation failed (mode=strict): {e}"
                             ) from e
+                        logger.warning(
+                            "Continuing without interaction_id (best_effort)",
+                            extra={"trace_id": thread_id},
+                        )
                 else:
-                    logger.error("update_interaction tool not found in available tools")
-                    logger.error("update_interaction tool missing!")
-                    result["interaction_persisted"] = False
+                    logger.warning("create_interaction tool not available")
+                    inputs["interaction_persisted"] = False
+
+                # Execute workflow
+                result = inputs.copy()
+                try:
+                    result = await app.ainvoke(inputs, config=config)
+                    if "interaction_persisted" not in result:
+                        result["interaction_persisted"] = interaction_persisted
+                except Exception as execute_err:
+                    logger.error(
+                        "Critical error in agent workflow",
+                        extra={
+                            "trace_id": thread_id,
+                            "interaction_id": interaction_id,
+                            "exception_type": type(execute_err).__name__,
+                        },
+                        exc_info=True,
+                    )
+                    result["error"] = str(execute_err)
+                    result["error_category"] = "SYSTEM_CRASH"
+                    if "messages" not in result:
+                        result["messages"] = []
+
+                # 2. Update Interaction Logging (Post-execution) with retry
+                if interaction_id:
+                    update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+                    if update_tool:
+                        try:
+                            # Determine status
+                            status = "SUCCESS"
+                            if result.get("error"):
+                                status = "FAILURE"
+                            elif result.get("ambiguity_type"):
+                                status = "CLARIFICATION_REQUIRED"
+
+                            # Get last message as response
+                            last_msg = ""
+                            if result.get("messages") and len(result["messages"]) > 0:
+                                last_message_obj = result["messages"][-1]
+                                if hasattr(last_message_obj, "content"):
+                                    last_msg = last_message_obj.content
+                                else:
+                                    last_msg = str(last_message_obj)
+
+                            if not last_msg and result.get("error"):
+                                last_msg = f"System Error: {result['error']}"
+
+                            # Capture update payload for retry closure
+                            update_payload = {
+                                "interaction_id": interaction_id,
+                                "tenant_id": tenant_id,
+                                "generated_sql": result.get("current_sql"),
+                                "response_payload": json.dumps(
+                                    {"text": last_msg, "error": result.get("error")}
+                                ),
+                                "execution_status": status,
+                                "error_type": result.get("error_category"),
+                                "tables_used": result.get("table_names", []),
+                            }
+
+                            async def _update_interaction():
+                                return await update_tool.ainvoke(update_payload, config=config)
+
+                            if telemetry.get_current_span():
+                                telemetry.get_current_span().add_event(
+                                    "persistence.update.start", {"interaction_id": interaction_id}
+                                )
+
+                            persistence_timeout_ms = get_env_int(
+                                "AGENT_INTERACTION_PERSISTENCE_TIMEOUT_MS", 500
+                            )
+                            persistence_fail_open = get_env_bool(
+                                "AGENT_INTERACTION_PERSISTENCE_FAIL_OPEN", True
+                            )
+
+                            try:
+                                await asyncio.wait_for(
+                                    retry_with_backoff(
+                                        _update_interaction,
+                                        "update_interaction",
+                                        extra_context={
+                                            "trace_id": thread_id,
+                                            "interaction_id": interaction_id,
+                                        },
+                                    ),
+                                    timeout=persistence_timeout_ms / 1000.0,
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning(
+                                    "Interaction update timed out after %dms",
+                                    persistence_timeout_ms,
+                                )
+                                telemetry.add_event(
+                                    "interaction.persistence_timeout",
+                                    attributes={
+                                        "stage": "update",
+                                        "timeout_ms": persistence_timeout_ms,
+                                    },
+                                )
+                                if not persistence_fail_open:
+                                    raise
+
+                            if telemetry.get_current_span():
+                                telemetry.get_current_span().add_event(
+                                    "persistence.update.success", {"interaction_id": interaction_id}
+                                )
+                        except Exception as e:
+                            if telemetry.get_current_span():
+                                telemetry.get_current_span().add_event(
+                                    "persistence.update.failure",
+                                    {"interaction_id": interaction_id, "exception": str(e)},
+                                )
+                                telemetry.get_current_span().add_event(
+                                    "interaction.persist_failed",
+                                    {"stage": "update", "exception_type": type(e).__name__},
+                                )
+                            # Structured logging - update failure is observable
+                            logger.error(
+                                "Failed to update interaction after all retries",
+                                extra={
+                                    "operation": "update_interaction",
+                                    "trace_id": thread_id,
+                                    "interaction_id": interaction_id,
+                                    "exception_type": type(e).__name__,
+                                    "exception_message": str(e),
+                                },
+                                exc_info=True,
+                            )
+                            logger.error("Update failed for %s: %s", interaction_id, e)
+
+                            # Mark result as having persistence failure (observable)
+                            result["persistence_failed"] = True
+                            result["persistence_error"] = str(e)
+                            result["interaction_persisted"] = False
+                            if persistence_mode == "strict":
+                                raise RuntimeError(
+                                    f"Interaction update failed (mode=strict): {e}"
+                                ) from e
+                    else:
+                        logger.error("update_interaction tool not found in available tools")
+                        logger.error("update_interaction tool missing!")
+                        result["interaction_persisted"] = False
 
         # Metadata is already handled early and made sticky via telemetry_context
 

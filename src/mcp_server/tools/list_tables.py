@@ -55,7 +55,9 @@ async def handler(tenant_id: int, search_term: Optional[str] = None) -> str:
     envelope = ToolResponseEnvelope(
         result=tables,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(), execution_time_ms=execution_time_ms
+            provider=Database.get_query_target_provider(),
+            execution_time_ms=execution_time_ms,
+            items_returned=len(tables),
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

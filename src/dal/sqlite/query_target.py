@@ -6,6 +6,7 @@ import aiosqlite
 
 from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
@@ -37,7 +38,7 @@ class SqliteQueryTargetDatabase:
         db_path, uri = _resolve_sqlite_path(cls._db_path, read_only)
         conn = await aiosqlite.connect(db_path, uri=uri, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        wrapper = _SqliteConnection(conn, max_rows=cls._max_rows)
+        wrapper = _SqliteConnection(conn, max_rows=cls._max_rows, read_only=read_only)
         try:
             yield wrapper
         finally:
@@ -47,9 +48,10 @@ class SqliteQueryTargetDatabase:
 class _SqliteConnection:
     """Adapter providing asyncpg-like helpers over aiosqlite."""
 
-    def __init__(self, conn: aiosqlite.Connection, max_rows: int) -> None:
+    def __init__(self, conn: aiosqlite.Connection, max_rows: int, read_only: bool = False) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -64,6 +66,7 @@ class _SqliteConnection:
         return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
 
         async def _run():
@@ -79,6 +82,7 @@ class _SqliteConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
 
         async def _run():
@@ -101,6 +105,7 @@ class _SqliteConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
 
         async def _run():

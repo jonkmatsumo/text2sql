@@ -6,6 +6,7 @@ import aiomysql
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
 from dal.mysql.quoting import translate_double_quotes_to_backticks
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
@@ -85,16 +86,17 @@ class MysqlQueryTargetDatabase:
             if read_only:
                 async with conn.cursor() as cursor:
                     await cursor.execute("SET TRANSACTION READ ONLY")
-            wrapper = _MysqlConnection(conn, max_rows=cls._max_rows)
+            wrapper = _MysqlConnection(conn, max_rows=cls._max_rows, read_only=read_only)
             yield wrapper
 
 
 class _MysqlConnection:
     """Adapter providing asyncpg-like helpers over aiomysql."""
 
-    def __init__(self, conn: aiomysql.Connection, max_rows: int) -> None:
+    def __init__(self, conn: aiomysql.Connection, max_rows: int, read_only: bool = False) -> None:
         self._conn = conn
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -109,6 +111,7 @@ class _MysqlConnection:
         return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
 
@@ -126,6 +129,7 @@ class _MysqlConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
 
@@ -148,6 +152,7 @@ class _MysqlConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
 
@@ -172,6 +177,7 @@ class _MysqlConnection:
         )
 
     async def fetchrow(self, sql: str, *params: Any) -> Optional[Dict[str, Any]]:
+        enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
 

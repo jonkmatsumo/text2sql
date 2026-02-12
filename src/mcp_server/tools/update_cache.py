@@ -57,7 +57,7 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
             result={"success": False, "error": {"code": error_code}},
             error=build_error_metadata(
                 message="Failed to update semantic cache.",
-                category="cache_update_failed",
+                category="internal",
                 provider="cache_service",
                 retryable=False,
                 code=error_code,

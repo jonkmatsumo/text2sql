@@ -45,6 +45,7 @@ class BigQueryQueryTargetDatabase:
             location=cls._config.location,
             timeout_seconds=cls._config.query_timeout_seconds,
             max_rows=cls._config.max_rows,
+            read_only=read_only,
         )
         wrapper = _BigQueryConnection(
             executor=executor,

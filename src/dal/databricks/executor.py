@@ -21,6 +21,7 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
         schema: str,
         timeout_seconds: int,
         max_rows: int,
+        read_only: bool = False,
     ) -> None:
         """Initialize executor with Databricks SQL Warehouse settings."""
         self._host = host.rstrip("/")
@@ -30,9 +31,13 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
         self._schema = schema
         self._timeout_seconds = timeout_seconds
         self._max_rows = max_rows
+        self._read_only = read_only
 
     async def submit(self, sql: str, params: Optional[list] = None) -> str:
         """Submit a query for asynchronous execution."""
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="databricks", read_only=self._read_only)
         payload = {
             "statement": sql,
             "warehouse_id": self._warehouse_id,

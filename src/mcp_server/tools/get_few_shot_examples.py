@@ -37,4 +37,11 @@ async def handler(query: str, tenant_id: int, limit: int = 3) -> str:
 
     if err := validate_limit(limit, TOOL_NAME):
         return err
-    return await get_relevant_examples(query, tenant_id=tenant_id, limit=limit)
+    from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+
+    examples = await get_relevant_examples(query, tenant_id=tenant_id, limit=limit)
+
+    return GenericToolResponseEnvelope(
+        result=examples,
+        metadata=GenericToolMetadata(provider="registry"),
+    ).model_dump_json()

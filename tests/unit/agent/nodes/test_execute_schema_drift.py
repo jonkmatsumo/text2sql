@@ -59,7 +59,7 @@ async def test_drift_detected_postgres(base_state, mock_executor_tool, monkeypat
     # Simulate Postgres error
     mock_executor_tool.ainvoke.return_value = {
         "error": 'relation "users" does not exist',
-        "error_category": "query_error",
+        "error_category": "invalid_request",
         "provider": "postgres",
     }
 
@@ -90,7 +90,7 @@ async def test_drift_detected_bigquery(base_state, mock_executor_tool, monkeypat
     # Simulate BigQuery error
     mock_executor_tool.ainvoke.return_value = {
         "error": "Not found: Table my-project:dataset.table",
-        "error_category": "query_error",
+        "error_category": "invalid_request",
     }
 
     result = await validate_and_execute_node(base_state)

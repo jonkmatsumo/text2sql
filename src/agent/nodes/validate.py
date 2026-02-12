@@ -201,6 +201,9 @@ def _resolve_column_allowlist(state: AgentState) -> Dict[str, Set[str]]:
 def _append_bounded_event(state: AgentState, key: str, event: dict) -> tuple[list[dict], bool, int]:
     max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
     max_events = max(1, int(max_events))
+    # Character limit for the entire list of dicts serialized
+    max_chars = get_env_int("AGENT_RETRY_SUMMARY_MAX_CHARS", 10000) or 10000
+
     truncated_key = f"{key}_truncated"
     dropped_key = f"{key}_dropped"
     existing_truncated = bool(state.get(truncated_key))
@@ -212,10 +215,31 @@ def _append_bounded_event(state: AgentState, key: str, event: dict) -> tuple[lis
     if not isinstance(events, list):
         events = []
     events = [entry for entry in events if isinstance(entry, dict)]
+
+    # 1. Append new event
     events.append(event)
-    dropped_now = max(0, len(events) - max_events)
-    if dropped_now:
+
+    # 2. Bound by item count (FIFO)
+    dropped_now = 0
+    if len(events) > max_events:
+        dropped_now = len(events) - max_events
         events = events[dropped_now:]
+
+    # 3. Bound by character count (FIFO)
+    # Estimate size by JSON serialization
+    import json
+
+    def _estimate_size(evs):
+        return len(json.dumps(evs))
+
+    while events and _estimate_size(events) > max_chars:
+        if len(events) == 1:
+            events = []
+            dropped_now += 1
+            break
+        events.pop(0)
+        dropped_now += 1
+
     total_dropped = existing_dropped + dropped_now
     return events, (existing_truncated or dropped_now > 0), total_dropped
 

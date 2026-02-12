@@ -8,6 +8,7 @@ from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output, unwrap_envelope
+from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 from common.config.env import get_env_bool
 from common.observability.metrics import agent_metrics
 
@@ -85,8 +86,15 @@ async def cache_lookup_node(state: AgentState) -> dict:
             logger.warning("lookup_cache tool not found")
             span.set_attribute("lookup_mode", "error")
             span.set_attribute("cache.hit", False)
+            span.set_attribute("cache.lookup_failed", True)
+            span.set_attribute("cache.lookup_failure_reason", "tool_missing")
             _record_cache_outcome("error")
-            return {"cached_sql": None, "from_cache": False}
+            return {
+                "cached_sql": None,
+                "from_cache": False,
+                "cache_lookup_failed": True,
+                "cache_lookup_failure_reason": "tool_missing",
+            }
 
         try:
             tenant_id = state.get("tenant_id")
@@ -98,30 +106,71 @@ async def cache_lookup_node(state: AgentState) -> dict:
             if not cache_data:
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
+                span.set_attribute("cache.lookup_failed", False)
                 span.set_outputs({"hit": False})
                 _record_cache_outcome("miss")
-                return {"cached_sql": None, "from_cache": False}
+                return {
+                    "cached_sql": None,
+                    "from_cache": False,
+                    "cache_lookup_failed": False,
+                    "cache_lookup_failure_reason": None,
+                }
 
             if isinstance(cache_data, list) and len(cache_data) > 0:
                 cache_data = cache_data[0]
 
-            # Unwrap GenericToolResponseEnvelope if present
+            if isinstance(cache_data, dict) and cache_data.get("error"):
+                error_obj = cache_data.get("error")
+                error_category = (
+                    error_obj.get("category", "tool_response_malformed")
+                    if isinstance(error_obj, dict)
+                    else "tool_response_malformed"
+                )
+                span.set_attribute("cache.lookup_failed", True)
+                span.set_attribute("cache.lookup_failure_reason", "tool_error_payload")
+                span.set_attribute("cache.lookup_error_category", str(error_category))
+                span.add_event(
+                    "cache.lookup_failure",
+                    {"reason": "tool_error_payload", "category": str(error_category)},
+                )
+                _record_cache_outcome("error")
+                return {
+                    "cached_sql": None,
+                    "from_cache": False,
+                    "cache_lookup_failed": True,
+                    "cache_lookup_failure_reason": "tool_error_payload",
+                }
+
             # Unwrap GenericToolResponseEnvelope if present
             cache_data = unwrap_envelope(cache_data)
 
             if not isinstance(cache_data, dict):
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
+                span.set_attribute("cache.lookup_failed", True)
+                span.set_attribute("cache.lookup_failure_reason", "malformed_cache_payload")
+                span.add_event("cache.lookup_failure", {"reason": "malformed_cache_payload"})
                 span.set_outputs({"hit": False})
-                _record_cache_outcome("miss")
-                return {"cached_sql": None, "from_cache": False}
+                _record_cache_outcome("error")
+                return {
+                    "cached_sql": None,
+                    "from_cache": False,
+                    "cache_lookup_failed": True,
+                    "cache_lookup_failure_reason": "malformed_cache_payload",
+                }
 
             if not cache_data.get("value"):
                 logger.info("Cache Miss or Rejected Hit")
                 span.set_attribute("cache.hit", False)
+                span.set_attribute("cache.lookup_failed", False)
                 span.set_outputs({"hit": False})
                 _record_cache_outcome("miss")
-                return {"cached_sql": None, "from_cache": False}
+                return {
+                    "cached_sql": None,
+                    "from_cache": False,
+                    "cache_lookup_failed": False,
+                    "cache_lookup_failure_reason": None,
+                }
 
             # Cache Hit!
             cached_sql = cache_data.get("value")
@@ -140,9 +189,11 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 if not cached_snapshot_id:
                     span.set_attribute("cache.snapshot_missing", True)
                 else:
-                    current_snapshot_id = await _get_current_schema_snapshot_id(
-                        tools, user_query, tenant_id
-                    )
+                    current_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+                    if not current_snapshot_id or current_snapshot_id == "unknown":
+                        current_snapshot_id = await _get_current_schema_snapshot_id(
+                            tools, user_query, tenant_id
+                        )
                     span.set_attribute("cache.cached_snapshot_id", cached_snapshot_id)
                     if current_snapshot_id:
                         span.set_attribute("cache.current_snapshot_id", current_snapshot_id)
@@ -163,12 +214,30 @@ async def cache_lookup_node(state: AgentState) -> dict:
                                 "from_cache": False,
                                 "cache_metadata": cache_metadata,
                                 "cache_similarity": similarity,
+                                "cache_lookup_failed": False,
+                                "cache_lookup_failure_reason": None,
                                 "rejected_cache_context": {
                                     "sql": cached_sql,
                                     "original_query": user_query,
                                     "reason": "schema_snapshot_mismatch",
                                 },
                             }
+                    else:
+                        span.set_attribute("cache.lookup_failed", True)
+                        span.set_attribute(
+                            "cache.lookup_failure_reason", "snapshot_validation_unavailable"
+                        )
+                        span.add_event(
+                            "cache.lookup_failure",
+                            {"reason": "snapshot_validation_unavailable"},
+                        )
+                        _record_cache_outcome("error")
+                        return {
+                            "cached_sql": None,
+                            "from_cache": False,
+                            "cache_lookup_failed": True,
+                            "cache_lookup_failure_reason": "snapshot_validation_unavailable",
+                        }
 
             logger.info(f"✓ Cache hit validated by MCP. ID: {cache_id}, Sim: {similarity:.4f}")
             span.set_outputs({"hit": True, "sql": cached_sql})
@@ -179,6 +248,8 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 "cached_sql": cached_sql,
                 "cache_metadata": cache_metadata,
                 "cache_similarity": similarity,
+                "cache_lookup_failed": False,
+                "cache_lookup_failure_reason": None,
             }
 
         except Exception as e:
@@ -190,8 +261,19 @@ async def cache_lookup_node(state: AgentState) -> dict:
             span.set_attribute("error", str(e))
             span.set_attribute("error.type", type(e).__name__)
             span.set_attribute("cache.hit", False)
+            span.set_attribute("cache.lookup_failed", True)
+            span.set_attribute("cache.lookup_failure_reason", "exception")
+            span.add_event(
+                "cache.lookup_failure",
+                {"reason": "exception", "error_type": type(e).__name__},
+            )
             _record_cache_outcome("error")
-            return {"cached_sql": None, "from_cache": False}
+            return {
+                "cached_sql": None,
+                "from_cache": False,
+                "cache_lookup_failed": True,
+                "cache_lookup_failure_reason": "exception",
+            }
 
 
 def reset_cache_state() -> None:

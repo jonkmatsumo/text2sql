@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+
+
+class ErrorCategory(str, Enum):
+    """Canonical error categories."""
+
+    AUTH = "auth"
+    INVALID_REQUEST = "invalid_request"
+    UNSUPPORTED_CAPABILITY = "unsupported_capability"
+    TIMEOUT = "timeout"
+    SCHEMA_DRIFT = "schema_drift"
+    INTERNAL = "internal"
+    CONNECTIVITY = "connectivity"
+    SYNTAX = "syntax"
+    DEADLOCK = "deadlock"
+    SERIALIZATION = "serialization"
+    THROTTLING = "throttling"
+    RESOURCE_EXHAUSTED = "resource_exhausted"
+    TRANSIENT = "transient"
+    UNKNOWN = "unknown"
+
+    # MCP / Extension categories
+    DEPENDENCY_FAILURE = "dependency_failure"
+    UNAUTHORIZED = "unauthorized"
+    TOOL_VERSION_INVALID = "tool_version_invalid"
+    TOOL_VERSION_UNSUPPORTED = "tool_version_unsupported"
+    TOOL_RESPONSE_MALFORMED = "tool_response_malformed"
 
 
 class ToolError(BaseModel):
@@ -18,7 +45,7 @@ class ToolError(BaseModel):
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
-    category: str = Field(..., description="Provider-agnostic error category")
+    category: ErrorCategory = Field(..., description="Provider-agnostic error category")
     code: Optional[str] = Field(None, description="Stable machine-readable error code")
     message: str = Field(
         ..., max_length=2048, description="Safe user-facing error message (redacted/bounded)"

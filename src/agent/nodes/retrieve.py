@@ -9,6 +9,10 @@ from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.graph_formatter import format_graph_to_markdown
+from agent.utils.schema_snapshot import (
+    build_schema_snapshot_transition,
+    resolve_pinned_schema_snapshot_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +68,8 @@ async def retrieve_context_node(state: AgentState) -> dict:
         table_names = []
         graph_data = {}
 
-        existing_snapshot_id = state.get("schema_snapshot_id")
+        existing_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+        has_explicit_pinned_snapshot = bool(state.get("pinned_schema_snapshot_id"))
         existing_schema_fingerprint = state.get("schema_fingerprint")
         existing_schema_version_ts = state.get("schema_version_ts")
 
@@ -75,7 +80,7 @@ async def retrieve_context_node(state: AgentState) -> dict:
             if subgraph_tool:
                 # Execute subgraph retrieval with grounded query
                 payload = {"query": grounded_query}
-                if existing_snapshot_id:
+                if existing_snapshot_id and existing_snapshot_id != "unknown":
                     payload["snapshot_id"] = existing_snapshot_id
 
                 subgraph_json = await subgraph_tool.ainvoke(payload)
@@ -191,15 +196,32 @@ async def retrieve_context_node(state: AgentState) -> dict:
             # Trigger one-time refresh by clearing context and returning flag
             # (In LangGraph, the router or retrieve node itself can handle this)
             logger.warning("Schema drift detected. Triggering refresh.")
-            return {
+            transition = build_schema_snapshot_transition(
+                existing_snapshot_id,
+                new_snapshot_id,
+                reason="drift_detected",
+            )
+
+            # Keep run-scoped pinned snapshot stable until an explicit refresh node applies
+            # the candidate snapshot. For non-run-scoped callers (legacy), preserve behavior.
+            refresh_state = {
                 "schema_refresh_count": refresh_count + 1,
-                "schema_snapshot_id": new_snapshot_id,
                 "schema_fingerprint": new_schema_fingerprint,
                 "schema_version_ts": new_schema_version_ts,
+                "pending_schema_snapshot_id": new_snapshot_id,
+                "pending_schema_fingerprint": new_schema_fingerprint,
+                "pending_schema_version_ts": new_schema_version_ts,
+                "schema_snapshot_transition": transition,
                 "schema_drift_suspected": True,
                 "error": "Schema drift detected",  # Triggers retry logic
                 **_latency_payload(),
             }
+            if has_explicit_pinned_snapshot:
+                refresh_state["schema_snapshot_id"] = existing_snapshot_id
+                refresh_state["pinned_schema_snapshot_id"] = existing_snapshot_id
+            else:
+                refresh_state["schema_snapshot_id"] = new_snapshot_id
+            return refresh_state
 
         pinned_snapshot_id = (
             existing_snapshot_id
@@ -229,7 +251,11 @@ async def retrieve_context_node(state: AgentState) -> dict:
             "raw_schema_context": raw_nodes,
             "table_names": table_names,
             "schema_snapshot_id": pinned_snapshot_id,
+            "pinned_schema_snapshot_id": pinned_snapshot_id,
             "schema_fingerprint": pinned_schema_fingerprint,
             "schema_version_ts": pinned_schema_version_ts,
+            "pending_schema_snapshot_id": None,
+            "pending_schema_fingerprint": None,
+            "pending_schema_version_ts": None,
             **_latency_payload(),
         }

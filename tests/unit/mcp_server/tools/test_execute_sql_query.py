@@ -27,6 +27,12 @@ class TestExecuteSqlQuery:
         )
         Database._query_target_provider = "postgres"
 
+    @pytest.fixture(autouse=True)
+    def mock_policy_enforcer(self):
+        """Mock PolicyEnforcer to bypass validation."""
+        with patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"):
+            yield
+
     def test_tool_name_no_suffix(self):
         """Verify TOOL_NAME does not end with '_tool'."""
         assert not TOOL_NAME.endswith("_tool")
@@ -53,7 +59,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT COUNT(*) as count FROM film", tenant_id=1)
 
             mock_get.assert_called_once()
@@ -77,7 +86,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler(
                 "SELECT COUNT(*) as count, NOW() as created_at FROM film",
                 tenant_id=1,
@@ -120,7 +132,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT * FROM film WHERE film_id = -1", tenant_id=1)
 
             data = json.loads(result)
@@ -138,7 +153,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT * FROM film", tenant_id=1)
 
             data = json.loads(result)
@@ -220,7 +238,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT * FROM nonexistent", tenant_id=1)
 
             data = json.loads(result)
@@ -236,7 +257,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT * FROM film", tenant_id=1)
 
             data = json.loads(result)
@@ -253,7 +277,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT * FROM film WHERE film_id = $1", tenant_id=1, params=[1])
 
             mock_conn.fetch.assert_called_once_with("SELECT * FROM film WHERE film_id = $1", 1)
@@ -274,7 +301,10 @@ class TestExecuteSqlQuery:
         mock_conn.__aexit__ = AsyncMock(return_value=False)
         mock_get = MagicMock(return_value=mock_conn)
 
-        with patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get):
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler(
                 "SELECT * FROM film",
                 tenant_id=1,
@@ -287,7 +317,10 @@ class TestExecuteSqlQuery:
     @pytest.mark.asyncio
     async def test_execute_sql_query_max_length_exceeded(self):
         """Test rejecting a query that exceeds MCP_MAX_SQL_LENGTH."""
-        with patch("mcp_server.tools.execute_sql_query.get_env_int", return_value=10):
+        with (
+            patch("mcp_server.tools.execute_sql_query.get_env_int", return_value=10),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
             result = await handler("SELECT 1234567890", tenant_id=1)
 
             data = json.loads(result)
@@ -297,7 +330,8 @@ class TestExecuteSqlQuery:
     @pytest.mark.asyncio
     async def test_execute_sql_query_blocked_function(self):
         """Test rejecting blocked functions like pg_sleep."""
-        result = await handler("SELECT pg_sleep(5)", tenant_id=1)
+        with patch("mcp_server.utils.auth.validate_role", return_value=None):
+            result = await handler("SELECT pg_sleep(5)", tenant_id=1)
 
         data = json.loads(result)
         assert data["error"]["category"] == "invalid_request"
@@ -322,8 +356,11 @@ class TestExecuteSqlQuery:
         Database._query_target_provider = provider
         mock_get_connection = MagicMock()
 
-        with patch(
-            "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+        with (
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
         ):
             result = await handler(sql_query, tenant_id=7)
 

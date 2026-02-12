@@ -41,6 +41,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     bytes_returned: Optional[int] = Field(
         None, description="Estimated size of the payload in bytes"
     )
+    truncation_reason: Optional[str] = Field(
+        None, description="Standardized truncation reason alias for partial_reason"
+    )
 
     # Capability negotiation fields
     capability_required: Optional[str] = None
@@ -85,6 +88,17 @@ class ExecuteSQLQueryMetadata(BaseModel):
         if normalized.get("next_cursor") is None and normalized.get("next_page_token") is not None:
             normalized["next_cursor"] = normalized["next_page_token"]
 
+        if (
+            normalized.get("partial_reason") is None
+            and normalized.get("truncation_reason") is not None
+        ):
+            normalized["partial_reason"] = normalized["truncation_reason"]
+        if (
+            normalized.get("truncation_reason") is None
+            and normalized.get("partial_reason") is not None
+        ):
+            normalized["truncation_reason"] = normalized["partial_reason"]
+
         return normalized
 
     @model_validator(mode="after")
@@ -100,6 +114,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.next_cursor = self.next_page_token
         if self.next_page_token is None and self.next_cursor is not None:
             self.next_page_token = self.next_cursor
+        if self.truncation_reason is None and self.partial_reason is not None:
+            self.truncation_reason = self.partial_reason
         return self
 
 
@@ -189,7 +205,7 @@ def parse_execute_sql_response(payload: Any) -> ExecuteSQLQueryResponseEnvelope:
                 return _create_error_envelope(
                     f"Incompatible envelope version: {payload_version} "
                     f"(supported: {CURRENT_SCHEMA_VERSION.split('.')[0]}.x)",
-                    category="invalid_response_version",
+                    category="tool_version_unsupported",
                 )
 
             return envelope
@@ -241,6 +257,7 @@ class GenericToolMetadata(BaseModel):
     items_total: Optional[int] = None
     bytes_returned: Optional[int] = None
     bytes_total: Optional[int] = None
+    snapshot_id: Optional[str] = Field(None, description="Schema snapshot ID for lineage tracking")
 
     @model_validator(mode="before")
     @classmethod

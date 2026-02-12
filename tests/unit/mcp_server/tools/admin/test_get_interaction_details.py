@@ -64,5 +64,5 @@ class TestGetInteractionDetails:
             result = await handler("nonexistent")
 
             data = json.loads(result)
-            assert data["error"]["category"] == "not_found"
+            assert data["error"]["category"] == "invalid_request"
             assert "not found" in data["error"]["message"]

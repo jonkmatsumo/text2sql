@@ -1,6 +1,5 @@
 """Retrieval module for dynamic few-shot learning."""
 
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,9 +30,11 @@ async def get_relevant_examples(
         return ""
 
     # 2. Format results
-    results = [
-        {"question": ex.question, "sql": ex.sql_query, "signature": ex.signature_key[:8]}
-        for ex in examples
-    ]
+    import json
 
-    return json.dumps(results, separators=(",", ":"))
+    return json.dumps(
+        [
+            {"question": ex.question, "sql": ex.sql_query, "signature": ex.signature_key[:8]}
+            for ex in examples
+        ]
+    )

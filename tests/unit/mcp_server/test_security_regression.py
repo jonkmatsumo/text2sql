@@ -16,6 +16,17 @@ class TestSecurityRegression:
     """Tests identifying bypass vectors for the current regex-based security."""
 
     @pytest.fixture(autouse=True)
+    def mock_security_checks(self):
+        """Bypass role and policy checks for these low-level DB tests."""
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None
+            ),
+        ):
+            yield
+
+    @pytest.fixture(autouse=True)
     def mock_capabilities(self):
         """Mock Database capabilities."""
         mock_caps = MagicMock()
