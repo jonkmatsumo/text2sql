@@ -16,6 +16,7 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
         location: Optional[str],
         timeout_seconds: int,
         max_rows: int,
+        read_only: bool = False,
     ) -> None:
         """Initialize executor with project and execution limits."""
         from google.cloud import bigquery
@@ -24,11 +25,15 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
         self._location = location
         self._timeout_seconds = timeout_seconds
         self._max_rows = max_rows
+        self._read_only = read_only
 
     async def submit(self, sql: str, params: Optional[list] = None) -> str:
         """Submit a query for asynchronous execution."""
         from google.cloud import bigquery
 
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="bigquery", read_only=self._read_only)
         job_config = bigquery.QueryJobConfig()
         if params:
             job_config.query_parameters = params

@@ -695,6 +695,7 @@ class Database:
                             provider=cls._query_target_provider,
                             execution_model=cls.get_query_target_capabilities().execution_model,
                             max_rows=sync_max_rows,
+                            read_only=read_only,
                         )
                     else:
                         yield conn
@@ -715,6 +716,7 @@ class Database:
                         provider=cls._query_target_provider,
                         execution_model=cls.get_query_target_capabilities().execution_model,
                         max_rows=sync_max_rows,
+                        read_only=read_only,
                     )
                 else:
                     yield conn

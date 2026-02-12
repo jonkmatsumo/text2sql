@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.duckdb.config import DuckDBConfig
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
@@ -44,6 +45,7 @@ class DuckDBQueryTargetDatabase:
             query_timeout_seconds=cls._config.query_timeout_seconds,
             max_rows=cls._config.max_rows,
             sync_max_rows=sync_max_rows,
+            read_only=db_read_only,
         )
         try:
             yield wrapper
@@ -54,11 +56,19 @@ class DuckDBQueryTargetDatabase:
 class _DuckDBConnection:
     """Adapter providing asyncpg-like helpers over DuckDB."""
 
-    def __init__(self, conn, query_timeout_seconds: int, max_rows: int, sync_max_rows: int) -> None:
+    def __init__(
+        self,
+        conn,
+        query_timeout_seconds: int,
+        max_rows: int,
+        sync_max_rows: int,
+        read_only: bool = False,
+    ) -> None:
         self._conn = conn
         self._query_timeout_seconds = query_timeout_seconds
         self._max_rows = max_rows
         self._sync_max_rows = sync_max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -73,6 +83,8 @@ class _DuckDBConnection:
         return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
+        enforce_read_only_sql(sql, "duckdb", self._read_only)
+
         async def _run():
             await self._run_query(sql, list(params))
             return "OK"
@@ -86,6 +98,8 @@ class _DuckDBConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        enforce_read_only_sql(sql, "duckdb", self._read_only)
+
         async def _run():
             rows = await self._run_query(sql, list(params))
             limit = self._max_rows
@@ -106,6 +120,7 @@ class _DuckDBConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, "duckdb", self._read_only)
 
         async def _run():
             rows, columns = await self._run_query_with_columns(sql, list(params))

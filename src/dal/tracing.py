@@ -3,6 +3,7 @@ import inspect
 from typing import Any, Awaitable, Dict, Optional
 
 from common.config.env import get_env_bool
+from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata
 
 
@@ -46,12 +47,20 @@ async def trace_query_operation(
 class TracedAsyncpgConnection:
     """Proxy for asyncpg connections that emits query tracing spans."""
 
-    def __init__(self, conn: Any, provider: str, execution_model: str, max_rows: int = 0) -> None:
+    def __init__(
+        self,
+        conn: Any,
+        provider: str,
+        execution_model: str,
+        max_rows: int = 0,
+        read_only: bool = False,
+    ) -> None:
         """Initialize the traced connection wrapper."""
         self._conn = conn
         self._provider = provider
         self._execution_model = execution_model
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -67,6 +76,7 @@ class TracedAsyncpgConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         """Execute a statement with tracing when enabled."""
+        enforce_read_only_sql(sql, self._provider, self._read_only)
 
         async def _run():
             return await self._conn.execute(sql, *params)
@@ -81,6 +91,7 @@ class TracedAsyncpgConnection:
 
     async def fetch(self, sql: str, *params: Any) -> list[Dict[str, Any]]:
         """Fetch rows with tracing when enabled."""
+        enforce_read_only_sql(sql, self._provider, self._read_only)
 
         async def _run():
             rows = await self._conn.fetch(sql, *params)
@@ -101,6 +112,7 @@ class TracedAsyncpgConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[list[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        enforce_read_only_sql(sql, self._provider, self._read_only)
 
         async def _run():
             from dal.util.column_metadata import columns_from_asyncpg_attributes
