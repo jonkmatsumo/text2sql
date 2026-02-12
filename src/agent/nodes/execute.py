@@ -14,8 +14,9 @@ from agent.tools import get_mcp_tools
 from agent.utils.pagination_prefetch import (
     PrefetchManager,
     build_prefetch_cache_key,
+    build_query_signature,
     get_prefetch_config,
-    pop_prefetched_page,
+    pop_prefetched_page_validated,
 )
 from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 from agent.validation.policy_enforcer import PolicyEnforcer
@@ -296,6 +297,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
             seed_value = state.get("seed")
             seed = seed_value if isinstance(seed_value, int) else None
+            query_signature = build_query_signature(rewritten_sql)
             existing_completeness = state.get("result_completeness")
             completeness_hint = None
             if isinstance(existing_completeness, dict):
@@ -319,7 +321,22 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         completeness_hint=completeness_hint,
                         scope_id=None,
                     )
-                    prefetched_payload = pop_prefetched_page(prefetched_cache_key)
+                    prefetched_payload, prefetch_discard_reason = pop_prefetched_page_validated(
+                        prefetched_cache_key,
+                        expected_tenant_id=tenant_id,
+                        expected_schema_snapshot_id=pinned_snapshot_id,
+                        expected_query_signature=query_signature,
+                    )
+                    if prefetch_discard_reason is not None:
+                        discard_attrs = {
+                            "reason": str(prefetch_discard_reason),
+                            "prefetch.discarded_due_to_snapshot_mismatch": bool(
+                                prefetch_discard_reason == "snapshot_mismatch"
+                            ),
+                        }
+                        if prefetch_discard_reason == "snapshot_mismatch":
+                            span.set_attribute("prefetch.discarded_due_to_snapshot_mismatch", True)
+                        span.add_event("pagination.prefetch_discarded", discard_attrs)
                     if prefetched_payload is not None:
                         span.add_event(
                             "pagination.prefetch_cache_hit",
@@ -744,6 +761,11 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     prefetcher.schedule(
                                         prefetch_key,
                                         _fetch_prefetched_page,
+                                        cache_context={
+                                            "tenant_id": tenant_id,
+                                            "schema_snapshot_id": pinned_snapshot_id,
+                                            "query_signature": query_signature,
+                                        },
                                     )
                                 )
 

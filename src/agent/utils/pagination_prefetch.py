@@ -23,6 +23,11 @@ _PREFETCH_MAX_OBSERVED = 0
 _PREFETCH_COOLDOWN_UNTIL = 0.0  # time.time()
 
 
+def build_query_signature(sql_query: str) -> str:
+    """Build a stable hash signature for SQL identity checks."""
+    return hashlib.sha256((sql_query or "").encode("utf-8")).hexdigest()
+
+
 def _safe_prefetch_int(name: str, default: int, minimum: int) -> int:
     try:
         parsed = get_env_int(name, default)
@@ -70,8 +75,9 @@ def build_prefetch_cache_key(
         "fallback_mode": get_env_str("AGENT_CAPABILITY_FALLBACK_MODE"),
         "cap_mitigation": get_env_str("AGENT_PROVIDER_CAP_MITIGATION"),
     }
+    query_signature = build_query_signature(sql_query)
     payload = {
-        "sql_query": sql_query,
+        "query_signature": query_signature,
         "tenant_id": tenant_id,
         "page_token": page_token,
         "page_size": page_size,
@@ -87,12 +93,67 @@ def build_prefetch_cache_key(
 
 def pop_prefetched_page(cache_key: str) -> Optional[dict[str, Any]]:
     """Consume a prefetched page if it exists."""
-    return _PREFETCH_CACHE.pop(cache_key, None)
+    entry = _PREFETCH_CACHE.pop(cache_key, None)
+    if isinstance(entry, dict) and "payload" in entry:
+        payload = entry.get("payload")
+        return payload if isinstance(payload, dict) else None
+    return entry if isinstance(entry, dict) else None
 
 
-def cache_prefetched_page(cache_key: str, payload: dict[str, Any]) -> None:
+def pop_prefetched_page_validated(
+    cache_key: str,
+    *,
+    expected_tenant_id: Optional[int],
+    expected_schema_snapshot_id: Optional[str],
+    expected_query_signature: str,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Consume a prefetched page and validate run-scoped context.
+
+    Returns:
+        (payload, discard_reason)
+    """
+    entry = _PREFETCH_CACHE.pop(cache_key, None)
+    if entry is None:
+        return None, None
+
+    if isinstance(entry, dict) and "payload" in entry:
+        payload = entry.get("payload")
+        cached_tenant_id = entry.get("tenant_id")
+        cached_schema_snapshot_id = entry.get("schema_snapshot_id")
+        cached_query_signature = entry.get("query_signature")
+    elif isinstance(entry, dict):
+        payload = entry
+        cached_tenant_id = None
+        cached_schema_snapshot_id = None
+        cached_query_signature = None
+    else:
+        return None, "malformed_entry"
+
+    if cached_tenant_id != expected_tenant_id:
+        return None, "tenant_mismatch"
+    if cached_schema_snapshot_id != expected_schema_snapshot_id:
+        return None, "snapshot_mismatch"
+    if cached_query_signature != expected_query_signature:
+        return None, "query_signature_mismatch"
+
+    return payload if isinstance(payload, dict) else None, None
+
+
+def cache_prefetched_page(
+    cache_key: str,
+    payload: dict[str, Any],
+    *,
+    tenant_id: Optional[int] = None,
+    schema_snapshot_id: Optional[str] = None,
+    query_signature: Optional[str] = None,
+) -> None:
     """Cache a prefetched page payload with bounded memory usage."""
-    _PREFETCH_CACHE[cache_key] = payload
+    _PREFETCH_CACHE[cache_key] = {
+        "payload": payload,
+        "tenant_id": tenant_id,
+        "schema_snapshot_id": schema_snapshot_id,
+        "query_signature": query_signature,
+    }
     _PREFETCH_CACHE.move_to_end(cache_key)
     while len(_PREFETCH_CACHE) > _PREFETCH_CACHE_MAX_ENTRIES:
         _PREFETCH_CACHE.popitem(last=False)
@@ -120,7 +181,13 @@ class PrefetchManager:
             await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
         self._inflight_keys.clear()
 
-    def schedule(self, cache_key: str, fetch_fn: PrefetchFetchFn) -> tuple[bool, str]:
+    def schedule(
+        self,
+        cache_key: str,
+        fetch_fn: PrefetchFetchFn,
+        *,
+        cache_context: Optional[dict[str, Any]] = None,
+    ) -> tuple[bool, str]:
         """Schedule a prefetch task.
 
         Returns:
@@ -162,10 +229,16 @@ class PrefetchManager:
 
         ctx = telemetry.capture_context()
 
-        self._task_group.create_task(self._run_task(cache_key, fetch_fn, ctx))
+        self._task_group.create_task(self._run_task(cache_key, fetch_fn, ctx, cache_context))
         return True, PrefetchSuppressionReason.SCHEDULED.value
 
-    async def _run_task(self, cache_key: str, fetch_fn: PrefetchFetchFn, ctx: Any):
+    async def _run_task(
+        self,
+        cache_key: str,
+        fetch_fn: PrefetchFetchFn,
+        ctx: Any,
+        cache_context: Optional[dict[str, Any]],
+    ):
         global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
         global _PREFETCH_WAITING_COUNT, _PREFETCH_COOLDOWN_UNTIL
         import time
@@ -206,7 +279,14 @@ class PrefetchManager:
                             _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
 
                 if payload is not None:
-                    cache_prefetched_page(cache_key, payload)
+                    context = cache_context or {}
+                    cache_prefetched_page(
+                        cache_key,
+                        payload,
+                        tenant_id=context.get("tenant_id"),
+                        schema_snapshot_id=context.get("schema_snapshot_id"),
+                        query_signature=context.get("query_signature"),
+                    )
 
             except Exception as e:
                 logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
