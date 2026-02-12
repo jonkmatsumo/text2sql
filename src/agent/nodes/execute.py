@@ -17,6 +17,7 @@ from agent.utils.pagination_prefetch import (
     get_prefetch_config,
     pop_prefetched_page,
 )
+from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 from agent.validation.policy_enforcer import PolicyEnforcer
 from agent.validation.tenant_rewriter import TenantRewriter
 from common.config.env import get_env_bool, get_env_int, get_env_str
@@ -111,6 +112,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         span.set_attribute("error.category", "unknown")
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")
+        pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
 
         span.set_inputs(
             {
@@ -312,7 +314,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         tenant_id=tenant_id,
                         page_token=str(page_token),
                         page_size=execute_payload.get("page_size"),
-                        schema_snapshot_id=state.get("schema_snapshot_id"),
+                        schema_snapshot_id=pinned_snapshot_id,
                         seed=seed,
                         completeness_hint=completeness_hint,
                         scope_id=None,
@@ -404,7 +406,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     return {
                         "schema_drift_suspected": True,
                         "missing_identifiers": identifiers,
-                        "schema_snapshot_id": state.get("schema_snapshot_id"),
+                        "schema_snapshot_id": pinned_snapshot_id,
+                        "pinned_schema_snapshot_id": pinned_snapshot_id,
                         "schema_drift_auto_refresh": auto_refresh,
                     }
 
@@ -710,7 +713,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                     tenant_id=tenant_id,
                                     page_token=next_page_token_for_prefetch,
                                     page_size=int(prefetch_page_size),
-                                    schema_snapshot_id=state.get("schema_snapshot_id"),
+                                    schema_snapshot_id=pinned_snapshot_id,
                                     seed=seed,
                                     completeness_hint=result_partial_reason,
                                 )
@@ -835,7 +838,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                                         "query": user_query,
                                         "sql": original_sql,
                                         "tenant_id": tenant_id,
-                                        "schema_snapshot_id": state.get("schema_snapshot_id"),
+                                        "schema_snapshot_id": pinned_snapshot_id,
                                     }
                                 )
                     except Exception:

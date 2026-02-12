@@ -78,6 +78,12 @@ class AgentState(TypedDict):
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]
+    pinned_schema_snapshot_id: Optional[str]
+    pending_schema_snapshot_id: Optional[str]
+    pending_schema_fingerprint: Optional[str]
+    pending_schema_version_ts: Optional[int]
+    schema_snapshot_transition: Optional[dict]
+    schema_snapshot_refresh_applied: Optional[int]
     schema_fingerprint: Optional[str]
     schema_version_ts: Optional[int]
 

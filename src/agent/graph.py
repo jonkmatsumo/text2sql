@@ -31,6 +31,10 @@ from agent.runtime_metrics import (
 from agent.state import AgentState
 from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
+from agent.utils.schema_snapshot import (
+    apply_pending_schema_snapshot_refresh,
+    resolve_pinned_schema_snapshot_id,
+)
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
 from common.observability.metrics import agent_metrics
@@ -85,9 +89,18 @@ async def schema_refresh_node(state: AgentState) -> dict:
         name="schema_refresh",
         span_type=SpanType.AGENT_NODE,
     ) as span:
+        from agent.tools import get_mcp_tools
+        from agent.utils.parsing import parse_tool_output, unwrap_envelope
+        from agent.utils.schema_fingerprint import (
+            fingerprint_schema_nodes,
+            resolve_schema_snapshot_id,
+        )
+
         refresh_count = state.get("schema_refresh_count", 0)
         span.set_attribute("schema.drift.auto_refresh_attempted", True)
         span.set_attribute("schema.drift.refresh_count", refresh_count + 1)
+        prior_pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+        span.set_attribute("schema.old_snapshot_id", prior_pinned_snapshot_id)
 
         # Invalidate cache for missing identifiers
         from common.config.env import get_env_str
@@ -106,11 +119,73 @@ async def schema_refresh_node(state: AgentState) -> dict:
                 # Fallback: invalidate table in default schema
                 SCHEMA_CACHE.invalidate(provider=provider, table=identifier)
 
+        candidate_snapshot_id = state.get("pending_schema_snapshot_id")
+        candidate_fingerprint = state.get("pending_schema_fingerprint")
+        candidate_version_ts = state.get("pending_schema_version_ts")
+        if not candidate_snapshot_id:
+            active_query = state.get("active_query")
+            if not active_query:
+                messages = state.get("messages") or []
+                if messages:
+                    active_query = getattr(messages[-1], "content", None)
+
+            if active_query:
+                try:
+                    tools = await get_mcp_tools()
+                    subgraph_tool = next(
+                        (
+                            tool
+                            for tool in tools
+                            if getattr(tool, "name", None) == "get_semantic_subgraph"
+                        ),
+                        None,
+                    )
+                    if subgraph_tool is not None:
+                        payload = {"query": active_query}
+                        tenant_id = state.get("tenant_id")
+                        if tenant_id is not None:
+                            payload["tenant_id"] = tenant_id
+
+                        raw_subgraph = await subgraph_tool.ainvoke(payload)
+                        parsed = parse_tool_output(raw_subgraph)
+                        if isinstance(parsed, list) and parsed:
+                            parsed = parsed[0]
+                        parsed = unwrap_envelope(parsed)
+                        nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
+                        resolved_snapshot_id = resolve_schema_snapshot_id(nodes)
+                        if resolved_snapshot_id and resolved_snapshot_id != "unknown":
+                            candidate_snapshot_id = resolved_snapshot_id
+                            candidate_fingerprint = (
+                                fingerprint_schema_nodes(nodes) if nodes else None
+                            )
+                            candidate_version_ts = (
+                                int(time.time()) if candidate_fingerprint else candidate_version_ts
+                            )
+                except Exception:
+                    logger.warning(
+                        "Schema refresh could not resolve updated snapshot id",
+                        exc_info=True,
+                    )
+
+        refresh_state = apply_pending_schema_snapshot_refresh(
+            state,
+            candidate_snapshot_id=candidate_snapshot_id,
+            candidate_fingerprint=candidate_fingerprint,
+            candidate_version_ts=candidate_version_ts,
+            reason="schema_refresh",
+        )
+        span.set_attribute("schema.new_snapshot_id", refresh_state["schema_snapshot_id"])
+        span.set_attribute(
+            "schema.refresh_applied",
+            refresh_state["schema_snapshot_id"] != prior_pinned_snapshot_id,
+        )
+
         return {
             "schema_refresh_count": refresh_count + 1,
             "error": None,  # Clear error to allow re-entry into the flow
             "schema_drift_suspected": False,
             "retry_count": state.get("retry_count", 0),  # Preserve retry count
+            **refresh_state,
         }
 
 
@@ -776,6 +851,12 @@ async def run_agent_with_tracing(
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
+            "pinned_schema_snapshot_id": schema_snapshot_id,
+            "pending_schema_snapshot_id": None,
+            "pending_schema_fingerprint": None,
+            "pending_schema_version_ts": None,
+            "schema_snapshot_transition": None,
+            "schema_snapshot_refresh_applied": 0,
             "schema_fingerprint": None,
             "schema_version_ts": None,
             "deadline_ts": deadline_ts,
@@ -859,6 +940,8 @@ async def run_agent_with_tracing(
                         )
                 schema_snapshot_id = schema_snapshot_id or "unknown"
                 inputs["schema_snapshot_id"] = schema_snapshot_id
+            inputs["pinned_schema_snapshot_id"] = schema_snapshot_id
+            telemetry.update_current_trace({"schema_snapshot_id": schema_snapshot_id})
 
             # 1. Start Interaction Logging (Pre-execution) with retry
             interaction_id = None

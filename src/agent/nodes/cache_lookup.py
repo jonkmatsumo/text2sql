@@ -8,6 +8,7 @@ from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output, unwrap_envelope
+from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 from common.config.env import get_env_bool
 from common.observability.metrics import agent_metrics
 
@@ -140,9 +141,11 @@ async def cache_lookup_node(state: AgentState) -> dict:
                 if not cached_snapshot_id:
                     span.set_attribute("cache.snapshot_missing", True)
                 else:
-                    current_snapshot_id = await _get_current_schema_snapshot_id(
-                        tools, user_query, tenant_id
-                    )
+                    current_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+                    if not current_snapshot_id or current_snapshot_id == "unknown":
+                        current_snapshot_id = await _get_current_schema_snapshot_id(
+                            tools, user_query, tenant_id
+                        )
                     span.set_attribute("cache.cached_snapshot_id", cached_snapshot_id)
                     if current_snapshot_id:
                         span.set_attribute("cache.current_snapshot_id", current_snapshot_id)

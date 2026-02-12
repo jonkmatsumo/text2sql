@@ -82,6 +82,10 @@ def build_replay_bundle(
     request_payload: dict[str, Any],
 ) -> ReplayBundle:
     """Build a validated replay bundle from runtime state."""
+    from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
+
+    pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+
     response_text = None
     if state.get("messages"):
         last_message = state["messages"][-1]
@@ -159,8 +163,8 @@ def build_replay_bundle(
         ),
         prompt_hash=canonical_json_hash(PROMPT_VERSION),
         schema_context={
-            "schema_snapshot_id": state.get("schema_snapshot_id"),
-            "fingerprint": state.get("schema_snapshot_id"),
+            "schema_snapshot_id": pinned_snapshot_id,
+            "fingerprint": pinned_snapshot_id,
         },
         flags=collect_replay_flags(),
         tool_io=tool_io,
