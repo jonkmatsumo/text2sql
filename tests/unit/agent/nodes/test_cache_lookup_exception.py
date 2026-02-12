@@ -41,6 +41,8 @@ async def test_cache_lookup_swallowed_exception(mock_tools, mock_logger):
     # Should not crash
     assert result["from_cache"] is False
     assert result["cached_sql"] is None
+    assert result["cache_lookup_failed"] is True
+    assert result["cache_lookup_failure_reason"] == "exception"
 
     # Verify structured logging
     mock_logger.error.assert_called_once()
@@ -49,3 +51,18 @@ async def test_cache_lookup_swallowed_exception(mock_tools, mock_logger):
     assert "extra" in kwargs
     assert kwargs["extra"]["error_type"] == "RuntimeError"
     assert kwargs["extra"]["error"] == "Boom"
+
+
+async def test_cache_lookup_malformed_payload_sets_failure_signal(mock_tools):
+    """Malformed payloads should be signaled as lookup failures, not plain misses."""
+    state = AgentState(messages=[], tenant_id=1)
+
+    # Return raw non-enveloped text that parse_tool_output forwards as primitive.
+    mock_tools[0].ainvoke.return_value = "not-json"
+
+    result = await cache_lookup_node(state)
+
+    assert result["from_cache"] is False
+    assert result["cached_sql"] is None
+    assert result["cache_lookup_failed"] is True
+    assert result["cache_lookup_failure_reason"] == "malformed_cache_payload"

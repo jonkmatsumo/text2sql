@@ -9,8 +9,9 @@ from agent.nodes.cache_lookup import cache_lookup_node
 
 
 @pytest.mark.asyncio
-async def test_cache_lookup_hit_emits_hit_metric():
+async def test_cache_lookup_hit_emits_hit_metric(monkeypatch):
     """Cache hit path should emit outcome=hit metric."""
+    monkeypatch.setenv("AGENT_CACHE_SCHEMA_VALIDATION", "false")
     tool = AsyncMock()
     tool.name = "lookup_cache"
     tool.ainvoke = AsyncMock(return_value={})
@@ -43,8 +44,9 @@ async def test_cache_lookup_hit_emits_hit_metric():
 
 
 @pytest.mark.asyncio
-async def test_cache_lookup_miss_emits_miss_metric():
+async def test_cache_lookup_miss_emits_miss_metric(monkeypatch):
     """Cache miss path should emit outcome=miss metric."""
+    monkeypatch.setenv("AGENT_CACHE_SCHEMA_VALIDATION", "false")
     tool = AsyncMock()
     tool.name = "lookup_cache"
     tool.ainvoke = AsyncMock(return_value={})
