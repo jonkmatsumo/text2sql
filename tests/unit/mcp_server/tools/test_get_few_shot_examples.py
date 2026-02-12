@@ -18,17 +18,24 @@ class TestGetFewShotExamples:
     @pytest.mark.asyncio
     async def test_get_few_shot_examples_returns_examples(self):
         """Test retrieving few shot examples."""
-        mock_result = '[{"query": "show users", "sql": "SELECT * FROM users"}]'
+        import json
+
+        mock_result = [{"query": "show users", "sql": "SELECT * FROM users"}]
 
         with patch(
             "mcp_server.tools.get_few_shot_examples.get_relevant_examples", new_callable=AsyncMock
         ) as mock_svc:
             mock_svc.return_value = mock_result
 
-            result = await handler("show all users", tenant_id=1, limit=3)
+            result_json = await handler("show all users", tenant_id=1, limit=3)
+            result = json.loads(result_json)
 
             mock_svc.assert_called_once_with("show all users", tenant_id=1, limit=3)
-            assert result == mock_result
+
+            assert "schema_version" in result
+            assert "metadata" in result
+            assert result["result"] == mock_result
+            assert result["metadata"]["provider"] == "registry"
 
     @pytest.mark.asyncio
     async def test_get_few_shot_examples_requires_tenant_id(self):
