@@ -58,7 +58,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
             # Differentiate missing vs inaccessible
             error_msg = str(e).lower()
             status = "error"
-            category = "metadata_lookup_failed"
+            category = "internal"
             message = "Failed to retrieve table schema."
             if "not found" in error_msg or "does not exist" in error_msg:
                 status = "TABLE_NOT_FOUND"

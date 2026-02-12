@@ -124,10 +124,13 @@ def register_all(mcp: "FastMCP") -> None:
     from mcp_server.tools.update_cache import handler as update_cache
 
     # Helper for traced registration
+    from mcp_server.utils.contract_enforcement import enforce_tool_response_contract
     from mcp_server.utils.tracing import trace_tool
 
     def register(name, func):
-        mcp.tool(name=name)(trace_tool(name)(func))
+        traced = trace_tool(name)(func)
+        wrapped = enforce_tool_response_contract(name)(traced)
+        mcp.tool(name=name)(wrapped)
 
     # Register core retrieval tools
     register("list_tables", list_tables)
