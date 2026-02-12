@@ -263,6 +263,18 @@ async def handler(
             provider=provider,
         )
 
+    # 3. Policy Enforcement (Table Allowlist & Sensitive Columns)
+    from agent.validation.policy_enforcer import PolicyEnforcer
+
+    try:
+        PolicyEnforcer.validate_sql(sql_query)
+    except ValueError as e:
+        return _construct_error_response(
+            str(e),
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+        )
+
     # 1.5 Parameter Validation
     param_error = _validate_params(params)
     if param_error:
