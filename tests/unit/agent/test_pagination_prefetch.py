@@ -10,6 +10,9 @@ from agent.nodes.execute import validate_and_execute_node
 from agent.state import AgentState
 from agent.utils.pagination_prefetch import (
     PrefetchManager,
+    build_prefetch_cache_key,
+    build_query_signature,
+    cache_prefetched_page,
     prefetch_diagnostics,
     reset_prefetch_state,
 )
@@ -191,6 +194,81 @@ async def test_prefetch_schedules_and_serves_cached_next_page(
     assert mock_tool.ainvoke.call_count == 2
     assert second_result["query_result"] == [{"id": 2}]
     assert second_result["result_completeness"]["prefetch_reason"] == "cache_hit"
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.telemetry.start_span")
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_prefetch_discarded_on_snapshot_mismatch_falls_back_to_live_execution(
+    mock_rewriter, mock_enforcer, mock_get_tools, mock_start_span, schema_fixture, monkeypatch
+):
+    """Stale prefetched results should be discarded when snapshot context mismatches."""
+    mock_span = _mock_span_ctx(mock_start_span)
+    monkeypatch.setenv("AGENT_PREFETCH_NEXT_PAGE", "on")
+    monkeypatch.setenv("AGENT_AUTO_PAGINATION", "off")
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    sql_query = schema_fixture.sample_query
+    tenant_id = 7
+    page_token = "token-2"
+    page_size = 2
+    pinned_snapshot = "snap-new"
+    stale_snapshot = "snap-old"
+
+    prefetch_key = build_prefetch_cache_key(
+        sql_query=sql_query,
+        tenant_id=tenant_id,
+        page_token=page_token,
+        page_size=page_size,
+        schema_snapshot_id=pinned_snapshot,
+        seed=None,
+        completeness_hint=None,
+    )
+    cache_prefetched_page(
+        prefetch_key,
+        json.loads(_enveloped([{"id": 999}], None)),
+        tenant_id=tenant_id,
+        schema_snapshot_id=stale_snapshot,
+        query_signature=build_query_signature(sql_query),
+    )
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    mock_tool.ainvoke = AsyncMock(return_value=_enveloped([{"id": 2}], None))
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql=sql_query,
+        query_result=None,
+        error=None,
+        retry_count=0,
+        tenant_id=tenant_id,
+        page_token=page_token,
+        page_size=page_size,
+        interactive_session=True,
+        schema_snapshot_id=pinned_snapshot,
+        pinned_schema_snapshot_id=pinned_snapshot,
+    )
+
+    result = await validate_and_execute_node(state)
+
+    # Stale prefetch is discarded; execution falls back to live tool call.
+    assert mock_tool.ainvoke.call_count == 1
+    assert result["error"] is None
+    assert result["query_result"] == [{"id": 2}]
+
+    discarded_event = None
+    for call in mock_span.add_event.call_args_list:
+        if call.args and call.args[0] == "pagination.prefetch_discarded":
+            discarded_event = call
+            break
+    assert discarded_event is not None
+    assert discarded_event.args[1].get("prefetch.discarded_due_to_snapshot_mismatch") is True
 
 
 @pytest.mark.asyncio
