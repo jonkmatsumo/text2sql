@@ -6,6 +6,7 @@ import pytest
 
 from agent.nodes.correct import correct_sql_node
 from agent.state import AgentState
+from common.utils.hashing import canonical_json_hash
 
 
 class TestCorrectSqlNode:
@@ -62,6 +63,37 @@ class TestCorrectSqlNode:
         assert result["retry_count"] == 1
         # Verify error reset
         assert result["error"] is None
+
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.correct.ChatPromptTemplate")
+    def test_correct_sql_node_prompt_budget_exceeded(
+        self, mock_prompt_class, mock_llm, monkeypatch
+    ):
+        """Prompt-byte budget should stop correction before invoking the LLM."""
+        monkeypatch.setenv("AGENT_MAX_PROMPT_BYTES_PER_RUN", "200")
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        state = AgentState(
+            messages=[],
+            schema_context=("x" * 5000),
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error='relation "films" does not exist',
+            retry_count=0,
+            llm_prompt_bytes_used=0,
+            llm_budget_exceeded=False,
+        )
+
+        result = correct_sql_node(state)
+
+        mock_chain.invoke.assert_not_called()
+        mock_llm.assert_not_called()
+        assert result["error_category"] == "budget_exhausted"
+        assert result["llm_budget_exceeded"] is True
 
     @patch("agent.llm_client.get_llm")
     @patch("agent.nodes.correct.ChatPromptTemplate")
@@ -289,3 +321,62 @@ class TestCorrectSqlNode:
 
         expected_sql = "SELECT COUNT(*)\n  FROM film\n  WHERE rating = 'PG'"
         assert result["current_sql"] == expected_sql
+
+    def test_correct_sql_node_tracks_budget_exhaustion_in_correction_attempts(self):
+        """Budget-exhausted exits should still produce correction attempt telemetry state."""
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error="syntax error",
+            retry_count=0,
+            token_budget={"max_tokens": 10, "consumed_tokens": 10},
+        )
+
+        result = correct_sql_node(state)
+
+        assert result["error_category"] == "budget_exhausted"
+        assert result["correction_attempts"][-1]["outcome"] == "budget_exhausted"
+
+    def test_correct_sql_node_tracks_repeated_error_stop(self):
+        """Repeated-signature exits should preserve correction attempts and outcome."""
+        error_msg = "syntax error near from"
+        signature = canonical_json_hash(
+            {"category": "SYNTAX_ERROR", "message": error_msg.strip().lower()}
+        )
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error=error_msg,
+            error_category="SYNTAX_ERROR",
+            retry_count=0,
+            error_signatures=[signature],
+        )
+
+        result = correct_sql_node(state)
+
+        assert result["error_category"] == "repeated_error"
+        assert result["correction_attempts"][-1]["outcome"] == "repeated_error"
+
+    def test_correction_attempts_memory_cap_sets_truncation_metadata(self, monkeypatch):
+        """Correction history should stay bounded and expose truncation metadata."""
+        monkeypatch.setenv("AGENT_RETRY_SUMMARY_MAX_EVENTS", "1")
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql="SELECT * FROM films",
+            query_result=None,
+            error="syntax error",
+            retry_count=0,
+            token_budget={"max_tokens": 10, "consumed_tokens": 10},
+            correction_attempts=[{"attempt": 0, "outcome": "seed"}],
+        )
+
+        result = correct_sql_node(state)
+
+        assert len(result["correction_attempts"]) == 1
+        assert result["correction_attempts_truncated"] is True
+        assert result["correction_attempts_dropped"] >= 1

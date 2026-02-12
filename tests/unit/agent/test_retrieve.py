@@ -1,5 +1,6 @@
 """Unit tests for context retrieval node."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -413,3 +414,143 @@ class TestRetrieveContextNode:
         # Verify error message when tool not found
         assert "not available" in result["schema_context"]
         assert result["table_names"] == []
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.retrieve.telemetry.start_span")
+    @patch("agent.nodes.retrieve.get_mcp_tools")
+    async def test_schema_fingerprint_pinned_across_retrieve_calls(
+        self, mock_get_mcp_tools, mock_start_span
+    ):
+        """Schema fingerprint should be set once and remain stable in normal retrieval."""
+        self._mock_telemetry_span(mock_start_span)
+
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph"
+        graph_data = self._make_graph_data(
+            tables=[{"name": "orders", "description": "Orders table"}],
+            columns=[{"name": "order_id", "type": "int", "table": "orders"}],
+        )
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(graph_data))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="show orders")],
+            schema_context="",
+            current_sql=None,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+
+        first = await retrieve_context_node(state)
+        state.update(first)
+        second = await retrieve_context_node(state)
+
+        assert first["schema_fingerprint"]
+        assert second["schema_fingerprint"] == first["schema_fingerprint"]
+        assert second["schema_version_ts"] == first["schema_version_ts"]
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.retrieve.telemetry.start_span")
+    @patch("agent.nodes.retrieve.get_mcp_tools")
+    async def test_schema_fingerprint_changes_only_on_refresh_path(
+        self, mock_get_mcp_tools, mock_start_span
+    ):
+        """Fingerprint should change only when a schema-refresh transition is triggered."""
+        self._mock_telemetry_span(mock_start_span)
+
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph"
+        new_graph = self._make_graph_data(
+            tables=[{"name": "orders_v2", "description": "Orders v2"}],
+            columns=[{"name": "order_id", "type": "int", "table": "orders_v2"}],
+        )
+        mock_subgraph_tool.ainvoke = AsyncMock(return_value=json.dumps(new_graph))
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="show orders")],
+            schema_context="",
+            current_sql=None,
+            query_result=None,
+            error=None,
+            retry_count=0,
+            schema_snapshot_id="fp-old",
+            schema_fingerprint="oldfingerprint",
+            schema_version_ts=123,
+            schema_refresh_count=0,
+        )
+
+        refresh_transition = await retrieve_context_node(state)
+        assert refresh_transition["schema_refresh_count"] == 1
+        assert refresh_transition["error"] == "Schema drift detected"
+        assert refresh_transition["schema_fingerprint"] != state["schema_fingerprint"]
+
+        state.update(refresh_transition)
+        stable_after_refresh = await retrieve_context_node(state)
+        assert (
+            stable_after_refresh["schema_fingerprint"] == refresh_transition["schema_fingerprint"]
+        )
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.retrieve.telemetry.start_span")
+    @patch("agent.nodes.retrieve.get_mcp_tools")
+    async def test_schema_refresh_concurrency_keeps_run_fingerprint_consistent(
+        self, mock_get_mcp_tools, mock_start_span
+    ):
+        """Concurrent refresh flows should keep each run internally fingerprint-consistent."""
+        self._mock_telemetry_span(mock_start_span)
+
+        graph_a = self._make_graph_data(
+            tables=[{"name": "orders_a", "description": "Orders A"}],
+            columns=[{"name": "order_id", "type": "int", "table": "orders_a"}],
+        )
+        graph_b = self._make_graph_data(
+            tables=[{"name": "orders_b", "description": "Orders B"}],
+            columns=[{"name": "order_id", "type": "int", "table": "orders_b"}],
+        )
+
+        async def _ainvoke(payload):
+            query = payload.get("query")
+            return json.dumps(graph_a if query == "run-a" else graph_b)
+
+        mock_subgraph_tool = MagicMock()
+        mock_subgraph_tool.name = "get_semantic_subgraph"
+        mock_subgraph_tool.ainvoke = AsyncMock(side_effect=_ainvoke)
+        mock_get_mcp_tools.return_value = [mock_subgraph_tool]
+
+        from langchain_core.messages import HumanMessage
+
+        async def _run(query_text: str) -> tuple[str, str]:
+            state = AgentState(
+                messages=[HumanMessage(content=query_text)],
+                schema_context="",
+                current_sql=None,
+                query_result=None,
+                error=None,
+                retry_count=0,
+                schema_snapshot_id="fp-old",
+                schema_fingerprint="oldfingerprint",
+                schema_version_ts=123,
+                schema_refresh_count=0,
+            )
+
+            refresh_transition = await retrieve_context_node(state)
+            assert refresh_transition["schema_refresh_count"] == 1
+            state.update(refresh_transition)
+
+            stabilized = await retrieve_context_node(state)
+            assert stabilized["schema_fingerprint"] == refresh_transition["schema_fingerprint"]
+            return refresh_transition["schema_fingerprint"], stabilized["schema_fingerprint"]
+
+        (fp_a_first, fp_a_second), (fp_b_first, fp_b_second) = await asyncio.gather(
+            _run("run-a"),
+            _run("run-b"),
+        )
+
+        assert fp_a_first == fp_a_second
+        assert fp_b_first == fp_b_second

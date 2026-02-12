@@ -142,6 +142,13 @@ def synthesize_insight_node(state: AgentState) -> dict:
             from common.sanitization.text import redact_sensitive_info
 
             error_str = redact_sensitive_info(str(error))
+            error_metadata = state.get("error_metadata")
+            structured_safe_message = None
+            if isinstance(error_metadata, dict):
+                safe_candidate = error_metadata.get("message")
+                if isinstance(safe_candidate, str) and safe_candidate.strip():
+                    structured_safe_message = redact_sensitive_info(safe_candidate)
+            user_error_message = structured_safe_message or error_str
 
             error_category = state.get("error_category")
 
@@ -178,7 +185,8 @@ def synthesize_insight_node(state: AgentState) -> dict:
                 or error_category in ("invalid_request", "timeout")
             ):
                 response_content = (
-                    f"I encountered a validation error while processing your request: {error_str}"
+                    "I encountered a validation error while processing your request: "
+                    f"{user_error_message}"
                 )
             elif (
                 termination_reason == TerminationReason.UNSUPPORTED_CAPABILITY
@@ -200,7 +208,9 @@ def synthesize_insight_node(state: AgentState) -> dict:
                 termination_reason == TerminationReason.TOOL_RESPONSE_MALFORMED
                 or error_category == "tool_response_malformed"
             ):
-                response_content = f"I received a malformed response from the database: {error_str}"
+                response_content = (
+                    "I received a malformed response from the database: " f"{user_error_message}"
+                )
             else:
                 # Generic fallback for unknown/other errors
                 response_content = "An internal error occurred while processing your request."

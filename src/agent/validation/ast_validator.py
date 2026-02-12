@@ -16,9 +16,10 @@ import sqlglot
 from sqlglot import exp
 
 from agent.utils.sql_ast import count_joins, extract_columns, extract_tables, normalize_sql
-from common.config.env import get_env_bool, get_env_int
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import ValidationRefusalReason
-from common.policy.sql_policy import is_sensitive_column_name
+from common.policy.sql_policy import classify_blocked_table_reference, is_sensitive_column_name
+from common.sql.comments import strip_sql_comments
 from common.sql.dialect import normalize_sqlglot_dialect
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ class ViolationType(str, Enum):
     SYNTAX_ERROR = "syntax_error"
     COMPLEXITY_LIMIT = "complexity_limit"
     SENSITIVE_COLUMN = "sensitive_column"
+    COLUMN_ALLOWLIST = "column_allowlist"
+    CARTESIAN_JOIN = "cartesian_join"
 
 
 @dataclass
@@ -59,6 +62,12 @@ class SQLMetadata:
     table_lineage: list[str] = field(default_factory=list)
     column_usage: list[str] = field(default_factory=list)
     join_complexity: int = 0
+    join_count: int = 0
+    estimated_table_count: int = 0
+    estimated_scan_columns: int = 0
+    union_count: int = 0
+    detected_cartesian_flag: bool = False
+    query_complexity_score: int = 0
     has_aggregation: bool = False
     has_subquery: bool = False
     has_window_function: bool = False
@@ -69,6 +78,12 @@ class SQLMetadata:
             "table_lineage": self.table_lineage,
             "column_usage": self.column_usage,
             "join_complexity": self.join_complexity,
+            "join_count": self.join_count,
+            "estimated_table_count": self.estimated_table_count,
+            "estimated_scan_columns": self.estimated_scan_columns,
+            "union_count": self.union_count,
+            "detected_cartesian_flag": self.detected_cartesian_flag,
+            "query_complexity_score": self.query_complexity_score,
             "has_aggregation": self.has_aggregation,
             "has_subquery": self.has_subquery,
             "has_window_function": self.has_window_function,
@@ -95,20 +110,6 @@ class ASTValidationResult:
             "parsed_sql": self.parsed_sql,
         }
 
-
-# Security configuration
-RESTRICTED_TABLES = frozenset(
-    {
-        "payroll",
-        "credentials",
-        "audit_logs",
-        "user_secrets",
-        "password_history",
-        "api_keys",
-    }
-)
-
-RESTRICTED_TABLE_PREFIXES = ("pg_", "information_schema.")
 
 FORBIDDEN_COMMANDS = frozenset(
     {
@@ -138,8 +139,9 @@ def parse_sql(
         Tuple of (parsed AST, error message if parse failed)
     """
     dialect = normalize_sqlglot_dialect(dialect)
+    stripped_sql = strip_sql_comments(sql)
     try:
-        expressions = sqlglot.parse(sql, dialect=dialect)
+        expressions = sqlglot.parse(stripped_sql, dialect=dialect)
 
         if not expressions:
             return None, "Empty SQL query"
@@ -230,8 +232,11 @@ def validate_security(
                 )
             )
 
-        # Check exact matches
-        if table_name in RESTRICTED_TABLES:
+        blocked_reason = classify_blocked_table_reference(
+            table_name=table_name,
+            schema_name=schema_name,
+        )
+        if blocked_reason == "restricted_table":
             violations.append(
                 SecurityViolation(
                     violation_type=ViolationType.RESTRICTED_TABLE,
@@ -239,25 +244,21 @@ def validate_security(
                         f"Security Violation: Access to table '{table_name}' is restricted. "
                         "Please reformulate the query using only permitted tables."
                     ),
-                    details={"table": table_name, "reason": "restricted_table"},
+                    details={"table": table_name, "reason": blocked_reason},
                 )
             )
-
-        # Check prefix matches (system tables)
-        for prefix in RESTRICTED_TABLE_PREFIXES:
-            if full_name.startswith(prefix) or table_name.startswith(prefix):
-                violations.append(
-                    SecurityViolation(
-                        violation_type=ViolationType.RESTRICTED_TABLE,
-                        message=(
-                            f"Security Violation: Access to system table "
-                            f"'{full_name}' is forbidden. Only user-defined "
-                            "tables in the public schema are permitted."
-                        ),
-                        details={"table": full_name, "reason": "system_table"},
-                    )
+        elif blocked_reason in {"system_table", "blocked_schema"}:
+            violations.append(
+                SecurityViolation(
+                    violation_type=ViolationType.RESTRICTED_TABLE,
+                    message=(
+                        f"Security Violation: Access to system table "
+                        f"'{full_name}' is forbidden. Only user-defined "
+                        "tables in the public schema are permitted."
+                    ),
+                    details={"table": full_name, "reason": blocked_reason},
                 )
-                break
+            )
 
     # Check for dangerous UNION patterns with subqueries
     # (these can sometimes be used for SQL injection via UNION-based attacks)
@@ -375,7 +376,130 @@ def _extract_sensitive_columns(ast: exp.Expression) -> list[str]:
     return sorted(sensitive)
 
 
-def extract_metadata(ast: exp.Expression) -> SQLMetadata:
+def _normalize_allowed_columns(
+    allowed_columns: Optional[dict[str, set[str]]],
+) -> dict[str, set[str]]:
+    normalized: dict[str, set[str]] = {}
+    if not allowed_columns:
+        return normalized
+
+    for table_name, columns in allowed_columns.items():
+        normalized_table = str(table_name).strip().lower()
+        if not normalized_table:
+            continue
+        normalized_columns = {
+            str(column_name).strip().lower()
+            for column_name in (columns or set())
+            if str(column_name).strip()
+        }
+        if normalized_columns:
+            normalized[normalized_table] = normalized_columns
+    return normalized
+
+
+def _extract_table_alias_map(ast: exp.Expression, cte_names: set[str]) -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for table in ast.find_all(exp.Table):
+        table_name = table.name.lower() if table.name else ""
+        if not table_name or table_name in cte_names:
+            continue
+        alias = table.alias_or_name.lower() if table.alias_or_name else ""
+        if alias:
+            alias_map[alias] = table_name
+    return alias_map
+
+
+def _validate_column_allowlist(
+    ast: exp.Expression,
+    allowed_columns: Optional[dict[str, set[str]]],
+    mode: str,
+) -> tuple[list[SecurityViolation], list[str]]:
+    """Validate selected columns against an allowlist.
+
+    This guard is intentionally scoped to projection columns to avoid false
+    positives on predicates and join conditions.
+    """
+    normalized_allowed_columns = _normalize_allowed_columns(allowed_columns)
+    if not normalized_allowed_columns or mode == "off":
+        return [], []
+
+    cte_names = _extract_cte_names(ast)
+    alias_map = _extract_table_alias_map(ast, cte_names)
+
+    violations: list[SecurityViolation] = []
+    warnings: list[str] = []
+
+    for select_node in ast.find_all(exp.Select):
+        for projection in select_node.expressions or []:
+            projected_columns: list[exp.Column] = []
+            if isinstance(projection, exp.Star):
+                message = (
+                    "Column allowlist warning: wildcard projection (*) is not explicitly "
+                    "allowlisted."
+                )
+                details = {
+                    "reason": "column_not_allowlisted",
+                    "column": "*",
+                    "table": None,
+                }
+                violation = SecurityViolation(
+                    violation_type=ViolationType.COLUMN_ALLOWLIST,
+                    message=message,
+                    details=details,
+                )
+                if mode == "block":
+                    violations.append(violation)
+                else:
+                    warnings.append(message)
+                continue
+
+            if isinstance(projection, exp.Column):
+                projected_columns = [projection]
+            else:
+                projected_columns = list(projection.find_all(exp.Column))
+
+            for column in projected_columns:
+                column_name = column.name.lower() if column.name else ""
+                if not column_name:
+                    continue
+
+                # Skip unqualified columns to avoid alias/CTE ambiguity.
+                table_ref = column.table.lower() if column.table else ""
+                if not table_ref:
+                    continue
+
+                table_name = alias_map.get(table_ref, table_ref)
+                allowed_for_table = normalized_allowed_columns.get(table_name)
+                # Unknown table mapping is treated as non-enforceable to avoid
+                # false positives on derived tables/CTEs.
+                if allowed_for_table is None:
+                    continue
+                if column_name in allowed_for_table:
+                    continue
+
+                message = (
+                    f"Column allowlist violation: column '{table_name}.{column_name}' "
+                    "is not allowed."
+                )
+                details = {
+                    "reason": "column_not_allowlisted",
+                    "table": table_name,
+                    "column": column_name,
+                }
+                violation = SecurityViolation(
+                    violation_type=ViolationType.COLUMN_ALLOWLIST,
+                    message=message,
+                    details=details,
+                )
+                if mode == "block":
+                    violations.append(violation)
+                else:
+                    warnings.append(message)
+
+    return violations, warnings
+
+
+def extract_metadata(ast: exp.Expression, *, detected_cartesian_flag: bool = False) -> SQLMetadata:
     """
     Extract metadata from SQL AST for audit logging and complexity analysis.
 
@@ -403,6 +527,16 @@ def extract_metadata(ast: exp.Expression) -> SQLMetadata:
 
     # Count join complexity
     metadata.join_complexity = count_joins(ast)
+    metadata.join_count = metadata.join_complexity
+    metadata.estimated_table_count = len(metadata.table_lineage)
+    metadata.estimated_scan_columns = len(metadata.column_usage)
+    metadata.union_count = len(list(ast.find_all(exp.Union)))
+    metadata.detected_cartesian_flag = bool(detected_cartesian_flag)
+    metadata.query_complexity_score = (
+        (metadata.join_count * 3)
+        + (metadata.estimated_table_count * 2)
+        + (metadata.union_count * 4)
+    )
 
     # Check for aggregation
     agg_funcs = (exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max, exp.AggFunc)
@@ -454,8 +588,58 @@ def validate_complexity(ast: exp.Expression) -> list[SecurityViolation]:
     return violations
 
 
+def _detect_cartesian_join_patterns(
+    ast: exp.Expression, mode: str
+) -> tuple[list[SecurityViolation], list[str]]:
+    """Detect likely Cartesian joins and constant join predicates."""
+    normalized_mode = (mode or "warn").strip().lower()
+    if normalized_mode not in {"warn", "block"}:
+        return [], []
+
+    violations: list[SecurityViolation] = []
+    warnings: list[str] = []
+
+    for join in ast.find_all(exp.Join):
+        on_clause = join.args.get("on")
+        using_clause = join.args.get("using")
+
+        reason = None
+        if on_clause is None and using_clause is None:
+            reason = "join_without_predicate"
+        elif on_clause is not None and not any(on_clause.find_all(exp.Column)):
+            reason = "join_constant_condition"
+
+        if reason is None:
+            continue
+
+        message = (
+            "Potential Cartesian join detected: "
+            f"{reason.replace('_', ' ')}. Add an explicit join predicate."
+        )
+        details = {
+            "reason": reason,
+            "join_sql": join.sql(dialect="postgres")[:300],
+        }
+        violation = SecurityViolation(
+            violation_type=ViolationType.CARTESIAN_JOIN,
+            message=message,
+            details=details,
+        )
+        if normalized_mode == "block":
+            violations.append(violation)
+        else:
+            warnings.append(message)
+
+    return violations, warnings
+
+
 def validate_sql(
-    sql: str, dialect: str = "postgres", allowed_tables: Optional[set[str]] = None
+    sql: str,
+    dialect: str = "postgres",
+    allowed_tables: Optional[set[str]] = None,
+    allowed_columns: Optional[dict[str, set[str]]] = None,
+    column_allowlist_mode: str = "warn",
+    cartesian_join_mode: Optional[str] = None,
 ) -> ASTValidationResult:
     """
     Complete SQL validation: parse, security check, complexity check, and metadata extraction.
@@ -466,6 +650,9 @@ def validate_sql(
         sql: SQL query string
         dialect: SQL dialect (default: postgres)
         allowed_tables: Optional allowlist used for set-operation branch checks.
+        allowed_columns: Optional table->columns allowlist used for projection checks.
+        column_allowlist_mode: "warn" (default), "block", or "off".
+        cartesian_join_mode: "warn" (default), "block", or "off".
 
     Returns:
         ASTValidationResult with validation status, violations, and metadata
@@ -489,9 +676,40 @@ def validate_sql(
     violations = validate_security(ast, allowed_tables=allowed_tables)
     warnings: list[str] = []
 
+    column_mode = (column_allowlist_mode or "warn").strip().lower()
+    if column_mode not in {"warn", "block", "off"}:
+        column_mode = "warn"
+    cartesian_mode = (
+        (cartesian_join_mode or get_env_str("AGENT_CARTESIAN_JOIN_MODE", "warn") or "warn")
+        .strip()
+        .lower()
+    )
+    if cartesian_mode not in {"warn", "block", "off"}:
+        cartesian_mode = "warn"
+
     # Validate complexity
     complexity_violations = validate_complexity(ast)
     violations.extend(complexity_violations)
+
+    # Optional column-level allowlist
+    column_violations, column_warnings = _validate_column_allowlist(
+        ast,
+        allowed_columns=allowed_columns,
+        mode=column_mode,
+    )
+    violations.extend(column_violations)
+    warnings.extend(column_warnings)
+
+    cartesian_violations: list[SecurityViolation] = []
+    cartesian_warnings: list[str] = []
+    if cartesian_mode != "off":
+        cartesian_violations, cartesian_warnings = _detect_cartesian_join_patterns(
+            ast,
+            mode=cartesian_mode,
+        )
+        violations.extend(cartesian_violations)
+        warnings.extend(cartesian_warnings)
+    detected_cartesian_flag = bool(cartesian_violations or cartesian_warnings)
 
     # Optional sensitive-column guardrail
     sensitive_columns = _extract_sensitive_columns(ast)
@@ -518,7 +736,7 @@ def validate_sql(
             )
 
     # Extract metadata (even if there are violations, for audit purposes)
-    metadata = extract_metadata(ast)
+    metadata = extract_metadata(ast, detected_cartesian_flag=detected_cartesian_flag)
 
     # Transpile to normalized form (useful for caching and comparison)
     try:

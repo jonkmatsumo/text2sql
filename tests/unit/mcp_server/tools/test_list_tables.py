@@ -38,6 +38,7 @@ class TestListTables:
             mock_store.list_tables.assert_called_once_with(tenant_id=1)
             data = json.loads(result)
             assert data["schema_version"] == "1.0"
+            assert data["metadata"]["tool_version"] == "v1"
             assert len(data["result"]) == 3
             assert "users" in data["result"]
             assert "orders" in data["result"]

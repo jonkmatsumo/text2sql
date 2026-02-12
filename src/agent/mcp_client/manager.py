@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from agent.mcp_client.sdk_client import MCPClient
+from common.models.error_metadata import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,49 @@ class RetryConfig:
 
 # Default retry configuration
 DEFAULT_RETRY_CONFIG = RetryConfig()
+
+
+def is_retryable_tool_error(err: ToolError) -> bool:
+    """Decide retryability from structured ToolError fields only."""
+    if isinstance(err.retryable, bool):
+        return err.retryable
+    category = str(err.category or "").strip().lower()
+    # Conservative fallback when legacy payloads omit retryable.
+    if category in {"timeout"}:
+        return True
+    if category in {
+        "invalid_request",
+        "unsupported_capability",
+        "unauthorized",
+        "auth",
+        "tool_response_malformed",
+        "not_found",
+    }:
+        return False
+    return False
+
+
+def _extract_tool_error(payload: Any) -> Optional[ToolError]:
+    """Extract ToolError from an MCP tool payload envelope when present."""
+    if not isinstance(payload, dict):
+        return None
+    error_obj = payload.get("error")
+    if not error_obj:
+        return None
+    if isinstance(error_obj, dict):
+        try:
+            return ToolError.model_validate(error_obj)
+        except Exception:
+            return None
+    if isinstance(error_obj, str):
+        return ToolError(
+            category="internal_error",
+            code="UNSTRUCTURED_TOOL_ERROR",
+            message=error_obj,
+            retryable=False,
+            provider="mcp_server",
+        )
+    return None
 
 
 def is_transient_error(exc: Exception) -> bool:
@@ -237,7 +281,42 @@ class McpClientSession:
 
         for attempt in range(config.max_retries + 1):
             try:
-                return await self._mcp.call_tool(name, arguments)
+                result = await self._mcp.call_tool(name, arguments)
+                structured_error = _extract_tool_error(result)
+                if structured_error is None:
+                    return result
+
+                if not is_retryable_tool_error(structured_error):
+                    logger.warning(
+                        "MCP tool '%s' returned non-retryable structured error "
+                        "(category=%s, code=%s).",
+                        name,
+                        structured_error.category,
+                        structured_error.code,
+                    )
+                    return result
+
+                if attempt >= config.max_retries:
+                    logger.error(
+                        "MCP tool '%s' returned retryable structured error after %d attempts.",
+                        name,
+                        attempt + 1,
+                    )
+                    return result
+
+                delay = config.get_delay(attempt)
+                logger.warning(
+                    "MCP tool '%s' returned retryable structured error (attempt %d/%d), "
+                    "retrying in %.2fs (category=%s, code=%s).",
+                    name,
+                    attempt + 1,
+                    config.max_retries + 1,
+                    delay,
+                    structured_error.category,
+                    structured_error.code,
+                )
+                await asyncio.sleep(delay)
+                continue
             except Exception as exc:
                 last_exception = exc
 

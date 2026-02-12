@@ -35,8 +35,11 @@ async def test_list_tables_truncation():
                 assert len(result["result"]) < 1000
                 assert result["metadata"]["provider"] == "postgres"
                 assert result["metadata"]["is_truncated"] is True
+                assert result["metadata"]["truncated"] is True
                 assert result["metadata"]["items_total"] == 1000
                 assert result["metadata"]["items_returned"] == len(result["result"])
+                assert result["metadata"]["returned_count"] == len(result["result"])
+                assert result["metadata"]["limit_applied"] == len(result["result"])
                 assert result["metadata"]["bytes_total"] >= result["metadata"]["bytes_returned"]
                 assert result["metadata"]["truncation_reason"] in {
                     "max_items",
@@ -74,8 +77,11 @@ async def test_get_table_schema_truncation_metadata():
                 result = json.loads(result_str)
 
                 assert result["metadata"]["is_truncated"] is True
+                assert result["metadata"]["truncated"] is True
                 assert result["metadata"]["items_total"] == len(table_names)
                 assert result["metadata"]["items_returned"] == len(result["result"])
+                assert result["metadata"]["returned_count"] == len(result["result"])
+                assert result["metadata"]["limit_applied"] == len(result["result"])
                 assert result["metadata"]["items_returned"] < len(table_names)
                 assert result["metadata"]["bytes_total"] >= result["metadata"]["bytes_returned"]
                 assert isinstance(result["result"], list)

@@ -7,23 +7,15 @@ import requests
 
 from agent.telemetry import SpanType, telemetry
 
-# Only run if explicitly enabled or if we can detect the worker
+# Only run when explicitly enabled.
 OTEL_WORKER_URL = os.getenv("OTEL_WORKER_URL", "http://localhost:4320")
 ENABLE_SMOKE_TEST = os.getenv("ENABLE_OTEL_SMOKE_TEST") == "true"
-
-
-def is_worker_reachable():
-    """Check if OTEL worker is reachable."""
-    try:
-        requests.get(f"{OTEL_WORKER_URL}/health", timeout=1)
-        return True
-    except Exception:
-        return False
+SKIP_OTEL_WORKER_TESTS = os.getenv("SKIP_OTEL_WORKER_TESTS") == "1"
 
 
 @pytest.mark.skipif(
-    not (ENABLE_SMOKE_TEST or is_worker_reachable()),
-    reason="OTEL worker not reachable or smoke test disabled",
+    SKIP_OTEL_WORKER_TESTS or not ENABLE_SMOKE_TEST,
+    reason="OTEL smoke test disabled (set ENABLE_OTEL_SMOKE_TEST=true)",
 )
 def test_otel_worker_ingestion_smoke():
     """Emit a real trace and verify it appears in the OTEL worker API."""

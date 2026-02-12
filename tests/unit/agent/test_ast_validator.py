@@ -181,6 +181,20 @@ class TestExtractMetadata:
         )
         metadata = extract_metadata(ast)
         assert metadata.join_complexity == 3
+        assert metadata.join_count == 3
+        assert metadata.estimated_table_count >= 3
+        assert metadata.query_complexity_score >= (metadata.join_count * 3)
+
+    def test_complexity_union_and_cartesian_flags(self):
+        """Validation metadata should capture union count and Cartesian-join signal."""
+        result = validate_sql(
+            "SELECT c.id FROM customers c CROSS JOIN orders o UNION SELECT c2.id FROM customers c2",
+            cartesian_join_mode="warn",
+        )
+        assert result.metadata is not None
+        assert result.metadata.union_count == 1
+        assert result.metadata.detected_cartesian_flag is True
+        assert result.metadata.query_complexity_score >= 9
 
     def test_aggregation_detection(self):
         """Test aggregation function detection."""
@@ -237,6 +251,63 @@ class TestValidateSql:
         assert "violations" in result_dict
         assert "metadata" in result_dict
         assert isinstance(result_dict["violations"], list)
+
+    def test_column_allowlist_warn_mode(self):
+        """Column allowlist warn mode should keep query valid but emit warnings."""
+        result = validate_sql(
+            "SELECT c.email FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="warn",
+        )
+        assert result.is_valid is True
+        assert result.violations == []
+        assert any("column allowlist" in warning.lower() for warning in result.warnings)
+
+    def test_column_allowlist_block_mode(self):
+        """Column allowlist block mode should reject non-allowlisted projections."""
+        result = validate_sql(
+            "SELECT c.email FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.violation_type == ViolationType.COLUMN_ALLOWLIST for v in result.violations)
+
+    def test_column_allowlist_allows_valid_projection(self):
+        """Allowlisted projected columns should pass in block mode."""
+        result = validate_sql(
+            "SELECT c.name FROM customers c",
+            allowed_columns={"customers": {"id", "name"}},
+            column_allowlist_mode="block",
+        )
+        assert result.is_valid is True
+
+    def test_cartesian_join_warn_mode(self):
+        """Cartesian joins should warn by default without blocking execution."""
+        result = validate_sql(
+            "SELECT * FROM customers CROSS JOIN orders",
+            cartesian_join_mode="warn",
+        )
+        assert result.is_valid is True
+        assert any("cartesian join" in warning.lower() for warning in result.warnings)
+
+    def test_cartesian_join_block_mode(self):
+        """Cartesian joins should block when configured."""
+        result = validate_sql(
+            "SELECT * FROM customers CROSS JOIN orders",
+            cartesian_join_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.violation_type == ViolationType.CARTESIAN_JOIN for v in result.violations)
+
+    def test_constant_join_predicate_block_mode(self):
+        """Constant join predicates should be treated as Cartesian risks in block mode."""
+        result = validate_sql(
+            "SELECT * FROM customers c JOIN orders o ON 1 = 1",
+            cartesian_join_mode="block",
+        )
+        assert result.is_valid is False
+        assert any(v.details.get("reason") == "join_constant_condition" for v in result.violations)
 
 
 class TestSecurityViolation:

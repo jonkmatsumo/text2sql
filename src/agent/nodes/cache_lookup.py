@@ -17,44 +17,38 @@ logger = logging.getLogger(__name__)
 async def _get_current_schema_snapshot_id(
     tools, user_query: str, tenant_id: Optional[int]
 ) -> Optional[str]:
-    from agent.utils.schema_cache import get_cached_schema_snapshot_id
-
-    cached_snapshot_id = get_cached_schema_snapshot_id(tenant_id)
-    if cached_snapshot_id:
-        return cached_snapshot_id
+    from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
 
     subgraph_tool = next((t for t in tools if t.name == "get_semantic_subgraph"), None)
     if not subgraph_tool:
         return None
 
-    payload = {"query": user_query}
-    if tenant_id is not None:
-        payload["tenant_id"] = tenant_id
-    try:
-        raw_subgraph = await subgraph_tool.ainvoke(payload)
-    except Exception as e:
-        logger.warning(
-            "Schema snapshot fetch failed",
-            extra={"error_type": type(e).__name__, "error": str(e)},
-            exc_info=True,
-        )
-        return None
+    async def _refresh_snapshot_id() -> Optional[str]:
+        payload = {"query": user_query}
+        if tenant_id is not None:
+            payload["tenant_id"] = tenant_id
+        try:
+            raw_subgraph = await subgraph_tool.ainvoke(payload)
+        except Exception as e:
+            logger.warning(
+                "Schema snapshot fetch failed",
+                extra={"error_type": type(e).__name__, "error": str(e)},
+                exc_info=True,
+            )
+            return None
 
-    parsed = parse_tool_output(raw_subgraph)
-    if isinstance(parsed, list) and parsed:
-        parsed = parsed[0]
+        parsed = parse_tool_output(raw_subgraph)
+        if isinstance(parsed, list) and parsed:
+            parsed = parsed[0]
 
-    # Unwrap GenericToolResponseEnvelope if present
-    # Unwrap GenericToolResponseEnvelope if present
-    parsed = unwrap_envelope(parsed)
+        parsed = unwrap_envelope(parsed)
+        nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
 
-    nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
-    from agent.utils.schema_cache import set_cached_schema_snapshot_id
-    from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
+        from agent.utils.schema_fingerprint import resolve_schema_snapshot_id
 
-    snapshot_id = resolve_schema_snapshot_id(nodes)
-    set_cached_schema_snapshot_id(tenant_id, snapshot_id)
-    return snapshot_id
+        return resolve_schema_snapshot_id(nodes)
+
+    return await get_or_refresh_schema_snapshot_id(tenant_id, _refresh_snapshot_id)
 
 
 async def cache_lookup_node(state: AgentState) -> dict:

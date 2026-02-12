@@ -193,3 +193,26 @@ class TestASTValidator:
         assert not result.is_valid
         assert any(v.violation_type == ViolationType.SENSITIVE_COLUMN for v in result.violations)
         assert any("api_key" in v.message for v in result.violations)
+
+    def test_validate_sql_ignores_block_markers_inside_comments(self):
+        """Comment text should not trigger table/function policy violations."""
+        sql = """
+        -- payroll pg_sleep should be ignored
+        SELECT id
+        FROM users
+        /* information_schema.tables should also be ignored */
+        """
+        result = validate_sql(sql)
+        assert result.is_valid
+
+    def test_validate_sql_blocks_actual_restricted_table_with_comments(self):
+        """Restricted tables should still be blocked after comment stripping."""
+        sql = """
+        /* harmless comment */
+        SELECT *
+        FROM payroll
+        -- users
+        """
+        result = validate_sql(sql)
+        assert not result.is_valid
+        assert any(v.violation_type == ViolationType.RESTRICTED_TABLE for v in result.violations)

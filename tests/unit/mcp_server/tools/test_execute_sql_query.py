@@ -63,6 +63,7 @@ class TestExecuteSqlQuery:
             # New envelope structure check
             assert data["schema_version"] == "1.0"
             assert data["rows"][0]["count"] == 1000
+            assert data["metadata"]["tool_version"] == "v1"
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
 
@@ -86,6 +87,7 @@ class TestExecuteSqlQuery:
             data = json.loads(result)
             assert data["schema_version"] == "1.0"
             assert data["rows"] == mock_rows
+            assert data["metadata"]["tool_version"] == "v1"
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
             assert data["columns"] == [

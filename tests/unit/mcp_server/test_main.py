@@ -149,3 +149,44 @@ class TestMain:
 
                     # Verify connection context manager was used
                     mock_get.assert_called_once()
+
+    def test_setup_telemetry_uses_in_memory_exporter_in_pytest(self, monkeypatch):
+        """MCP telemetry should default to in-memory exporter under pytest."""
+        import mcp_server.main as main_mod
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/unit/mcp_server/test_main.py::test")
+        monkeypatch.setenv("OTEL_WORKER_ENABLED", "true")
+        monkeypatch.setenv("OTEL_WORKER_REQUIRED", "false")
+        monkeypatch.delenv("OTEL_DISABLE_EXPORTER", raising=False)
+        monkeypatch.delenv("OTEL_TEST_EXPORTER", raising=False)
+
+        fake_provider = MagicMock()
+        with (
+            patch.object(main_mod, "TracerProvider", return_value=fake_provider),
+            patch.object(main_mod.trace, "set_tracer_provider"),
+        ):
+            main_mod.setup_telemetry()
+
+        assert fake_provider.add_span_processor.call_count == 1
+
+    def test_setup_telemetry_required_mode_raises_on_exporter_failure(self, monkeypatch):
+        """MCP telemetry should fail fast when required mode cannot initialize exporter."""
+        import mcp_server.main as main_mod
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/unit/mcp_server/test_main.py::test")
+        monkeypatch.setenv("OTEL_WORKER_ENABLED", "true")
+        monkeypatch.setenv("OTEL_WORKER_REQUIRED", "true")
+        monkeypatch.setenv("OTEL_TEST_EXPORTER", "in_memory")
+        monkeypatch.delenv("OTEL_DISABLE_EXPORTER", raising=False)
+
+        fake_provider = MagicMock()
+        with (
+            patch.object(main_mod, "TracerProvider", return_value=fake_provider),
+            patch.object(main_mod.trace, "set_tracer_provider"),
+            patch(
+                "common.observability.in_memory_exporter.get_or_create_span_exporter",
+                side_effect=RuntimeError("exporter boom"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="OTEL_WORKER_REQUIRED=true"):
+                main_mod.setup_telemetry()

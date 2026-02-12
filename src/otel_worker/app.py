@@ -3,12 +3,16 @@ import base64
 import gzip
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from inspect import isawaitable
+from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
 
+from otel_worker.config import settings
 from otel_worker.ingestion.limiter import limiter
 from otel_worker.ingestion.monitor import OverflowAction, monitor
 from otel_worker.ingestion.processor import coordinator
@@ -46,28 +50,149 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class WorkerLifecycleState:
+    """In-memory lifecycle status for operator visibility and safe request handling."""
+
+    enabled: bool = True
+    required: bool = False
+    ready: bool = False
+    degraded: bool = False
+    ingestion_available: bool = False
+    started_components: list[str] = field(default_factory=list)
+    startup_errors: list[str] = field(default_factory=list)
+
+    def reset(self, *, enabled: bool, required: bool) -> None:
+        """Reset startup/shutdown state for a new app lifespan cycle."""
+        self.enabled = bool(enabled)
+        self.required = bool(required)
+        self.ready = False
+        self.degraded = False
+        self.ingestion_available = False
+        self.started_components = []
+        self.startup_errors = []
+
+
+worker_lifecycle_state = WorkerLifecycleState()
+
+
+async def _run_component_step(
+    component_name: str,
+    action: Callable[[], Any],
+    *,
+    required: bool,
+) -> bool:
+    """Run a startup/shutdown action and apply required/degraded semantics."""
+    try:
+        result = action()
+        if isawaitable(result):
+            await result
+        return True
+    except Exception as exc:
+        message = f"{component_name} failed: {exc}"
+        logger.exception(message)
+        worker_lifecycle_state.startup_errors.append(message)
+        if required:
+            raise RuntimeError(
+                f"OTEL worker startup failed at '{component_name}'. "
+                "Set OTEL_WORKER_REQUIRED=false to allow degraded startup."
+            ) from exc
+        worker_lifecycle_state.degraded = True
+        return False
+
+
+def _flush_otel_provider(timeout_ms: int = 2000) -> None:
+    """Flush and shutdown tracer provider best-effort for clean worker shutdown."""
+    try:
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush(timeout_millis=timeout_ms)
+        if hasattr(provider, "shutdown"):
+            provider.shutdown()
+    except Exception as exc:
+        logger.exception("Failed to flush OTEL tracer provider during shutdown: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for storage and background workers."""
-    try:
-        init_db()
-        init_minio()
-    except Exception as e:
-        logger.error(f"Failed to initialize storage: {e}")
+    worker_lifecycle_state.reset(
+        enabled=settings.OTEL_WORKER_ENABLED,
+        required=settings.OTEL_WORKER_REQUIRED,
+    )
 
-    safe_queue.start()
-    await monitor.start()
-    await coordinator.start()
-    await aggregation_coordinator.start()
-    await regression_coordinator.start()
-    await reconciliation_coordinator.start()
+    if not settings.OTEL_WORKER_ENABLED:
+        logger.warning("OTEL worker startup skipped: OTEL_WORKER_ENABLED=false")
+        yield
+        _flush_otel_provider()
+        return
+
+    startup_plan: list[tuple[str, Callable[[], Any]]] = [
+        ("storage.init_db", init_db),
+        ("storage.init_minio", init_minio),
+        ("queue.safe_queue.start", safe_queue.start),
+        ("ingestion.monitor.start", monitor.start),
+        ("ingestion.processor.start", coordinator.start),
+        ("metrics.aggregation.start", aggregation_coordinator.start),
+        ("metrics.regression.start", regression_coordinator.start),
+        ("storage.reconciliation.start", reconciliation_coordinator.start),
+    ]
+    shutdown_plan: list[tuple[str, Callable[[], Any]]] = [
+        ("storage.reconciliation.stop", reconciliation_coordinator.stop),
+        ("metrics.regression.stop", regression_coordinator.stop),
+        ("metrics.aggregation.stop", aggregation_coordinator.stop),
+        ("ingestion.processor.stop", coordinator.stop),
+        ("ingestion.monitor.stop", monitor.stop),
+        ("queue.safe_queue.stop", safe_queue.stop),
+    ]
+
+    for component_name, action in startup_plan:
+        started = await _run_component_step(
+            component_name,
+            action,
+            required=settings.OTEL_WORKER_REQUIRED,
+        )
+        if started:
+            worker_lifecycle_state.started_components.append(component_name)
+
+    started_set = set(worker_lifecycle_state.started_components)
+    required_ingestion_components = {
+        "storage.init_db",
+        "queue.safe_queue.start",
+        "ingestion.monitor.start",
+        "ingestion.processor.start",
+    }
+    worker_lifecycle_state.ingestion_available = required_ingestion_components.issubset(started_set)
+    worker_lifecycle_state.ready = (
+        worker_lifecycle_state.ingestion_available and not worker_lifecycle_state.startup_errors
+    )
+    worker_lifecycle_state.degraded = worker_lifecycle_state.degraded or (
+        not worker_lifecycle_state.ready
+    )
+
+    if worker_lifecycle_state.degraded:
+        logger.warning(
+            "OTEL worker started in degraded mode. started_components=%s startup_errors=%s",
+            worker_lifecycle_state.started_components,
+            worker_lifecycle_state.startup_errors,
+        )
+
     yield
-    await reconciliation_coordinator.stop()
-    await regression_coordinator.stop()
-    await aggregation_coordinator.stop()
-    await coordinator.stop()
-    await monitor.stop()
-    safe_queue.stop()
+
+    for component_name, action in shutdown_plan:
+        if component_name.replace(
+            ".stop", ".start"
+        ) not in started_set and component_name.startswith(
+            ("metrics.", "ingestion.", "queue.", "storage.reconciliation.")
+        ):
+            continue
+        try:
+            result = action()
+            if isawaitable(result):
+                await result
+        except Exception as exc:
+            logger.exception("OTEL worker shutdown step failed (%s): %s", component_name, exc)
+    _flush_otel_provider()
 
 
 app = FastAPI(title="OTEL Dual-Write Worker", lifespan=lifespan)
@@ -291,12 +416,40 @@ async def api_get_raw_trace(trace_id: str):
 @app.get("/healthz")
 async def healthz():
     """Health check endpoint."""
-    return {"status": "ok"}
+    status_value = "ok"
+    if not worker_lifecycle_state.enabled:
+        status_value = "disabled"
+    elif worker_lifecycle_state.degraded:
+        status_value = "degraded"
+    return {
+        "status": status_value,
+        "enabled": bool(worker_lifecycle_state.enabled),
+        "required": bool(worker_lifecycle_state.required),
+        "ready": bool(worker_lifecycle_state.ready),
+        "ingestion_available": bool(worker_lifecycle_state.ingestion_available),
+        "components_started": worker_lifecycle_state.started_components[:16],
+        "startup_errors": worker_lifecycle_state.startup_errors[:8],
+        "safe_queue_dropped_items": int(safe_queue.dropped_items),
+    }
+
+
+@app.get("/health")
+async def health():
+    """Compatibility health endpoint."""
+    return await healthz()
 
 
 @app.post("/v1/traces")
 async def receive_traces(request: Request):
     """Endpoint for OTLP traces (supports Protobuf and JSON)."""
+    if not worker_lifecycle_state.enabled:
+        log_event("ingestion_skipped", reason="otel_worker_disabled")
+        return Response(status_code=status.HTTP_202_ACCEPTED)
+
+    if not worker_lifecycle_state.ingestion_available:
+        log_event("ingestion_skipped", reason="ingestion_unavailable")
+        return Response(status_code=status.HTTP_202_ACCEPTED)
+
     # Enforce Rate Limiting (Token Bucket)
     if not limiter.acquire():
         log_event("rate_limited", reason="limit_exceeded")

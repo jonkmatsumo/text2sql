@@ -23,7 +23,13 @@ from agent.nodes.router import router_node
 from agent.nodes.synthesize import synthesize_insight_node
 from agent.nodes.validate import validate_sql_node
 from agent.nodes.visualize import visualize_query_node
+from agent.runtime_metrics import (
+    record_query_complexity_score,
+    record_stage_latency_breakdown,
+    record_truncation_event,
+)
 from agent.state import AgentState
+from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
 from agent.telemetry import SpanType, telemetry
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
@@ -704,6 +710,10 @@ async def run_agent_with_tracing(
     if tenant_id is None:
         raise ValueError("tenant_id is required")
 
+    from common.config.sanity import validate_runtime_configuration
+
+    validate_runtime_configuration()
+
     # 0. Centralized Ingress Sanitization
     raw_question = question
     res = sanitize_text(question)
@@ -766,6 +776,8 @@ async def run_agent_with_tracing(
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
+            "schema_fingerprint": None,
+            "schema_version_ts": None,
             "deadline_ts": deadline_ts,
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
@@ -777,6 +789,8 @@ async def run_agent_with_tracing(
                 "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
                 "consumed_tokens": 0,
             },
+            "llm_prompt_bytes_used": 0,
+            "llm_budget_exceeded": False,
             "error_signatures": [],
         }
 
@@ -811,17 +825,14 @@ async def run_agent_with_tracing(
                 if snapshot_mode == "static":
                     schema_snapshot_id = "v1.0"
                 elif snapshot_mode == "fingerprint":
-                    from agent.utils.schema_cache import (
-                        get_cached_schema_snapshot_id,
-                        set_cached_schema_snapshot_id,
-                    )
+                    from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
 
-                    schema_snapshot_id = get_cached_schema_snapshot_id(tenant_id)
-                    if not schema_snapshot_id:
-                        subgraph_tool = next(
-                            (t for t in tools if t.name == "get_semantic_subgraph"), None
-                        )
-                        if subgraph_tool:
+                    subgraph_tool = next(
+                        (t for t in tools if t.name == "get_semantic_subgraph"), None
+                    )
+                    if subgraph_tool:
+
+                        async def _refresh_snapshot_id() -> Optional[str]:
                             try:
                                 payload = {"query": question}
                                 if tenant_id is not None:
@@ -836,13 +847,16 @@ async def run_agent_with_tracing(
                                 if isinstance(parsed, list) and parsed:
                                     parsed = parsed[0]
                                 nodes = parsed.get("nodes", []) if isinstance(parsed, dict) else []
-                                schema_snapshot_id = resolve_schema_snapshot_id(nodes)
-                                if schema_snapshot_id and schema_snapshot_id != "unknown":
-                                    set_cached_schema_snapshot_id(tenant_id, schema_snapshot_id)
+                                return resolve_schema_snapshot_id(nodes)
                             except Exception:
                                 logger.warning(
                                     "Failed to compute schema snapshot id", exc_info=True
                                 )
+                                return None
+
+                        schema_snapshot_id = await get_or_refresh_schema_snapshot_id(
+                            tenant_id, _refresh_snapshot_id
+                        )
                 schema_snapshot_id = schema_snapshot_id or "unknown"
                 inputs["schema_snapshot_id"] = schema_snapshot_id
 
@@ -1097,7 +1111,152 @@ async def run_agent_with_tracing(
 
         # Metadata is already handled early and made sticky via telemetry_context
 
-        # 3. Final Flush (Control-plane safety)
+        # 3. Deterministic decision + retry summaries for debuggability
+        decision_summary = build_decision_summary(result)
+        retry_correction_summary = build_retry_correction_summary(result)
+        result["decision_summary"] = decision_summary
+        result["retry_correction_summary"] = retry_correction_summary
+
+        retry_summary = result.get("retry_summary")
+        if not isinstance(retry_summary, dict):
+            retry_summary = {}
+        retry_summary["correction_attempt_count"] = retry_correction_summary.get(
+            "correction_attempt_count", 0
+        )
+        retry_summary["validation_failure_count"] = retry_correction_summary.get(
+            "validation_failure_count", 0
+        )
+        retry_summary["final_stopping_reason"] = retry_correction_summary.get(
+            "final_stopping_reason"
+        )
+        retry_summary["correction_attempts_truncated"] = bool(
+            retry_correction_summary.get("correction_attempts_truncated", False)
+        )
+        retry_summary["validation_failures_truncated"] = bool(
+            retry_correction_summary.get("validation_failures_truncated", False)
+        )
+        retry_summary["correction_attempts_dropped"] = int(
+            retry_correction_summary.get("correction_attempts_dropped", 0) or 0
+        )
+        retry_summary["validation_failures_dropped"] = int(
+            retry_correction_summary.get("validation_failures_dropped", 0) or 0
+        )
+        result["retry_summary"] = retry_summary
+        validation_report = (
+            result.get("validation_report")
+            if isinstance(result.get("validation_report"), dict)
+            else {}
+        )
+        from agent.utils.schema_cache import get_schema_refresh_collision_count
+
+        schema_refresh_collisions = get_schema_refresh_collision_count()
+
+        summary_attrs = {
+            "decision.selected_tables_count": len(decision_summary.get("selected_tables", [])),
+            "decision.rejected_tables_count": len(decision_summary.get("rejected_tables", [])),
+            "decision.rejected_plan_candidates_count": len(
+                decision_summary.get("rejected_plan_candidates", [])
+            ),
+            "decision.retry_count": int(decision_summary.get("retry_count", 0) or 0),
+            "decision.schema_refresh_events": int(
+                decision_summary.get("schema_refresh_events", 0) or 0
+            ),
+            "schema.refresh_collisions": int(schema_refresh_collisions),
+            "query.join_count": int(
+                decision_summary.get("query_complexity", {}).get("join_count", 0) or 0
+            ),
+            "query.estimated_table_count": int(
+                decision_summary.get("query_complexity", {}).get("estimated_table_count", 0) or 0
+            ),
+            "query.estimated_scan_columns": int(
+                decision_summary.get("query_complexity", {}).get("estimated_scan_columns", 0) or 0
+            ),
+            "query.detected_cartesian_flag": bool(
+                decision_summary.get("query_complexity", {}).get("detected_cartesian_flag", False)
+            ),
+            "query.query_complexity_score": int(
+                decision_summary.get("query_complexity", {}).get("query_complexity_score", 0) or 0
+            ),
+            "latency.retrieval_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("retrieval_ms", 0.0) or 0.0
+            ),
+            "latency.planning_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("planning_ms", 0.0) or 0.0
+            ),
+            "latency.generation_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("generation_ms", 0.0) or 0.0
+            ),
+            "latency.validation_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("validation_ms", 0.0) or 0.0
+            ),
+            "latency.execution_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("execution_ms", 0.0) or 0.0
+            ),
+            "latency.correction_loop_ms": float(
+                decision_summary.get("latency_breakdown_ms", {}).get("correction_loop_ms", 0.0)
+                or 0.0
+            ),
+            "retry.correction_attempt_count": int(
+                retry_correction_summary.get("correction_attempt_count", 0) or 0
+            ),
+            "retry.validation_failure_count": int(
+                retry_correction_summary.get("validation_failure_count", 0) or 0
+            ),
+            "retry.final_stopping_reason": str(
+                retry_correction_summary.get("final_stopping_reason") or "unknown"
+            ),
+            "retry.correction_attempts_truncated": bool(
+                retry_correction_summary.get("correction_attempts_truncated", False)
+            ),
+            "retry.validation_failures_truncated": bool(
+                retry_correction_summary.get("validation_failures_truncated", False)
+            ),
+            "retry.correction_attempts_dropped": int(
+                retry_correction_summary.get("correction_attempts_dropped", 0) or 0
+            ),
+            "retry.validation_failures_dropped": int(
+                retry_correction_summary.get("validation_failures_dropped", 0) or 0
+            ),
+            "validation.report.failed_rules_count": int(
+                len(validation_report.get("failed_rules", []))
+                if isinstance(validation_report.get("failed_rules"), list)
+                else 0
+            ),
+            "validation.report.warnings_count": int(
+                len(validation_report.get("warnings", []))
+                if isinstance(validation_report.get("warnings"), list)
+                else 0
+            ),
+            "validation.report.affected_tables_count": int(
+                len(validation_report.get("affected_tables", []))
+                if isinstance(validation_report.get("affected_tables"), list)
+                else 0
+            ),
+        }
+        record_query_complexity_score(
+            decision_summary.get("query_complexity", {}).get("query_complexity_score", 0)
+        )
+        record_truncation_event(result.get("result_is_truncated", False))
+        record_stage_latency_breakdown(decision_summary.get("latency_breakdown_ms"))
+        telemetry.update_current_trace(summary_attrs)
+        active_span = telemetry.get_current_span()
+        if active_span:
+            active_span.set_attributes(summary_attrs)
+            active_span.add_event(
+                "agent.decision_summary",
+                {
+                    "summary_json": json.dumps(
+                        {
+                            "decision_summary": decision_summary,
+                            "retry_correction_summary": retry_correction_summary,
+                        },
+                        sort_keys=True,
+                        default=str,
+                    )[:2048]
+                },
+            )
+
+        # 4. Final Flush (Control-plane safety)
         # Ensure traces are sent before returning to avoid loss on rapid process exit
         telemetry.flush(timeout_ms=500)
 

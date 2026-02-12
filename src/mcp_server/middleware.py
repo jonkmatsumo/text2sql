@@ -21,6 +21,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from common.config.env import get_env_str
+from mcp_server.utils.request_auth_context import (
+    reset_internal_auth_verified,
+    set_internal_auth_verified,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +52,18 @@ class InternalAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Verify auth token on requests to protected paths."""
         token = get_env_str("INTERNAL_AUTH_TOKEN", "")
-        if token:
-            if request.url.path not in AUTH_EXEMPT_PATHS:
-                request_token = request.headers.get("X-Internal-Token")
-                if request_token != token:
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+        verified_internal_auth = False
+        if token and request.url.path not in AUTH_EXEMPT_PATHS:
+            request_token = request.headers.get("X-Internal-Token")
+            if request_token != token:
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            verified_internal_auth = True
+
+        auth_token = set_internal_auth_verified(verified_internal_auth)
+        try:
+            return await call_next(request)
+        finally:
+            reset_internal_auth_verified(auth_token)
 
 
 def get_middleware_stack() -> List[Middleware]:

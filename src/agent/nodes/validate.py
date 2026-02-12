@@ -1,5 +1,7 @@
 """SQL validation node for syntactic and semantic correctness with telemetry tracing."""
 
+import json
+import time
 from typing import Dict, Optional, Set, Tuple
 
 import sqlglot
@@ -9,7 +11,9 @@ from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.validation.ast_validator import validate_sql
-from common.config.env import get_env_bool, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
+from common.constants.reason_codes import ValidationReportRuleId
+from common.sanitization.text import redact_sensitive_info
 
 
 def _extract_limit(sql_query: str) -> Tuple[bool, Optional[int]]:
@@ -89,6 +93,26 @@ def _parse_table_allowlist(raw_allowlist: Optional[str]) -> Set[str]:
     return tables
 
 
+def _parse_column_allowlist(raw_allowlist: Optional[str]) -> Dict[str, Set[str]]:
+    columns: Dict[str, Set[str]] = {}
+    if not raw_allowlist:
+        return columns
+
+    for item in raw_allowlist.split(","):
+        normalized = item.strip().lower()
+        if not normalized:
+            continue
+        if "." not in normalized:
+            continue
+        table_name, column_name = normalized.split(".", 1)
+        table_name = table_name.strip()
+        column_name = column_name.strip()
+        if not table_name or not column_name:
+            continue
+        columns.setdefault(table_name, set()).add(column_name)
+    return columns
+
+
 def _schema_tables_from_state(state: AgentState) -> Set[str]:
     tables: Set[str] = set()
 
@@ -115,6 +139,30 @@ def _schema_tables_from_state(state: AgentState) -> Set[str]:
     return tables
 
 
+def _schema_columns_from_state(state: AgentState) -> Dict[str, Set[str]]:
+    columns: Dict[str, Set[str]] = {}
+    raw_schema_context = state.get("raw_schema_context") or []
+    if not isinstance(raw_schema_context, list):
+        return columns
+
+    for node in raw_schema_context:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type") or "").lower()
+        if node_type != "column":
+            continue
+        table_name = node.get("table")
+        column_name = node.get("name")
+        if not isinstance(table_name, str) or not isinstance(column_name, str):
+            continue
+        normalized_table = table_name.strip().lower()
+        normalized_column = column_name.strip().lower()
+        if not normalized_table or not normalized_column:
+            continue
+        columns.setdefault(normalized_table, set()).add(normalized_column)
+    return columns
+
+
 def _resolve_table_allowlist(state: AgentState) -> Set[str]:
     """Resolve per-tenant table allowlist from config or schema context."""
     tenant_id = state.get("tenant_id")
@@ -126,6 +174,172 @@ def _resolve_table_allowlist(state: AgentState) -> Set[str]:
     if configured_tables:
         return configured_tables
     return _schema_tables_from_state(state)
+
+
+def _resolve_column_allowlist_mode() -> str:
+    mode = (get_env_str("AGENT_COLUMN_ALLOWLIST_MODE", "warn") or "warn").strip().lower()
+    if mode not in {"warn", "block", "off"}:
+        return "warn"
+    return mode
+
+
+def _resolve_column_allowlist(state: AgentState) -> Dict[str, Set[str]]:
+    allowlist: Dict[str, Set[str]] = {}
+
+    use_schema_context = get_env_bool("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", True) is True
+    if use_schema_context:
+        for table_name, columns in _schema_columns_from_state(state).items():
+            allowlist.setdefault(table_name, set()).update(columns)
+
+    configured = _parse_column_allowlist(get_env_str("AGENT_COLUMN_ALLOWLIST", ""))
+    for table_name, columns in configured.items():
+        allowlist.setdefault(table_name, set()).update(columns)
+
+    return allowlist
+
+
+def _append_bounded_event(state: AgentState, key: str, event: dict) -> tuple[list[dict], bool, int]:
+    max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
+    max_events = max(1, int(max_events))
+    truncated_key = f"{key}_truncated"
+    dropped_key = f"{key}_dropped"
+    existing_truncated = bool(state.get(truncated_key))
+    existing_dropped_raw = state.get(dropped_key, 0)
+    existing_dropped = (
+        int(existing_dropped_raw) if isinstance(existing_dropped_raw, (int, float)) else 0
+    )
+    events = state.get(key) or []
+    if not isinstance(events, list):
+        events = []
+    events = [entry for entry in events if isinstance(entry, dict)]
+    events.append(event)
+    dropped_now = max(0, len(events) - max_events)
+    if dropped_now:
+        events = events[dropped_now:]
+    total_dropped = existing_dropped + dropped_now
+    return events, (existing_truncated or dropped_now > 0), total_dropped
+
+
+def _extract_rejected_tables(violations: list[dict]) -> list[dict]:
+    rejected_tables: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for violation in violations:
+        if not isinstance(violation, dict):
+            continue
+        details = violation.get("details")
+        if not isinstance(details, dict):
+            continue
+        reason = str(details.get("reason") or "unknown").strip().lower()
+        table = details.get("table")
+        if isinstance(table, str) and table.strip():
+            normalized = table.strip().lower()
+            key = (normalized, reason)
+            if key not in seen:
+                seen.add(key)
+                rejected_tables.append({"table": normalized, "reason": reason})
+        table_list = details.get("tables")
+        if isinstance(table_list, list):
+            for raw_table in table_list:
+                if not isinstance(raw_table, str) or not raw_table.strip():
+                    continue
+                normalized = raw_table.strip().lower()
+                key = (normalized, reason)
+                if key not in seen:
+                    seen.add(key)
+                    rejected_tables.append({"table": normalized, "reason": reason})
+    return rejected_tables
+
+
+def _validation_report_limit() -> int:
+    limit = get_env_int("AGENT_VALIDATION_REPORT_MAX_ITEMS", 20) or 20
+    return max(1, int(limit))
+
+
+def _validation_report_message_limit() -> int:
+    limit = get_env_int("AGENT_VALIDATION_REPORT_MAX_MESSAGE_CHARS", 256) or 256
+    return max(32, int(limit))
+
+
+def _sanitize_report_text(value: object, *, max_chars: int) -> str:
+    text = redact_sensitive_info(str(value or "")).strip()
+    if not text:
+        return ""
+    return text[:max_chars]
+
+
+def _normalize_validation_rule_id(value: object) -> str:
+    raw_rule = str(value or "").strip().lower()
+    if not raw_rule:
+        return ValidationReportRuleId.UNKNOWN.value
+    allowed = {rule.value for rule in ValidationReportRuleId}
+    if raw_rule in allowed:
+        return raw_rule
+    return ValidationReportRuleId.UNKNOWN.value
+
+
+def _bounded_strings(values: list[str], max_items: int) -> list[str]:
+    bounded: list[str] = []
+    max_chars = _validation_report_message_limit()
+    for value in values:
+        normalized = _sanitize_report_text(value, max_chars=max_chars)
+        if normalized:
+            bounded.append(normalized)
+        if len(bounded) >= max_items:
+            break
+    return bounded
+
+
+def _build_validation_report(result, max_items: int) -> dict:
+    """Build a bounded, operator-safe validation report.
+
+    Contract:
+    - `failed_rules[]`: stable rule IDs + bounded messages.
+    - `warnings[]`: bounded and redacted warning text.
+    - `affected_tables[]`: normalized table names.
+    """
+    violation_dicts = [violation.to_dict() for violation in result.violations]
+    failed_rules = []
+    affected_tables: set[str] = set()
+    max_chars = _validation_report_message_limit()
+
+    metadata = result.metadata.to_dict() if result.metadata else {}
+    if isinstance(metadata, dict):
+        lineage = metadata.get("table_lineage")
+        if isinstance(lineage, list):
+            for table_name in lineage:
+                if isinstance(table_name, str) and table_name.strip():
+                    affected_tables.add(table_name.strip().lower())
+
+    for violation in violation_dicts:
+        if not isinstance(violation, dict):
+            continue
+        rule = _normalize_validation_rule_id(violation.get("violation_type"))
+        message = _sanitize_report_text(violation.get("message"), max_chars=max_chars)
+        details = violation.get("details")
+        if len(failed_rules) < max_items:
+            failed_rules.append(
+                {
+                    "rule": rule,
+                    "message": message,
+                }
+            )
+        if isinstance(details, dict):
+            table = details.get("table")
+            if isinstance(table, str) and table.strip():
+                affected_tables.add(table.strip().lower())
+            tables = details.get("tables")
+            if isinstance(tables, list):
+                for raw_table in tables:
+                    if isinstance(raw_table, str) and raw_table.strip():
+                        affected_tables.add(raw_table.strip().lower())
+
+    warnings = _bounded_strings(result.warnings or [], max_items)
+    bounded_tables = sorted(affected_tables)[:max_items]
+    return {
+        "failed_rules": failed_rules,
+        "warnings": warnings,
+        "affected_tables": bounded_tables,
+    }
 
 
 async def validate_sql_node(state: AgentState) -> dict:
@@ -149,6 +363,13 @@ async def validate_sql_node(state: AgentState) -> dict:
         name="validate_sql",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.validation_ms", latency_ms)
+            return {"latency_validation_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "validate_sql")
         sql_query = state.get("current_sql")
@@ -160,6 +381,7 @@ async def validate_sql_node(state: AgentState) -> dict:
             return {
                 "error": "No SQL query to validate",
                 "ast_validation_result": None,
+                **_latency_payload(),
             }
 
         is_limited, limit_value = _extract_limit(sql_query)
@@ -217,6 +439,7 @@ async def validate_sql_node(state: AgentState) -> dict:
                             "ast_validation_result": {"is_valid": False},
                             "result_is_limited": is_limited,
                             "result_limit": limit_value,
+                            **_latency_payload(),
                         }
                 else:
                     span.set_attribute("validation.schema_bound_blocked", False)
@@ -228,7 +451,43 @@ async def validate_sql_node(state: AgentState) -> dict:
         allowlist_enabled = bool(allowed_tables)
         span.set_attribute("validation.table_allowlist_enabled", allowlist_enabled)
         span.set_attribute("validation.table_allowlist_count", len(allowed_tables))
-        result = validate_sql(sql_query, allowed_tables=allowed_tables or None)
+        allowed_columns = _resolve_column_allowlist(state)
+        column_allowlist_mode = _resolve_column_allowlist_mode()
+        span.set_attribute("validation.column_allowlist_mode", column_allowlist_mode)
+        span.set_attribute(
+            "validation.column_allowlist_tables_count",
+            len(allowed_columns),
+        )
+        span.set_attribute(
+            "validation.cartesian_join_mode",
+            (get_env_str("AGENT_CARTESIAN_JOIN_MODE", "warn") or "warn").strip().lower(),
+        )
+        result = validate_sql(
+            sql_query,
+            allowed_tables=allowed_tables or None,
+            allowed_columns=allowed_columns or None,
+            column_allowlist_mode=column_allowlist_mode,
+        )
+        validation_report = _build_validation_report(result, _validation_report_limit())
+        span.set_attribute(
+            "validation.report.failed_rules_count",
+            len(validation_report.get("failed_rules", [])),
+        )
+        span.set_attribute(
+            "validation.report.warnings_count",
+            len(validation_report.get("warnings", [])),
+        )
+        span.set_attribute(
+            "validation.report.affected_tables_count",
+            len(validation_report.get("affected_tables", [])),
+        )
+        if hasattr(span, "add_event"):
+            span.add_event(
+                "validation.report",
+                {
+                    "report_json": json.dumps(validation_report, sort_keys=True)[:1024],
+                },
+            )
 
         # Log validation result
         span.set_attribute("is_valid", str(result.is_valid))
@@ -239,6 +498,40 @@ async def validate_sql_node(state: AgentState) -> dict:
         if result.metadata:
             span.set_attribute("table_count", str(len(result.metadata.table_lineage)))
             span.set_attribute("join_complexity", str(result.metadata.join_complexity))
+            span.set_attribute("query.join_count", int(result.metadata.join_count or 0))
+            span.set_attribute(
+                "query.estimated_table_count", int(result.metadata.estimated_table_count or 0)
+            )
+            span.set_attribute(
+                "query.estimated_scan_columns",
+                int(result.metadata.estimated_scan_columns or 0),
+            )
+            span.set_attribute("query.union_count", int(result.metadata.union_count or 0))
+            span.set_attribute(
+                "query.detected_cartesian_flag",
+                bool(result.metadata.detected_cartesian_flag),
+            )
+            span.set_attribute(
+                "query.query_complexity_score",
+                int(result.metadata.query_complexity_score or 0),
+            )
+
+        query_metrics = {
+            "query_join_count": int(result.metadata.join_count or 0) if result.metadata else 0,
+            "query_estimated_table_count": (
+                int(result.metadata.estimated_table_count or 0) if result.metadata else 0
+            ),
+            "query_estimated_scan_columns": (
+                int(result.metadata.estimated_scan_columns or 0) if result.metadata else 0
+            ),
+            "query_union_count": int(result.metadata.union_count or 0) if result.metadata else 0,
+            "query_detected_cartesian_flag": (
+                bool(result.metadata.detected_cartesian_flag) if result.metadata else False
+            ),
+            "query_complexity_score": (
+                int(result.metadata.query_complexity_score or 0) if result.metadata else 0
+            ),
+        }
 
         if not result.is_valid:
             # Convert violations to structured error message for healer
@@ -247,12 +540,31 @@ async def validate_sql_node(state: AgentState) -> dict:
                 violation_messages.append(f"[{v.violation_type.value}] {v.message}")
 
             structured_error = "\n".join(violation_messages)
+            violation_dicts = [v.to_dict() for v in result.violations]
+            validation_event = {
+                "retry_count": int(state.get("retry_count", 0) or 0),
+                "violation_types": sorted(
+                    {
+                        violation.get("violation_type")
+                        for violation in violation_dicts
+                        if isinstance(violation, dict) and violation.get("violation_type")
+                    }
+                ),
+                "rejected_tables": _extract_rejected_tables(violation_dicts),
+            }
+            validation_failures, validation_failures_truncated, validation_failures_dropped = (
+                _append_bounded_event(
+                    state,
+                    "validation_failures",
+                    validation_event,
+                )
+            )
 
             span.set_outputs(
                 {
                     "is_valid": False,
                     "error": structured_error,
-                    "violations": [v.to_dict() for v in result.violations],
+                    "violations": violation_dicts,
                     "warnings": result.warnings,
                 }
             )
@@ -260,12 +572,18 @@ async def validate_sql_node(state: AgentState) -> dict:
             return {
                 "error": structured_error,
                 "ast_validation_result": result.to_dict(),
+                "validation_report": validation_report,
+                "validation_failures": validation_failures,
+                "validation_failures_truncated": validation_failures_truncated,
+                "validation_failures_dropped": validation_failures_dropped,
+                **query_metrics,
                 # Preserve metadata even on failure for audit
                 "table_lineage": result.metadata.table_lineage if result.metadata else [],
                 "column_usage": result.metadata.column_usage if result.metadata else [],
                 "join_complexity": result.metadata.join_complexity if result.metadata else 0,
                 "result_is_limited": is_limited,
                 "result_limit": limit_value,
+                **_latency_payload(),
             }
 
         # Validation passed - enrich state with metadata
@@ -281,6 +599,12 @@ async def validate_sql_node(state: AgentState) -> dict:
         return {
             "error": None,  # Clear any previous validation errors
             "ast_validation_result": result.to_dict(),
+            "validation_report": validation_report,
+            "validation_failures_truncated": bool(
+                state.get("validation_failures_truncated", False)
+            ),
+            "validation_failures_dropped": int(state.get("validation_failures_dropped", 0) or 0),
+            **query_metrics,
             "table_lineage": result.metadata.table_lineage if result.metadata else [],
             "column_usage": result.metadata.column_usage if result.metadata else [],
             "join_complexity": result.metadata.join_complexity if result.metadata else 0,
@@ -288,4 +612,5 @@ async def validate_sql_node(state: AgentState) -> dict:
             "result_limit": limit_value,
             # Optionally use normalized SQL
             "current_sql": result.parsed_sql if result.parsed_sql else sql_query,
+            **_latency_payload(),
         }

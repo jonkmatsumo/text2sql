@@ -16,10 +16,10 @@ from typing import Any, Callable, Dict, Optional
 from opentelemetry import context, propagate, trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.trace import Status, StatusCode
 
-from common.config.env import get_env_str
+from common.config.env import get_env_bool, get_env_str
 from common.sanitization.bounding import redact_recursive
 
 logger = logging.getLogger(__name__)
@@ -42,36 +42,66 @@ def _setup_otel_sdk():
 
     resource = Resource.create({SERVICE_NAME: OTEL_SERVICE_NAME})
     provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(provider)
 
-    # Check if we are running in a test environment
-    if (
-        "PYTEST_CURRENT_TEST" in os.environ
-        and os.environ.get("OTEL_ENABLE_IN_TESTS", "").lower() != "true"
-    ):
-        # In tests, specifically avoid OTLP to prevent connection retry noise
-        # unless explicitly enabled.
-        trace.set_tracer_provider(provider)
+    if not get_env_bool("OTEL_WORKER_ENABLED", True):
         _otel_initialized = True
-        logger.info("OTEL SDK initialized in TEST mode (No-op exporter)")
+        logger.info("OTEL SDK initialized without exporter (OTEL_WORKER_ENABLED=false)")
         return
 
-    if OTEL_EXPORTER_OTLP_PROTOCOL == "grpc":
-        try:
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-        except ImportError:
-            # Fallback to HTTP if grpc is not available or mismatch
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    else:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    worker_required = get_env_bool("OTEL_WORKER_REQUIRED", False)
 
-    exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
-    processor = BatchSpanProcessor(exporter)
-    provider.add_span_processor(processor)
+    # Explicit exporter disable for local/offline runs.
+    if get_env_bool("OTEL_DISABLE_EXPORTER", False):
+        _otel_initialized = True
+        logger.info("OTEL SDK initialized without exporter (OTEL_DISABLE_EXPORTER=true)")
+        return
 
-    # Set as global tracer provider
-    trace.set_tracer_provider(provider)
+    is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+    exporter_mode_default = "in_memory" if is_pytest else "otlp"
+    exporter_mode = (
+        (get_env_str("OTEL_TEST_EXPORTER", exporter_mode_default) or exporter_mode_default)
+        .strip()
+        .lower()
+    )
+
+    try:
+        if exporter_mode == "none":
+            logger.info("OTEL SDK initialized without exporter (OTEL_TEST_EXPORTER=none)")
+        elif exporter_mode == "in_memory":
+            from common.observability.in_memory_exporter import get_or_create_span_exporter
+
+            exporter = get_or_create_span_exporter("agent")
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
+            logger.info("OTEL SDK initialized with in-memory exporter (scope=agent)")
+        else:
+            if OTEL_EXPORTER_OTLP_PROTOCOL == "grpc":
+                try:
+                    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                        OTLPSpanExporter,
+                    )
+                except ImportError:
+                    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                        OTLPSpanExporter,
+                    )
+            else:
+                from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            exporter = OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT)
+            processor = BatchSpanProcessor(exporter)
+            provider.add_span_processor(processor)
+            logger.info(f"OTEL SDK initialized with endpoint: {OTEL_EXPORTER_OTLP_ENDPOINT}")
+    except Exception as exc:
+        if worker_required:
+            raise RuntimeError(
+                "Failed to initialize OTEL exporter while OTEL_WORKER_REQUIRED=true. "
+                "Set OTEL_WORKER_REQUIRED=false for degraded operation."
+            ) from exc
+        logger.exception(
+            "OTEL exporter initialization failed; continuing without exporter: %s", exc
+        )
+
     _otel_initialized = True
-    logger.info(f"OTEL SDK initialized with endpoint: {OTEL_EXPORTER_OTLP_ENDPOINT}")
 
 
 class SpanType(Enum):

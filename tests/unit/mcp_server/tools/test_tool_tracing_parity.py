@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from common.models.tool_versions import get_tool_version
 from mcp_server.tools.registry import CANONICAL_TOOLS
 from mcp_server.utils.tracing import trace_tool
 
@@ -40,7 +41,10 @@ async def test_non_sql_tool_emits_required_span_attributes():
 
     with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
         traced = trace_tool("get_sample_data")(fake_handler)
-        await traced(query="test", tenant_id=42)
+        response = await traced(query="test", tenant_id=42)
+
+    parsed = json.loads(response)
+    assert parsed["metadata"]["tool_version"] == get_tool_version("get_sample_data")
 
     # Collect all set_attribute calls into a dict for easy assertion
     attrs = {}
@@ -210,6 +214,9 @@ async def test_all_non_execute_tools_emit_bounded_metadata_shape(tool_name: str)
     metadata = parsed["metadata"]
 
     assert "is_truncated" in metadata
+    assert "truncated" in metadata
+    assert "returned_count" in metadata
+    assert "limit_applied" in metadata
     assert "items_returned" in metadata
     assert "items_total" in metadata
     assert "bytes_returned" in metadata
@@ -240,6 +247,7 @@ async def test_non_execute_raw_string_payload_is_wrapped_and_bounded():
     parsed = json.loads(response)
     assert "metadata" in parsed
     assert parsed["metadata"]["is_truncated"] is True
+    assert parsed["metadata"]["truncated"] is True
     assert parsed["metadata"]["bytes_total"] >= parsed["metadata"]["bytes_returned"]
 
 
@@ -264,3 +272,102 @@ async def test_truncation_metrics_emitted_for_non_execute_tool():
 
     mock_record_histogram.assert_called()
     mock_add_counter.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_requested_tool_version_supported_allows_execution():
+    """Matching requested_tool_version should execute the wrapped handler."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version=get_tool_version("list_tables"))
+
+    assert calls["count"] == 1
+    parsed = json.loads(response)
+    assert parsed["metadata"]["tool_version"] == get_tool_version("list_tables")
+
+
+@pytest.mark.asyncio
+async def test_requested_tool_version_unsupported_returns_compatibility_error():
+    """Unsupported requested_tool_version should fail before tool execution."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version="v2")
+
+    assert calls["count"] == 0
+    parsed = json.loads(response)
+    assert parsed["error"]["category"] == "tool_version_unsupported"
+    assert parsed["error"]["sql_state"] == "UNSUPPORTED_TOOL_VERSION"
+
+
+@pytest.mark.asyncio
+async def test_missing_requested_tool_version_defaults_to_supported_version():
+    """Missing requested_tool_version should execute normally."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced()
+
+    assert calls["count"] == 1
+    parsed = json.loads(response)
+    assert parsed["metadata"]["tool_version"] == get_tool_version("list_tables")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested_tool_version", ["", "2", "latest", "v0", "v-1"])
+async def test_malformed_requested_tool_version_returns_validation_error(requested_tool_version):
+    """Malformed requested_tool_version should fail deterministically."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version=requested_tool_version)
+
+    assert calls["count"] == 0
+    parsed = json.loads(response)
+    assert parsed["error"]["category"] == "tool_version_invalid"
+    assert parsed["error"]["sql_state"] == "INVALID_TOOL_VERSION_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_higher_requested_tool_version_is_unsupported():
+    """Higher requested_tool_version values should produce compatibility errors."""
+    mock_tracer, _mock_span = _make_mock_tracer()
+    calls = {"count": 0}
+
+    async def fake_handler():
+        calls["count"] += 1
+        return json.dumps({"result": [], "metadata": {"provider": "postgres"}})
+
+    with patch("opentelemetry.trace.get_tracer", return_value=mock_tracer):
+        traced = trace_tool("list_tables")(fake_handler)
+        response = await traced(requested_tool_version="v99")
+
+    assert calls["count"] == 0
+    parsed = json.loads(response)
+    assert parsed["error"]["category"] == "tool_version_unsupported"
+    assert parsed["error"]["sql_state"] == "UNSUPPORTED_TOOL_VERSION"

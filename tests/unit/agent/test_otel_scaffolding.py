@@ -4,7 +4,10 @@ import pytest
 
 from agent.telemetry import OTELTelemetryBackend
 
-pytestmark = pytest.mark.skipif(os.getenv("CI") == "true", reason="Failing in CI environment")
+pytestmark = pytest.mark.skipif(
+    os.getenv("SKIP_OTEL_WORKER_TESTS") == "1",
+    reason="OTEL worker tests disabled via SKIP_OTEL_WORKER_TESTS=1",
+)
 
 
 def test_otel_import_sanity():

@@ -8,7 +8,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from agent.telemetry import OTELTelemetryBackend, TelemetryService
 
-pytestmark = pytest.mark.skipif(os.getenv("CI") == "true", reason="Failing in CI environment")
+pytestmark = pytest.mark.skipif(
+    os.getenv("SKIP_OTEL_WORKER_TESTS") == "1",
+    reason="OTEL worker tests disabled via SKIP_OTEL_WORKER_TESTS=1",
+)
 
 
 @pytest.fixture(autouse=True)

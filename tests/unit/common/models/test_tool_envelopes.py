@@ -7,6 +7,7 @@ import pytest
 from common.models.tool_envelopes import (
     ExecuteSQLQueryMetadata,
     ExecuteSQLQueryResponseEnvelope,
+    GenericToolMetadata,
     parse_execute_sql_response,
 )
 
@@ -19,6 +20,7 @@ def test_envelope_creation_valid():
     assert env.rows == [{"id": 1}]
     assert env.metadata.rows_returned == 1
     assert not env.metadata.is_truncated
+    assert env.metadata.tool_version == "v1"
     assert env.schema_version == "1.0"
 
 
@@ -42,6 +44,7 @@ def test_parse_dict():
     payload = {"rows": [{"a": 1}], "metadata": {"rows_returned": 1}}
     env = parse_execute_sql_response(payload)
     assert isinstance(env, ExecuteSQLQueryResponseEnvelope)
+    assert env.metadata.tool_version == "v1"
 
 
 def test_parse_error_string():
@@ -65,6 +68,35 @@ def test_parse_error_dict():
 def test_metadata_defaults():
     """Test metadata default values."""
     meta = ExecuteSQLQueryMetadata(rows_returned=5)
+    assert meta.tool_version == "v1"
     assert not meta.is_truncated
+    assert meta.truncated is False
+    assert meta.returned_count == 5
     assert not meta.is_limited
     assert not meta.cap_detected
+
+
+def test_execute_metadata_accepts_standardized_aliases():
+    """Metadata should parse standardized truncation/pagination aliases."""
+    meta = ExecuteSQLQueryMetadata(
+        returned_count=3,
+        truncated=True,
+        limit_applied=3,
+        next_cursor="cursor-1",
+    )
+    assert meta.rows_returned == 3
+    assert meta.is_truncated is True
+    assert meta.row_limit == 3
+    assert meta.next_page_token == "cursor-1"
+
+
+def test_generic_metadata_alias_sync():
+    """Generic metadata keeps legacy and standardized aliases aligned."""
+    meta = GenericToolMetadata(
+        is_truncated=True,
+        items_returned=7,
+        next_page_token="p-2",
+    )
+    assert meta.truncated is True
+    assert meta.returned_count == 7
+    assert meta.next_cursor == "p-2"

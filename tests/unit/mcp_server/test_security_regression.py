@@ -1,6 +1,7 @@
 """Regression tests for SQL read-only enforcement bypass vectors."""
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
@@ -30,18 +31,24 @@ class TestSecurityRegression:
 
     @pytest.mark.asyncio
     async def test_bypass_with_comment(self):
-        """Test if regex handles keywords inside comments.
+        """Commented trailing text should not be treated as a second statement."""
 
-        Currently, the regex catches these, but we want to ensure any future change
-        doesn't break this without moving to real DB-level enforcement.
-        """
-        # This SHOULD be blocked by current regex
-        # This is blocked by AST validation (Multi-statement)
-        response_json = await execute_sql_query("SELECT 1; -- DROP TABLE users;", tenant_id=1)
-        response = json.loads(response_json)
+        class _Conn:
+            async def fetch(self, _sql, *_params):
+                return [{"value": 1}]
 
-        assert "error" in response
-        assert "Multi-statement queries are forbidden" in response["error"]["message"]
+        @asynccontextmanager
+        async def _conn_ctx(*_args, **_kwargs):
+            yield _Conn()
+
+        with patch.object(
+            execute_sql_query_mod.Database, "get_connection", return_value=_conn_ctx()
+        ):
+            response_json = await execute_sql_query("SELECT 1; -- DROP TABLE users;", tenant_id=1)
+            response = json.loads(response_json)
+
+        assert "error" not in response
+        assert response["rows"] == [{"value": 1}]
 
     @pytest.mark.asyncio
     async def test_bypass_with_set_blocked_by_db(self):

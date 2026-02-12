@@ -7,7 +7,6 @@ import asyncpg
 
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
-from common.models.error_metadata import ErrorMetadata
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
 from common.sql.dialect import normalize_sqlglot_dialect
 from dal.capability_negotiation import (
@@ -73,20 +72,33 @@ def _construct_error_response(
     retry_after_seconds: Optional[float] = None,
 ) -> str:
     """Construct a standardized error response."""
+    from mcp_server.utils.errors import build_error_metadata
+
     # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
     # Remove keys that are passed explicitly to avoid multiple values error
     for key in ["message", "category", "provider", "is_retryable", "retry_after_seconds"]:
         meta_dict.pop(key, None)
 
-    error_meta = ErrorMetadata(
+    error_meta = build_error_metadata(
         message=message,
         category=category,
         provider=provider,
-        is_retryable=is_retryable,
+        retryable=is_retryable,
         retry_after_seconds=retry_after_seconds,
-        **meta_dict,
+        code=meta_dict.get("sql_state"),
+        hint=meta_dict.get("hint"),
     )
+
+    details_safe = (
+        error_meta.details_safe.copy() if isinstance(error_meta.details_safe, dict) else {}
+    )
+    if meta_dict:
+        details_safe.update(
+            {key: value for key, value in meta_dict.items() if key not in {"sql_state", "hint"}}
+        )
+    if details_safe:
+        error_meta = error_meta.model_copy(update={"details_safe": details_safe})
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -103,11 +115,14 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
     import sqlglot
 
+    from common.sql.comments import strip_sql_comments
+
     # Map Text2SQL provider names to sqlglot dialects
     dialect = normalize_sqlglot_dialect(provider)
+    stripped_sql = strip_sql_comments(sql)
 
     try:
-        expressions = sqlglot.parse(sql, read=dialect)
+        expressions = sqlglot.parse(stripped_sql, read=dialect)
         if not expressions:
             return "Empty or invalid SQL query."
 
@@ -119,7 +134,11 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
             return "Failed to parse SQL query."
 
         # Use centralized policy
-        from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES, BLOCKED_FUNCTIONS
+        from common.policy.sql_policy import (
+            ALLOWED_STATEMENT_TYPES,
+            BLOCKED_FUNCTIONS,
+            classify_blocked_table_reference,
+        )
 
         if expression.key not in ALLOWED_STATEMENT_TYPES:
             allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
@@ -139,6 +158,21 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
             func_name = node.sql_name().lower()
             if func_name in BLOCKED_FUNCTIONS:
                 return f"Forbidden function: {func_name.upper()} is not allowed."
+
+        # Block restricted/system tables and schemas for direct MCP invocations.
+        for table in expression.find_all(exp.Table):
+            table_name = table.name.lower() if table.name else ""
+            schema_name = table.db.lower() if table.db else ""
+            blocked_reason = classify_blocked_table_reference(
+                table_name=table_name,
+                schema_name=schema_name,
+            )
+            if blocked_reason is None:
+                continue
+            full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+            if blocked_reason == "restricted_table":
+                return f"Forbidden table: {full_name} is not allowed."
+            return f"Forbidden schema/table reference: {full_name} is not allowed."
 
     except sqlglot.errors.ParseError as e:
         return f"SQL Syntax Error: {e}"

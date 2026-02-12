@@ -318,3 +318,39 @@ class TestGenerateSqlNode:
 
         expected_sql = "SELECT COUNT(*) as count\n  FROM film\n  WHERE rating = 'PG'"
         assert result["current_sql"] == expected_sql
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.generate.telemetry.start_span")
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.generate.ChatPromptTemplate")
+    async def test_generate_sql_node_prompt_budget_exceeded(
+        self, mock_prompt_class, mock_llm, mock_start_span, monkeypatch
+    ):
+        """Prompt-byte budget should short-circuit generation before LLM invocation."""
+        monkeypatch.setenv("AGENT_MAX_PROMPT_BYTES_PER_RUN", "200")
+        self._mock_telemetry_span(mock_start_span)
+        mock_prompt = MagicMock()
+        mock_chain = MagicMock()
+        mock_prompt.from_messages.return_value = mock_prompt
+        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
+        mock_prompt_class.from_messages.return_value = mock_prompt
+
+        from langchain_core.messages import HumanMessage
+
+        state = AgentState(
+            messages=[HumanMessage(content="very long query text")],
+            schema_context=("x" * 5000),
+            current_sql=None,
+            query_result=None,
+            error=None,
+            retry_count=0,
+            llm_prompt_bytes_used=0,
+            llm_budget_exceeded=False,
+        )
+
+        result = await generate_sql_node(state)
+
+        mock_chain.invoke.assert_not_called()
+        mock_llm.assert_not_called()
+        assert result["error_category"] == "budget_exhausted"
+        assert result["llm_budget_exceeded"] is True

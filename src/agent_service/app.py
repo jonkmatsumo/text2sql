@@ -42,6 +42,14 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def validate_startup_configuration() -> None:
+    """Fail fast on invalid runtime flag combinations."""
+    from common.config.sanity import validate_runtime_configuration
+
+    validate_runtime_configuration()
+
+
 class AgentRunRequest(BaseModel):
     """Request payload for agent execution."""
 
@@ -74,10 +82,25 @@ class AgentRunResponse(BaseModel):
     retry_summary: Optional[dict] = None
     capability_summary: Optional[dict] = None
     validation_summary: Optional[dict] = None
+    validation_report: Optional[dict] = None
     empty_result_guidance: Optional[str] = None
+    decision_summary: Optional[dict] = None
+    retry_correction_summary: Optional[dict] = None
     replay_bundle: Optional[dict[str, Any]] = None
     replay_bundle_json: Optional[str] = None
     replay_metadata: Optional[dict[str, Any]] = None
+
+
+class AgentDiagnosticsResponse(BaseModel):
+    """Operator-safe runtime diagnostics."""
+
+    active_database_provider: Optional[str] = None
+    retry_policy: dict[str, Any]
+    schema_cache_ttl_seconds: int
+    runtime_indicators: dict[str, Any]
+    enabled_flags: dict[str, Any]
+    debug: Optional[dict[str, Any]] = None
+    self_test: Optional[dict[str, Any]] = None
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -226,6 +249,8 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "rows_returned": rows_returned,
             }
 
+        include_decision_debug = get_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False) is True
+
         return AgentRunResponse(
             sql=state.get("current_sql"),
             result=state.get("query_result"),
@@ -253,7 +278,12 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 "schema_drift_suspected": state.get("schema_drift_suspected"),
                 "missing_identifiers": state.get("missing_identifiers"),
             },
+            validation_report=state.get("validation_report") if include_decision_debug else None,
             empty_result_guidance=state.get("empty_result_guidance"),
+            decision_summary=state.get("decision_summary") if include_decision_debug else None,
+            retry_correction_summary=(
+                state.get("retry_correction_summary") if include_decision_debug else None
+            ),
             replay_bundle=replay_bundle_payload,
             replay_bundle_json=replay_bundle_json,
             replay_metadata=replay_metadata,
@@ -264,3 +294,15 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         from common.sanitization.text import redact_sensitive_info as _redact
 
         return AgentRunResponse(error=_redact(str(exc)), trace_id=None)
+
+
+@app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
+def get_agent_diagnostics(debug: bool = False, self_test: bool = False) -> AgentDiagnosticsResponse:
+    """Return non-sensitive runtime diagnostics for operators."""
+    from common.config.diagnostics import build_operator_diagnostics
+    from common.config.diagnostics_self_test import run_diagnostics_self_test
+
+    payload = build_operator_diagnostics(debug=debug)
+    if self_test:
+        payload["self_test"] = run_diagnostics_self_test()
+    return AgentDiagnosticsResponse(**payload)

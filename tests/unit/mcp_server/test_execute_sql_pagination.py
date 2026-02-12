@@ -13,6 +13,7 @@ from mcp_server.tools.execute_sql_query import handler
 @pytest.mark.asyncio
 async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
     """Pagination options should be rejected when unsupported."""
+    monkeypatch.setenv("AGENT_CAPABILITY_FALLBACK_MODE", "off")
     caps = SimpleNamespace(
         supports_column_metadata=True,
         supports_cancel=True,
@@ -37,14 +38,13 @@ async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
         )
 
     result = json.loads(payload)
-    # Just verify it's an error and mentions pagination if possible
     assert "error" in result
     error_obj = result["error"]
-    if "category" in error_obj:
-        assert error_obj["category"] in ["unknown", "unsupported_capability"]
-
-    if "required_capability" in error_obj:
-        assert error_obj["required_capability"] == "pagination"
+    assert error_obj["category"] in ["unknown", "unsupported_capability"]
+    if error_obj["category"] == "unsupported_capability":
+        details = error_obj.get("details_safe") or {}
+        required = details.get("required_capability") or details.get("capability_required")
+        assert required == "pagination"
 
 
 @pytest.mark.asyncio
@@ -75,11 +75,11 @@ async def test_execute_sql_query_pagination_suggests_fallback(monkeypatch):
         )
 
     result = json.loads(payload)
-    # Check inside error object for capabilities/fallback metadata
     error_obj = result["error"]
     assert error_obj["category"] == "unsupported_capability"
-    assert error_obj["fallback_applied"] is False
-    assert error_obj["fallback_mode"] == "force_limited_results"
+    details = error_obj.get("details_safe") or {}
+    assert details["fallback_applied"] is False
+    assert details["fallback_mode"] == "force_limited_results"
 
 
 @pytest.mark.asyncio

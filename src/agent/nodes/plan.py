@@ -8,6 +8,7 @@ This module implements the "Plan-Then-Generate" pattern:
 """
 
 import json
+import time
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
@@ -98,6 +99,13 @@ async def plan_sql_node(state: AgentState) -> dict:
         name="plan_sql",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        stage_start = time.monotonic()
+
+        def _latency_payload() -> dict:
+            latency_ms = max(0.0, (time.monotonic() - stage_start) * 1000.0)
+            span.set_attribute("latency.planning_ms", latency_ms)
+            return {"latency_planning_ms": latency_ms}
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "plan_sql")
         messages = state["messages"]
@@ -129,7 +137,7 @@ async def plan_sql_node(state: AgentState) -> dict:
 
         if not user_query:
             span.set_outputs({"error": "No query to plan"})
-            return {}
+            return {"latency_planning_ms": 0.0}
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -211,4 +219,5 @@ Generate the SQL execution plan:""",
             "procedural_plan": procedural_plan,
             "clause_map": clause_map,
             "schema_ingredients": schema_ingredients,
+            **_latency_payload(),
         }

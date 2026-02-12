@@ -15,6 +15,10 @@ def _minimal_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("SCHEMA_SNAPSHOT_MODE", "fingerprint")
     monkeypatch.setenv("MCP_USER_ROLE", "ADMIN_ROLE,SQL_ADMIN_ROLE,TABLE_ADMIN_ROLE,SQL_USER_ROLE")
+    monkeypatch.setenv("OTEL_WORKER_ENABLED", "true")
+    monkeypatch.setenv("OTEL_WORKER_REQUIRED", "false")
+    if not os.getenv("OTEL_TEST_EXPORTER"):
+        monkeypatch.setenv("OTEL_TEST_EXPORTER", "in_memory")
     monkeypatch.delenv("POSTGRES_URL", raising=False)
     yield
 

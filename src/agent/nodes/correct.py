@@ -14,11 +14,34 @@ from agent.taxonomy.error_taxonomy import classify_error, generate_correction_st
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.utils.budgeting import update_latency_ema
-from common.config.env import get_env_bool, get_env_float, get_env_str
+from agent.utils.prompt_budget import consume_prompt_budget
+from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+
+def _append_bounded_correction_event(
+    state: AgentState, event: dict
+) -> tuple[list[dict], bool, int]:
+    max_events = get_env_int("AGENT_RETRY_SUMMARY_MAX_EVENTS", 20) or 20
+    max_events = max(1, int(max_events))
+    existing_truncated = bool(state.get("correction_attempts_truncated"))
+    existing_dropped_raw = state.get("correction_attempts_dropped", 0)
+    existing_dropped = (
+        int(existing_dropped_raw) if isinstance(existing_dropped_raw, (int, float)) else 0
+    )
+    events = state.get("correction_attempts") or []
+    if not isinstance(events, list):
+        events = []
+    events = [entry for entry in events if isinstance(entry, dict)]
+    events.append(event)
+    dropped_now = max(0, len(events) - max_events)
+    if dropped_now:
+        events = events[dropped_now:]
+    total_dropped = existing_dropped + dropped_now
+    return events, (existing_truncated or dropped_now > 0), total_dropped
 
 
 def correct_sql_node(state: AgentState) -> dict:
@@ -53,6 +76,17 @@ def correct_sql_node(state: AgentState) -> dict:
         retry_after_seconds = state.get("retry_after_seconds")
         procedural_plan = state.get("procedural_plan", "")
         ast_validation_result = state.get("ast_validation_result")
+        existing_loop_ms_raw = state.get("latency_correction_loop_ms")
+        existing_loop_ms = (
+            float(existing_loop_ms_raw) if isinstance(existing_loop_ms_raw, (int, float)) else 0.0
+        )
+
+        def _correction_loop_payload(attempt_latency_seconds: float | None = None) -> dict:
+            total_ms = max(0.0, existing_loop_ms)
+            if attempt_latency_seconds is not None:
+                total_ms += max(0.0, float(attempt_latency_seconds) * 1000.0)
+            span.set_attribute("latency.correction_loop_ms", total_ms)
+            return {"latency_correction_loop_ms": total_ms}
 
         span.set_inputs(
             {
@@ -85,14 +119,30 @@ def correct_sql_node(state: AgentState) -> dict:
         else:
             error_category, category_info = classify_error(error or "")
 
+        correction_event = {
+            "attempt": int(retry),
+            "error_category": str(error_category),
+            "has_retry_after": bool(retry_after_seconds),
+        }
+        (
+            correction_attempts,
+            correction_attempts_truncated,
+            correction_attempts_dropped,
+        ) = _append_bounded_correction_event(state, correction_event)
+
         # Terminal Error Gating (Phase C)
         if error_category in ("TABLE_INACCESSIBLE", "auth"):
             span.set_attribute("retry.terminated_early", True)
             span.set_attribute("retry.terminal_category", error_category)
+            correction_event["outcome"] = "terminal_stop"
             return {
                 "error": f"Terminal error: {error_category}. No correction possible.",
                 "error_category": error_category,
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
+                **_correction_loop_payload(),
             }
 
         span.set_attribute("error_category", error_category)
@@ -184,12 +234,20 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         from agent.utils.budget import TokenBudget
 
         budget = TokenBudget.from_dict(state.get("token_budget"))
+        prompt_bytes_used = int(state.get("llm_prompt_bytes_used") or 0)
         if budget and budget.is_exhausted():
             span.set_attribute("budget.exhausted", True)
+            correction_event["outcome"] = "budget_exhausted"
             return {
                 "error": "Token budget exhausted during correction loop.",
                 "error_category": "budget_exhausted",
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
+                "llm_prompt_bytes_used": prompt_bytes_used,
+                "llm_budget_exceeded": bool(state.get("llm_budget_exceeded", False)),
+                **_correction_loop_payload(),
             }
 
         # Detect repeated error signatures to stop infinite fails
@@ -205,10 +263,15 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         if current_sig in signatures:
             span.set_attribute("retry.stopped_due_to_repeat", True)
             span.set_attribute("retry.repeated_signature", current_sig)
+            correction_event["outcome"] = "repeated_error"
             return {
                 "error": f"Stopping correction loop: Repeated error detected ({error_category})",
                 "error_category": "repeated_error",
                 "retry_after_seconds": None,
+                "correction_attempts": correction_attempts,
+                "correction_attempts_truncated": correction_attempts_truncated,
+                "correction_attempts_dropped": correction_attempts_dropped,
+                **_correction_loop_payload(),
             }
 
         updated_signatures = signatures + [current_sig]
@@ -230,6 +293,47 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
 
             # If we are retrying due to drift, append warning.
             # Ideally we append to system or user. Append to user prompt for visibility.
+
+            (
+                prompt_bytes_used,
+                prompt_bytes_increment,
+                prompt_budget_exceeded,
+                prompt_bytes_limit,
+            ) = consume_prompt_budget(
+                prompt_bytes_used,
+                {
+                    "correction_strategy": correction_strategy,
+                    "taxonomy_context": taxonomy_context,
+                    "plan_context": plan_context,
+                    "ast_context": ast_context,
+                    "schema_context": schema_context,
+                    "bad_query": current_sql,
+                    "error_msg": current_error_msg,
+                },
+            )
+            span.set_attribute("llm.prompt_bytes.increment", prompt_bytes_increment)
+            span.set_attribute("llm.prompt_bytes.used", prompt_bytes_used)
+            span.set_attribute("llm.prompt_bytes.limit", prompt_bytes_limit)
+            span.set_attribute("llm.prompt_bytes.exceeded", prompt_budget_exceeded)
+            if prompt_budget_exceeded:
+                correction_event["outcome"] = "prompt_budget_exhausted"
+                return {
+                    "error": "LLM prompt budget exceeded during correction loop.",
+                    "error_category": "budget_exhausted",
+                    "retry_after_seconds": None,
+                    "correction_attempts": correction_attempts,
+                    "correction_attempts_truncated": correction_attempts_truncated,
+                    "correction_attempts_dropped": correction_attempts_dropped,
+                    "llm_prompt_bytes_used": prompt_bytes_used,
+                    "llm_budget_exceeded": True,
+                    "error_metadata": {
+                        "reason_code": "llm_prompt_budget_exceeded",
+                        "llm_prompt_bytes_used": prompt_bytes_used,
+                        "llm_prompt_bytes_limit": prompt_bytes_limit,
+                        "is_retryable": False,
+                    },
+                    **_correction_loop_payload(),
+                }
 
             chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
@@ -293,6 +397,8 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "Correction failed: Structural drift detected "
                             f"(score {similarity:.2f})"
                         )
+                        correction_event["outcome"] = "rejected_drift"
+                        correction_event["similarity_score"] = round(float(similarity), 4)
                         return {
                             "current_sql": current_sql,
                             "retry_count": retry,
@@ -302,6 +408,12 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                             "latency_correct_seconds": latency_seconds,
                             "ema_llm_latency_seconds": None,  # Don't update EMA on fail
                             "retry_after_seconds": None,
+                            "correction_attempts": correction_attempts,
+                            "correction_attempts_truncated": correction_attempts_truncated,
+                            "correction_attempts_dropped": correction_attempts_dropped,
+                            "llm_prompt_bytes_used": prompt_bytes_used,
+                            "llm_budget_exceeded": False,
+                            **_correction_loop_payload(latency_seconds),
                         }
                 else:
                     span.set_attribute("correction.similarity.rejected", False)
@@ -331,6 +443,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 "error_category": error_category,
             }
         )
+        correction_event["outcome"] = "corrected"
 
         return {
             "current_sql": corrected_sql,
@@ -342,5 +455,11 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "ema_llm_latency_seconds": ema_latency,
             "retry_after_seconds": None,
             "token_budget": budget.to_dict() if budget else state.get("token_budget"),
+            "llm_prompt_bytes_used": prompt_bytes_used,
+            "llm_budget_exceeded": False,
             "error_signatures": updated_signatures,
+            "correction_attempts": correction_attempts,
+            "correction_attempts_truncated": correction_attempts_truncated,
+            "correction_attempts_dropped": correction_attempts_dropped,
+            **_correction_loop_payload(latency_seconds),
         }

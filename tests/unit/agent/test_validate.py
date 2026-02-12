@@ -48,6 +48,11 @@ class TestValidateSqlNode:
         assert result.get("error") is None
         assert result.get("ast_validation_result") is not None
         assert result["ast_validation_result"]["is_valid"] is True
+        assert result["validation_report"] == {
+            "failed_rules": [],
+            "warnings": [],
+            "affected_tables": ["customers"],
+        }
 
     @pytest.mark.asyncio
     async def test_restricted_table_fails(self, base_state):
@@ -71,6 +76,8 @@ class TestValidateSqlNode:
         assert result.get("error") is not None
         assert "restricted" in result["error"].lower() or "security" in result["error"].lower()
         assert result["ast_validation_result"]["is_valid"] is False
+        assert result["validation_report"]["failed_rules"]
+        assert "payroll" in result["validation_report"]["affected_tables"]
 
     @pytest.mark.asyncio
     async def test_forbidden_command_fails(self, base_state):
@@ -166,6 +173,10 @@ class TestValidateSqlNode:
         assert result.get("table_lineage") is not None
         assert len(result["table_lineage"]) >= 2
         assert result.get("join_complexity") == 1
+        assert result.get("query_join_count") == 1
+        assert result.get("query_estimated_table_count") >= 2
+        assert result.get("query_estimated_scan_columns") >= 2
+        assert result.get("query_complexity_score") >= 7
 
     @pytest.mark.asyncio
     async def test_metadata_preserved_on_failure(self, base_state):
@@ -223,3 +234,119 @@ class TestValidateSqlNode:
 
         assert result.get("error") is None
         assert result["ast_validation_result"]["is_valid"] is True
+
+    @pytest.mark.asyncio
+    async def test_column_allowlist_from_schema_context_blocks_projection(
+        self, base_state, monkeypatch
+    ):
+        """Block mode should reject projected columns not present in schema context allowlist."""
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "block")
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", "true")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["raw_schema_context"] = [
+            {"type": "Table", "name": "customers"},
+            {"type": "Column", "table": "customers", "name": "id"},
+            {"type": "Column", "table": "customers", "name": "name"},
+        ]
+        base_state["current_sql"] = "SELECT customers.email FROM customers"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is not None
+        assert "column allowlist" in result["error"].lower()
+        assert result["ast_validation_result"]["is_valid"] is False
+
+    @pytest.mark.asyncio
+    async def test_column_allowlist_warn_mode_allows_execution(self, base_state, monkeypatch):
+        """Warn mode should not invalidate SQL even if a projected column is not allowlisted."""
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_MODE", "warn")
+        monkeypatch.setenv("AGENT_COLUMN_ALLOWLIST_FROM_SCHEMA_CONTEXT", "true")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["raw_schema_context"] = [
+            {"type": "Table", "name": "customers"},
+            {"type": "Column", "table": "customers", "name": "id"},
+        ]
+        base_state["current_sql"] = "SELECT customers.email FROM customers"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is None
+        assert result["ast_validation_result"]["is_valid"] is True
+        assert result["ast_validation_result"]["warnings"]
+
+    @pytest.mark.asyncio
+    async def test_cartesian_join_block_mode_rejects_query(self, base_state, monkeypatch):
+        """Block mode should reject likely Cartesian joins."""
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        monkeypatch.setenv("AGENT_CARTESIAN_JOIN_MODE", "block")
+        base_state["current_sql"] = "SELECT * FROM customers CROSS JOIN orders"
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert result.get("error") is not None
+        assert "cartesian join" in result["error"].lower()
+        assert result["ast_validation_result"]["is_valid"] is False
+
+    @pytest.mark.asyncio
+    async def test_validation_failures_memory_cap_sets_truncation_metadata(
+        self, base_state, monkeypatch
+    ):
+        """Validation failure history should remain bounded with truncation metadata."""
+        monkeypatch.setenv("AGENT_RETRY_SUMMARY_MAX_EVENTS", "1")
+        monkeypatch.setenv("AGENT_SCHEMA_BINDING_VALIDATION", "false")
+        base_state["current_sql"] = "SELECT * FROM payroll"
+        base_state["validation_failures"] = [{"retry_count": 0, "violation_types": ["seed"]}]
+
+        with patch("agent.nodes.validate.telemetry.start_span") as mock_span:
+            mock_span.return_value.__enter__ = lambda s: type(
+                "Span",
+                (),
+                {
+                    "set_inputs": lambda *a, **k: None,
+                    "set_outputs": lambda *a, **k: None,
+                    "set_attribute": lambda *a, **k: None,
+                },
+            )()
+            mock_span.return_value.__exit__ = lambda *a, **k: None
+
+            result = await validate_sql_node(base_state)
+
+        assert len(result["validation_failures"]) == 1
+        assert result["validation_failures_truncated"] is True
+        assert result["validation_failures_dropped"] >= 1

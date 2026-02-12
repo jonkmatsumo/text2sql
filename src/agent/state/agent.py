@@ -78,6 +78,8 @@ class AgentState(TypedDict):
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]
+    schema_fingerprint: Optional[str]
+    schema_version_ts: Optional[int]
 
     # Error message from the last execution attempt (if any)
     error: Optional[str]
@@ -97,6 +99,8 @@ class AgentState(TypedDict):
     # Per-request token budget configuration and consumption
     # Structure: {"max_tokens": int, "consumed_tokens": int}
     token_budget: Optional[dict]
+    llm_prompt_bytes_used: Optional[int]
+    llm_budget_exceeded: Optional[bool]
 
     # History of error signatures in the current request to detect loops
     # Signatures are hashes of (category, normalized_message)
@@ -121,6 +125,7 @@ class AgentState(TypedDict):
 
     # Complete AST validation result including violations
     ast_validation_result: Optional[dict]
+    validation_report: Optional[dict]
 
     # Tables accessed (for audit logging and lineage tracking)
     table_lineage: Optional[List[str]]
@@ -130,6 +135,12 @@ class AgentState(TypedDict):
 
     # Join depth score (for complexity analysis)
     join_complexity: Optional[int]
+    query_join_count: Optional[int]
+    query_estimated_table_count: Optional[int]
+    query_estimated_scan_columns: Optional[int]
+    query_union_count: Optional[int]
+    query_detected_cartesian_flag: Optional[bool]
+    query_complexity_score: Optional[int]
 
     # =========================================================================
     # Ambiguity Resolution Fields
@@ -164,10 +175,24 @@ class AgentState(TypedDict):
     latency_generate_seconds: Optional[float]
     latency_correct_seconds: Optional[float]
     ema_llm_latency_seconds: Optional[float]
+    latency_retrieval_ms: Optional[float]
+    latency_planning_ms: Optional[float]
+    latency_generation_ms: Optional[float]
+    latency_validation_ms: Optional[float]
+    latency_execution_ms: Optional[float]
+    latency_correction_loop_ms: Optional[float]
 
     # Retry history for debugging and telemetry
     # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}
     retry_summary: Optional[dict]
+    correction_attempts: Optional[List[dict]]
+    validation_failures: Optional[List[dict]]
+    correction_attempts_truncated: Optional[bool]
+    validation_failures_truncated: Optional[bool]
+    correction_attempts_dropped: Optional[int]
+    validation_failures_dropped: Optional[int]
+    retry_correction_summary: Optional[dict]
+    decision_summary: Optional[dict]
 
     # =========================================================================
     # Cache and Metadata
