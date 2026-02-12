@@ -44,12 +44,14 @@ class DatabricksQueryTargetDatabase:
             schema=cls._config.schema,
             timeout_seconds=cls._config.query_timeout_seconds,
             max_rows=cls._config.max_rows,
+            read_only=read_only,
         )
         wrapper = _DatabricksConnection(
             executor=executor,
             query_timeout_seconds=cls._config.query_timeout_seconds,
             poll_interval_seconds=cls._config.poll_interval_seconds,
             max_rows=cls._config.max_rows,
+            read_only=read_only,
         )
         yield wrapper
 
@@ -63,11 +65,13 @@ class _DatabricksConnection:
         query_timeout_seconds: int,
         poll_interval_seconds: int,
         max_rows: int,
+        read_only: bool = False,
     ) -> None:
         self._executor = executor
         self._query_timeout_seconds = query_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
         self._max_rows = max_rows
+        self._read_only = read_only
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -87,6 +91,9 @@ class _DatabricksConnection:
         self._last_truncated_reason = "PROVIDER_CAP" if truncated else None
 
     async def execute(self, sql: str, *params: Any) -> str:
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="databricks", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_databricks(sql, list(params))
 
         async def _run():
@@ -108,6 +115,9 @@ class _DatabricksConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="databricks", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_databricks(sql, list(params))
         rows = await trace_query_operation(
             "dal.query.execute",
@@ -128,6 +138,9 @@ class _DatabricksConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="databricks", read_only=self._read_only)
         sql, query_params = translate_postgres_params_to_databricks(sql, list(params))
         rows, columns = await trace_query_operation(
             "dal.query.execute",
