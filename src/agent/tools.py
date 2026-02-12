@@ -33,6 +33,15 @@ async def get_mcp_tools():
     if internal_token:
         headers["X-Internal-Token"] = internal_token
 
+    # Propagate run_id from telemetry context if available
+    from agent.telemetry import telemetry
+
+    ctx = telemetry.capture_context()
+    if ctx.sticky_metadata:
+        run_id = ctx.sticky_metadata.get("run_id")
+        if run_id:
+            headers["X-Run-ID"] = str(run_id)
+
     # Create SDK client and discover tools
     client = MCPClient(server_url=mcp_url, transport=mcp_transport, headers=headers)
 
