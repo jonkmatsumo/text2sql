@@ -6,6 +6,7 @@ from dal.duckdb.config import DuckDBConfig
 from dal.tracing import trace_query_operation
 from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
+from dal.util.timeouts import run_with_timeout
 
 
 class DuckDBQueryTargetDatabase:
@@ -156,9 +157,11 @@ class _DuckDBConnection:
             cols = [desc[0] for desc in cursor.description] if cursor.description else []
             return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
-        return await asyncio.wait_for(
-            asyncio.to_thread(_execute),
-            timeout=self._query_timeout_seconds,
+        return await run_with_timeout(
+            lambda: asyncio.to_thread(_execute),
+            timeout_seconds=self._query_timeout_seconds,
+            provider="duckdb",
+            operation_name="query.execute",
         )
 
     async def _run_query_with_columns(
@@ -173,7 +176,9 @@ class _DuckDBConnection:
             columns = columns_from_cursor_description(cursor.description, provider="duckdb")
             return rows, columns
 
-        return await asyncio.wait_for(
-            asyncio.to_thread(_execute),
-            timeout=self._query_timeout_seconds,
+        return await run_with_timeout(
+            lambda: asyncio.to_thread(_execute),
+            timeout_seconds=self._query_timeout_seconds,
+            provider="duckdb",
+            operation_name="query.fetch_with_columns",
         )

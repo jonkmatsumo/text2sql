@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
@@ -6,6 +5,7 @@ from dal.clickhouse.config import ClickHouseConfig
 from dal.clickhouse.param_translation import translate_postgres_params_to_clickhouse
 from dal.tracing import trace_query_operation
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
+from dal.util.timeouts import run_with_timeout
 
 
 class ClickHouseQueryTargetDatabase:
@@ -171,9 +171,11 @@ class _ClickHouseConnection:
             col_names = [col[0] for col in columns]
             return [dict(zip(col_names, row)) for row in rows]
 
-        return await asyncio.wait_for(
-            _execute(),
-            timeout=self._query_timeout_seconds,
+        return await run_with_timeout(
+            _execute,
+            timeout_seconds=self._query_timeout_seconds,
+            provider="clickhouse",
+            operation_name="query.execute",
         )
 
     async def _run_query_with_columns(
@@ -189,9 +191,11 @@ class _ClickHouseConnection:
             row_dicts = [dict(zip(col_names, row)) for row in rows]
             return row_dicts, _columns_from_clickhouse_types(columns)
 
-        return await asyncio.wait_for(
-            _execute(),
-            timeout=self._query_timeout_seconds,
+        return await run_with_timeout(
+            _execute,
+            timeout_seconds=self._query_timeout_seconds,
+            provider="clickhouse",
+            operation_name="query.fetch_with_columns",
         )
 
 

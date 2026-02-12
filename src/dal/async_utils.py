@@ -1,6 +1,6 @@
-import asyncio
-import logging
 from typing import Awaitable, Callable, Optional
+
+from dal.util.timeouts import run_with_timeout
 
 
 async def with_timeout(
@@ -9,13 +9,13 @@ async def with_timeout(
     on_timeout: Optional[Callable[[], Awaitable[None]]] = None,
 ):
     """Run an awaitable with a timeout and optional timeout handler."""
-    try:
-        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        if on_timeout is not None:
-            try:
-                await on_timeout()
-            except Exception as exc:
-                logger = logging.getLogger(__name__)
-                logger.warning("Timeout cancellation failed: %s", exc)
-        raise
+
+    async def _operation():
+        return await awaitable
+
+    return await run_with_timeout(
+        _operation,
+        timeout_seconds=timeout_seconds,
+        cancel=on_timeout,
+        operation_name="operation",
+    )
