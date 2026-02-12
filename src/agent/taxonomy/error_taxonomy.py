@@ -10,7 +10,7 @@ from typing import Optional
 
 
 @dataclass
-class ErrorCategory:
+class ErrorTaxonomyEntry:
     """Represents a category of SQL error with correction strategy."""
 
     name: str
@@ -21,7 +21,7 @@ class ErrorCategory:
 
 # Comprehensive error taxonomy based on common SQL failure modes
 ERROR_TAXONOMY = {
-    "AGGREGATION_MISUSE": ErrorCategory(
+    "AGGREGATION_MISUSE": ErrorTaxonomyEntry(
         name="Aggregation Misuse",
         patterns=[
             r"must appear in the GROUP BY clause",
@@ -35,7 +35,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Add 'column_name' to GROUP BY or use MAX(column_name) in SELECT",
     ),
-    "MISSING_JOIN": ErrorCategory(
+    "MISSING_JOIN": ErrorTaxonomyEntry(
         name="Missing Join",
         patterns=[
             r"missing FROM-clause entry",
@@ -50,7 +50,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Add JOIN table_name ON table_name.id = existing_table.foreign_key",
     ),
-    "TYPE_MISMATCH": ErrorCategory(
+    "TYPE_MISMATCH": ErrorTaxonomyEntry(
         name="Type Mismatch",
         patterns=[
             r"operator does not exist",
@@ -65,7 +65,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Change column = value to column = value::appropriate_type",
     ),
-    "AMBIGUOUS_COLUMN": ErrorCategory(
+    "AMBIGUOUS_COLUMN": ErrorTaxonomyEntry(
         name="Ambiguous Column Reference",
         patterns=[
             r"ambiguous column",
@@ -78,7 +78,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Change 'id' to 'table_name.id' or 't.id'",
     ),
-    "SYNTAX_ERROR": ErrorCategory(
+    "SYNTAX_ERROR": ErrorTaxonomyEntry(
         name="SQL Syntax Error",
         patterns=[
             r"syntax error at or near",
@@ -92,7 +92,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Verify SQL structure: SELECT columns FROM table WHERE condition",
     ),
-    "NULL_HANDLING": ErrorCategory(
+    "NULL_HANDLING": ErrorTaxonomyEntry(
         name="NULL Handling Error",
         patterns=[
             r"null value in column.*violates",
@@ -106,7 +106,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Change a/b to a/NULLIF(b, 0) or use COALESCE(column, default)",
     ),
-    "SUBQUERY_ERROR": ErrorCategory(
+    "SUBQUERY_ERROR": ErrorTaxonomyEntry(
         name="Subquery Error",
         patterns=[
             r"subquery must return only one column",
@@ -120,7 +120,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Add LIMIT 1 or use IN (subquery) instead of = (subquery)",
     ),
-    "PERMISSION_DENIED": ErrorCategory(
+    "PERMISSION_DENIED": ErrorTaxonomyEntry(
         name="Permission Denied",
         patterns=[
             r"permission denied",
@@ -133,7 +133,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Remove access to restricted tables or columns",
     ),
-    "FUNCTION_ERROR": ErrorCategory(
+    "FUNCTION_ERROR": ErrorTaxonomyEntry(
         name="Function Error",
         patterns=[
             r"function.*does not exist",
@@ -147,7 +147,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Verify function exists: Use pg-specific functions like date_trunc()",
     ),
-    "CONSTRAINT_VIOLATION": ErrorCategory(
+    "CONSTRAINT_VIOLATION": ErrorTaxonomyEntry(
         name="Constraint Violation",
         patterns=[
             r"duplicate key value violates",
@@ -161,7 +161,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Ensure query is read-only SELECT statement",
     ),
-    "LIMIT_EXCEEDED": ErrorCategory(
+    "LIMIT_EXCEEDED": ErrorTaxonomyEntry(
         name="Result Limit Exceeded",
         patterns=[
             r"result set too large",
@@ -174,7 +174,7 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Add LIMIT 1000 or refine WHERE conditions",
     ),
-    "DATE_TIME_ERROR": ErrorCategory(
+    "DATE_TIME_ERROR": ErrorTaxonomyEntry(
         name="Date/Time Error",
         patterns=[
             r"invalid input syntax for type date",
@@ -191,7 +191,7 @@ ERROR_TAXONOMY = {
 }
 
 
-def classify_error(error_message: str) -> tuple[str, ErrorCategory]:
+def classify_error(error_message: str) -> tuple[str, ErrorTaxonomyEntry]:
     """
     Classify an error message into a category from the taxonomy.
 
@@ -199,7 +199,7 @@ def classify_error(error_message: str) -> tuple[str, ErrorCategory]:
         error_message: The database error message string
 
     Returns:
-        Tuple of (category_key, ErrorCategory) or ("UNKNOWN", generic_category)
+        Tuple of (category_key, ErrorTaxonomyEntry) or ("UNKNOWN", generic_category)
     """
     error_lower = error_message.lower()
 
@@ -209,7 +209,7 @@ def classify_error(error_message: str) -> tuple[str, ErrorCategory]:
                 return category_key, category
 
     # Return unknown category
-    return "UNKNOWN", ErrorCategory(
+    return "UNKNOWN", ErrorTaxonomyEntry(
         name="Unknown Error",
         patterns=[],
         strategy=(
