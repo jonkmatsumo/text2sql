@@ -74,7 +74,7 @@ def _extract_tool_error(payload: Any) -> Optional[ToolError]:
             return None
     if isinstance(error_obj, str):
         return ToolError(
-            category="internal_error",
+            category="internal",
             code="UNSTRUCTURED_TOOL_ERROR",
             message=error_obj,
             retryable=False,

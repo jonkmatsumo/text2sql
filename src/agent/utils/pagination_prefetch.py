@@ -156,10 +156,16 @@ class PrefetchManager:
 
         _PREFETCH_WAITING_COUNT += 1
         self._inflight_keys.add(cache_key)
-        self._task_group.create_task(self._run_task(cache_key, fetch_fn))
+
+        # Capture current telemetry context to propagate to background task
+        from agent.telemetry import telemetry
+
+        ctx = telemetry.capture_context()
+
+        self._task_group.create_task(self._run_task(cache_key, fetch_fn, ctx))
         return True, PrefetchSuppressionReason.SCHEDULED.value
 
-    async def _run_task(self, cache_key: str, fetch_fn: PrefetchFetchFn):
+    async def _run_task(self, cache_key: str, fetch_fn: PrefetchFetchFn, ctx: Any):
         global _PREFETCH_ACTIVE_COUNT, _PREFETCH_MAX_OBSERVED
         global _PREFETCH_WAITING_COUNT, _PREFETCH_COOLDOWN_UNTIL
         import time
@@ -172,44 +178,50 @@ class PrefetchManager:
         waiting_decremented = False
         active_incremented = False
 
-        try:
-            async with self.local_semaphore:
-                # We are waiting for execution slot.
-                # Once we acquire local semaphore, we try to acquire global.
-                try:
-                    async with global_semaphore:
-                        # Once we have the global semaphore, we are no longer waiting/pending
-                        if not waiting_decremented:
-                            _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
-                            waiting_decremented = True
+        from agent.telemetry import telemetry
 
-                        _PREFETCH_ACTIVE_COUNT += 1
-                        active_incremented = True
-                        _PREFETCH_MAX_OBSERVED = max(_PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT)
+        # Restore telemetry context so child spans/logs are correlated
+        with telemetry.use_context(ctx):
+            try:
+                async with self.local_semaphore:
+                    # We are waiting for execution slot.
+                    # Once we acquire local semaphore, we try to acquire global.
+                    try:
+                        async with global_semaphore:
+                            # Once we have the global semaphore, we are no longer waiting/pending
+                            if not waiting_decremented:
+                                _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+                                waiting_decremented = True
 
-                        payload = await fetch_fn()
-                finally:
-                    # Ensure active count is ALWAYS decremented if it was incremented
-                    if active_incremented:
-                        _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
+                            _PREFETCH_ACTIVE_COUNT += 1
+                            active_incremented = True
+                            _PREFETCH_MAX_OBSERVED = max(
+                                _PREFETCH_MAX_OBSERVED, _PREFETCH_ACTIVE_COUNT
+                            )
 
-            if payload is not None:
-                cache_prefetched_page(cache_key, payload)
+                            payload = await fetch_fn()
+                    finally:
+                        # Ensure active count is ALWAYS decremented if it was incremented
+                        if active_incremented:
+                            _PREFETCH_ACTIVE_COUNT = max(0, _PREFETCH_ACTIVE_COUNT - 1)
 
-        except Exception as e:
-            logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
-            cooldown_seconds = _safe_prefetch_int(
-                "AGENT_PREFETCH_COOLDOWN_SECONDS", default=30, minimum=1
-            )
-            _PREFETCH_COOLDOWN_UNTIL = time.time() + cooldown_seconds
+                if payload is not None:
+                    cache_prefetched_page(cache_key, payload)
 
-        finally:
-            # Ensure waiting count is cleaned up if we exited before acquiring global semaphore
-            # (e.g. cancelled while waiting for local/global semaphore, or exception before acquire)
-            if not waiting_decremented:
-                _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+            except Exception as e:
+                logger.debug(f"Prefetch failed for key {cache_key[:8]}: {e}")
+                cooldown_seconds = _safe_prefetch_int(
+                    "AGENT_PREFETCH_COOLDOWN_SECONDS", default=30, minimum=1
+                )
+                _PREFETCH_COOLDOWN_UNTIL = time.time() + cooldown_seconds
 
-            self._inflight_keys.discard(cache_key)
+            finally:
+                # (e.g. cancelled while waiting for local/global semaphore,
+                # or exception before acquire)
+                if not waiting_decremented:
+                    _PREFETCH_WAITING_COUNT = max(0, _PREFETCH_WAITING_COUNT - 1)
+
+                self._inflight_keys.discard(cache_key)
 
 
 def start_prefetch_task(cache_key: str, fetch_fn: PrefetchFetchFn, max_concurrency: int) -> bool:

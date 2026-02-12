@@ -87,7 +87,7 @@ def tool_error_internal(
 ) -> ToolError:
     """Build a canonical internal tool error."""
     return _build_tool_error(
-        category="internal_error",
+        category="internal",
         code=code,
         message=message,
         retryable=False,

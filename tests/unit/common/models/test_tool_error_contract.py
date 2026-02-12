@@ -72,7 +72,7 @@ def test_tool_error_helper_defaults():
 
     assert unsupported.category == "unsupported_capability"
     assert unsupported.retryable is False
-    assert internal.category == "internal_error"
+    assert internal.category == "internal"
     assert internal.retryable is False
     assert timeout.category == "timeout"
     assert timeout.retryable is True
