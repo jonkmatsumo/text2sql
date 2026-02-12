@@ -140,6 +140,7 @@ async def handler(
             provider=Database.get_query_target_provider(),
             execution_time_ms=execution_time_ms,
             snapshot_id=snapshot_id,
+            items_returned=len(structured_results),
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

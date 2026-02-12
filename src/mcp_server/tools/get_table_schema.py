@@ -92,6 +92,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
             provider=Database.get_query_target_provider(),
             execution_time_ms=execution_time_ms,
             snapshot_id=snapshot_id,
+            items_returned=len(schema_list),
         ),
     )
     return envelope.model_dump_json(exclude_none=True)
