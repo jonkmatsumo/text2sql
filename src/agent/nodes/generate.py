@@ -421,17 +421,39 @@ Rules:
             }
 
         from agent.llm_client import get_llm
+        from agent.utils.llm_run_budget import LLMBudgetExceededError, budget_telemetry_attributes
 
         chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
 
         # Generate SQL (MLflow autolog will capture token usage)
         start_time = time.monotonic()
-        response = chain.invoke(
-            {
-                "schema_context": schema_context_to_use,
-                "question": user_query,
+        try:
+            response = chain.invoke(
+                {
+                    "schema_context": schema_context_to_use,
+                    "question": user_query,
+                }
+            )
+        except LLMBudgetExceededError as budget_error:
+            span.set_attribute("budget.exhausted", True)
+            span.set_attribute("llm.budget.exceeded", True)
+            span.set_attributes(budget_telemetry_attributes(budget_error.state))
+            return {
+                "error": "LLM token budget exceeded for this request.",
+                "error_category": "budget_exceeded",
+                "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                "retry_after_seconds": None,
+                "llm_budget_exceeded": True,
+                "error_metadata": {
+                    "reason_code": "llm_token_budget_exceeded",
+                    "is_retryable": False,
+                    "llm_tokens_prompt_total": int(budget_error.state.prompt_total),
+                    "llm_tokens_completion_total": int(budget_error.state.completion_total),
+                    "llm_tokens_budget_limit": int(budget_error.state.max_tokens),
+                    "llm_tokens_requested": int(budget_error.requested_tokens),
+                },
+                **_latency_payload(),
             }
-        )
         latency_seconds = time.monotonic() - start_time
         span.set_attribute("latency.generate_seconds", latency_seconds)
         ema_alpha = get_env_float("AGENT_RETRY_BUDGET_EMA_ALPHA", 0.3)
