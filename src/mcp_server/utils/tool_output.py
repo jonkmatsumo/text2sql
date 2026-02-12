@@ -257,12 +257,18 @@ def apply_truncation_metadata(payload: Any, meta: Dict[str, Any]) -> Any:
     metadata["is_truncated"] = truncated
     if meta.get("reason"):
         metadata["truncation_reason"] = meta["reason"]
+    elif "truncation_reason" not in metadata:
+        metadata["truncation_reason"] = None
     if meta.get("returned_items") is not None:
         returned_count = int(meta["returned_items"])
         metadata["returned_count"] = returned_count
         metadata["items_returned"] = returned_count
     if "returned_count" not in metadata:
         metadata["returned_count"] = None
+    if "items_returned" not in metadata:
+        metadata["items_returned"] = (
+            int(metadata["returned_count"]) if metadata.get("returned_count") is not None else None
+        )
     if meta.get("total_items") is not None:
         metadata["items_total"] = int(meta["total_items"])
     if meta.get("returned_bytes") is not None:
