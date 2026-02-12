@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
@@ -42,13 +42,19 @@ def _schema_drift_hint(
     provider: str,
     sql: Optional[str] = None,
     raw_schema_context: Optional[list[dict]] = None,
-) -> tuple[bool, list[str], Optional[DriftDetectionMethod]]:
-    from agent.utils.drift_detection import detect_schema_drift
+    error_metadata: Optional[dict[str, Any]] = None,
+) -> tuple[bool, list[str], Optional[DriftDetectionMethod], Optional[str]]:
+    from agent.utils.drift_detection import detect_schema_drift_details
 
-    identifiers, method = detect_schema_drift(
-        sql or "", error_text, provider, raw_schema_context or []
+    detection = detect_schema_drift_details(
+        sql or "",
+        error_text,
+        provider,
+        raw_schema_context or [],
+        error_metadata=error_metadata,
     )
-    return (len(identifiers) > 0, identifiers, method)
+    identifiers = detection.missing_identifiers
+    return (len(identifiers) > 0, identifiers, detection.method, detection.source)
 
 
 def _safe_env_int(name: str, default: int, minimum: int) -> int:
@@ -401,7 +407,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_prefetch_scheduled = False
                 result_prefetch_reason = prefetch_reason
 
-                def _maybe_add_schema_drift(error_msg: str) -> dict:
+                def _maybe_add_schema_drift(
+                    error_msg: str, error_meta: Optional[dict[str, Any]] = None
+                ) -> dict:
                     if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
                         return {}
                     provider = get_env_str(
@@ -409,8 +417,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     )
                     sql = state.get("current_sql")
                     raw_schema_context = state.get("raw_schema_context")
-                    suspected, identifiers, method = _schema_drift_hint(
-                        error_msg, provider, sql, raw_schema_context
+                    suspected, identifiers, method, drift_source = _schema_drift_hint(
+                        error_msg,
+                        provider,
+                        sql,
+                        raw_schema_context,
+                        error_meta,
                     )
                     if not suspected:
                         return {}
@@ -420,6 +432,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_attribute("schema.drift.auto_refresh_enabled", auto_refresh)
                     if method:
                         span.set_attribute("schema.drift.detection_method", method.value)
+                    if drift_source:
+                        span.set_attribute("schema.drift.source", drift_source)
                     return {
                         "schema_drift_suspected": True,
                         "missing_identifiers": identifiers,
@@ -486,7 +500,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     elif error_category == "invalid_request":
                         reason = TerminationReason.INVALID_REQUEST
 
-                    drift_hint = _maybe_add_schema_drift(error_msg)
+                    drift_hint = _maybe_add_schema_drift(error_msg, error_metadata)
                     return {
                         "error": error_msg,
                         "query_result": None,

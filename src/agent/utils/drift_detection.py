@@ -1,13 +1,124 @@
 """AST-based schema drift detection utilities."""
 
 import logging
-from typing import Any, Dict, List, Set, Tuple
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, List, Mapping, Set, Tuple
 
 from agent.utils.sql_ast import extract_columns, extract_tables, parse_sql
 from common.constants.reason_codes import DriftDetectionMethod
 from dal.error_patterns import extract_missing_identifiers
 
 logger = logging.getLogger(__name__)
+
+_STRUCTURED_DRIFT_SQLSTATE_CODES = {
+    "42P01",  # undefined_table (Postgres/Redshift)
+    "42703",  # undefined_column (Postgres/Redshift)
+    "3F000",  # invalid_schema_name (Postgres/Redshift)
+    "42S02",  # table not found (MySQL/ODBC)
+    "42S22",  # column not found (MySQL/ODBC)
+}
+_STRUCTURED_DRIFT_CODE_FRAGMENTS = (
+    "UNDEFINED_TABLE",
+    "UNDEFINED_COLUMN",
+    "TABLE_NOT_FOUND",
+    "COLUMN_NOT_FOUND",
+    "OBJECT_DOES_NOT_EXIST",
+    "NOT_FOUND",
+    "MISSING_COLUMN",
+    "MISSING_TABLE",
+)
+_SQLSTATE_IN_TEXT_RE = re.compile(r"(?:sqlstate|sql state)\s*[:=]?\s*([0-9A-Z]{5})", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class DriftDetectionResult:
+    """Detailed schema drift detection result."""
+
+    missing_identifiers: List[str]
+    method: DriftDetectionMethod
+    source: str
+
+
+def _iter_code_candidates(value: Any) -> list[str]:
+    """Collect string code-like values from nested metadata structures."""
+    candidates: list[str] = []
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            candidates.append(stripped)
+        return candidates
+
+    if isinstance(value, Mapping):
+        for key, nested_value in value.items():
+            key_normalized = str(key).strip().lower()
+            if key_normalized in {
+                "code",
+                "sql_state",
+                "sqlstate",
+                "reason",
+                "reason_code",
+                "error_code",
+                "provider_code",
+            }:
+                candidates.extend(_iter_code_candidates(nested_value))
+                continue
+
+            # Some providers include relevant codes under nested maps in details.
+            if key_normalized in {"details_safe", "details_debug", "details"}:
+                candidates.extend(_iter_code_candidates(nested_value))
+
+    if isinstance(value, list):
+        for nested in value:
+            candidates.extend(_iter_code_candidates(nested))
+
+    return candidates
+
+
+def _extract_structured_sqlstates(
+    error_message: str, error_metadata: Mapping[str, Any] | None
+) -> set[str]:
+    """Extract SQLSTATE codes from structured metadata and explicit SQLSTATE text."""
+    sqlstates: set[str] = set()
+
+    if error_metadata:
+        for key in ("code", "sql_state", "sqlstate"):
+            candidate = error_metadata.get(key)
+            if isinstance(candidate, str):
+                normalized = candidate.strip().upper()
+                if len(normalized) == 5 and normalized.isalnum():
+                    sqlstates.add(normalized)
+
+    for match in _SQLSTATE_IN_TEXT_RE.findall(error_message or ""):
+        normalized = match.strip().upper()
+        if len(normalized) == 5 and normalized.isalnum():
+            sqlstates.add(normalized)
+
+    return sqlstates
+
+
+def _has_structured_drift_signal(
+    error_message: str, error_metadata: Mapping[str, Any] | None
+) -> bool:
+    """Return True when metadata includes structured drift indicators."""
+    sqlstates = _extract_structured_sqlstates(error_message, error_metadata)
+    if sqlstates.intersection(_STRUCTURED_DRIFT_SQLSTATE_CODES):
+        return True
+
+    if not error_metadata:
+        return False
+
+    for raw_code in _iter_code_candidates(error_metadata):
+        code_value = raw_code.strip().upper()
+        if not code_value:
+            continue
+        if code_value in _STRUCTURED_DRIFT_SQLSTATE_CODES:
+            return True
+        if any(fragment in code_value for fragment in _STRUCTURED_DRIFT_CODE_FRAGMENTS):
+            return True
+
+    return False
 
 
 def _build_schema_set(raw_schema_context: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
@@ -44,6 +155,7 @@ def detect_schema_drift(
     error_message: str,
     provider: str,
     raw_schema_context: List[Dict[str, Any]],
+    error_metadata: Dict[str, Any] | None = None,
 ) -> Tuple[List[str], DriftDetectionMethod]:
     """
     Detect missing identifiers (tables/columns) using AST analysis or regex fallback.
@@ -51,8 +163,27 @@ def detect_schema_drift(
     Returns:
         Tuple of (list of missing identifiers, method used)
     """
+    result = detect_schema_drift_details(
+        sql=sql,
+        error_message=error_message,
+        provider=provider,
+        raw_schema_context=raw_schema_context,
+        error_metadata=error_metadata,
+    )
+    return result.missing_identifiers, result.method
+
+
+def detect_schema_drift_details(
+    sql: str,
+    error_message: str,
+    provider: str,
+    raw_schema_context: List[Dict[str, Any]],
+    error_metadata: Dict[str, Any] | None = None,
+) -> DriftDetectionResult:
+    """Detect schema drift with source details for telemetry."""
     missing_identifiers: List[str] = []
     method = DriftDetectionMethod.AST
+    source = "regex"
 
     # Normalize inputs
     sql = (sql or "").strip()
@@ -114,6 +245,10 @@ def detect_schema_drift(
 
     # 2. If AST found nothing or parse failed, or if we want to be aggressive (Hybrid)
     # The error message is often the most authoritative source of what's EXACTLY missing.
+    structured_signal = _has_structured_drift_signal(
+        error_message=error_message,
+        error_metadata=error_metadata if isinstance(error_metadata, dict) else None,
+    )
     regex_identifiers = extract_missing_identifiers(provider, error_message)
 
     if not missing_identifiers and regex_identifiers:
@@ -134,4 +269,11 @@ def detect_schema_drift(
     elif not ast:
         method = DriftDetectionMethod.REGEX_FALLBACK
 
-    return missing_identifiers, method
+    if structured_signal and missing_identifiers:
+        source = "structured"
+
+    return DriftDetectionResult(
+        missing_identifiers=missing_identifiers,
+        method=method,
+        source=source,
+    )
