@@ -62,6 +62,7 @@ class AgentState(TypedDict):
     result_prefetch_enabled: Optional[bool]
     result_prefetch_scheduled: Optional[bool]
     result_prefetch_reason: Optional[str]
+    prefetch_discard_count: Optional[int]
     empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages
@@ -107,6 +108,8 @@ class AgentState(TypedDict):
     token_budget: Optional[dict]
     llm_prompt_bytes_used: Optional[int]
     llm_budget_exceeded: Optional[bool]
+    llm_calls: Optional[int]
+    llm_token_total: Optional[int]
 
     # History of error signatures in the current request to detect loops
     # Signatures are hashes of (category, normalized_message)
@@ -199,6 +202,7 @@ class AgentState(TypedDict):
     validation_failures_dropped: Optional[int]
     retry_correction_summary: Optional[dict]
     decision_summary: Optional[dict]
+    run_decision_summary: Optional[dict]
 
     # =========================================================================
     # Cache and Metadata

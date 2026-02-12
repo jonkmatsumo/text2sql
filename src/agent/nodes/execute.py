@@ -313,6 +313,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             prefetched_cache_key = None
             page_token = execute_payload.get("page_token")
             replay_bundle = state.get("replay_bundle")
+            prefetch_discard_count = int(state.get("prefetch_discard_count", 0) or 0)
 
             # Structured Concurrency for Prefetch
             async with PrefetchManager(max_concurrency=prefetch_max_concurrency) as prefetcher:
@@ -334,6 +335,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         expected_query_signature=query_signature,
                     )
                     if prefetch_discard_reason is not None:
+                        prefetch_discard_count += 1
                         discard_attrs = {
                             "reason": str(prefetch_discard_reason),
                             "prefetch.discarded_due_to_snapshot_mismatch": bool(
@@ -507,6 +509,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         "error_category": error_category,
                         "retry_after_seconds": retry_after_seconds,
                         "error_metadata": error_metadata,
+                        "prefetch_discard_count": prefetch_discard_count,
                         "termination_reason": reason,
                         **drift_hint,
                         **_latency_payload(),
@@ -908,6 +911,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_prefetch_enabled": bool(result_prefetch_enabled),
                     "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                     "result_prefetch_reason": result_prefetch_reason,
+                    "prefetch_discard_count": prefetch_discard_count,
                     "retry_after_seconds": None,
                     "termination_reason": TerminationReason.SUCCESS,
                     "result_completeness": ResultCompleteness.from_parts(

@@ -29,7 +29,11 @@ from agent.runtime_metrics import (
     record_truncation_event,
 )
 from agent.state import AgentState
-from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
+from agent.state.decision_summary import (
+    build_decision_summary,
+    build_retry_correction_summary,
+    build_run_decision_summary,
+)
 from agent.telemetry import SpanType, telemetry
 from agent.utils.schema_snapshot import (
     apply_pending_schema_snapshot_refresh,
@@ -886,7 +890,7 @@ async def run_agent_with_tracing(
 
         # Execute workflow within MCP context to ensure connections are closed
         from agent.tools import mcp_tools_context, unpack_mcp_result
-        from agent.utils.llm_run_budget import llm_run_budget_context
+        from agent.utils.llm_run_budget import current_budget_state, llm_run_budget_context
         from agent.utils.retry import retry_with_backoff
 
         # Interaction persistence mode (default: best_effort)
@@ -908,6 +912,8 @@ async def run_agent_with_tracing(
 
         base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
         llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
+        llm_calls_total = 0
+        llm_token_total = 0
 
         with llm_run_budget_context(llm_budget_limit):
             async with mcp_tools_context() as tools:
@@ -1247,13 +1253,26 @@ async def run_agent_with_tracing(
                         logger.error("update_interaction tool missing!")
                         result["interaction_persisted"] = False
 
+                llm_budget_state = current_budget_state()
+                if llm_budget_state is not None:
+                    llm_calls_total = int(getattr(llm_budget_state, "call_count", 0) or 0)
+                    llm_token_total = int(getattr(llm_budget_state, "total", 0) or 0)
+                result["llm_calls"] = int(llm_calls_total)
+                result["llm_token_total"] = int(llm_token_total)
+
         # Metadata is already handled early and made sticky via telemetry_context
 
         # 3. Deterministic decision + retry summaries for debuggability
         decision_summary = build_decision_summary(result)
         retry_correction_summary = build_retry_correction_summary(result)
+        run_decision_summary = build_run_decision_summary(
+            result,
+            llm_calls=llm_calls_total,
+            llm_token_total=llm_token_total,
+        )
         result["decision_summary"] = decision_summary
         result["retry_correction_summary"] = retry_correction_summary
+        result["run_decision_summary"] = run_decision_summary
 
         retry_summary = result.get("retry_summary")
         if not isinstance(retry_summary, dict):
@@ -1370,7 +1389,22 @@ async def run_agent_with_tracing(
                 if isinstance(validation_report.get("affected_tables"), list)
                 else 0
             ),
+            "run.retries": int(run_decision_summary.get("retries", 0) or 0),
+            "run.llm_calls": int(run_decision_summary.get("llm_calls", 0) or 0),
+            "run.llm_token_total": int(run_decision_summary.get("llm_token_total", 0) or 0),
+            "run.schema_refresh_count": int(
+                run_decision_summary.get("schema_refresh_count", 0) or 0
+            ),
+            "run.prefetch_discard_count": int(
+                run_decision_summary.get("prefetch_discard_count", 0) or 0
+            ),
+            "run.error_categories_count": int(
+                len(run_decision_summary.get("error_categories_encountered", []))
+            ),
         }
+        terminated_reason = run_decision_summary.get("terminated_reason")
+        if terminated_reason:
+            summary_attrs["run.terminated_reason"] = str(terminated_reason)
         record_query_complexity_score(
             decision_summary.get("query_complexity", {}).get("query_complexity_score", 0)
         )
@@ -1387,7 +1421,18 @@ async def run_agent_with_tracing(
                         {
                             "decision_summary": decision_summary,
                             "retry_correction_summary": retry_correction_summary,
+                            "run_decision_summary": run_decision_summary,
                         },
+                        sort_keys=True,
+                        default=str,
+                    )[:2048]
+                },
+            )
+            active_span.add_event(
+                "agent.run_decision_summary",
+                {
+                    "summary_json": json.dumps(
+                        run_decision_summary,
                         sort_keys=True,
                         default=str,
                     )[:2048]
