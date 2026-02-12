@@ -7,6 +7,8 @@ import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 
+from opentelemetry import trace
+
 from common.observability.metrics import agent_metrics
 
 
@@ -52,7 +54,17 @@ _SCHEMA_SNAPSHOT_ID_CACHE: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
 _SCHEMA_REFRESH_LOCKS: Dict[Tuple[int, int], asyncio.Lock] = {}
 _SCHEMA_REFRESH_COLLISIONS: int = 0
 _LAST_SCHEMA_REFRESH_TIMESTAMP: Optional[float] = None
+_LAST_TENANT_REFRESH_TS: Dict[int, float] = {}
 _STATE_LOCK = threading.Lock()
+
+
+class SchemaRefreshLimitExceeded(RuntimeError):
+    """Raised when schema refresh calls are throttled by cooldown policy."""
+
+    def __init__(self, retry_after_seconds: float):
+        """Initialize limit-exceeded error with retry delay hint."""
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__("Schema refresh cooldown is active.")
 
 
 def _tenant_cache_key(tenant_id: Optional[int]) -> int:
@@ -82,6 +94,64 @@ def _record_schema_refresh_collision() -> None:
         "agent.schema_refresh.collisions_total",
         attributes={"scope": "schema_snapshot_id"},
         description="Count of concurrent schema snapshot refresh collisions",
+    )
+
+
+def _record_schema_cache_hit() -> None:
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("schema.cache.hit", True)
+        span.set_attribute("schema.cache.miss", False)
+    agent_metrics.add_counter(
+        "schema.cache.hit",
+        attributes={"scope": "schema_snapshot_id"},
+        description="Schema snapshot cache hits",
+    )
+
+
+def _record_schema_cache_miss() -> None:
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("schema.cache.hit", False)
+        span.set_attribute("schema.cache.miss", True)
+    agent_metrics.add_counter(
+        "schema.cache.miss",
+        attributes={"scope": "schema_snapshot_id"},
+        description="Schema snapshot cache misses",
+    )
+
+
+def _record_schema_refresh_count() -> None:
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("schema.refresh.count", 1)
+    agent_metrics.add_counter(
+        "schema.refresh.count",
+        attributes={"scope": "schema_snapshot_id"},
+        description="Schema snapshot refresh attempts",
+    )
+
+
+def _record_schema_snapshot_churn() -> None:
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("schema.snapshot.churn", 1)
+    agent_metrics.add_counter(
+        "schema.snapshot.churn",
+        attributes={"scope": "schema_snapshot_id"},
+        description="Count of schema snapshot id transitions",
+    )
+
+
+def _record_schema_refresh_cooldown_active(retry_after_seconds: float) -> None:
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("schema.refresh.cooldown_active", True)
+        span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
+    agent_metrics.add_counter(
+        "schema.refresh.cooldown_active",
+        attributes={"scope": "schema_snapshot_id"},
+        description="Schema refresh cooldown rejections",
     )
 
 
@@ -134,6 +204,20 @@ def get_schema_cache_max_entries() -> int:
     return max(1, int(raw_max))
 
 
+def get_schema_refresh_cooldown_seconds() -> float:
+    """Return minimum interval between tenant refresh attempts."""
+    from common.config.env import get_env_float
+
+    default_cooldown = 0.0
+    try:
+        raw_cooldown = get_env_float("SCHEMA_REFRESH_COOLDOWN_SECONDS", default_cooldown)
+    except ValueError:
+        return default_cooldown
+    if raw_cooldown is None:
+        return default_cooldown
+    return max(0.0, float(raw_cooldown))
+
+
 def _evict_snapshot_lru_if_needed() -> None:
     max_entries = get_schema_cache_max_entries()
     while len(_SCHEMA_SNAPSHOT_ID_CACHE) > max_entries:
@@ -150,6 +234,7 @@ def get_cached_schema_snapshot_id(
     with _STATE_LOCK:
         entry = _SCHEMA_SNAPSHOT_ID_CACHE.get(cache_key)
     if not entry:
+        _record_schema_cache_miss()
         return None
 
     cached_at = entry.get("cached_at")
@@ -162,16 +247,19 @@ def get_cached_schema_snapshot_id(
     if now_value - float(cached_at) >= get_schema_cache_ttl_seconds():
         with _STATE_LOCK:
             _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
+        _record_schema_cache_miss()
         return None
 
     snapshot_id = entry.get("snapshot_id")
     if not isinstance(snapshot_id, str) or not snapshot_id:
         with _STATE_LOCK:
             _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
+        _record_schema_cache_miss()
         return None
     with _STATE_LOCK:
         if cache_key in _SCHEMA_SNAPSHOT_ID_CACHE:
             _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
+    _record_schema_cache_hit()
     return snapshot_id
 
 
@@ -202,6 +290,9 @@ def set_cached_schema_snapshot_id(
             return
 
     with _STATE_LOCK:
+        previous_snapshot_id = None
+        if existing_entry and isinstance(existing_entry.get("snapshot_id"), str):
+            previous_snapshot_id = existing_entry.get("snapshot_id")
         _SCHEMA_SNAPSHOT_ID_CACHE[cache_key] = {
             "snapshot_id": snapshot_id,
             "cached_at": cached_at,
@@ -209,6 +300,9 @@ def set_cached_schema_snapshot_id(
         _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
         _evict_snapshot_lru_if_needed()
         _LAST_SCHEMA_REFRESH_TIMESTAMP = time.time()
+        _LAST_TENANT_REFRESH_TS[cache_key] = float(cached_at)
+    if previous_snapshot_id and previous_snapshot_id != snapshot_id:
+        _record_schema_snapshot_churn()
 
 
 async def get_or_refresh_schema_snapshot_id(
@@ -229,7 +323,23 @@ async def get_or_refresh_schema_snapshot_id(
         if cached_snapshot_id:
             return cached_snapshot_id
 
+        cooldown_seconds = get_schema_refresh_cooldown_seconds()
+        cache_key = _tenant_cache_key(tenant_id)
+        now = time.monotonic()
+        if cooldown_seconds > 0:
+            with _STATE_LOCK:
+                last_refresh_ts = _LAST_TENANT_REFRESH_TS.get(cache_key)
+            if isinstance(last_refresh_ts, (int, float)):
+                elapsed = now - float(last_refresh_ts)
+                if elapsed < cooldown_seconds:
+                    retry_after_seconds = max(0.1, float(cooldown_seconds - elapsed))
+                    _record_schema_refresh_cooldown_active(retry_after_seconds)
+                    raise SchemaRefreshLimitExceeded(retry_after_seconds)
+
+        _record_schema_refresh_count()
         snapshot_id = await refresh_fn()
+        with _STATE_LOCK:
+            _LAST_TENANT_REFRESH_TS[cache_key] = now
         if isinstance(snapshot_id, str) and snapshot_id and snapshot_id != "unknown":
             set_cached_schema_snapshot_id(tenant_id, snapshot_id)
         return snapshot_id
@@ -254,5 +364,6 @@ def reset_schema_cache() -> None:
     with _STATE_LOCK:
         _SCHEMA_SNAPSHOT_ID_CACHE.clear()
         _SCHEMA_REFRESH_LOCKS.clear()
+        _LAST_TENANT_REFRESH_TS.clear()
         _SCHEMA_REFRESH_COLLISIONS = 0
         _LAST_SCHEMA_REFRESH_TIMESTAMP = None
