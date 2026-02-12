@@ -4,11 +4,18 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 import asyncpg
+from opentelemetry import trace
 
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorCategory
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
+from common.sql.complexity import (
+    ComplexityMetrics,
+    analyze_sql_complexity,
+    find_complexity_violation,
+    get_mcp_complexity_limits,
+)
 from common.sql.dialect import normalize_sqlglot_dialect
 from dal.capability_negotiation import (
     CapabilityNegotiationResult,
@@ -110,6 +117,94 @@ def _construct_error_response(
         error=error_meta,
     )
     return envelope.model_dump_json(exclude_none=True)
+
+
+def _record_complexity_attributes(
+    metrics: ComplexityMetrics, *, limit_exceeded: bool = False
+) -> None:
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("sql.complexity.score", int(metrics.score))
+    span.set_attribute("sql.complexity.joins", int(metrics.joins))
+    span.set_attribute("sql.complexity.ctes", int(metrics.ctes))
+    span.set_attribute("sql.complexity.subquery_depth", int(metrics.subquery_depth))
+    span.set_attribute("sql.complexity.cartesian_join_detected", bool(metrics.has_cartesian))
+    if metrics.projection_count is not None:
+        span.set_attribute("sql.complexity.projection_count", int(metrics.projection_count))
+    if limit_exceeded:
+        span.set_attribute("sql.complexity.limit_exceeded", True)
+
+
+def _complexity_violation_message(
+    limit_name: str,
+    measured: int | bool,
+    limit: int | bool,
+) -> str:
+    if limit_name == "cartesian_join":
+        return "SQL query rejected by complexity guard: cartesian joins are not allowed."
+    if limit_name == "complexity_score":
+        return (
+            "SQL query rejected by complexity guard: complexity score exceeds the configured limit."
+        )
+    if limit_name == "projection_count":
+        return "SQL query rejected by complexity guard: projected column count exceeds the limit."
+    if limit_name == "subquery_depth":
+        return (
+            "SQL query rejected by complexity guard: subquery nesting depth exceeds "
+            "the allowed limit."
+        )
+    if limit_name == "ctes":
+        return "SQL query rejected by complexity guard: CTE count exceeds the allowed limit."
+    if limit_name == "joins":
+        return "SQL query rejected by complexity guard: join count exceeds the allowed limit."
+    return "SQL query rejected by complexity guard: configured complexity limits exceeded."
+
+
+def _validate_sql_complexity(
+    sql: str, provider: str
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    from common.sql.comments import strip_sql_comments
+
+    stripped_sql = strip_sql_comments(sql)
+    dialect = normalize_sqlglot_dialect(provider)
+    try:
+        metrics = analyze_sql_complexity(stripped_sql, dialect=dialect)
+    except Exception:
+        return None, None
+
+    _record_complexity_attributes(metrics)
+    limits = get_mcp_complexity_limits()
+    violation = find_complexity_violation(metrics, limits)
+    complexity_meta = {
+        "complexity_score": metrics.score,
+        "joins": metrics.joins,
+        "ctes": metrics.ctes,
+        "subquery_depth": metrics.subquery_depth,
+        "cartesian_join_detected": metrics.has_cartesian,
+    }
+    if metrics.projection_count is not None:
+        complexity_meta["projection_count"] = metrics.projection_count
+
+    if violation is None:
+        return None, complexity_meta
+
+    _record_complexity_attributes(metrics, limit_exceeded=True)
+    complexity_meta.update(
+        {
+            "complexity_limit_name": violation.limit_name,
+            "complexity_limit_value": violation.limit,
+            "complexity_limit_measured": violation.measured,
+        }
+    )
+    return (
+        _complexity_violation_message(
+            limit_name=violation.limit_name,
+            measured=violation.measured,
+            limit=violation.limit,
+        ),
+        complexity_meta,
+    )
 
 
 def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
@@ -261,6 +356,16 @@ async def handler(
             validation_error,
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
+        )
+
+    # 2.5 Complexity Guard
+    complexity_error, complexity_metadata = _validate_sql_complexity(sql_query, provider)
+    if complexity_error:
+        return _construct_error_response(
+            complexity_error,
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata=complexity_metadata,
         )
 
     # 3. Policy Enforcement (Table Allowlist & Sensitive Columns)
