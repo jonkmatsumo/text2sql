@@ -1088,23 +1088,38 @@ async def run_agent_with_tracing(
                         },
                         exc_info=True,
                     )
-                    from agent.utils.llm_resilience import LLMRateLimitExceededError
+                    from agent.utils.llm_resilience import (
+                        LLMCircuitOpenError,
+                        LLMRateLimitExceededError,
+                    )
 
-                    if isinstance(execute_err, LLMRateLimitExceededError):
+                    if isinstance(execute_err, (LLMRateLimitExceededError, LLMCircuitOpenError)):
+                        is_circuit_open = isinstance(execute_err, LLMCircuitOpenError)
                         error_message = "LLM rate limit exceeded. Please retry shortly."
+                        error_code = "LLM_RATE_LIMIT_EXCEEDED"
+                        details_safe = {
+                            "llm_global_active": int(getattr(execute_err, "active_calls", 0)),
+                            "llm_global_limit": int(getattr(execute_err, "limit", 0)),
+                        }
+                        if is_circuit_open:
+                            error_message = "LLM circuit breaker is open. Please retry shortly."
+                            error_code = "LLM_CIRCUIT_OPEN"
+                            details_safe = {
+                                "llm_circuit_failures": int(
+                                    getattr(execute_err, "consecutive_failures", 0)
+                                )
+                            }
+
                         result["error"] = error_message
                         result["error_category"] = execute_err.category
                         result["retry_after_seconds"] = float(execute_err.retry_after_seconds)
                         result["error_metadata"] = {
                             "category": execute_err.category,
-                            "code": "LLM_RATE_LIMIT_EXCEEDED",
+                            "code": error_code,
                             "message": error_message,
                             "is_retryable": True,
                             "retry_after_seconds": float(execute_err.retry_after_seconds),
-                            "details_safe": {
-                                "llm_global_active": int(execute_err.active_calls),
-                                "llm_global_limit": int(execute_err.limit),
-                            },
+                            "details_safe": details_safe,
                         }
                     else:
                         result["error"] = str(execute_err)

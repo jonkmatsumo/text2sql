@@ -248,7 +248,11 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
 
     from agent.telemetry import telemetry
     from agent.telemetry_schema import SpanKind, TelemetryKeys, truncate_json
-    from agent.utils.llm_resilience import LLMRateLimitExceededError, get_global_llm_limiter
+    from agent.utils.llm_resilience import (
+        LLMCircuitOpenError,
+        LLMRateLimitExceededError,
+        get_global_llm_limiter,
+    )
     from agent.utils.llm_run_budget import (
         LLMBudgetExceededError,
         budget_telemetry_attributes,
@@ -296,7 +300,12 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                     span.set_attributes(budget_telemetry_attributes(budget_state))
 
                 with limiter.acquire_sync():
-                    response = llm.invoke(input, config, **kwargs)
+                    try:
+                        response = llm.invoke(input, config, **kwargs)
+                    except Exception as invoke_error:
+                        limiter.record_failure(invoke_error)
+                        raise
+                    limiter.record_success()
 
                 # Capture Output
                 if hasattr(response, "content"):
@@ -329,6 +338,17 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 span.set_attribute("retry.retry_after_seconds", float(e.retry_after_seconds))
                 error_info = {
                     "error": "LLM rate limit exceeded",
+                    "type": type(e).__name__,
+                    "category": e.category,
+                }
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                raise e
+            except LLMCircuitOpenError as e:
+                span.set_attribute("llm.circuit.state", "open")
+                span.set_attribute("llm.circuit.failures", int(e.consecutive_failures))
+                span.set_attribute("retry.retry_after_seconds", float(e.retry_after_seconds))
+                error_info = {
+                    "error": "LLM circuit breaker is open",
                     "type": type(e).__name__,
                     "category": e.category,
                 }
@@ -372,7 +392,12 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                     span.set_attributes(budget_telemetry_attributes(budget_state))
 
                 async with limiter.acquire_async():
-                    response = await llm.ainvoke(input, config, **kwargs)
+                    try:
+                        response = await llm.ainvoke(input, config, **kwargs)
+                    except Exception as invoke_error:
+                        limiter.record_failure(invoke_error)
+                        raise
+                    limiter.record_success()
 
                 # Capture Output
                 if hasattr(response, "content"):
@@ -405,6 +430,17 @@ def _wrap_llm(llm: BaseChatModel, seed: Optional[int] = None):
                 span.set_attribute("retry.retry_after_seconds", float(e.retry_after_seconds))
                 error_info = {
                     "error": "LLM rate limit exceeded",
+                    "type": type(e).__name__,
+                    "category": e.category,
+                }
+                span.set_attribute(TelemetryKeys.ERROR, truncate_json(error_info)[0])
+                raise e
+            except LLMCircuitOpenError as e:
+                span.set_attribute("llm.circuit.state", "open")
+                span.set_attribute("llm.circuit.failures", int(e.consecutive_failures))
+                span.set_attribute("retry.retry_after_seconds", float(e.retry_after_seconds))
+                error_info = {
+                    "error": "LLM circuit breaker is open",
                     "type": type(e).__name__,
                     "category": e.category,
                 }

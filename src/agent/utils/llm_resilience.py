@@ -1,8 +1,9 @@
-"""Global LLM resilience controls for concurrency limiting."""
+"""Global LLM resilience controls for concurrency limiting and circuit breaking."""
 
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterator, Optional
@@ -34,14 +35,38 @@ class LLMRateLimitExceededError(RuntimeError):
         super().__init__("LLM global concurrency limit exceeded.")
 
 
-class LLMGlobalConcurrencyLimiter:
-    """Process-wide limiter for concurrent LLM calls."""
+class LLMCircuitOpenError(RuntimeError):
+    """Raised when the LLM circuit breaker is open."""
 
-    def __init__(self, *, max_concurrent_calls: int, retry_after_seconds: float) -> None:
-        """Initialize limiter thresholds and internal state."""
+    category = "limit_exceeded"
+    is_retryable = True
+
+    def __init__(self, retry_after_seconds: float, consecutive_failures: int) -> None:
+        """Initialize typed circuit-open error details."""
+        self.retry_after_seconds = float(retry_after_seconds)
+        self.consecutive_failures = int(consecutive_failures)
+        super().__init__("LLM circuit breaker is open.")
+
+
+class LLMGlobalConcurrencyLimiter:
+    """Process-wide limiter for concurrent LLM calls and outage containment."""
+
+    def __init__(
+        self,
+        *,
+        max_concurrent_calls: int,
+        retry_after_seconds: float,
+        circuit_failure_threshold: int,
+        circuit_cooldown_seconds: float,
+    ) -> None:
+        """Initialize limiter and circuit-breaker state."""
         self._limit = max(1, int(max_concurrent_calls))
         self._retry_after_seconds = max(0.1, float(retry_after_seconds))
+        self._circuit_failure_threshold = max(1, int(circuit_failure_threshold))
+        self._circuit_cooldown_seconds = max(1.0, float(circuit_cooldown_seconds))
         self._active_calls = 0
+        self._consecutive_failures = 0
+        self._circuit_open_until_monotonic = 0.0
         self._lock = threading.Lock()
 
     def _record_telemetry(self, *, active_calls: int, rate_limited: bool) -> None:
@@ -51,8 +76,32 @@ class LLMGlobalConcurrencyLimiter:
         span.set_attribute("llm.global_active", int(active_calls))
         span.set_attribute("llm.global_limit", int(self._limit))
         span.set_attribute("llm.rate_limited", bool(rate_limited))
+        span.set_attribute("llm.circuit.failures", int(self._consecutive_failures))
+        span.set_attribute("llm.circuit.state", self.circuit_state)
+
+    @property
+    def circuit_state(self) -> str:
+        """Return current circuit state."""
+        with self._lock:
+            now = time.monotonic()
+            if self._circuit_open_until_monotonic > now:
+                return "open"
+            return "closed"
+
+    def _assert_circuit_closed(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            remaining = self._circuit_open_until_monotonic - now
+            failures = self._consecutive_failures
+        if remaining > 0:
+            self._record_telemetry(active_calls=self._active_calls, rate_limited=False)
+            raise LLMCircuitOpenError(
+                retry_after_seconds=max(0.1, float(remaining)),
+                consecutive_failures=failures,
+            )
 
     def _try_acquire(self) -> LLMConcurrencyLease:
+        self._assert_circuit_closed()
         with self._lock:
             if self._active_calls >= self._limit:
                 self._record_telemetry(active_calls=self._active_calls, rate_limited=True)
@@ -69,6 +118,26 @@ class LLMGlobalConcurrencyLimiter:
     def _release(self) -> None:
         with self._lock:
             self._active_calls = max(0, self._active_calls - 1)
+            active_calls = self._active_calls
+        self._record_telemetry(active_calls=active_calls, rate_limited=False)
+
+    def record_success(self) -> None:
+        """Reset consecutive failure counter after successful upstream call."""
+        with self._lock:
+            self._consecutive_failures = 0
+            self._circuit_open_until_monotonic = 0.0
+            active_calls = self._active_calls
+        self._record_telemetry(active_calls=active_calls, rate_limited=False)
+
+    def record_failure(self, error: Exception) -> None:
+        """Record an upstream failure and open circuit when threshold is reached."""
+        if not _is_circuit_relevant_failure(error):
+            return
+        now = time.monotonic()
+        with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._circuit_failure_threshold:
+                self._circuit_open_until_monotonic = now + self._circuit_cooldown_seconds
             active_calls = self._active_calls
         self._record_telemetry(active_calls=active_calls, rate_limited=False)
 
@@ -121,6 +190,16 @@ def get_global_llm_limiter() -> LLMGlobalConcurrencyLimiter:
         _GLOBAL_LLM_LIMITER = LLMGlobalConcurrencyLimiter(
             max_concurrent_calls=_safe_env_int("LLM_MAX_CONCURRENT_CALLS", 8, minimum=1),
             retry_after_seconds=_safe_env_float("LLM_LIMIT_RETRY_AFTER_SECONDS", 1.0, minimum=0.1),
+            circuit_failure_threshold=_safe_env_int(
+                "LLM_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+                5,
+                minimum=1,
+            ),
+            circuit_cooldown_seconds=_safe_env_float(
+                "LLM_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
+                30.0,
+                minimum=1.0,
+            ),
         )
     return _GLOBAL_LLM_LIMITER
 
@@ -129,3 +208,33 @@ def reset_global_llm_limiter() -> None:
     """Reset global limiter singleton (test helper)."""
     global _GLOBAL_LLM_LIMITER
     _GLOBAL_LLM_LIMITER = None
+
+
+def _is_circuit_relevant_failure(error: Exception) -> bool:
+    """Count failures that indicate upstream LLM instability."""
+    if isinstance(error, (TimeoutError,)):
+        return True
+
+    message = str(error).strip().lower()
+    if not message:
+        return False
+    if any(fragment in message for fragment in ("timeout", "timed out")):
+        return True
+    if any(fragment in message for fragment in ("rate limit", "too many requests", "status 429")):
+        return True
+    if any(
+        fragment in message
+        for fragment in (
+            "status 500",
+            "status 502",
+            "status 503",
+            "status 504",
+            "upstream 5xx",
+            "service unavailable",
+            "internal server error",
+            "bad gateway",
+            "gateway timeout",
+        )
+    ):
+        return True
+    return False
