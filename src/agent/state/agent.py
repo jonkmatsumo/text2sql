@@ -215,6 +215,8 @@ class AgentState(TypedDict):
 
     # Similarity score from cache lookup (0-1 or 0-100 depending on backend)
     cache_similarity: Optional[float]
+    cache_lookup_failed: Optional[bool]
+    cache_lookup_failure_reason: Optional[str]
 
     # Context about a rejected cache hit to guide generation (e.g. "similar query but wrong entity")
     # Structure: {"sql": str, "original_query": str, "reason": str}
