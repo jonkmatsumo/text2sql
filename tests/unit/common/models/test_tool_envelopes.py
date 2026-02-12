@@ -1,6 +1,10 @@
 """Tests for tool envelope models."""
 
-from common.models.tool_envelopes import GenericToolMetadata, GenericToolResponseEnvelope
+from common.models.tool_envelopes import (
+    ExecuteSQLQueryMetadata,
+    GenericToolMetadata,
+    GenericToolResponseEnvelope,
+)
 
 
 def test_generic_tool_metadata_snapshot_id():
@@ -37,3 +41,16 @@ def test_generic_tool_response_envelope_serialization():
     assert '"snapshot_id":"snap-456"' in json_str
     assert '"items_returned":1' in json_str
     assert '"returned_count":1' in json_str
+
+
+def test_execute_sql_query_metadata_truncation_reason_alias():
+    """Verify truncation_reason and partial_reason aliases in ExecuteSQLQueryMetadata."""
+    # Test partial_reason -> truncation_reason
+    meta1 = ExecuteSQLQueryMetadata(rows_returned=0, partial_reason="MAX_ROWS")
+    assert meta1.partial_reason == "MAX_ROWS"
+    assert meta1.truncation_reason == "MAX_ROWS"
+
+    # Test truncation_reason -> partial_reason
+    meta2 = ExecuteSQLQueryMetadata(rows_returned=0, truncation_reason="SIZE_LIMIT")
+    assert meta2.partial_reason == "SIZE_LIMIT"
+    assert meta2.truncation_reason == "SIZE_LIMIT"

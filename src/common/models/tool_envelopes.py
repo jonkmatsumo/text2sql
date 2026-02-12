@@ -41,6 +41,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     bytes_returned: Optional[int] = Field(
         None, description="Estimated size of the payload in bytes"
     )
+    truncation_reason: Optional[str] = Field(
+        None, description="Standardized truncation reason alias for partial_reason"
+    )
 
     # Capability negotiation fields
     capability_required: Optional[str] = None
@@ -85,6 +88,17 @@ class ExecuteSQLQueryMetadata(BaseModel):
         if normalized.get("next_cursor") is None and normalized.get("next_page_token") is not None:
             normalized["next_cursor"] = normalized["next_page_token"]
 
+        if (
+            normalized.get("partial_reason") is None
+            and normalized.get("truncation_reason") is not None
+        ):
+            normalized["partial_reason"] = normalized["truncation_reason"]
+        if (
+            normalized.get("truncation_reason") is None
+            and normalized.get("partial_reason") is not None
+        ):
+            normalized["truncation_reason"] = normalized["partial_reason"]
+
         return normalized
 
     @model_validator(mode="after")
@@ -100,6 +114,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.next_cursor = self.next_page_token
         if self.next_page_token is None and self.next_cursor is not None:
             self.next_page_token = self.next_cursor
+        if self.truncation_reason is None and self.partial_reason is not None:
+            self.truncation_reason = self.partial_reason
         return self
 
 
