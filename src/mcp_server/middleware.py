@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from common.config.env import get_env_str
+from common.observability.context import run_id_var
 from mcp_server.utils.request_auth_context import (
     reset_internal_auth_verified,
     set_internal_auth_verified,
@@ -40,6 +41,28 @@ CORS_ORIGINS = [
 
 # Paths that don't require authentication
 AUTH_EXEMPT_PATHS = ["/health", "/messages"]
+
+
+class RunIdMiddleware(BaseHTTPMiddleware):
+    """Middleware to propagate X-Run-ID header to context and spans."""
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """Extract run_id from header and set in context/span."""
+        run_id = request.headers.get("X-Run-ID")
+        token = None
+        if run_id:
+            token = run_id_var.set(run_id)
+            from opentelemetry import trace
+
+            span = trace.get_current_span()
+            if span.is_recording():
+                span.set_attribute("run_id", run_id)
+
+        try:
+            return await call_next(request)
+        finally:
+            if token:
+                run_id_var.reset(token)
 
 
 class InternalAuthMiddleware(BaseHTTPMiddleware):
@@ -80,6 +103,7 @@ def get_middleware_stack() -> List[Middleware]:
             allow_methods=["*"],
             allow_headers=["*"],
         ),
+        Middleware(RunIdMiddleware),
         Middleware(InternalAuthMiddleware),
     ]
 
