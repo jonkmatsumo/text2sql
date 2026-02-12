@@ -94,6 +94,11 @@ def normalize_payload(payload: Any) -> Any:
         return parsed
 
     except (json.JSONDecodeError, TypeError) as e:
+        # If it looks like JSON (starts with { or [) but failed to parse, raise ValueError
+        stripped = payload.strip()
+        if stripped.startswith(("{", "[")):
+            raise ValueError(f"Malformed JSON payload: {str(e)}")
+
         # Not valid JSON - could be plain text error message
         logger.debug(f"Payload is not JSON, treating as raw text: {str(e)[:50]}")
         return payload
@@ -164,11 +169,25 @@ def parse_tool_output(tool_output):
                 aggregated_results.append(normalized)
 
         except Exception as e:
+            from common.models.error_metadata import ErrorCategory
+
+            # Return a special error envelope to signal parsing failure
+            aggregated_results.append(
+                {
+                    "schema_version": "1.0",
+                    "result": None,
+                    "metadata": {"provider": "agent_parser"},
+                    "error": {
+                        "category": ErrorCategory.TOOL_RESPONSE_MALFORMED.value,
+                        "message": f"Malformed tool response: {str(e)[:200]}",
+                        "retryable": False,
+                    },
+                }
+            )
             logger.warning(
                 f"Failed to parse tool output chunk: {str(e)[:100]}... "
                 f"Raw Payload Start: {str(raw_payload)[:100]}"
             )
-            continue
 
     return aggregated_results
 
