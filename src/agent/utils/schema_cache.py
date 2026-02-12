@@ -4,6 +4,7 @@ import abc
 import asyncio
 import threading
 import time
+from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
 
 from common.observability.metrics import agent_metrics
@@ -47,7 +48,7 @@ class MemorySchemaSnapshotCache(SchemaSnapshotCache):
 
 
 _CACHE_BACKEND: Optional[SchemaSnapshotCache] = None
-_SCHEMA_SNAPSHOT_ID_CACHE: Dict[int, Dict[str, Any]] = {}
+_SCHEMA_SNAPSHOT_ID_CACHE: "OrderedDict[int, Dict[str, Any]]" = OrderedDict()
 _SCHEMA_REFRESH_LOCKS: Dict[Tuple[int, int], asyncio.Lock] = {}
 _SCHEMA_REFRESH_COLLISIONS: int = 0
 _LAST_SCHEMA_REFRESH_TIMESTAMP: Optional[float] = None
@@ -119,6 +120,26 @@ def get_schema_cache_ttl_seconds() -> int:
     return max(1, int(raw_ttl))
 
 
+def get_schema_cache_max_entries() -> int:
+    """Return schema snapshot LRU capacity from env."""
+    from common.config.env import get_env_int
+
+    default_max_entries = 1000
+    try:
+        raw_max = get_env_int("SCHEMA_CACHE_MAX_ENTRIES", default_max_entries)
+    except ValueError:
+        return default_max_entries
+    if raw_max is None:
+        return default_max_entries
+    return max(1, int(raw_max))
+
+
+def _evict_snapshot_lru_if_needed() -> None:
+    max_entries = get_schema_cache_max_entries()
+    while len(_SCHEMA_SNAPSHOT_ID_CACHE) > max_entries:
+        _SCHEMA_SNAPSHOT_ID_CACHE.popitem(last=False)
+
+
 def get_cached_schema_snapshot_id(
     tenant_id: Optional[int],
     *,
@@ -148,6 +169,9 @@ def get_cached_schema_snapshot_id(
         with _STATE_LOCK:
             _SCHEMA_SNAPSHOT_ID_CACHE.pop(cache_key, None)
         return None
+    with _STATE_LOCK:
+        if cache_key in _SCHEMA_SNAPSHOT_ID_CACHE:
+            _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
     return snapshot_id
 
 
@@ -182,6 +206,8 @@ def set_cached_schema_snapshot_id(
             "snapshot_id": snapshot_id,
             "cached_at": cached_at,
         }
+        _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
+        _evict_snapshot_lru_if_needed()
         _LAST_SCHEMA_REFRESH_TIMESTAMP = time.time()
 
 
