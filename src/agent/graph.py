@@ -63,8 +63,26 @@ def _safe_env_int(name: str, default: int, minimum: int) -> int:
     return max(minimum, int(parsed))
 
 
+def _safe_env_bool(name: str, default: bool) -> bool:
+    try:
+        parsed = get_env_bool(name, default)
+    except ValueError:
+        return bool(default)
+    if parsed is None:
+        return bool(default)
+    return bool(parsed)
+
+
 def _is_replay_mode(state: AgentState) -> bool:
     return bool(state.get("replay_mode"))
+
+
+def _llm_retries_disabled(state: AgentState) -> bool:
+    return _is_replay_mode(state) or bool(state.get("llm_retries_kill_switch_enabled"))
+
+
+def _schema_refresh_disabled(state: AgentState) -> bool:
+    return bool(state.get("schema_refresh_kill_switch_enabled"))
 
 
 def _resolve_run_seed(*, replay_mode: bool) -> Optional[int]:
@@ -268,7 +286,7 @@ def route_after_validation(state: AgentState) -> str:
         str: Next node name
     """
     retry_count = state.get("retry_count", 0)
-    max_retries = 0 if _is_replay_mode(state) else _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+    max_retries = 0 if _llm_retries_disabled(state) else _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
     error_category = str(state.get("error_category") or "").strip().lower()
 
     ast_result = state.get("ast_validation_result")
@@ -304,7 +322,7 @@ def _max_retry_attempts() -> int:
 
 
 def _effective_max_retry_attempts(state: AgentState) -> int:
-    if _is_replay_mode(state):
+    if _llm_retries_disabled(state):
         return 0
     return _max_retry_attempts()
 
@@ -445,6 +463,7 @@ def route_after_execution(state: AgentState) -> str:
         state.get("schema_drift_suspected")
         and state.get("schema_drift_auto_refresh")
         and not _is_replay_mode(state)
+        and not _schema_refresh_disabled(state)
     ):
         refresh_count = state.get("schema_refresh_count", 0)
         if refresh_count < 1:
@@ -458,6 +477,21 @@ def route_after_execution(state: AgentState) -> str:
                 span=telemetry.get_current_span(),
             )
             return "refresh_schema"
+    elif state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+        refresh_disabled_reason = (
+            "replay_mode_disable_schema_refresh"
+            if _is_replay_mode(state)
+            else "kill_switch_disable_schema_refresh"
+        )
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="refresh_schema",
+            reason=refresh_disabled_reason,
+            retry_count=int(state.get("retry_count", 0) or 0),
+            error_category=error_category,
+            span=telemetry.get_current_span(),
+        )
 
     deadline_ts = state.get("deadline_ts")
     remaining = None
@@ -692,6 +726,8 @@ def route_after_execution(state: AgentState) -> str:
 
     if retry_count >= max_retries:
         retry_summary["max_retries_reached"] = True
+        if bool(state.get("llm_retries_kill_switch_enabled")):
+            retry_summary["llm_retries_disabled"] = True
         state["retry_summary"] = retry_summary
         retry_decision["reason_code"] = RetryDecisionReason.MAX_RETRIES_REACHED.value
         retry_decision["will_retry"] = False
@@ -712,11 +748,14 @@ def route_after_execution(state: AgentState) -> str:
         )
         if span:
             span.add_event("system.decision", decision_summary.to_dict())
+        reason_value = RetryDecisionReason.MAX_RETRIES_REACHED.value
+        if bool(state.get("llm_retries_kill_switch_enabled")) and not _is_replay_mode(state):
+            reason_value = "kill_switch_disable_llm_retries"
         append_decision_event(
             state,
             node="route_after_execution",
             decision="fail",
-            reason=RetryDecisionReason.MAX_RETRIES_REACHED.value,
+            reason=reason_value,
             retry_count=retry_count,
             error_category=error_category,
             retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
@@ -1026,6 +1065,9 @@ async def run_agent_with_tracing(
             "decision_events": [],
             "decision_events_truncated": False,
             "decision_events_dropped": 0,
+            "prefetch_kill_switch_enabled": _safe_env_bool("DISABLE_PREFETCH", False),
+            "schema_refresh_kill_switch_enabled": _safe_env_bool("DISABLE_SCHEMA_REFRESH", False),
+            "llm_retries_kill_switch_enabled": _safe_env_bool("DISABLE_LLM_RETRIES", False),
         }
 
         # Config with thread_id for checkpointer

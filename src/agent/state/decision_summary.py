@@ -351,6 +351,15 @@ def build_run_decision_summary(
         "llm_token_total": max(0, resolved_llm_token_total),
         "schema_refresh_count": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "prefetch_discard_count": int(normalized_state.get("prefetch_discard_count", 0) or 0),
+        "kill_switches": {
+            "disable_prefetch": bool(normalized_state.get("prefetch_kill_switch_enabled", False)),
+            "disable_schema_refresh": bool(
+                normalized_state.get("schema_refresh_kill_switch_enabled", False)
+            ),
+            "disable_llm_retries": bool(
+                normalized_state.get("llm_retries_kill_switch_enabled", False)
+            ),
+        },
         "decision_event_counts": summarize_decision_events(normalized_state),
         "decision_events_truncated": bool(normalized_state.get("decision_events_truncated", False)),
         "decision_events_dropped": int(normalized_state.get("decision_events_dropped", 0) or 0),

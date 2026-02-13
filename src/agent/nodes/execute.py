@@ -7,6 +7,7 @@ from typing import Any, Optional
 from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
+from agent.state.decision_events import append_decision_event
 from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
@@ -301,6 +302,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             prefetch_enabled, prefetch_max_concurrency, prefetch_reason = get_prefetch_config(
                 interactive_session
             )
+            prefetch_kill_switch_enabled = bool(state.get("prefetch_kill_switch_enabled"))
+            if prefetch_kill_switch_enabled:
+                prefetch_enabled = False
+                prefetch_reason = "disabled_kill_switch"
+                append_decision_event(
+                    state,
+                    node="execute_sql",
+                    decision="prefetch",
+                    reason="kill_switch_disable_prefetch",
+                    retry_count=int(state.get("retry_count", 0) or 0),
+                    error_category=str(state.get("error_category") or "") or None,
+                    span=span,
+                )
             if bool(state.get("replay_mode")):
                 prefetch_enabled = False
                 prefetch_reason = "disabled"

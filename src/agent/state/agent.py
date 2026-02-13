@@ -82,6 +82,9 @@ class AgentState(TypedDict):
     deadline_ts: Optional[float]
     timeout_seconds: Optional[float]
     interactive_session: Optional[bool]
+    prefetch_kill_switch_enabled: Optional[bool]
+    schema_refresh_kill_switch_enabled: Optional[bool]
+    llm_retries_kill_switch_enabled: Optional[bool]
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]

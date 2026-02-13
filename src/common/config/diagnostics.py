@@ -68,6 +68,9 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
             "capability_fallback_mode": _safe_mode("AGENT_CAPABILITY_FALLBACK_MODE", "off"),
             "provider_cap_mitigation": _safe_mode("AGENT_PROVIDER_CAP_MITIGATION", "off"),
             "decision_summary_debug": _safe_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False),
+            "disable_prefetch": _safe_env_bool("DISABLE_PREFETCH", False),
+            "disable_schema_refresh": _safe_env_bool("DISABLE_SCHEMA_REFRESH", False),
+            "disable_llm_retries": _safe_env_bool("DISABLE_LLM_RETRIES", False),
         },
     }
     if debug:
