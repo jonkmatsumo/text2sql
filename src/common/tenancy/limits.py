@@ -59,6 +59,8 @@ class _TenantState:
 @dataclass(frozen=True)
 class _ReserveOutcome:
     active_runs: int | None
+    effective_limit: int
+    warm_start_active: bool
     retry_after_seconds: Optional[float] = None
     tokens_remaining: Optional[float] = None
     limit_kind: str = "concurrency"
@@ -76,6 +78,9 @@ class TenantConcurrencyLimiter:
         retry_after_seconds: float,
         refill_rate: float = 0.0,
         burst_capacity: Optional[int] = None,
+        warm_start_cooldown_seconds: float = 0.0,
+        warm_start_per_tenant_limit: Optional[int] = None,
+        warm_start_burst_capacity: Optional[int] = None,
         span_active_attribute: str = "tenant.active_runs",
         span_limit_attribute: str = "tenant.limit",
         span_limit_exceeded_attribute: str = "tenant.limit_exceeded",
@@ -93,6 +98,26 @@ class TenantConcurrencyLimiter:
         if resolved_burst_capacity is None:
             resolved_burst_capacity = self._per_tenant_limit * 4
         self._burst_capacity = max(1, int(resolved_burst_capacity))
+        self._warm_start_cooldown_seconds = max(0.0, float(warm_start_cooldown_seconds))
+        resolved_warm_start_limit = (
+            self._per_tenant_limit
+            if warm_start_per_tenant_limit is None
+            else int(warm_start_per_tenant_limit)
+        )
+        self._warm_start_per_tenant_limit = max(
+            1,
+            min(int(self._per_tenant_limit), int(resolved_warm_start_limit)),
+        )
+        resolved_warm_start_burst = (
+            self._burst_capacity
+            if warm_start_burst_capacity is None
+            else int(warm_start_burst_capacity)
+        )
+        self._warm_start_burst_capacity = max(
+            1,
+            min(int(self._burst_capacity), int(resolved_warm_start_burst)),
+        )
+        self._created_at_monotonic = time.monotonic()
         self._span_active_attribute = str(span_active_attribute or "tenant.active_runs")
         self._span_limit_attribute = str(span_limit_attribute or "tenant.limit")
         self._span_limit_exceeded_attribute = str(
@@ -108,6 +133,21 @@ class TenantConcurrencyLimiter:
         self._state_lock = asyncio.Lock()
         self._tenant_states: OrderedDict[int, _TenantState] = OrderedDict()
 
+    def _warm_start_active(self, now: float) -> bool:
+        if self._warm_start_cooldown_seconds <= 0:
+            return False
+        return (now - self._created_at_monotonic) < self._warm_start_cooldown_seconds
+
+    def _effective_per_tenant_limit(self, now: float) -> int:
+        if self._warm_start_active(now):
+            return int(self._warm_start_per_tenant_limit)
+        return int(self._per_tenant_limit)
+
+    def _effective_burst_capacity(self, now: float) -> int:
+        if self._warm_start_active(now):
+            return int(self._warm_start_burst_capacity)
+        return int(self._burst_capacity)
+
     async def _get_or_create_state(self, tenant_id: int) -> _TenantState:
         now = time.monotonic()
         async with self._state_lock:
@@ -117,7 +157,7 @@ class TenantConcurrencyLimiter:
                     semaphore=asyncio.Semaphore(self._per_tenant_limit),
                     active_runs=0,
                     last_access_ts=now,
-                    tokens=float(self._burst_capacity),
+                    tokens=float(self._effective_burst_capacity(now)),
                     last_refill_ts=now,
                 )
                 self._tenant_states[tenant_id] = state
@@ -150,9 +190,22 @@ class TenantConcurrencyLimiter:
         *,
         active_runs: int,
         limit_exceeded: bool,
+        effective_limit: Optional[int] = None,
+        warm_start_active: Optional[bool] = None,
         tokens_remaining: Optional[float] = None,
         retry_after_seconds: Optional[float] = None,
     ) -> None:
+        now = time.monotonic()
+        resolved_limit = (
+            int(self._effective_per_tenant_limit(now))
+            if effective_limit is None
+            else max(1, int(effective_limit))
+        )
+        resolved_warm_start_active = (
+            bool(self._warm_start_active(now))
+            if warm_start_active is None
+            else bool(warm_start_active)
+        )
         span = trace.get_current_span()
         normalized_tokens_remaining = (
             -1.0 if tokens_remaining is None else max(0.0, float(tokens_remaining))
@@ -162,10 +215,11 @@ class TenantConcurrencyLimiter:
         )
         if span is not None and span.is_recording():
             span.set_attribute(self._span_active_attribute, int(active_runs))
-            span.set_attribute(self._span_limit_attribute, int(self._per_tenant_limit))
+            span.set_attribute(self._span_limit_attribute, int(resolved_limit))
             span.set_attribute(self._span_limit_exceeded_attribute, bool(limit_exceeded))
             span.set_attribute("tenant.rate.tokens_remaining", normalized_tokens_remaining)
             span.set_attribute("tenant.rate.retry_after", normalized_retry_after)
+            span.set_attribute("system.warm_start.active", resolved_warm_start_active)
         agent_metrics.record_histogram(
             self._active_runs_histogram_name,
             float(active_runs),
@@ -179,14 +233,16 @@ class TenantConcurrencyLimiter:
                 description="Count of tenant concurrency limit rejections",
             )
 
-    def _refill_tokens_locked(self, state: _TenantState, now: float) -> Optional[float]:
+    def _refill_tokens_locked(
+        self, state: _TenantState, now: float, *, burst_capacity: int
+    ) -> Optional[float]:
         if self._refill_rate <= 0:
             return None
 
         elapsed = max(0.0, float(now - state.last_refill_ts))
         if elapsed > 0:
             state.tokens = min(
-                float(self._burst_capacity),
+                float(max(1, int(burst_capacity))),
                 float(state.tokens) + (elapsed * self._refill_rate),
             )
             state.last_refill_ts = now
@@ -208,8 +264,15 @@ class TenantConcurrencyLimiter:
     async def _reserve_slot(self, tenant_id: int, state: _TenantState) -> _ReserveOutcome:
         now = time.monotonic()
         async with self._state_lock:
-            tokens_remaining = self._refill_tokens_locked(state, now)
-            if state.active_runs >= self._per_tenant_limit:
+            effective_limit = self._effective_per_tenant_limit(now)
+            effective_burst_capacity = self._effective_burst_capacity(now)
+            warm_start_active = self._warm_start_active(now)
+            tokens_remaining = self._refill_tokens_locked(
+                state,
+                now,
+                burst_capacity=effective_burst_capacity,
+            )
+            if state.active_runs >= effective_limit:
                 state.last_access_ts = now
                 self._tenant_states.move_to_end(tenant_id)
                 from agent.audit import AuditEventType, emit_audit_event
@@ -222,11 +285,14 @@ class TenantConcurrencyLimiter:
                     metadata={
                         "scope": self._metrics_scope,
                         "active_runs": int(state.active_runs),
-                        "limit": int(self._per_tenant_limit),
+                        "limit": int(effective_limit),
+                        "warm_start": bool(warm_start_active),
                     },
                 )
                 return _ReserveOutcome(
                     active_runs=None,
+                    effective_limit=effective_limit,
+                    warm_start_active=warm_start_active,
                     retry_after_seconds=self._retry_after_seconds,
                     tokens_remaining=tokens_remaining,
                     limit_kind="concurrency",
@@ -246,13 +312,17 @@ class TenantConcurrencyLimiter:
                     metadata={
                         "scope": self._metrics_scope,
                         "active_runs": int(state.active_runs),
-                        "limit": int(self._per_tenant_limit),
+                        "limit": int(effective_limit),
                         "limit_kind": "rate",
+                        "burst_capacity": int(effective_burst_capacity),
+                        "warm_start": bool(warm_start_active),
                         "retry_after_seconds": retry_after,
                     },
                 )
                 return _ReserveOutcome(
                     active_runs=None,
+                    effective_limit=effective_limit,
+                    warm_start_active=warm_start_active,
                     retry_after_seconds=retry_after,
                     tokens_remaining=tokens_remaining,
                     limit_kind="rate",
@@ -266,6 +336,8 @@ class TenantConcurrencyLimiter:
             self._tenant_states.move_to_end(tenant_id)
             return _ReserveOutcome(
                 active_runs=state.active_runs,
+                effective_limit=effective_limit,
+                warm_start_active=warm_start_active,
                 tokens_remaining=tokens_remaining,
                 limit_kind="concurrency",
             )
@@ -298,12 +370,14 @@ class TenantConcurrencyLimiter:
             self._record_telemetry(
                 active_runs=active_runs,
                 limit_exceeded=True,
+                effective_limit=reserve_outcome.effective_limit,
+                warm_start_active=reserve_outcome.warm_start_active,
                 tokens_remaining=reserve_outcome.tokens_remaining,
                 retry_after_seconds=reserve_outcome.retry_after_seconds,
             )
             raise TenantConcurrencyLimitExceeded(
                 tenant_id=tenant_id,
-                limit=self._per_tenant_limit,
+                limit=reserve_outcome.effective_limit,
                 active_runs=active_runs,
                 retry_after_seconds=reserve_outcome.retry_after_seconds
                 or self._retry_after_seconds,
@@ -324,6 +398,8 @@ class TenantConcurrencyLimiter:
         self._record_telemetry(
             active_runs=active_runs,
             limit_exceeded=False,
+            effective_limit=reserve_outcome.effective_limit,
+            warm_start_active=reserve_outcome.warm_start_active,
             tokens_remaining=reserve_outcome.tokens_remaining,
             retry_after_seconds=0.0,
         )
@@ -331,7 +407,7 @@ class TenantConcurrencyLimiter:
             yield TenantLease(
                 tenant_id=tenant_id,
                 active_runs=active_runs,
-                limit=self._per_tenant_limit,
+                limit=reserve_outcome.effective_limit,
             )
         finally:
             if acquired:
@@ -378,6 +454,11 @@ def get_agent_run_tenant_limiter() -> TenantConcurrencyLimiter:
     global _AGENT_RUN_LIMITER
     if _AGENT_RUN_LIMITER is None:
         per_tenant_limit = _safe_env_int("AGENT_TENANT_MAX_CONCURRENT_RUNS", 3, minimum=1)
+        burst_capacity = _safe_env_int(
+            "AGENT_TENANT_RATE_BURST_CAPACITY",
+            per_tenant_limit * 30,
+            minimum=1,
+        )
         _AGENT_RUN_LIMITER = TenantConcurrencyLimiter(
             per_tenant_limit=per_tenant_limit,
             max_tracked_tenants=_safe_env_int("AGENT_TENANT_LIMITER_MAX_TENANTS", 2000, minimum=1),
@@ -392,9 +473,20 @@ def get_agent_run_tenant_limiter() -> TenantConcurrencyLimiter:
                 float(per_tenant_limit * 10),
                 minimum=0.0,
             ),
-            burst_capacity=_safe_env_int(
-                "AGENT_TENANT_RATE_BURST_CAPACITY",
-                per_tenant_limit * 30,
+            burst_capacity=burst_capacity,
+            warm_start_cooldown_seconds=_safe_env_float(
+                "AGENT_TENANT_WARM_START_COOLDOWN_SECONDS",
+                30.0,
+                minimum=0.0,
+            ),
+            warm_start_per_tenant_limit=_safe_env_int(
+                "AGENT_TENANT_WARM_START_MAX_CONCURRENT_RUNS",
+                max(1, per_tenant_limit // 2),
+                minimum=1,
+            ),
+            warm_start_burst_capacity=_safe_env_int(
+                "AGENT_TENANT_WARM_START_BURST_CAPACITY",
+                max(1, burst_capacity // 2),
                 minimum=1,
             ),
         )
@@ -412,6 +504,11 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
     global _MCP_TOOL_LIMITER
     if _MCP_TOOL_LIMITER is None:
         per_tenant_limit = _safe_env_int("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", 3, minimum=1)
+        burst_capacity = _safe_env_int(
+            "MCP_TENANT_RATE_BURST_CAPACITY",
+            per_tenant_limit * 30,
+            minimum=1,
+        )
         _MCP_TOOL_LIMITER = TenantConcurrencyLimiter(
             per_tenant_limit=per_tenant_limit,
             max_tracked_tenants=_safe_env_int("MCP_TENANT_LIMITER_MAX_TENANTS", 2000, minimum=1),
@@ -426,9 +523,20 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
                 float(per_tenant_limit * 10),
                 minimum=0.0,
             ),
-            burst_capacity=_safe_env_int(
-                "MCP_TENANT_RATE_BURST_CAPACITY",
-                per_tenant_limit * 30,
+            burst_capacity=burst_capacity,
+            warm_start_cooldown_seconds=_safe_env_float(
+                "MCP_TENANT_WARM_START_COOLDOWN_SECONDS",
+                30.0,
+                minimum=0.0,
+            ),
+            warm_start_per_tenant_limit=_safe_env_int(
+                "MCP_TENANT_WARM_START_MAX_CONCURRENT_TOOL_CALLS",
+                max(1, per_tenant_limit // 2),
+                minimum=1,
+            ),
+            warm_start_burst_capacity=_safe_env_int(
+                "MCP_TENANT_WARM_START_BURST_CAPACITY",
+                max(1, burst_capacity // 2),
                 minimum=1,
             ),
             span_active_attribute="tenant.active_tool_calls",
