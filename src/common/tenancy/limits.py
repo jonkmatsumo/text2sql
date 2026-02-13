@@ -459,15 +459,58 @@ def _safe_env_float(name: str, default: float, minimum: float) -> float:
     return max(minimum, float(value))
 
 
+def _safe_env_optional_int(name: str) -> Optional[int]:
+    try:
+        value = get_env_int(name, None)
+    except ValueError:
+        return None
+    if value is None:
+        return None
+    return int(value)
+
+
+def _safe_env_optional_float(name: str) -> Optional[float]:
+    try:
+        value = get_env_float(name, None)
+    except ValueError:
+        return None
+    if value is None:
+        return None
+    return float(value)
+
+
+def _resolve_rate_limit_int(*, shared_env: str, legacy_env: str, default: int, minimum: int) -> int:
+    shared_value = _safe_env_optional_int(shared_env)
+    if shared_value is not None:
+        return max(minimum, int(shared_value))
+    return _safe_env_int(legacy_env, default, minimum=minimum)
+
+
+def _resolve_rate_limit_float(
+    *, shared_env: str, legacy_env: str, default: float, minimum: float
+) -> float:
+    shared_value = _safe_env_optional_float(shared_env)
+    if shared_value is not None:
+        return max(minimum, float(shared_value))
+    return _safe_env_float(legacy_env, default, minimum=minimum)
+
+
 def get_agent_run_tenant_limiter() -> TenantConcurrencyLimiter:
     """Return singleton tenant concurrency limiter for agent runs."""
     global _AGENT_RUN_LIMITER
     if _AGENT_RUN_LIMITER is None:
         per_tenant_limit = _safe_env_int("AGENT_TENANT_MAX_CONCURRENT_RUNS", 3, minimum=1)
-        burst_capacity = _safe_env_int(
-            "AGENT_TENANT_RATE_BURST_CAPACITY",
-            per_tenant_limit * 30,
+        burst_capacity = _resolve_rate_limit_int(
+            shared_env="TENANT_RATE_LIMIT_BURST",
+            legacy_env="AGENT_TENANT_RATE_BURST_CAPACITY",
+            default=10,
             minimum=1,
+        )
+        tokens_per_second = _resolve_rate_limit_float(
+            shared_env="TENANT_RATE_LIMIT_TOKENS_PER_SECOND",
+            legacy_env="AGENT_TENANT_RATE_REFILL_PER_SECOND",
+            default=5.0,
+            minimum=0.0,
         )
         _AGENT_RUN_LIMITER = TenantConcurrencyLimiter(
             per_tenant_limit=per_tenant_limit,
@@ -478,11 +521,7 @@ def get_agent_run_tenant_limiter() -> TenantConcurrencyLimiter:
             retry_after_seconds=_safe_env_float(
                 "AGENT_TENANT_LIMIT_RETRY_AFTER_SECONDS", 1.0, minimum=0.1
             ),
-            refill_rate=_safe_env_float(
-                "AGENT_TENANT_RATE_REFILL_PER_SECOND",
-                float(per_tenant_limit * 10),
-                minimum=0.0,
-            ),
+            refill_rate=tokens_per_second,
             burst_capacity=burst_capacity,
             warm_start_cooldown_seconds=_safe_env_float(
                 "AGENT_TENANT_WARM_START_COOLDOWN_SECONDS",
@@ -514,10 +553,17 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
     global _MCP_TOOL_LIMITER
     if _MCP_TOOL_LIMITER is None:
         per_tenant_limit = _safe_env_int("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", 3, minimum=1)
-        burst_capacity = _safe_env_int(
-            "MCP_TENANT_RATE_BURST_CAPACITY",
-            per_tenant_limit * 30,
+        burst_capacity = _resolve_rate_limit_int(
+            shared_env="TENANT_RATE_LIMIT_BURST",
+            legacy_env="MCP_TENANT_RATE_BURST_CAPACITY",
+            default=10,
             minimum=1,
+        )
+        tokens_per_second = _resolve_rate_limit_float(
+            shared_env="TENANT_RATE_LIMIT_TOKENS_PER_SECOND",
+            legacy_env="MCP_TENANT_RATE_REFILL_PER_SECOND",
+            default=5.0,
+            minimum=0.0,
         )
         _MCP_TOOL_LIMITER = TenantConcurrencyLimiter(
             per_tenant_limit=per_tenant_limit,
@@ -528,11 +574,7 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
             retry_after_seconds=_safe_env_float(
                 "MCP_TENANT_LIMIT_RETRY_AFTER_SECONDS", 1.0, minimum=0.1
             ),
-            refill_rate=_safe_env_float(
-                "MCP_TENANT_RATE_REFILL_PER_SECOND",
-                float(per_tenant_limit * 10),
-                minimum=0.0,
-            ),
+            refill_rate=tokens_per_second,
             burst_capacity=burst_capacity,
             warm_start_cooldown_seconds=_safe_env_float(
                 "MCP_TENANT_WARM_START_COOLDOWN_SECONDS",
