@@ -411,14 +411,25 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
     """Return singleton tenant concurrency limiter for MCP tool invocations."""
     global _MCP_TOOL_LIMITER
     if _MCP_TOOL_LIMITER is None:
+        per_tenant_limit = _safe_env_int("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", 3, minimum=1)
         _MCP_TOOL_LIMITER = TenantConcurrencyLimiter(
-            per_tenant_limit=_safe_env_int("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", 3, minimum=1),
+            per_tenant_limit=per_tenant_limit,
             max_tracked_tenants=_safe_env_int("MCP_TENANT_LIMITER_MAX_TENANTS", 2000, minimum=1),
             idle_ttl_seconds=_safe_env_float(
                 "MCP_TENANT_LIMITER_IDLE_TTL_SECONDS", 900.0, minimum=0.0
             ),
             retry_after_seconds=_safe_env_float(
                 "MCP_TENANT_LIMIT_RETRY_AFTER_SECONDS", 1.0, minimum=0.1
+            ),
+            refill_rate=_safe_env_float(
+                "MCP_TENANT_RATE_REFILL_PER_SECOND",
+                float(per_tenant_limit),
+                minimum=0.0,
+            ),
+            burst_capacity=_safe_env_int(
+                "MCP_TENANT_RATE_BURST_CAPACITY",
+                per_tenant_limit * 3,
+                minimum=1,
             ),
             span_active_attribute="tenant.active_tool_calls",
             span_limit_attribute="tenant.limit",
