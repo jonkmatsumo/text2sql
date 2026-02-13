@@ -141,3 +141,87 @@ async def test_rate_smoothing_allows_calls_after_refill():
     await asyncio.sleep(0.25)
     async with limiter.acquire(tenant_id=31):
         pass
+
+
+@pytest.mark.asyncio
+async def test_warm_start_temporarily_reduces_tenant_concurrency():
+    """Warm-start should enforce a lower temporary concurrency ceiling per tenant."""
+    limiter = TenantConcurrencyLimiter(
+        per_tenant_limit=2,
+        max_tracked_tenants=10,
+        idle_ttl_seconds=60.0,
+        retry_after_seconds=1.0,
+        warm_start_cooldown_seconds=0.2,
+        warm_start_per_tenant_limit=1,
+    )
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def _warm_holder() -> None:
+        async with limiter.acquire(tenant_id=88):
+            started.set()
+            await release.wait()
+
+    task = asyncio.create_task(_warm_holder())
+    await started.wait()
+    try:
+        with pytest.raises(TenantConcurrencyLimitExceeded) as exc_info:
+            async with limiter.acquire(tenant_id=88):
+                pass
+        assert exc_info.value.limit == 1
+        assert exc_info.value.limit_kind == "concurrency"
+    finally:
+        release.set()
+        await task
+
+    await asyncio.sleep(0.25)
+
+    release_steady = asyncio.Event()
+    started_first = asyncio.Event()
+    started_second = asyncio.Event()
+
+    async def _steady_holder(started_event: asyncio.Event) -> None:
+        async with limiter.acquire(tenant_id=88) as lease:
+            assert lease.limit == 2
+            started_event.set()
+            await release_steady.wait()
+
+    first_task = asyncio.create_task(_steady_holder(started_first))
+    await started_first.wait()
+    second_task = asyncio.create_task(_steady_holder(started_second))
+    await asyncio.wait_for(started_second.wait(), timeout=0.5)
+    release_steady.set()
+    await first_task
+    await second_task
+
+
+@pytest.mark.asyncio
+async def test_warm_start_temporarily_reduces_rate_burst_capacity():
+    """Warm-start should lower burst capacity and restore steady burst after cooldown."""
+    limiter = TenantConcurrencyLimiter(
+        per_tenant_limit=4,
+        max_tracked_tenants=10,
+        idle_ttl_seconds=60.0,
+        retry_after_seconds=1.0,
+        refill_rate=1000.0,
+        burst_capacity=3,
+        warm_start_cooldown_seconds=0.2,
+        warm_start_per_tenant_limit=4,
+        warm_start_burst_capacity=1,
+    )
+
+    async with limiter.acquire(tenant_id=91):
+        pass
+
+    with pytest.raises(TenantConcurrencyLimitExceeded) as exc_info:
+        async with limiter.acquire(tenant_id=91):
+            pass
+    assert exc_info.value.limit_kind == "rate"
+
+    await asyncio.sleep(0.25)
+    async with limiter.acquire(tenant_id=91):
+        pass
+    async with limiter.acquire(tenant_id=91):
+        pass
+    async with limiter.acquire(tenant_id=91):
+        pass
