@@ -349,6 +349,17 @@ def build_run_decision_summary(
         "retries": int(normalized_state.get("retry_count", 0) or 0),
         "llm_calls": max(0, resolved_llm_calls),
         "llm_token_total": max(0, resolved_llm_token_total),
+        "tool_calls": {
+            "total": int(normalized_state.get("tool_calls_total", 0) or 0),
+        },
+        "rows": {
+            "total": int(normalized_state.get("rows_total", 0) or 0),
+        },
+        "budget_exceeded": {
+            "llm": bool(normalized_state.get("llm_budget_exceeded", False)),
+            "tool_calls": bool(normalized_state.get("tool_call_budget_exceeded", False)),
+            "rows": bool(normalized_state.get("sql_row_budget_exceeded", False)),
+        },
         "schema_refresh_count": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "prefetch_discard_count": int(normalized_state.get("prefetch_discard_count", 0) or 0),
         "kill_switches": {
