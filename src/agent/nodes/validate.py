@@ -486,11 +486,17 @@ async def validate_sql_node(state: AgentState) -> dict:
             "validation.cartesian_join_mode",
             (get_env_str("AGENT_CARTESIAN_JOIN_MODE", "warn") or "warn").strip().lower(),
         )
+
+        policy_snapshot = state.get("policy_snapshot")
+        if policy_snapshot:
+            span.set_attribute("policy.snapshot_id", policy_snapshot.get("snapshot_id", "unknown"))
+
         result = validate_sql(
             sql_query,
             allowed_tables=allowed_tables or None,
             allowed_columns=allowed_columns or None,
             column_allowlist_mode=column_allowlist_mode,
+            policy_snapshot=policy_snapshot,
         )
         validation_report = _build_validation_report(result, _validation_report_limit())
         span.set_attribute(

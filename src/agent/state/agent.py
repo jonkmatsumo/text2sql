@@ -23,6 +23,9 @@ class AgentState(TypedDict):
     # Unique identifier for this specific run execution
     run_id: str
 
+    # Pinned policy snapshot for deterministic validation
+    policy_snapshot: Optional[Dict[str, Any]]
+
     # The resolved/contextualized query to use for retrieval/generation
     # If using history, this contains the synthesized standalone question
     active_query: Optional[str]

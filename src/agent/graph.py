@@ -42,6 +42,7 @@ from agent.utils.schema_snapshot import (
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
 from common.observability.metrics import agent_metrics
+from common.policy.sql_policy import load_policy_snapshot
 from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
@@ -846,9 +847,12 @@ async def run_agent_with_tracing(
         if deadline_ts is None and timeout_seconds:
             deadline_ts = time.monotonic() + timeout_seconds
 
+        policy_snapshot = load_policy_snapshot()
+
         inputs = {
             "messages": [HumanMessage(content=question)],
             "run_id": run_id,
+            "policy_snapshot": policy_snapshot,
             "schema_context": "",
             "current_sql": None,
             "query_result": None,
