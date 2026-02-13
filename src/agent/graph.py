@@ -74,6 +74,16 @@ def _safe_env_bool(name: str, default: bool) -> bool:
     return bool(parsed)
 
 
+def _resolve_budget_env_int(shared_name: str, legacy_name: str, default: int, minimum: int) -> int:
+    try:
+        shared_value = get_env_int(shared_name, None)
+    except ValueError:
+        shared_value = None
+    if shared_value is not None:
+        return max(minimum, int(shared_value))
+    return _safe_env_int(legacy_name, default, minimum)
+
+
 def _is_replay_mode(state: AgentState) -> bool:
     return bool(state.get("replay_mode"))
 
@@ -1138,10 +1148,22 @@ async def run_agent_with_tracing(
         base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
         llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
         default_time_budget_ms = int(max(0.0, float(timeout_seconds or 30.0)) * 1000.0)
+        tool_call_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_TOOL_CALLS",
+            "AGENT_TOOL_CALL_BUDGET",
+            50,
+            0,
+        )
+        rows_returned_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_ROWS_RETURNED",
+            "AGENT_SQL_ROW_BUDGET",
+            5000,
+            0,
+        )
         run_budget = RunBudget(
             llm_token_budget=llm_budget_limit,
-            tool_call_budget=_safe_env_int("AGENT_TOOL_CALL_BUDGET", 40, 0),
-            sql_row_budget=_safe_env_int("AGENT_SQL_ROW_BUDGET", 10000, 0),
+            tool_call_budget=tool_call_budget_limit,
+            sql_row_budget=rows_returned_budget_limit,
             time_budget_ms=_safe_env_int("AGENT_TIME_BUDGET_MS", default_time_budget_ms, 0),
         )
         inputs["run_budget"] = run_budget.to_state_dict()
