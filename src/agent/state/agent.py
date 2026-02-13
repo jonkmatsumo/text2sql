@@ -263,6 +263,7 @@ class AgentState(TypedDict):
     last_tool_output: Optional[dict]
 
     # Replay bundle for deterministic execution
+    replay_mode: Optional[bool]
     replay_bundle: Optional[dict]
 
     # Explicit termination reason for better observability

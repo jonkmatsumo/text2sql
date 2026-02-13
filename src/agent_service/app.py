@@ -63,6 +63,7 @@ class AgentRunRequest(BaseModel):
     timeout_seconds: Optional[float] = Field(default=None, gt=0)
     page_token: Optional[str] = None
     page_size: Optional[int] = Field(default=None, gt=0)
+    replay_mode: bool = False
     replay_bundle: Optional[dict[str, Any]] = None
     replay_allow_external_calls: bool = False
 
@@ -134,9 +135,9 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
             timeout_seconds = request.timeout_seconds or 30.0
             deadline_ts = time.monotonic() + timeout_seconds
-            replay_mode = (get_env_str("AGENT_REPLAY_MODE", "off") or "off").strip().lower()
-            if replay_mode not in {"off", "record", "replay"}:
-                replay_mode = "off"
+            replay_bundle_mode = (get_env_str("AGENT_REPLAY_MODE", "off") or "off").strip().lower()
+            if replay_bundle_mode not in {"off", "record", "replay"}:
+                replay_bundle_mode = "off"
 
             async def _run_live_agent(
                 question: str, bundle: Optional[dict[str, Any]] = None
@@ -151,6 +152,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                         page_token=request.page_token,
                         page_size=request.page_size,
                         interactive_session=True,
+                        replay_mode=bool(request.replay_mode),
                         replay_bundle=bundle,
                     ),
                     timeout=timeout_seconds,
@@ -162,7 +164,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             trace_id = None
             provenance = None
 
-            if replay_mode == "replay":
+            if replay_bundle_mode == "replay":
                 if not request.replay_bundle:
                     return AgentRunResponse(
                         error="Replay mode requires a replay_bundle payload.",
@@ -210,7 +212,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     }
             else:
                 state = await _run_live_agent(request.question)
-                if replay_mode == "record":
+                if replay_bundle_mode == "record":
                     replay_bundle = build_replay_bundle(
                         question=request.question,
                         state=state,
@@ -270,7 +272,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             if state.get("clarification_question"):
                 response_text = state["clarification_question"]
 
-            if replay_mode != "replay" or request.replay_allow_external_calls:
+            if replay_bundle_mode != "replay" or request.replay_allow_external_calls:
                 trace_id = telemetry.get_current_trace_id()
                 if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
                     trace_id = None

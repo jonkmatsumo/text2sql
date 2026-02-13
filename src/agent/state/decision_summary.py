@@ -340,6 +340,7 @@ def build_run_decision_summary(
 
     return {
         "tenant_id": normalized_state.get("tenant_id"),
+        "replay_mode": bool(normalized_state.get("replay_mode", False)),
         "schema_snapshot_id": (
             normalized_state.get("schema_snapshot_id")
             or normalized_state.get("pinned_schema_snapshot_id")

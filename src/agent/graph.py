@@ -800,6 +800,7 @@ async def run_agent_with_tracing(
     page_token: str = None,
     page_size: int = None,
     interactive_session: bool = False,
+    replay_mode: bool = False,
     replay_bundle: Optional[dict[str, Any]] = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
@@ -841,6 +842,8 @@ async def run_agent_with_tracing(
         "version": "2.0.0",
         "thread_id": thread_id,
     }
+    if replay_mode:
+        base_metadata["replay_mode"] = "deterministic"
     if replay_bundle:
         base_metadata["replay_mode"] = "active"
 
@@ -898,6 +901,7 @@ async def run_agent_with_tracing(
             "page_size": page_size,
             "seed": get_env_int("AGENT_LLM_SEED", None),
             "interactive_session": interactive_session,
+            "replay_mode": bool(replay_mode),
             "replay_bundle": replay_bundle,
             "token_budget": {
                 "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),

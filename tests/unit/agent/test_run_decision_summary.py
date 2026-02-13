@@ -37,6 +37,7 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
 
     assert summary == {
         "tenant_id": 7,
+        "replay_mode": False,
         "schema_snapshot_id": "snap-123",
         "retries": 2,
         "llm_calls": 4,
@@ -86,6 +87,7 @@ async def test_run_agent_attaches_run_summary_and_emits_final_span_event(monkeyp
     assert summary["schema_refresh_count"] == 2
     assert summary["prefetch_discard_count"] == 1
     assert summary["terminated_reason"] == "timeout"
+    assert summary["replay_mode"] is False
     assert summary["llm_calls"] >= 0
     assert summary["llm_token_total"] >= 0
     assert "timeout" in summary["error_categories_encountered"]
