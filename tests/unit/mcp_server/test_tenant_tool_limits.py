@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from common.tenancy.limits import reset_mcp_tool_tenant_limiter
 from mcp_server.utils.tracing import trace_tool
 
@@ -18,8 +19,10 @@ def _ok_execute_response() -> dict:
 @pytest.fixture(autouse=True)
 def _reset_limiter() -> None:
     reset_mcp_tool_tenant_limiter()
+    reset_audit_event_buffer()
     yield
     reset_mcp_tool_tenant_limiter()
+    reset_audit_event_buffer()
 
 
 @pytest.mark.asyncio
@@ -50,6 +53,9 @@ async def test_same_tenant_second_concurrent_tool_call_is_rejected(monkeypatch):
         assert second["error"]["code"] == "TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED"
         assert second["error"]["retry_after_seconds"] == pytest.approx(1.25, rel=0, abs=1e-6)
         assert second["error"]["retryable"] is True
+        recent = get_audit_event_buffer().list_recent(limit=1)
+        assert recent[0]["event_type"] == AuditEventType.TENANT_CONCURRENCY_BLOCK.value
+        assert recent[0]["tenant_id"] == 101
     finally:
         release.set()
         await first_task

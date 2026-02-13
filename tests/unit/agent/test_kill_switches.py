@@ -6,9 +6,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from agent.graph import route_after_execution
 from agent.nodes.execute import validate_and_execute_node
 from agent.state.decision_summary import build_run_decision_summary
+
+
+@pytest.fixture(autouse=True)
+def _reset_audit():
+    reset_audit_event_buffer()
+    yield
+    reset_audit_event_buffer()
 
 
 def test_disable_llm_retries_kill_switch_overrides_retry_flow(monkeypatch):
@@ -28,6 +36,8 @@ def test_disable_llm_retries_kill_switch_overrides_retry_flow(monkeypatch):
     assert route == "failed"
     reasons = [event["reason"] for event in state.get("decision_events", [])]
     assert "kill_switch_disable_llm_retries" in reasons
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.KILL_SWITCH_OVERRIDE.value
     summary = build_run_decision_summary(state)
     assert summary["kill_switches"]["disable_llm_retries"] is True
 
@@ -51,6 +61,8 @@ def test_disable_schema_refresh_kill_switch_prevents_refresh(monkeypatch):
     assert route != "refresh_schema"
     reasons = [event["reason"] for event in state.get("decision_events", [])]
     assert "kill_switch_disable_schema_refresh" in reasons
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.KILL_SWITCH_OVERRIDE.value
     summary = build_run_decision_summary(state)
     assert summary["kill_switches"]["disable_schema_refresh"] is True
 
@@ -97,5 +109,7 @@ async def test_disable_prefetch_kill_switch_prevents_prefetch(
     assert result["result_prefetch_reason"] == "disabled_kill_switch"
     reasons = [event["reason"] for event in state.get("decision_events", [])]
     assert "kill_switch_disable_prefetch" in reasons
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.KILL_SWITCH_OVERRIDE.value
     summary = build_run_decision_summary(state)
     assert summary["kill_switches"]["disable_prefetch"] is True

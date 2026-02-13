@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import agent.graph as graph_mod
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from agent.state.decision_summary import build_run_decision_summary
 
 
@@ -114,3 +115,35 @@ async def test_run_agent_attaches_run_summary_and_emits_final_span_event(monkeyp
         call.args[0] for call in mock_current_span.add_event.call_args_list if call.args
     ]
     assert "agent.run_decision_summary" in emitted_events
+
+
+@pytest.mark.asyncio
+async def test_run_agent_replay_mode_emits_audit_event(monkeypatch):
+    """Replay-mode executions should emit a structured replay activation audit event."""
+    reset_audit_event_buffer()
+
+    with patch.object(graph_mod, "app") as mock_app:
+        mock_app.ainvoke = AsyncMock(
+            return_value={
+                "messages": [],
+                "tenant_id": 9,
+                "retry_count": 0,
+                "schema_refresh_count": 0,
+                "prefetch_discard_count": 0,
+                "termination_reason": "success",
+                "error_category": None,
+            }
+        )
+        with patch("agent.tools.mcp_tools_context", side_effect=_mock_tools_context):
+            await graph_mod.run_agent_with_tracing(
+                "replay this",
+                tenant_id=9,
+                thread_id="thread-replay-audit",
+                replay_mode=True,
+                replay_bundle={"tool_io": []},
+            )
+
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.REPLAY_MODE_ACTIVATED.value
+    assert recent[0]["tenant_id"] == 9
+    reset_audit_event_buffer()
