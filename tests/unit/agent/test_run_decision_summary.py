@@ -35,8 +35,11 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
     }
 
     summary = build_run_decision_summary(state, llm_calls=4, llm_token_total=321)
+    summary_hash = summary.get("decision_summary_hash")
 
-    assert summary == {
+    assert isinstance(summary_hash, str)
+    assert len(summary_hash) == 64
+    assert {k: v for k, v in summary.items() if k != "decision_summary_hash"} == {
         "tenant_id": 7,
         "replay_mode": False,
         "schema_snapshot_id": "snap-123",
@@ -74,6 +77,26 @@ def test_build_run_decision_summary_records_replay_mode():
 
     assert summary["tenant_id"] == 3
     assert summary["replay_mode"] is True
+
+
+def test_run_decision_summary_hash_excludes_volatile_counters():
+    """Decision summary hash should ignore volatile token and row counters."""
+    base_state = {
+        "tenant_id": 1,
+        "retry_count": 0,
+        "schema_snapshot_id": "snap-1",
+    }
+    summary_one = build_run_decision_summary(
+        {**base_state, "tool_calls_total": 1, "rows_total": 10},
+        llm_calls=2,
+        llm_token_total=100,
+    )
+    summary_two = build_run_decision_summary(
+        {**base_state, "tool_calls_total": 9, "rows_total": 99},
+        llm_calls=20,
+        llm_token_total=500,
+    )
+    assert summary_one["decision_summary_hash"] == summary_two["decision_summary_hash"]
 
 
 @pytest.mark.asyncio

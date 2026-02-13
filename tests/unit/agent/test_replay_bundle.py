@@ -19,6 +19,8 @@ def test_build_replay_bundle_redacts_sensitive_prompts():
         "query_result": [{"id": 1}],
         "messages": [type("Msg", (), {"content": "Bearer abc123"})()],
         "schema_snapshot_id": "snap-1",
+        "policy_snapshot": {"snapshot_id": "policy-1"},
+        "run_decision_summary": {"decision_summary_hash": "hash-1"},
         "result_completeness": {"rows_returned": 1},
     }
     bundle = build_replay_bundle(
@@ -28,6 +30,8 @@ def test_build_replay_bundle_redacts_sensitive_prompts():
     )
 
     assert bundle.schema_context["schema_snapshot_id"] == "snap-1"
+    assert bundle.integrity.policy_snapshot_id == "policy-1"
+    assert bundle.integrity.decision_summary_hash == "hash-1"
     assert "<password>" in bundle.prompts["user"]
     assert "Bearer <redacted>" in bundle.prompts["assistant"]
 

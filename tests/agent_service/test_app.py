@@ -278,6 +278,157 @@ def test_run_agent_replay_mode_validates_bundle(monkeypatch):
     assert "Invalid replay bundle" in body["error"]
 
 
+def test_run_agent_replay_integrity_check_passes_when_snapshots_match(monkeypatch):
+    """Replay integrity check should pass when captured and current markers align."""
+    monkeypatch.setenv("AGENT_REPLAY_MODE", "replay")
+
+    async def fake_run_agent_with_tracing(*args, **kwargs):  # noqa: ARG001
+        return {
+            "current_sql": "select 1",
+            "query_result": [{"one": 1}],
+            "messages": [type("Msg", (), {"content": "captured response"})()],
+            "error": None,
+            "schema_snapshot_id": "snap-1",
+            "policy_snapshot": {"snapshot_id": "policy-1"},
+            "run_decision_summary": {"decision_summary_hash": "hash-1"},
+        }
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+
+    replay_bundle = {
+        "version": "1.0",
+        "captured_at": "2026-01-01T00:00:00+00:00",
+        "model": {"provider": "openai", "model_id": "gpt-4o"},
+        "seed": 7,
+        "prompts": {"user": "show me revenue", "assistant": "ok"},
+        "schema_context": {"schema_snapshot_id": "snap-1", "fingerprint": "snap-1"},
+        "flags": {"AGENT_REPLAY_MODE": "replay"},
+        "tool_io": [],
+        "outcome": {"sql": "select 1", "result": [{"one": 1}], "response": "captured response"},
+        "integrity": {
+            "schema_snapshot_id": "snap-1",
+            "policy_snapshot_id": "policy-1",
+            "decision_summary_hash": "hash-1",
+        },
+    }
+
+    client = TestClient(agent_app.app)
+    resp = client.post(
+        "/agent/run",
+        json={
+            "question": "ignored",
+            "tenant_id": 1,
+            "replay_bundle": replay_bundle,
+            "replay_integrity_check": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["error"] is None
+    assert body["replay_metadata"]["integrity_check"] == "passed"
+
+
+def test_run_agent_replay_integrity_check_fails_on_schema_mismatch(monkeypatch):
+    """Replay integrity check should fail with typed mismatch on schema divergence."""
+    monkeypatch.setenv("AGENT_REPLAY_MODE", "replay")
+
+    async def fake_run_agent_with_tracing(*args, **kwargs):  # noqa: ARG001
+        return {
+            "current_sql": "select 1",
+            "query_result": [{"one": 1}],
+            "messages": [type("Msg", (), {"content": "captured response"})()],
+            "error": None,
+            "schema_snapshot_id": "snap-live",
+            "policy_snapshot": {"snapshot_id": "policy-1"},
+            "run_decision_summary": {"decision_summary_hash": "hash-1"},
+        }
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+
+    replay_bundle = {
+        "version": "1.0",
+        "captured_at": "2026-01-01T00:00:00+00:00",
+        "model": {"provider": "openai", "model_id": "gpt-4o"},
+        "prompts": {"user": "show me revenue", "assistant": "ok"},
+        "schema_context": {"schema_snapshot_id": "snap-1", "fingerprint": "snap-1"},
+        "flags": {"AGENT_REPLAY_MODE": "replay"},
+        "tool_io": [],
+        "outcome": {"sql": "select 1", "result": [], "response": "captured response"},
+        "integrity": {
+            "schema_snapshot_id": "snap-1",
+            "policy_snapshot_id": "policy-1",
+            "decision_summary_hash": "hash-1",
+        },
+    }
+
+    client = TestClient(agent_app.app)
+    resp = client.post(
+        "/agent/run",
+        json={
+            "question": "ignored",
+            "tenant_id": 1,
+            "replay_bundle": replay_bundle,
+            "replay_integrity_check": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["error"] == "Replay integrity check failed."
+    assert body["error_metadata"]["code"] == "REPLAY_MISMATCH"
+
+
+def test_run_agent_replay_integrity_check_fails_on_policy_mismatch(monkeypatch):
+    """Replay integrity check should fail when policy snapshot IDs diverge."""
+    monkeypatch.setenv("AGENT_REPLAY_MODE", "replay")
+
+    async def fake_run_agent_with_tracing(*args, **kwargs):  # noqa: ARG001
+        return {
+            "current_sql": "select 1",
+            "query_result": [{"one": 1}],
+            "messages": [type("Msg", (), {"content": "captured response"})()],
+            "error": None,
+            "schema_snapshot_id": "snap-1",
+            "policy_snapshot": {"snapshot_id": "policy-live"},
+            "run_decision_summary": {"decision_summary_hash": "hash-1"},
+        }
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+
+    replay_bundle = {
+        "version": "1.0",
+        "captured_at": "2026-01-01T00:00:00+00:00",
+        "model": {"provider": "openai", "model_id": "gpt-4o"},
+        "prompts": {"user": "show me revenue", "assistant": "ok"},
+        "schema_context": {"schema_snapshot_id": "snap-1", "fingerprint": "snap-1"},
+        "flags": {"AGENT_REPLAY_MODE": "replay"},
+        "tool_io": [],
+        "outcome": {"sql": "select 1", "result": [], "response": "captured response"},
+        "integrity": {
+            "schema_snapshot_id": "snap-1",
+            "policy_snapshot_id": "policy-1",
+            "decision_summary_hash": "hash-1",
+        },
+    }
+
+    client = TestClient(agent_app.app)
+    resp = client.post(
+        "/agent/run",
+        json={
+            "question": "ignored",
+            "tenant_id": 1,
+            "replay_bundle": replay_bundle,
+            "replay_integrity_check": True,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["error"] == "Replay integrity check failed."
+    assert body["error_metadata"]["code"] == "REPLAY_MISMATCH"
+
+
 def test_run_agent_debug_decision_summary_flag(monkeypatch):
     """Decision summaries are only returned when debug mode is explicitly enabled."""
 
