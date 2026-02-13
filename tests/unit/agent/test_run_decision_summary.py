@@ -46,8 +46,10 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
         "retries": 2,
         "llm_calls": 4,
         "llm_token_total": 321,
-        "tool_calls": {"total": 0},
-        "rows": {"total": 0},
+        "tool_calls": {"total": 0, "limit": 0},
+        "rows_returned": {"total": 0, "limit": 0},
+        "rows": {"total": 0, "limit": 0},
+        "budget_ceilings": {"llm_tokens": 0, "tool_calls": 0, "rows_returned": 0},
         "budget_exceeded": {
             "llm": False,
             "tool_calls": False,
@@ -97,6 +99,32 @@ def test_run_decision_summary_hash_excludes_volatile_counters():
         llm_token_total=500,
     )
     assert summary_one["decision_summary_hash"] == summary_two["decision_summary_hash"]
+
+
+def test_build_run_decision_summary_includes_budget_ceilings():
+    """Run summary should expose configured budget ceilings and runtime totals."""
+    summary = build_run_decision_summary(
+        {
+            "tenant_id": 1,
+            "tool_calls_total": 7,
+            "rows_total": 42,
+            "run_budget": {
+                "llm_token_budget": 1234,
+                "tool_call_budget": 50,
+                "sql_row_budget": 5000,
+            },
+        }
+    )
+
+    assert summary["tool_calls"]["total"] == 7
+    assert summary["tool_calls"]["limit"] == 50
+    assert summary["rows_returned"]["total"] == 42
+    assert summary["rows_returned"]["limit"] == 5000
+    assert summary["budget_ceilings"] == {
+        "llm_tokens": 1234,
+        "tool_calls": 50,
+        "rows_returned": 5000,
+    }
 
 
 @pytest.mark.asyncio

@@ -104,3 +104,28 @@ async def test_tool_call_budget_consumption_persists_across_attempts():
     assert first == {"ok": True}
     assert second["error"]["category"] == "budget_exceeded"
     assert invoke_fn.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_rows_returned_budget_exceeded_from_tool_metadata():
+    """Wrapper should enforce rows-returned budget using tool metadata counters."""
+    invoke_fn = AsyncMock(return_value={"metadata": {"items_returned": 3}, "result": []})
+    tool = create_tool_wrapper(
+        name="list_tables",
+        description="List tables",
+        input_schema={},
+        invoke_fn=invoke_fn,
+    )
+    budget = RunBudget(
+        llm_token_budget=100,
+        tool_call_budget=10,
+        sql_row_budget=1,
+        time_budget_ms=30_000,
+    )
+
+    with run_budget_context(budget):
+        result = await tool.ainvoke({"tenant_id": 1})
+
+    assert result["error"]["category"] == "budget_exceeded"
+    assert result["error"]["details_safe"]["budget_dimension"] == "rows_returned"
+    assert invoke_fn.call_count == 1
