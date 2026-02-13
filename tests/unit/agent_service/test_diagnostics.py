@@ -118,7 +118,7 @@ class TestDiagnostics:
 
     def test_audit_diagnostics_endpoint_returns_safe_bounded_events(self, monkeypatch):
         """Audit diagnostics should expose bounded safe events without SQL payloads."""
-        monkeypatch.setenv("AGENT_AUDIT_BUFFER_SIZE", "2")
+        monkeypatch.setenv("OPS_AUDIT_EVENT_BUFFER_SIZE", "2")
         reset_audit_event_buffer()
         emit_audit_event(
             AuditEventType.POLICY_REJECTION,
@@ -141,6 +141,19 @@ class TestDiagnostics:
         assert len(data["recent_events"]) == 2
         assert data["recent_events"][0]["run_id"] == "run-audit-replay"
         assert data["recent_events"][1]["run_id"] == "run-audit-safe"
+        assert data["recent_events"][0]["source"] == "agent"
         assert "sql" not in json.dumps(data)
+
+        filtered = client.get("/diagnostics/audit?limit=10&run_id=run-audit-safe")
+        assert filtered.status_code == 200
+        filtered_events = filtered.json()["recent_events"]
+        assert len(filtered_events) == 1
+        assert filtered_events[0]["run_id"] == "run-audit-safe"
+
+        agent_diag = client.get("/agent/diagnostics?audit_limit=10&audit_run_id=run-audit-replay")
+        assert agent_diag.status_code == 200
+        audit_events = agent_diag.json()["audit_events"]
+        assert len(audit_events) == 1
+        assert audit_events[0]["run_id"] == "run-audit-replay"
 
         reset_audit_event_buffer()
