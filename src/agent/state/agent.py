@@ -119,6 +119,11 @@ class AgentState(TypedDict):
     llm_budget_exceeded: Optional[bool]
     llm_calls: Optional[int]
     llm_token_total: Optional[int]
+    run_budget: Optional[dict]
+    tool_calls_total: Optional[int]
+    rows_total: Optional[int]
+    tool_call_budget_exceeded: Optional[bool]
+    sql_row_budget_exceeded: Optional[bool]
 
     # History of error signatures in the current request to detect loops
     # Signatures are hashes of (category, normalized_message)

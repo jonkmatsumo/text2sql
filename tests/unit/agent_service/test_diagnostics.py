@@ -2,6 +2,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+from agent.audit import AuditEventType, emit_audit_event, reset_audit_event_buffer
 from agent.state.run_summary_store import get_run_summary_store, reset_run_summary_store
 from agent_service.app import app
 from common.observability.monitor import agent_monitor
@@ -114,3 +115,32 @@ class TestDiagnostics:
         assert old_selected is None
 
         reset_run_summary_store()
+
+    def test_audit_diagnostics_endpoint_returns_safe_bounded_events(self, monkeypatch):
+        """Audit diagnostics should expose bounded safe events without SQL payloads."""
+        monkeypatch.setenv("AGENT_AUDIT_BUFFER_SIZE", "2")
+        reset_audit_event_buffer()
+        emit_audit_event(
+            AuditEventType.POLICY_REJECTION,
+            tenant_id=5,
+            run_id="run-audit-safe",
+            metadata={"sql": "SELECT * FROM secrets", "reason": "blocked"},
+        )
+        emit_audit_event(
+            AuditEventType.REPLAY_MODE_ACTIVATED,
+            tenant_id=5,
+            run_id="run-audit-replay",
+            metadata={"mode": "replay"},
+        )
+
+        client = TestClient(app)
+        resp = client.get("/diagnostics/audit?limit=10")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "recent_events" in data
+        assert len(data["recent_events"]) == 2
+        assert data["recent_events"][0]["run_id"] == "run-audit-replay"
+        assert data["recent_events"][1]["run_id"] == "run-audit-safe"
+        assert "sql" not in json.dumps(data)
+
+        reset_audit_event_buffer()

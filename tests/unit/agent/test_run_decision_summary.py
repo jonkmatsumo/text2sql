@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import agent.graph as graph_mod
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from agent.state.decision_summary import build_run_decision_summary
 
 
@@ -34,14 +35,24 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
     }
 
     summary = build_run_decision_summary(state, llm_calls=4, llm_token_total=321)
+    summary_hash = summary.get("decision_summary_hash")
 
-    assert summary == {
+    assert isinstance(summary_hash, str)
+    assert len(summary_hash) == 64
+    assert {k: v for k, v in summary.items() if k != "decision_summary_hash"} == {
         "tenant_id": 7,
         "replay_mode": False,
         "schema_snapshot_id": "snap-123",
         "retries": 2,
         "llm_calls": 4,
         "llm_token_total": 321,
+        "tool_calls": {"total": 0},
+        "rows": {"total": 0},
+        "budget_exceeded": {
+            "llm": False,
+            "tool_calls": False,
+            "rows": False,
+        },
         "schema_refresh_count": 1,
         "prefetch_discard_count": 3,
         "kill_switches": {
@@ -57,7 +68,7 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
     }
     assert "current_sql" not in summary
     assert "query_result" not in summary
-    assert "rows" not in summary
+    assert summary["rows"]["total"] == 0
 
 
 def test_build_run_decision_summary_records_replay_mode():
@@ -66,6 +77,26 @@ def test_build_run_decision_summary_records_replay_mode():
 
     assert summary["tenant_id"] == 3
     assert summary["replay_mode"] is True
+
+
+def test_run_decision_summary_hash_excludes_volatile_counters():
+    """Decision summary hash should ignore volatile token and row counters."""
+    base_state = {
+        "tenant_id": 1,
+        "retry_count": 0,
+        "schema_snapshot_id": "snap-1",
+    }
+    summary_one = build_run_decision_summary(
+        {**base_state, "tool_calls_total": 1, "rows_total": 10},
+        llm_calls=2,
+        llm_token_total=100,
+    )
+    summary_two = build_run_decision_summary(
+        {**base_state, "tool_calls_total": 9, "rows_total": 99},
+        llm_calls=20,
+        llm_token_total=500,
+    )
+    assert summary_one["decision_summary_hash"] == summary_two["decision_summary_hash"]
 
 
 @pytest.mark.asyncio
@@ -114,3 +145,35 @@ async def test_run_agent_attaches_run_summary_and_emits_final_span_event(monkeyp
         call.args[0] for call in mock_current_span.add_event.call_args_list if call.args
     ]
     assert "agent.run_decision_summary" in emitted_events
+
+
+@pytest.mark.asyncio
+async def test_run_agent_replay_mode_emits_audit_event(monkeypatch):
+    """Replay-mode executions should emit a structured replay activation audit event."""
+    reset_audit_event_buffer()
+
+    with patch.object(graph_mod, "app") as mock_app:
+        mock_app.ainvoke = AsyncMock(
+            return_value={
+                "messages": [],
+                "tenant_id": 9,
+                "retry_count": 0,
+                "schema_refresh_count": 0,
+                "prefetch_discard_count": 0,
+                "termination_reason": "success",
+                "error_category": None,
+            }
+        )
+        with patch("agent.tools.mcp_tools_context", side_effect=_mock_tools_context):
+            await graph_mod.run_agent_with_tracing(
+                "replay this",
+                tenant_id=9,
+                thread_id="thread-replay-audit",
+                replay_mode=True,
+                replay_bundle={"tool_io": []},
+            )
+
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.REPLAY_MODE_ACTIVATED.value
+    assert recent[0]["tenant_id"] == 9
+    reset_audit_event_buffer()

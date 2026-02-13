@@ -11,6 +11,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
 
+from agent.audit import AuditEventType, emit_audit_event
+from agent.models.run_budget import RunBudgetExceededError, consume_tool_call_budget
+from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import tool_error_invalid_request
 
@@ -75,6 +78,41 @@ class MCPToolWrapper:
                 result=None,
                 metadata=GenericToolMetadata(provider="agent_mcp_client"),
                 error=validation_error,
+            ).model_dump(exclude_none=True)
+
+        try:
+            consume_tool_call_budget(1)
+        except RunBudgetExceededError as exc:
+            emit_audit_event(
+                AuditEventType.BUDGET_EXCEEDED,
+                error_category=ErrorCategory.BUDGET_EXCEEDED,
+                metadata={
+                    "budget_dimension": exc.dimension,
+                    "budget_limit": exc.limit,
+                    "budget_used": exc.used,
+                    "budget_requested": exc.requested,
+                    "tool_name": self.name,
+                },
+            )
+            return ToolResponseEnvelope(
+                result=None,
+                metadata=GenericToolMetadata(provider="agent_mcp_client"),
+                error=ToolError(
+                    category=ErrorCategory.BUDGET_EXCEEDED,
+                    code=RunBudgetExceededError.code,
+                    message=(
+                        "Run budget exceeded before tool execution. "
+                        "Please narrow the request scope."
+                    ),
+                    retryable=False,
+                    provider="agent_mcp_client",
+                    details_safe={
+                        "budget_dimension": exc.dimension,
+                        "budget_limit": exc.limit,
+                        "budget_used": exc.used,
+                        "budget_requested": exc.requested,
+                    },
+                ),
             ).model_dump(exclude_none=True)
 
         # Config is accepted for LangGraph compatibility but not used by MCP

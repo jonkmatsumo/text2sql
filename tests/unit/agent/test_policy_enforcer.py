@@ -2,6 +2,7 @@
 
 import pytest
 
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from agent.validation.policy_enforcer import PolicyEnforcer, clear_table_cache
 
 
@@ -12,11 +13,13 @@ class TestPolicyEnforcerTableAllowlist:
         """Reset to static allowlist for predictable testing."""
         # Use static tables for testing (avoid DB dependency)
         PolicyEnforcer.set_allowed_tables({"customer", "fact_transaction", "dim_account"})
+        reset_audit_event_buffer()
 
     def teardown_method(self):
         """Clear static override after each test."""
         PolicyEnforcer.set_allowed_tables(None)
         clear_table_cache()
+        reset_audit_event_buffer()
 
     def test_allows_whitelisted_table(self):
         """Test that queries against allowed tables pass."""
@@ -36,6 +39,8 @@ class TestPolicyEnforcerTableAllowlist:
         sql = "SELECT * FROM secret_data"
         with pytest.raises(ValueError, match="Access to table 'secret_data' is not allowed"):
             PolicyEnforcer.validate_sql(sql)
+        recent = get_audit_event_buffer().list_recent(limit=1)
+        assert recent[0]["event_type"] == AuditEventType.POLICY_REJECTION.value
 
     def test_rejects_cross_schema_access(self):
         """Test that explicit non-public schema access is rejected."""

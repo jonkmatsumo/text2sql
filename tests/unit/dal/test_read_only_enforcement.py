@@ -4,6 +4,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
+
+
+@pytest.fixture(autouse=True)
+def _reset_audit_events():
+    reset_audit_event_buffer()
+    yield
+    reset_audit_event_buffer()
+
 
 @pytest.mark.asyncio
 async def test_redshift_connection_blocks_mutating_sql_in_read_only_mode():
@@ -17,6 +26,8 @@ async def test_redshift_connection_blocks_mutating_sql_in_read_only_mode():
         await wrapper.fetch("DELETE FROM users WHERE id = 1")
 
     db_conn.fetch.assert_not_called()
+    recent = get_audit_event_buffer().list_recent(limit=1)
+    assert recent[0]["event_type"] == AuditEventType.READONLY_VIOLATION.value
 
 
 @pytest.mark.asyncio

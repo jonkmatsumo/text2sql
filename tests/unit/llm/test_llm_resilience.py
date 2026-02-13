@@ -130,3 +130,27 @@ def test_circuit_cooldown_expires(monkeypatch):
 
     time.sleep(1.05)
     assert limiter.circuit_state == "closed"
+
+
+def test_warm_start_temporarily_reduces_global_concurrency(monkeypatch):
+    """Warm-start window should use a lower limit before restoring steady-state capacity."""
+    monkeypatch.setenv("LLM_MAX_CONCURRENT_CALLS", "3")
+    monkeypatch.setenv("LLM_WARM_START_COOLDOWN_SECONDS", "0.2")
+    monkeypatch.setenv("LLM_WARM_START_MAX_CONCURRENT_CALLS", "1")
+    monkeypatch.setenv("LLM_LIMIT_RETRY_AFTER_SECONDS", "0.5")
+    limiter = get_global_llm_limiter()
+
+    with limiter.acquire_sync() as warm_lease:
+        assert warm_lease.limit == 1
+        with pytest.raises(LLMRateLimitExceededError) as exc_info:
+            with limiter.acquire_sync():
+                pass
+        assert exc_info.value.limit == 1
+        assert exc_info.value.retry_after_seconds == pytest.approx(0.5, rel=0, abs=1e-6)
+
+    time.sleep(0.25)
+
+    with limiter.acquire_sync() as steady_outer:
+        assert steady_outer.limit == 3
+        with limiter.acquire_sync() as steady_inner:
+            assert steady_inner.limit == 3

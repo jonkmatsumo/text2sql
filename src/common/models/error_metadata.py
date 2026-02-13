@@ -24,6 +24,7 @@ class ErrorCategory(str, Enum):
     SERIALIZATION = "serialization"
     THROTTLING = "throttling"
     RESOURCE_EXHAUSTED = "resource_exhausted"
+    BUDGET_EXCEEDED = "budget_exceeded"
     TRANSIENT = "transient"
     UNKNOWN = "unknown"
 

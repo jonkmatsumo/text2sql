@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.audit import AuditEventType, get_audit_event_buffer, reset_audit_event_buffer
 from mcp_server.tools.execute_sql_query import _validate_sql_ast, handler
 
 
@@ -24,6 +25,12 @@ class TestExecuteSqlValidation:
             supports_schema_cache=False,
         )
         Database._query_target_provider = "postgres"
+        reset_audit_event_buffer()
+
+    def teardown_method(self, method):
+        """Reset per-test audit buffer state."""
+        _ = method
+        reset_audit_event_buffer()
 
     @pytest.mark.asyncio
     async def test_validate_sql_multi_statement_complex(self):
@@ -42,6 +49,8 @@ class TestExecuteSqlValidation:
         data = json.loads(result)
         assert data["error"]["category"] == "invalid_request"
         assert "Forbidden statement type" in data["error"]["message"]
+        recent = get_audit_event_buffer().list_recent(limit=1)
+        assert recent[0]["event_type"] == AuditEventType.READONLY_VIOLATION.value
 
     @pytest.mark.asyncio
     async def test_validate_params_not_list(self):
@@ -124,6 +133,8 @@ class TestExecuteSqlValidation:
         assert "join count exceeds the allowed limit" in data["error"]["message"]
         assert data["error"]["details_safe"]["complexity_limit_name"] == "joins"
         assert data["error"]["details_safe"]["joins"] == 3
+        recent = get_audit_event_buffer().list_recent(limit=1)
+        assert recent[0]["event_type"] == AuditEventType.SQL_COMPLEXITY_REJECTION.value
 
     @pytest.mark.asyncio
     async def test_validate_sql_rejects_cte_count_limit(self, monkeypatch):

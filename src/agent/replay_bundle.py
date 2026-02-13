@@ -27,6 +27,14 @@ class ReplayToolIO(BaseModel):
     output: dict[str, Any]
 
 
+class ReplayIntegrity(BaseModel):
+    """Captured integrity markers for deterministic replay validation."""
+
+    schema_snapshot_id: Optional[str] = None
+    policy_snapshot_id: Optional[str] = None
+    decision_summary_hash: Optional[str] = None
+
+
 class ReplayBundle(BaseModel):
     """Replay bundle schema."""
 
@@ -40,6 +48,7 @@ class ReplayBundle(BaseModel):
     flags: dict[str, Any]
     tool_io: list[ReplayToolIO]
     outcome: dict[str, Any]
+    integrity: Optional[ReplayIntegrity] = None
 
 
 def collect_replay_flags() -> dict[str, Any]:
@@ -85,6 +94,14 @@ def build_replay_bundle(
     from agent.utils.schema_snapshot import resolve_pinned_schema_snapshot_id
 
     pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
+    policy_snapshot = state.get("policy_snapshot")
+    policy_snapshot_id = None
+    if isinstance(policy_snapshot, dict):
+        policy_snapshot_id = policy_snapshot.get("snapshot_id")
+    run_decision_summary = state.get("run_decision_summary")
+    decision_summary_hash = None
+    if isinstance(run_decision_summary, dict):
+        decision_summary_hash = run_decision_summary.get("decision_summary_hash")
 
     response_text = None
     if state.get("messages"):
@@ -178,6 +195,11 @@ def build_replay_bundle(
                 "retry_summary": state.get("retry_summary"),
                 "result_completeness": state.get("result_completeness"),
             }
+        ),
+        integrity=ReplayIntegrity(
+            schema_snapshot_id=pinned_snapshot_id,
+            policy_snapshot_id=policy_snapshot_id,
+            decision_summary_hash=decision_summary_hash,
         ),
     )
     return bundle
@@ -320,6 +342,7 @@ def lookup_replay_tool_output(
 
 __all__ = [
     "ReplayBundle",
+    "ReplayIntegrity",
     "ReplayToolIO",
     "REPLAY_BUNDLE_VERSION",
     "build_replay_bundle",

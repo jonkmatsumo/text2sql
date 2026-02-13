@@ -12,6 +12,7 @@ from typing import Any, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from agent.audit import AuditEventType, emit_audit_event
 from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.clarify import clarify_node
 from agent.nodes.correct import correct_sql_node
@@ -483,6 +484,16 @@ def route_after_execution(state: AgentState) -> str:
             if _is_replay_mode(state)
             else "kill_switch_disable_schema_refresh"
         )
+        if refresh_disabled_reason == "kill_switch_disable_schema_refresh":
+            emit_audit_event(
+                AuditEventType.KILL_SWITCH_OVERRIDE,
+                tenant_id=state.get("tenant_id"),
+                run_id=state.get("run_id"),
+                metadata={
+                    "kill_switch": "disable_schema_refresh",
+                    "scope": "route_after_execution",
+                },
+            )
         append_decision_event(
             state,
             node="route_after_execution",
@@ -751,6 +762,15 @@ def route_after_execution(state: AgentState) -> str:
         reason_value = RetryDecisionReason.MAX_RETRIES_REACHED.value
         if bool(state.get("llm_retries_kill_switch_enabled")) and not _is_replay_mode(state):
             reason_value = "kill_switch_disable_llm_retries"
+            emit_audit_event(
+                AuditEventType.KILL_SWITCH_OVERRIDE,
+                tenant_id=state.get("tenant_id"),
+                run_id=state.get("run_id"),
+                metadata={
+                    "kill_switch": "disable_llm_retries",
+                    "scope": "route_after_execution",
+                },
+            )
         append_decision_event(
             state,
             node="route_after_execution",
@@ -1007,6 +1027,16 @@ async def run_agent_with_tracing(
     with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN, attributes=base_metadata):
         # Make metadata sticky for all child spans
         telemetry.update_current_trace(base_metadata)
+        if replay_mode or replay_bundle:
+            emit_audit_event(
+                AuditEventType.REPLAY_MODE_ACTIVATED,
+                tenant_id=tenant_id,
+                run_id=run_id,
+                metadata={
+                    "replay_mode_flag": bool(replay_mode),
+                    "replay_bundle_present": bool(replay_bundle),
+                },
+            )
 
         # Capture context and serialize it for state persistence
         telemetry_context = telemetry.capture_context()
@@ -1074,6 +1104,7 @@ async def run_agent_with_tracing(
         config = {"configurable": {"thread_id": thread_id}}
 
         # Execute workflow within MCP context to ensure connections are closed
+        from agent.models.run_budget import RunBudget, run_budget_context
         from agent.tools import mcp_tools_context, unpack_mcp_result
         from agent.utils.llm_run_budget import current_budget_state, llm_run_budget_context
         from agent.utils.retry import retry_with_backoff
@@ -1097,10 +1128,22 @@ async def run_agent_with_tracing(
 
         base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
         llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
+        default_time_budget_ms = int(max(0.0, float(timeout_seconds or 30.0)) * 1000.0)
+        run_budget = RunBudget(
+            llm_token_budget=llm_budget_limit,
+            tool_call_budget=_safe_env_int("AGENT_TOOL_CALL_BUDGET", 40, 0),
+            sql_row_budget=_safe_env_int("AGENT_SQL_ROW_BUDGET", 10000, 0),
+            time_budget_ms=_safe_env_int("AGENT_TIME_BUDGET_MS", default_time_budget_ms, 0),
+        )
+        inputs["run_budget"] = run_budget.to_state_dict()
+        inputs["tool_calls_total"] = int(run_budget.tool_calls_total)
+        inputs["rows_total"] = int(run_budget.rows_total)
+        inputs["tool_call_budget_exceeded"] = bool(run_budget.tool_call_budget_exceeded)
+        inputs["sql_row_budget_exceeded"] = bool(run_budget.sql_row_budget_exceeded)
         llm_calls_total = 0
         llm_token_total = 0
 
-        with llm_run_budget_context(llm_budget_limit):
+        with llm_run_budget_context(llm_budget_limit), run_budget_context(run_budget):
             async with mcp_tools_context() as tools:
                 schema_snapshot_id = inputs.get("schema_snapshot_id")
                 if not schema_snapshot_id:
@@ -1444,6 +1487,11 @@ async def run_agent_with_tracing(
                     llm_token_total = int(getattr(llm_budget_state, "total", 0) or 0)
                 result["llm_calls"] = int(llm_calls_total)
                 result["llm_token_total"] = int(llm_token_total)
+                result["tool_calls_total"] = int(run_budget.tool_calls_total)
+                result["rows_total"] = int(run_budget.rows_total)
+                result["tool_call_budget_exceeded"] = bool(run_budget.tool_call_budget_exceeded)
+                result["sql_row_budget_exceeded"] = bool(run_budget.sql_row_budget_exceeded)
+                result["run_budget"] = run_budget.to_state_dict()
 
         # Metadata is already handled early and made sticky via telemetry_context
 
@@ -1581,6 +1629,19 @@ async def run_agent_with_tracing(
             "run.retries": int(run_decision_summary.get("retries", 0) or 0),
             "run.llm_calls": int(run_decision_summary.get("llm_calls", 0) or 0),
             "run.llm_token_total": int(run_decision_summary.get("llm_token_total", 0) or 0),
+            "run.tool_calls_total": int(
+                (run_decision_summary.get("tool_calls") or {}).get("total", 0) or 0
+            ),
+            "run.rows_total": int((run_decision_summary.get("rows") or {}).get("total", 0) or 0),
+            "run.budget_exceeded.llm": bool(
+                (run_decision_summary.get("budget_exceeded") or {}).get("llm", False)
+            ),
+            "run.budget_exceeded.tool_calls": bool(
+                (run_decision_summary.get("budget_exceeded") or {}).get("tool_calls", False)
+            ),
+            "run.budget_exceeded.rows": bool(
+                (run_decision_summary.get("budget_exceeded") or {}).get("rows", False)
+            ),
             "run.schema_refresh_count": int(
                 run_decision_summary.get("schema_refresh_count", 0) or 0
             ),
