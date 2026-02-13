@@ -389,12 +389,12 @@ def get_agent_run_tenant_limiter() -> TenantConcurrencyLimiter:
             ),
             refill_rate=_safe_env_float(
                 "AGENT_TENANT_RATE_REFILL_PER_SECOND",
-                float(per_tenant_limit),
+                float(per_tenant_limit * 10),
                 minimum=0.0,
             ),
             burst_capacity=_safe_env_int(
                 "AGENT_TENANT_RATE_BURST_CAPACITY",
-                per_tenant_limit * 3,
+                per_tenant_limit * 30,
                 minimum=1,
             ),
         )
@@ -423,12 +423,12 @@ def get_mcp_tool_tenant_limiter() -> TenantConcurrencyLimiter:
             ),
             refill_rate=_safe_env_float(
                 "MCP_TENANT_RATE_REFILL_PER_SECOND",
-                float(per_tenant_limit),
+                float(per_tenant_limit * 10),
                 minimum=0.0,
             ),
             burst_capacity=_safe_env_int(
                 "MCP_TENANT_RATE_BURST_CAPACITY",
-                per_tenant_limit * 3,
+                per_tenant_limit * 30,
                 minimum=1,
             ),
             span_active_attribute="tenant.active_tool_calls",
