@@ -105,6 +105,7 @@ class AgentDiagnosticsResponse(BaseModel):
     runtime_indicators: dict[str, Any]
     enabled_flags: dict[str, Any]
     monitor_snapshot: Optional[dict[str, Any]] = None
+    run_summary_store: Optional[dict[str, Any]] = None
     debug: Optional[dict[str, Any]] = None
     self_test: Optional[dict[str, Any]] = None
 
@@ -373,14 +374,37 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
 
 @app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
-def get_agent_diagnostics(debug: bool = False, self_test: bool = False) -> AgentDiagnosticsResponse:
+def get_agent_diagnostics(
+    debug: bool = False,
+    self_test: bool = False,
+    recent_runs_limit: int = 20,
+    run_id: Optional[str] = None,
+) -> AgentDiagnosticsResponse:
     """Return non-sensitive runtime diagnostics for operators."""
+    from agent.state.run_summary_store import get_run_summary_store
     from common.config.diagnostics import build_operator_diagnostics
     from common.config.diagnostics_self_test import run_diagnostics_self_test
     from common.observability.monitor import agent_monitor
 
     payload = build_operator_diagnostics(debug=debug)
     payload["monitor_snapshot"] = agent_monitor.get_snapshot()
+    summary_store = get_run_summary_store()
+    bounded_limit = max(0, min(200, int(recent_runs_limit)))
+    recent_runs = summary_store.list_recent(limit=bounded_limit)
+    payload["run_summary_store"] = {
+        "recent_runs": [
+            {
+                "run_id": item.get("run_id"),
+                "timestamp": item.get("timestamp"),
+                "terminated_reason": (item.get("summary") or {}).get("terminated_reason"),
+                "tenant_id": (item.get("summary") or {}).get("tenant_id"),
+                "replay_mode": bool((item.get("summary") or {}).get("replay_mode", False)),
+            }
+            for item in recent_runs
+            if isinstance(item, dict)
+        ],
+        "selected_run": summary_store.get(run_id) if run_id else None,
+    }
     if self_test:
         payload["self_test"] = run_diagnostics_self_test()
     return AgentDiagnosticsResponse(**payload)
