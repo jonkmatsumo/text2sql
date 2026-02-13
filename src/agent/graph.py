@@ -35,6 +35,7 @@ from agent.state.decision_summary import (
     build_run_decision_summary,
 )
 from agent.telemetry import SpanType, telemetry
+from agent.utils.retry_after import compute_retry_delay
 from agent.utils.schema_snapshot import (
     apply_pending_schema_snapshot_refresh,
     resolve_pinned_schema_snapshot_id,
@@ -474,13 +475,20 @@ def route_after_execution(state: AgentState) -> str:
 
         if retry_after_seconds is not None and float(retry_after_seconds) > 0:
             retry_decision["retry_after_raw"] = float(retry_after_seconds)
+
+            jittered_delay = compute_retry_delay(
+                float(retry_after_seconds),
+                jitter_ratio=get_env_float("AGENT_THROTTLE_JITTER_RATIO", 0.2),
+                max_delay=get_env_float("AGENT_MAX_THROTTLE_SLEEP_SECONDS", 2.0),
+            )
+
             if remaining is None:
-                bounded_retry_after = float(retry_after_seconds)
+                bounded_retry_after = jittered_delay
                 retry_decision["retry_after_applied"] = True
             else:
-                bounded_retry_after = min(float(retry_after_seconds), max(0.0, remaining))
+                bounded_retry_after = min(jittered_delay, max(0.0, remaining))
                 retry_decision["retry_after_applied"] = bounded_retry_after > 0
-                if bounded_retry_after < float(retry_after_seconds):
+                if bounded_retry_after < jittered_delay:
                     retry_decision["retry_after_capped"] = True
 
             if bounded_retry_after <= 0.0 and remaining is not None and remaining <= 0:
@@ -614,13 +622,19 @@ def route_after_execution(state: AgentState) -> str:
         return "failed"
 
     state["retry_summary"] = retry_summary
-    retry_decision["reason_code"] = RetryDecisionReason.PROCEED_TO_CORRECTION.value
+
+    # Check if throttled
+    reason_code = RetryDecisionReason.PROCEED_TO_CORRECTION
+    if state.get("retry_after_seconds") and float(state["retry_after_seconds"]) > 0:
+        reason_code = RetryDecisionReason.THROTTLE_RETRY
+
+    retry_decision["reason_code"] = reason_code.value
     retry_decision["will_retry"] = True
     agent_metrics.add_counter(
         "agent.retry.decisions_total",
         attributes={
             "policy": retry_policy,
-            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "reason": reason_code.value,
             "will_retry": True,
         },
         description="Count of retry decision outcomes",
@@ -632,7 +646,7 @@ def route_after_execution(state: AgentState) -> str:
         description="Observed retry attempt index for retry decisions",
         attributes={
             "policy": retry_policy,
-            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "reason": reason_code.value,
             "will_retry": True,
         },
     )
@@ -640,7 +654,7 @@ def route_after_execution(state: AgentState) -> str:
     decision_summary = format_decision_summary(
         action="retry",
         decision="proceed",
-        reason_code=RetryDecisionReason.PROCEED_TO_CORRECTION,
+        reason_code=reason_code,
         attempt=retry_count + 1,
     )
     if span:
