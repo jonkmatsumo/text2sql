@@ -17,8 +17,10 @@ from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
 from common.constants.reason_codes import ToolVersionNegotiationErrorCode
+from common.models.error_metadata import ErrorCategory
 from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
+from common.tenancy.limits import TenantConcurrencyLimitExceeded, get_mcp_tool_tenant_limiter
 from mcp_server.utils.errors import tool_error_response
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,49 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         )
 
                 try:
+
+                    async def _invoke_with_tenant_limit() -> Any:
+                        raw_tenant_id = kwargs.get("tenant_id")
+                        if raw_tenant_id is None:
+                            return await func(*args, **kwargs)
+
+                        try:
+                            tenant_id_int = int(raw_tenant_id)
+                        except (TypeError, ValueError):
+                            return await func(*args, **kwargs)
+                        if tenant_id_int <= 0:
+                            return await func(*args, **kwargs)
+
+                        limiter = get_mcp_tool_tenant_limiter()
+                        try:
+                            async with limiter.acquire(tenant_id_int) as lease:
+                                span.set_attribute("tenant.limit", int(lease.limit))
+                                span.set_attribute(
+                                    "tenant.active_tool_calls", int(lease.active_runs)
+                                )
+                                span.set_attribute("tenant.limit_exceeded", False)
+                                return await func(*args, **kwargs)
+                        except TenantConcurrencyLimitExceeded as exc:
+                            span.set_attribute("tenant.limit", int(exc.limit))
+                            span.set_attribute("tenant.active_tool_calls", int(exc.active_runs))
+                            span.set_attribute("tenant.limit_exceeded", True)
+                            mcp_metrics.add_counter(
+                                "mcp.tenant_limit_exceeded.count",
+                                description="Count of MCP tenant tool concurrency rejections",
+                                attributes={"tool_name": tool_name},
+                            )
+                            return tool_error_response(
+                                message=(
+                                    "Tenant tool concurrency limit exceeded. "
+                                    "Please retry shortly."
+                                ),
+                                code="TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED",
+                                category=ErrorCategory.LIMIT_EXCEEDED,
+                                provider=tool_name,
+                                retryable=True,
+                                retry_after_seconds=float(exc.retry_after_seconds),
+                            )
+
                     if version_parse_error:
                         span.set_attribute("mcp.tool.version_compatible", False)
                         span.set_attribute("mcp.tool.version_error", version_parse_error)
@@ -225,7 +270,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                             )
 
                     # Execute the tool
-                    response = await func(*args, **kwargs)
+                    response = await _invoke_with_tenant_limit()
 
                     # 2. Apply Output Bounding
                     from mcp_server.utils.tool_output import bound_non_execute_tool_response
