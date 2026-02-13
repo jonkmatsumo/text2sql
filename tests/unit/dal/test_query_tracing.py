@@ -77,3 +77,35 @@ async def test_trace_submit_span(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert span.attributes["db.status"] == "ok"
     assert "db.statement" not in span.attributes
+
+
+@pytest.mark.asyncio
+async def test_trace_query_with_run_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure run_id is attached to DAL spans when present in context."""
+    from common.observability.context import run_id_var
+
+    monkeypatch.setenv("DAL_TRACE_QUERIES", "true")
+
+    # Set run_id context
+    token = run_id_var.set("run-abc-123")
+
+    try:
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+        async def _op():
+            return "ok"
+
+        with patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
+            mock_get_tracer.side_effect = lambda name: provider.get_tracer(name)
+            await trace_query_operation(
+                "test", provider="pg", execution_model="sync", sql="sql", operation=_op()
+            )
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].attributes["run_id"] == "run-abc-123"
+
+    finally:
+        run_id_var.reset(token)
