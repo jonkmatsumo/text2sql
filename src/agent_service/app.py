@@ -20,6 +20,7 @@ from agent.replay_bundle import (
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
 from common.models.error_metadata import ErrorCategory
+from common.observability.monitor import RunSummary, agent_monitor
 from common.sanitization.text import redact_sensitive_info
 from common.tenancy.limits import TenantConcurrencyLimitExceeded, get_agent_run_tenant_limiter
 
@@ -101,6 +102,7 @@ class AgentDiagnosticsResponse(BaseModel):
     schema_cache_ttl_seconds: int
     runtime_indicators: dict[str, Any]
     enabled_flags: dict[str, Any]
+    monitor_snapshot: Optional[dict[str, Any]] = None
     debug: Optional[dict[str, Any]] = None
     self_test: Optional[dict[str, Any]] = None
 
@@ -111,6 +113,7 @@ _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 @app.post("/agent/run", response_model=AgentRunResponse)
 async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
     """Run the agent and return UI-compatible results."""
+    start_ts = time.time()
     thread_id = request.thread_id or str(uuid.uuid4())
     limiter = get_agent_run_tenant_limiter()
     try:
@@ -235,6 +238,29 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     if replay_metadata:
                         replay_metadata["export_path"] = export_path
 
+            # Record metrics to monitor
+            try:
+                duration_ms = (time.time() - start_ts) * 1000.0
+                err_cat = state.get("error_category")
+                summary = RunSummary(
+                    run_id=state.get("run_id") or thread_id,
+                    timestamp=start_ts,
+                    status="error" if state.get("error") else "success",
+                    error_category=str(err_cat) if err_cat else None,
+                    duration_ms=duration_ms,
+                    tenant_id=request.tenant_id,
+                    llm_calls=int(state.get("llm_calls", 0) or 0),
+                    llm_tokens=int(state.get("llm_token_total", 0) or 0),
+                )
+                agent_monitor.record_run(summary)
+
+                if err_cat == "LLM_CIRCUIT_OPEN":
+                    agent_monitor.increment("circuit_breaker_open")
+                elif err_cat == "LLM_RATE_LIMIT_EXCEEDED":
+                    agent_monitor.increment("rate_limited")
+            except Exception:
+                pass  # Don't fail request on monitoring error
+
             response_text = None
             if state.get("messages"):
                 response_text = state["messages"][-1].content
@@ -304,6 +330,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 replay_metadata=replay_metadata,
             )
     except TenantConcurrencyLimitExceeded as exc:
+        agent_monitor.increment("tenant_limit_exceeded")
         error_message = "Tenant concurrency limit exceeded. Please retry shortly."
         telemetry.update_current_trace(
             {
@@ -342,8 +369,10 @@ def get_agent_diagnostics(debug: bool = False, self_test: bool = False) -> Agent
     """Return non-sensitive runtime diagnostics for operators."""
     from common.config.diagnostics import build_operator_diagnostics
     from common.config.diagnostics_self_test import run_diagnostics_self_test
+    from common.observability.monitor import agent_monitor
 
     payload = build_operator_diagnostics(debug=debug)
+    payload["monitor_snapshot"] = agent_monitor.get_snapshot()
     if self_test:
         payload["self_test"] = run_diagnostics_self_test()
     return AgentDiagnosticsResponse(**payload)

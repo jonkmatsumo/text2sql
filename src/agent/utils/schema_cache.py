@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 from opentelemetry import trace
 
 from common.observability.metrics import agent_metrics
+from common.observability.monitor import agent_monitor
 
 
 class SchemaSnapshotCache(abc.ABC):
@@ -148,6 +149,7 @@ def _record_schema_refresh_cooldown_active(retry_after_seconds: float) -> None:
     if span is not None and span.is_recording():
         span.set_attribute("schema.refresh.cooldown_active", True)
         span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
+    agent_monitor.increment("schema_refresh_storm")
     agent_metrics.add_counter(
         "schema.refresh.cooldown_active",
         attributes={"scope": "schema_snapshot_id"},
