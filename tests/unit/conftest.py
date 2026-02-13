@@ -58,3 +58,15 @@ def _reset_database_state():
     # Reset DAL factory singletons so provider-specific stores/introspectors
     # don't leak across tests with different QUERY_TARGET_BACKEND values.
     reset_singletons()
+
+
+@pytest.fixture(autouse=True)
+def _reset_tenant_limiters():
+    """Reset tenant limiter singletons between tests to avoid cross-test leakage."""
+    from common.tenancy.limits import reset_agent_run_tenant_limiter, reset_mcp_tool_tenant_limiter
+
+    reset_agent_run_tenant_limiter()
+    reset_mcp_tool_tenant_limiter()
+    yield
+    reset_agent_run_tenant_limiter()
+    reset_mcp_tool_tenant_limiter()
