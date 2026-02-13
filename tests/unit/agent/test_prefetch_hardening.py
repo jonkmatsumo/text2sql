@@ -136,3 +136,47 @@ def test_prefetch_cache_key_includes_flags(monkeypatch):
     )
 
     assert key1 != key2
+
+
+@pytest.mark.asyncio
+@patch("agent.nodes.execute.get_mcp_tools")
+@patch("agent.nodes.execute.PolicyEnforcer")
+@patch("agent.nodes.execute.TenantRewriter")
+async def test_replay_mode_disables_prefetch_scheduling(
+    mock_rewriter, mock_enforcer, mock_get_tools, monkeypatch
+):
+    """Replay mode should never schedule background prefetch tasks."""
+    monkeypatch.setenv("AGENT_PREFETCH_NEXT_PAGE", "on")
+    monkeypatch.setenv("AGENT_AUTO_PAGINATION", "off")
+
+    mock_enforcer.validate_sql.return_value = None
+    mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+    mock_tool = AsyncMock()
+    mock_tool.name = "execute_sql_query"
+    mock_tool.ainvoke.return_value = (
+        '{"rows": [{"id": 1}], "metadata": {"next_page_token": "t1", '
+        '"rows_returned": 1, "response_shape": "enveloped"}}'
+    )
+    mock_get_tools.return_value = [mock_tool]
+
+    state = AgentState(
+        messages=[],
+        schema_context="",
+        current_sql="SELECT * FROM users",
+        query_result=None,
+        error=None,
+        retry_count=0,
+        interactive_session=True,
+        replay_mode=True,
+        page_size=10,
+    )
+
+    result = await validate_and_execute_node(state)
+
+    assert result["error"] is None
+    completeness = result["result_completeness"]
+    assert completeness["prefetch_enabled"] is False
+    assert completeness["prefetch_scheduled"] is False
+    assert completeness["prefetch_reason"] == "disabled"
+    assert mock_tool.ainvoke.call_count == 1

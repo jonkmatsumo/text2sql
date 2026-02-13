@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.utils.drift_detection import detect_schema_drift
+from agent.utils.drift_detection import detect_schema_drift, detect_schema_drift_details
 from common.constants.reason_codes import DriftDetectionMethod
 
 
@@ -116,3 +116,40 @@ def test_detect_schema_drift_no_context_regex_only():
     # Currently it would be HYBRID because ast exists but missing_identifiers from AST is empty.
     # Wait, if ast exists but missing_identifiers is empty, and regex finds something, it is HYBRID.
     assert method == DriftDetectionMethod.HYBRID
+
+
+def test_detect_schema_drift_prefers_structured_signal(raw_schema_context):
+    """Structured SQLSTATE indicators should be preferred over regex parsing."""
+    sql = "SELECT email FROM users"
+    error_message = 'relation "users" does not exist'
+    error_metadata = {"sql_state": "42703", "code": "42703"}
+
+    result = detect_schema_drift_details(
+        sql=sql,
+        error_message=error_message,
+        provider="postgres",
+        raw_schema_context=raw_schema_context,
+        error_metadata=error_metadata,
+    )
+
+    assert "email" in result.missing_identifiers
+    assert result.source == "structured"
+    assert result.method == DriftDetectionMethod.HYBRID
+
+
+def test_detect_schema_drift_uses_regex_source_without_structured_metadata():
+    """Regex fallback should be the source when no structured signal exists."""
+    sql = "INVALID SQL !!!"
+    error_message = 'relation "missing_table" does not exist'
+
+    result = detect_schema_drift_details(
+        sql=sql,
+        error_message=error_message,
+        provider="postgres",
+        raw_schema_context=[],
+        error_metadata=None,
+    )
+
+    assert "missing_table" in result.missing_identifiers
+    assert result.source == "regex"
+    assert result.method == DriftDetectionMethod.REGEX_FALLBACK

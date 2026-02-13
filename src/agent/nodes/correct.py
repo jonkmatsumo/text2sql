@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
 from agent.state import AgentState
+from agent.state.decision_events import append_decision_event
 from agent.taxonomy.error_taxonomy import classify_error, generate_correction_strategy
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
@@ -132,6 +133,16 @@ def correct_sql_node(state: AgentState) -> dict:
             if sleep_seconds > 0:
                 span.set_attribute("retry.retry_after_seconds", sleep_seconds)
                 span.add_event("retry.retry_after_sleep", {"sleep_seconds": sleep_seconds})
+                append_decision_event(
+                    state,
+                    node="correct_sql",
+                    decision="throttle_sleep",
+                    reason="retry_after_sleep",
+                    retry_count=retry_count,
+                    error_category=str(state.get("error_category") or "") or None,
+                    retry_after_seconds=sleep_seconds,
+                    span=span,
+                )
                 time.sleep(sleep_seconds)
 
         # Classify the error using taxonomy

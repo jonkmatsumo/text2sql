@@ -3,6 +3,7 @@ import inspect
 from typing import Any, Awaitable, Dict, Optional
 
 from common.config.env import get_env_bool
+from common.observability.context import run_id_var
 from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata
 
@@ -31,6 +32,9 @@ async def trace_query_operation(
 
     tracer = trace.get_tracer("dal")
     with tracer.start_as_current_span(name) as span:
+        run_id = run_id_var.get()
+        if run_id:
+            span.set_attribute("run_id", run_id)
         span.set_attribute("db.provider", provider)
         span.set_attribute("db.execution_model", execution_model)
         if sql:

@@ -4,7 +4,8 @@ Defines SQL statement, function, and sensitive-column policies shared by
 Agent and MCP validation layers.
 """
 
-from typing import Set
+import time
+from typing import Any, Dict, Optional, Set
 
 from common.config.env import get_env_str
 
@@ -101,12 +102,32 @@ def get_blocked_schemas() -> set[str]:
     return set(DEFAULT_BLOCKED_SCHEMAS)
 
 
+def load_policy_snapshot() -> Dict[str, Any]:
+    """Create a deterministic snapshot of the current policy configuration.
+
+    Returns:
+        Dictionary containing policy configuration state.
+    """
+    return {
+        "snapshot_id": f"policy-v1-{int(time.time())}",
+        "blocked_tables": list(get_blocked_tables()),
+        "blocked_schemas": list(get_blocked_schemas()),
+        "timestamp": time.time(),
+    }
+
+
 def classify_blocked_table_reference(
     *,
     table_name: str,
     schema_name: str = "",
+    snapshot: Optional[Dict[str, Any]] = None,
 ) -> str | None:
     """Classify blocked table/schema references from normalized identifiers.
+
+    Args:
+        table_name: Normalized table name.
+        schema_name: Normalized schema name.
+        snapshot: Optional policy snapshot dictionary. If None, loads live policy.
 
     Returns:
         Reason code when blocked, otherwise None.
@@ -117,10 +138,17 @@ def classify_blocked_table_reference(
     if not normalized_table:
         return None
 
-    if normalized_table in get_blocked_tables():
+    if snapshot:
+        blocked_tables = set(snapshot.get("blocked_tables", []))
+        blocked_schemas = set(snapshot.get("blocked_schemas", []))
+    else:
+        blocked_tables = get_blocked_tables()
+        blocked_schemas = get_blocked_schemas()
+
+    if normalized_table in blocked_tables:
         return "restricted_table"
 
-    if normalized_schema and normalized_schema in get_blocked_schemas():
+    if normalized_schema and normalized_schema in blocked_schemas:
         return "blocked_schema"
 
     if normalized_table.startswith(BLOCKED_TABLE_PREFIXES):

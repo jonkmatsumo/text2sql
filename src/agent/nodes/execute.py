@@ -2,11 +2,12 @@
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
+from agent.state.decision_events import append_decision_event
 from agent.state.result_completeness import ResultCompleteness
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
@@ -42,13 +43,19 @@ def _schema_drift_hint(
     provider: str,
     sql: Optional[str] = None,
     raw_schema_context: Optional[list[dict]] = None,
-) -> tuple[bool, list[str], Optional[DriftDetectionMethod]]:
-    from agent.utils.drift_detection import detect_schema_drift
+    error_metadata: Optional[dict[str, Any]] = None,
+) -> tuple[bool, list[str], Optional[DriftDetectionMethod], Optional[str]]:
+    from agent.utils.drift_detection import detect_schema_drift_details
 
-    identifiers, method = detect_schema_drift(
-        sql or "", error_text, provider, raw_schema_context or []
+    detection = detect_schema_drift_details(
+        sql or "",
+        error_text,
+        provider,
+        raw_schema_context or [],
+        error_metadata=error_metadata,
     )
-    return (len(identifiers) > 0, identifiers, method)
+    identifiers = detection.missing_identifiers
+    return (len(identifiers) > 0, identifiers, detection.method, detection.source)
 
 
 def _safe_env_int(name: str, default: int, minimum: int) -> int:
@@ -295,6 +302,22 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             prefetch_enabled, prefetch_max_concurrency, prefetch_reason = get_prefetch_config(
                 interactive_session
             )
+            prefetch_kill_switch_enabled = bool(state.get("prefetch_kill_switch_enabled"))
+            if prefetch_kill_switch_enabled:
+                prefetch_enabled = False
+                prefetch_reason = "disabled_kill_switch"
+                append_decision_event(
+                    state,
+                    node="execute_sql",
+                    decision="prefetch",
+                    reason="kill_switch_disable_prefetch",
+                    retry_count=int(state.get("retry_count", 0) or 0),
+                    error_category=str(state.get("error_category") or "") or None,
+                    span=span,
+                )
+            if bool(state.get("replay_mode")):
+                prefetch_enabled = False
+                prefetch_reason = "disabled"
             seed_value = state.get("seed")
             seed = seed_value if isinstance(seed_value, int) else None
             query_signature = build_query_signature(rewritten_sql)
@@ -307,6 +330,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             prefetched_cache_key = None
             page_token = execute_payload.get("page_token")
             replay_bundle = state.get("replay_bundle")
+            prefetch_discard_count = int(state.get("prefetch_discard_count", 0) or 0)
 
             # Structured Concurrency for Prefetch
             async with PrefetchManager(max_concurrency=prefetch_max_concurrency) as prefetcher:
@@ -328,6 +352,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         expected_query_signature=query_signature,
                     )
                     if prefetch_discard_reason is not None:
+                        prefetch_discard_count += 1
                         discard_attrs = {
                             "reason": str(prefetch_discard_reason),
                             "prefetch.discarded_due_to_snapshot_mismatch": bool(
@@ -401,7 +426,9 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 result_prefetch_scheduled = False
                 result_prefetch_reason = prefetch_reason
 
-                def _maybe_add_schema_drift(error_msg: str) -> dict:
+                def _maybe_add_schema_drift(
+                    error_msg: str, error_meta: Optional[dict[str, Any]] = None
+                ) -> dict:
                     if not get_env_bool("AGENT_SCHEMA_DRIFT_HINTS", True):
                         return {}
                     provider = get_env_str(
@@ -409,8 +436,12 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     )
                     sql = state.get("current_sql")
                     raw_schema_context = state.get("raw_schema_context")
-                    suspected, identifiers, method = _schema_drift_hint(
-                        error_msg, provider, sql, raw_schema_context
+                    suspected, identifiers, method, drift_source = _schema_drift_hint(
+                        error_msg,
+                        provider,
+                        sql,
+                        raw_schema_context,
+                        error_meta,
                     )
                     if not suspected:
                         return {}
@@ -420,6 +451,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_attribute("schema.drift.auto_refresh_enabled", auto_refresh)
                     if method:
                         span.set_attribute("schema.drift.detection_method", method.value)
+                    if drift_source:
+                        span.set_attribute("schema.drift.source", drift_source)
                     return {
                         "schema_drift_suspected": True,
                         "missing_identifiers": identifiers,
@@ -486,13 +519,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     elif error_category == "invalid_request":
                         reason = TerminationReason.INVALID_REQUEST
 
-                    drift_hint = _maybe_add_schema_drift(error_msg)
+                    drift_hint = _maybe_add_schema_drift(error_msg, error_metadata)
                     return {
                         "error": error_msg,
                         "query_result": None,
                         "error_category": error_category,
                         "retry_after_seconds": retry_after_seconds,
                         "error_metadata": error_metadata,
+                        "prefetch_discard_count": prefetch_discard_count,
                         "termination_reason": reason,
                         **drift_hint,
                         **_latency_payload(),
@@ -894,6 +928,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_prefetch_enabled": bool(result_prefetch_enabled),
                     "result_prefetch_scheduled": bool(result_prefetch_scheduled),
                     "result_prefetch_reason": result_prefetch_reason,
+                    "prefetch_discard_count": prefetch_discard_count,
                     "retry_after_seconds": None,
                     "termination_reason": TerminationReason.SUCCESS,
                     "result_completeness": ResultCompleteness.from_parts(

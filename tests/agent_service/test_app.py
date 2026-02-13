@@ -105,6 +105,7 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
         captured["timeout_seconds"] = timeout_seconds
         captured["deadline_ts"] = deadline_ts
         captured["interactive_session"] = interactive_session
+        captured["replay_mode"] = kwargs.get("replay_mode")
         return {"messages": [], "error": None}
 
     monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
@@ -116,6 +117,44 @@ def test_entrypoint_sets_deadline_ts(monkeypatch):
     assert captured["timeout_seconds"] == 30.0
     assert captured["deadline_ts"] is not None
     assert captured["interactive_session"] is True
+    assert captured["replay_mode"] is False
+
+
+def test_entrypoint_passes_replay_mode_flag(monkeypatch):
+    """Explicit replay_mode flag should be propagated to graph execution."""
+    captured = {}
+
+    async def fake_run_agent_with_tracing(
+        question,
+        tenant_id,
+        thread_id,
+        timeout_seconds=None,
+        deadline_ts=None,
+        page_token=None,
+        page_size=None,
+        interactive_session=False,
+        **kwargs,
+    ):
+        _ = (
+            question,
+            tenant_id,
+            thread_id,
+            timeout_seconds,
+            deadline_ts,
+            page_token,
+            page_size,
+            interactive_session,
+        )
+        captured["replay_mode"] = kwargs.get("replay_mode")
+        return {"messages": [], "error": None}
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+
+    client = TestClient(agent_app.app)
+    resp = client.post("/agent/run", json={"question": "hi", "tenant_id": 1, "replay_mode": True})
+
+    assert resp.status_code == 200
+    assert captured["replay_mode"] is True
 
 
 def test_run_agent_record_mode_returns_replay_bundle(monkeypatch):

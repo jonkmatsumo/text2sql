@@ -158,7 +158,9 @@ def parse_sql(
 
 
 def validate_security(
-    ast: exp.Expression, allowed_tables: Optional[set[str]] = None
+    ast: exp.Expression,
+    allowed_tables: Optional[set[str]] = None,
+    policy_snapshot: Optional[dict] = None,
 ) -> list[SecurityViolation]:
     """
     Validate SQL AST for security violations.
@@ -171,6 +173,8 @@ def validate_security(
 
     Args:
         ast: Parsed SQL AST
+        allowed_tables: Optional explicit allowlist of tables
+        policy_snapshot: Optional snapshot of policy configuration
 
     Returns:
         List of SecurityViolation objects (empty if valid)
@@ -235,6 +239,7 @@ def validate_security(
         blocked_reason = classify_blocked_table_reference(
             table_name=table_name,
             schema_name=schema_name,
+            snapshot=policy_snapshot,
         )
         if blocked_reason == "restricted_table":
             violations.append(
@@ -640,6 +645,7 @@ def validate_sql(
     allowed_columns: Optional[dict[str, set[str]]] = None,
     column_allowlist_mode: str = "warn",
     cartesian_join_mode: Optional[str] = None,
+    policy_snapshot: Optional[dict] = None,
 ) -> ASTValidationResult:
     """
     Complete SQL validation: parse, security check, complexity check, and metadata extraction.
@@ -653,6 +659,7 @@ def validate_sql(
         allowed_columns: Optional table->columns allowlist used for projection checks.
         column_allowlist_mode: "warn" (default), "block", or "off".
         cartesian_join_mode: "warn" (default), "block", or "off".
+        policy_snapshot: Optional snapshot of policy configuration.
 
     Returns:
         ASTValidationResult with validation status, violations, and metadata
@@ -673,7 +680,11 @@ def validate_sql(
         )
 
     # Validate security
-    violations = validate_security(ast, allowed_tables=allowed_tables)
+    violations = validate_security(
+        ast,
+        allowed_tables=allowed_tables,
+        policy_snapshot=policy_snapshot,
+    )
     warnings: list[str] = []
 
     column_mode = (column_allowlist_mode or "warn").strip().lower()

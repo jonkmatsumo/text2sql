@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from agent.state.decision_events import summarize_decision_events
 from common.config.env import get_env_int
 from common.constants.reason_codes import RejectedPlanCandidateReason
 from common.sanitization.text import redact_sensitive_info
@@ -297,4 +298,71 @@ def build_decision_summary(
         "schema_refresh_events": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "query_complexity": _extract_query_complexity(normalized_state),
         "latency_breakdown_ms": _extract_latency_breakdown(normalized_state),
+    }
+
+
+def _collect_error_categories_encountered(state: dict[str, Any]) -> list[str]:
+    categories: set[str] = set()
+
+    def _add_category(raw: Any) -> None:
+        if not isinstance(raw, str):
+            return
+        normalized = raw.strip().lower()
+        if normalized:
+            categories.add(normalized)
+
+    _add_category(state.get("error_category"))
+    error_metadata = state.get("error_metadata")
+    if isinstance(error_metadata, dict):
+        _add_category(error_metadata.get("category"))
+
+    correction_attempts = state.get("correction_attempts") or []
+    if isinstance(correction_attempts, list):
+        for event in correction_attempts:
+            if isinstance(event, dict):
+                _add_category(event.get("error_category"))
+
+    return sorted(categories)
+
+
+def build_run_decision_summary(
+    state: dict[str, Any], *, llm_calls: int | None = None, llm_token_total: int | None = None
+) -> dict[str, Any]:
+    """Build a final run-level summary artifact for postmortem/debug workflows."""
+    normalized_state = _as_state_mapping(state)
+    resolved_llm_calls = (
+        int(llm_calls) if llm_calls is not None else int(normalized_state.get("llm_calls", 0) or 0)
+    )
+    resolved_llm_token_total = (
+        int(llm_token_total)
+        if llm_token_total is not None
+        else int(normalized_state.get("llm_token_total", 0) or 0)
+    )
+
+    return {
+        "tenant_id": normalized_state.get("tenant_id"),
+        "replay_mode": bool(normalized_state.get("replay_mode", False)),
+        "schema_snapshot_id": (
+            normalized_state.get("schema_snapshot_id")
+            or normalized_state.get("pinned_schema_snapshot_id")
+        ),
+        "retries": int(normalized_state.get("retry_count", 0) or 0),
+        "llm_calls": max(0, resolved_llm_calls),
+        "llm_token_total": max(0, resolved_llm_token_total),
+        "schema_refresh_count": int(normalized_state.get("schema_refresh_count", 0) or 0),
+        "prefetch_discard_count": int(normalized_state.get("prefetch_discard_count", 0) or 0),
+        "kill_switches": {
+            "disable_prefetch": bool(normalized_state.get("prefetch_kill_switch_enabled", False)),
+            "disable_schema_refresh": bool(
+                normalized_state.get("schema_refresh_kill_switch_enabled", False)
+            ),
+            "disable_llm_retries": bool(
+                normalized_state.get("llm_retries_kill_switch_enabled", False)
+            ),
+        },
+        "decision_event_counts": summarize_decision_events(normalized_state),
+        "decision_events_truncated": bool(normalized_state.get("decision_events_truncated", False)),
+        "decision_events_dropped": int(normalized_state.get("decision_events_dropped", 0) or 0),
+        "error_categories_encountered": _collect_error_categories_encountered(normalized_state),
+        "terminated_reason": _resolve_final_stopping_reason(normalized_state),
     }

@@ -29,8 +29,15 @@ from agent.runtime_metrics import (
     record_truncation_event,
 )
 from agent.state import AgentState
-from agent.state.decision_summary import build_decision_summary, build_retry_correction_summary
+from agent.state.decision_events import append_decision_event
+from agent.state.decision_summary import (
+    build_decision_summary,
+    build_retry_correction_summary,
+    build_run_decision_summary,
+)
+from agent.state.run_summary_store import get_run_summary_store
 from agent.telemetry import SpanType, telemetry
+from agent.utils.retry_after import compute_retry_delay
 from agent.utils.schema_snapshot import (
     apply_pending_schema_snapshot_refresh,
     resolve_pinned_schema_snapshot_id,
@@ -38,6 +45,7 @@ from agent.utils.schema_snapshot import (
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
 from common.constants.reason_codes import RetryDecisionReason
 from common.observability.metrics import agent_metrics
+from common.policy.sql_policy import load_policy_snapshot
 from common.utils.decisions import format_decision_summary
 
 logger = logging.getLogger(__name__)
@@ -53,6 +61,48 @@ def _safe_env_int(name: str, default: int, minimum: int) -> int:
     if parsed is None:
         return default
     return max(minimum, int(parsed))
+
+
+def _safe_env_bool(name: str, default: bool) -> bool:
+    try:
+        parsed = get_env_bool(name, default)
+    except ValueError:
+        return bool(default)
+    if parsed is None:
+        return bool(default)
+    return bool(parsed)
+
+
+def _is_replay_mode(state: AgentState) -> bool:
+    return bool(state.get("replay_mode"))
+
+
+def _llm_retries_disabled(state: AgentState) -> bool:
+    return _is_replay_mode(state) or bool(state.get("llm_retries_kill_switch_enabled"))
+
+
+def _schema_refresh_disabled(state: AgentState) -> bool:
+    return bool(state.get("schema_refresh_kill_switch_enabled"))
+
+
+def _resolve_run_seed(*, replay_mode: bool) -> Optional[int]:
+    """Resolve deterministic run seed, forcing one for replay mode."""
+    if replay_mode:
+        try:
+            seed = get_env_int("AGENT_LLM_SEED", 0)
+        except ValueError:
+            return 0
+        if seed is None:
+            return 0
+        return int(seed)
+
+    try:
+        seed = get_env_int("AGENT_LLM_SEED", None)
+    except ValueError:
+        return None
+    if seed is None:
+        return None
+    return int(seed)
 
 
 def run_telemetry_configure():
@@ -236,7 +286,7 @@ def route_after_validation(state: AgentState) -> str:
         str: Next node name
     """
     retry_count = state.get("retry_count", 0)
-    max_retries = _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+    max_retries = 0 if _llm_retries_disabled(state) else _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
     error_category = str(state.get("error_category") or "").strip().lower()
 
     ast_result = state.get("ast_validation_result")
@@ -269,6 +319,12 @@ def _max_retry_attempts() -> int:
     if configured is None:
         configured = 3
     return max(1, int(configured))
+
+
+def _effective_max_retry_attempts(state: AgentState) -> int:
+    if _llm_retries_disabled(state):
+        return 0
+    return _max_retry_attempts()
 
 
 def _adaptive_is_retryable(
@@ -391,19 +447,57 @@ def route_after_execution(state: AgentState) -> str:
                     "will_retry": False,
                 },
             )
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="fail",
+            reason=RetryDecisionReason.UNSUPPORTED_CAPABILITY.value,
+            retry_count=int(state.get("retry_count", 0) or 0),
+            error_category=error_category,
+            span=span,
+        )
         return "failed"
 
     # Guarded Automatic Schema Refresh
-    if state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+    if (
+        state.get("schema_drift_suspected")
+        and state.get("schema_drift_auto_refresh")
+        and not _is_replay_mode(state)
+        and not _schema_refresh_disabled(state)
+    ):
         refresh_count = state.get("schema_refresh_count", 0)
         if refresh_count < 1:
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="refresh_schema",
+                reason="schema_drift_auto_refresh",
+                retry_count=int(state.get("retry_count", 0) or 0),
+                error_category=error_category,
+                span=telemetry.get_current_span(),
+            )
             return "refresh_schema"
+    elif state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+        refresh_disabled_reason = (
+            "replay_mode_disable_schema_refresh"
+            if _is_replay_mode(state)
+            else "kill_switch_disable_schema_refresh"
+        )
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="refresh_schema",
+            reason=refresh_disabled_reason,
+            retry_count=int(state.get("retry_count", 0) or 0),
+            error_category=error_category,
+            span=telemetry.get_current_span(),
+        )
 
     deadline_ts = state.get("deadline_ts")
     remaining = None
     estimated_correction_budget = _estimate_correction_budget_seconds(state)
     retry_count = state.get("retry_count", 0)
-    max_retries = _max_retry_attempts()
+    max_retries = _effective_max_retry_attempts(state)
     retry_policy = _retry_policy_mode()
     retry_after_seconds = state.get("retry_after_seconds")
 
@@ -465,17 +559,33 @@ def route_after_execution(state: AgentState) -> str:
             )
             if span:
                 span.add_event("system.decision", decision_summary.to_dict())
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="fail",
+                reason=RetryDecisionReason.NON_RETRYABLE_CATEGORY.value,
+                retry_count=retry_count,
+                error_category=error_category,
+                span=span,
+            )
             return "failed"
 
         if retry_after_seconds is not None and float(retry_after_seconds) > 0:
             retry_decision["retry_after_raw"] = float(retry_after_seconds)
+
+            jittered_delay = compute_retry_delay(
+                float(retry_after_seconds),
+                jitter_ratio=get_env_float("AGENT_THROTTLE_JITTER_RATIO", 0.2),
+                max_delay=get_env_float("AGENT_MAX_THROTTLE_SLEEP_SECONDS", 2.0),
+            )
+
             if remaining is None:
-                bounded_retry_after = float(retry_after_seconds)
+                bounded_retry_after = jittered_delay
                 retry_decision["retry_after_applied"] = True
             else:
-                bounded_retry_after = min(float(retry_after_seconds), max(0.0, remaining))
+                bounded_retry_after = min(jittered_delay, max(0.0, remaining))
                 retry_decision["retry_after_applied"] = bounded_retry_after > 0
-                if bounded_retry_after < float(retry_after_seconds):
+                if bounded_retry_after < jittered_delay:
                     retry_decision["retry_after_capped"] = True
 
             if bounded_retry_after <= 0.0 and remaining is not None and remaining <= 0:
@@ -503,6 +613,16 @@ def route_after_execution(state: AgentState) -> str:
                 )
                 if span:
                     span.add_event("system.decision", decision_summary.to_dict())
+                append_decision_event(
+                    state,
+                    node="route_after_execution",
+                    decision="stop_budget",
+                    reason=RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER.value,
+                    retry_count=retry_count,
+                    error_category=state.get("error_category"),
+                    retry_after_seconds=bounded_retry_after,
+                    span=span,
+                )
                 return "failed"
             state["retry_after_seconds"] = bounded_retry_after
             retry_summary["retry_after_seconds"] = bounded_retry_after
@@ -556,6 +676,16 @@ def route_after_execution(state: AgentState) -> str:
             )
             if span:
                 span.add_event("system.decision", decision_summary.to_dict())
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="stop_budget",
+                reason=RetryDecisionReason.INSUFFICIENT_BUDGET.value,
+                retry_count=retry_count,
+                error_category=state.get("error_category"),
+                retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+                span=span,
+            )
             return "failed"
 
     if span:
@@ -582,10 +712,22 @@ def route_after_execution(state: AgentState) -> str:
         )
         if span:
             span.add_event("system.decision", decision_summary.to_dict())
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="stop_budget",
+            reason=RetryDecisionReason.DEADLINE_EXCEEDED.value,
+            retry_count=retry_count,
+            error_category=state.get("error_category"),
+            retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+            span=span,
+        )
         return "failed"
 
     if retry_count >= max_retries:
         retry_summary["max_retries_reached"] = True
+        if bool(state.get("llm_retries_kill_switch_enabled")):
+            retry_summary["llm_retries_disabled"] = True
         state["retry_summary"] = retry_summary
         retry_decision["reason_code"] = RetryDecisionReason.MAX_RETRIES_REACHED.value
         retry_decision["will_retry"] = False
@@ -606,16 +748,35 @@ def route_after_execution(state: AgentState) -> str:
         )
         if span:
             span.add_event("system.decision", decision_summary.to_dict())
+        reason_value = RetryDecisionReason.MAX_RETRIES_REACHED.value
+        if bool(state.get("llm_retries_kill_switch_enabled")) and not _is_replay_mode(state):
+            reason_value = "kill_switch_disable_llm_retries"
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="fail",
+            reason=reason_value,
+            retry_count=retry_count,
+            error_category=error_category,
+            retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+            span=span,
+        )
         return "failed"
 
     state["retry_summary"] = retry_summary
-    retry_decision["reason_code"] = RetryDecisionReason.PROCEED_TO_CORRECTION.value
+
+    # Check if throttled
+    reason_code = RetryDecisionReason.PROCEED_TO_CORRECTION
+    if state.get("retry_after_seconds") and float(state["retry_after_seconds"]) > 0:
+        reason_code = RetryDecisionReason.THROTTLE_RETRY
+
+    retry_decision["reason_code"] = reason_code.value
     retry_decision["will_retry"] = True
     agent_metrics.add_counter(
         "agent.retry.decisions_total",
         attributes={
             "policy": retry_policy,
-            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "reason": reason_code.value,
             "will_retry": True,
         },
         description="Count of retry decision outcomes",
@@ -627,7 +788,7 @@ def route_after_execution(state: AgentState) -> str:
         description="Observed retry attempt index for retry decisions",
         attributes={
             "policy": retry_policy,
-            "reason": RetryDecisionReason.PROCEED_TO_CORRECTION.value,
+            "reason": reason_code.value,
             "will_retry": True,
         },
     )
@@ -635,11 +796,21 @@ def route_after_execution(state: AgentState) -> str:
     decision_summary = format_decision_summary(
         action="retry",
         decision="proceed",
-        reason_code=RetryDecisionReason.PROCEED_TO_CORRECTION,
+        reason_code=reason_code,
         attempt=retry_count + 1,
     )
     if span:
         span.add_event("system.decision", decision_summary.to_dict())
+    append_decision_event(
+        state,
+        node="route_after_execution",
+        decision="retry",
+        reason=reason_code.value,
+        retry_count=retry_count,
+        error_category=error_category,
+        retry_after_seconds=state.get("retry_after_seconds"),
+        span=span,
+    )
     return "correct"  # Go to self-correction
 
 
@@ -781,6 +952,7 @@ async def run_agent_with_tracing(
     page_token: str = None,
     page_size: int = None,
     interactive_session: bool = False,
+    replay_mode: bool = False,
     replay_bundle: Optional[dict[str, Any]] = None,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
@@ -810,14 +982,20 @@ async def run_agent_with_tracing(
     if thread_id is None:
         thread_id = session_id or str(uuid.uuid4())
 
+    # Generate stable run_id for this execution
+    run_id = str(uuid.uuid4())
+
     # Prepare base metadata for all spans
     base_metadata = {
         "tenant_id": str(tenant_id),
+        "run_id": run_id,
         "environment": get_env_str("ENVIRONMENT", "development"),
         "deployment": get_env_str("DEPLOYMENT", "development"),
         "version": "2.0.0",
         "thread_id": thread_id,
     }
+    if replay_mode:
+        base_metadata["replay_mode"] = "deterministic"
     if replay_bundle:
         base_metadata["replay_mode"] = "active"
 
@@ -838,8 +1016,12 @@ async def run_agent_with_tracing(
         if deadline_ts is None and timeout_seconds:
             deadline_ts = time.monotonic() + timeout_seconds
 
+        policy_snapshot = load_policy_snapshot()
+
         inputs = {
             "messages": [HumanMessage(content=question)],
+            "run_id": run_id,
+            "policy_snapshot": policy_snapshot,
             "schema_context": "",
             "current_sql": None,
             "query_result": None,
@@ -869,8 +1051,9 @@ async def run_agent_with_tracing(
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
             "page_size": page_size,
-            "seed": get_env_int("AGENT_LLM_SEED", None),
+            "seed": _resolve_run_seed(replay_mode=bool(replay_mode)),
             "interactive_session": interactive_session,
+            "replay_mode": bool(replay_mode),
             "replay_bundle": replay_bundle,
             "token_budget": {
                 "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
@@ -879,6 +1062,12 @@ async def run_agent_with_tracing(
             "llm_prompt_bytes_used": 0,
             "llm_budget_exceeded": False,
             "error_signatures": [],
+            "decision_events": [],
+            "decision_events_truncated": False,
+            "decision_events_dropped": 0,
+            "prefetch_kill_switch_enabled": _safe_env_bool("DISABLE_PREFETCH", False),
+            "schema_refresh_kill_switch_enabled": _safe_env_bool("DISABLE_SCHEMA_REFRESH", False),
+            "llm_retries_kill_switch_enabled": _safe_env_bool("DISABLE_LLM_RETRIES", False),
         }
 
         # Config with thread_id for checkpointer
@@ -886,7 +1075,7 @@ async def run_agent_with_tracing(
 
         # Execute workflow within MCP context to ensure connections are closed
         from agent.tools import mcp_tools_context, unpack_mcp_result
-        from agent.utils.llm_run_budget import llm_run_budget_context
+        from agent.utils.llm_run_budget import current_budget_state, llm_run_budget_context
         from agent.utils.retry import retry_with_backoff
 
         # Interaction persistence mode (default: best_effort)
@@ -908,6 +1097,8 @@ async def run_agent_with_tracing(
 
         base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
         llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
+        llm_calls_total = 0
+        llm_token_total = 0
 
         with llm_run_budget_context(llm_budget_limit):
             async with mcp_tools_context() as tools:
@@ -1088,8 +1279,42 @@ async def run_agent_with_tracing(
                         },
                         exc_info=True,
                     )
-                    result["error"] = str(execute_err)
-                    result["error_category"] = "SYSTEM_CRASH"
+                    from agent.utils.llm_resilience import (
+                        LLMCircuitOpenError,
+                        LLMRateLimitExceededError,
+                    )
+
+                    if isinstance(execute_err, (LLMRateLimitExceededError, LLMCircuitOpenError)):
+                        is_circuit_open = isinstance(execute_err, LLMCircuitOpenError)
+                        error_message = "LLM rate limit exceeded. Please retry shortly."
+                        error_code = "LLM_RATE_LIMIT_EXCEEDED"
+                        details_safe = {
+                            "llm_global_active": int(getattr(execute_err, "active_calls", 0)),
+                            "llm_global_limit": int(getattr(execute_err, "limit", 0)),
+                        }
+                        if is_circuit_open:
+                            error_message = "LLM circuit breaker is open. Please retry shortly."
+                            error_code = "LLM_CIRCUIT_OPEN"
+                            details_safe = {
+                                "llm_circuit_failures": int(
+                                    getattr(execute_err, "consecutive_failures", 0)
+                                )
+                            }
+
+                        result["error"] = error_message
+                        result["error_category"] = execute_err.category
+                        result["retry_after_seconds"] = float(execute_err.retry_after_seconds)
+                        result["error_metadata"] = {
+                            "category": execute_err.category,
+                            "code": error_code,
+                            "message": error_message,
+                            "is_retryable": True,
+                            "retry_after_seconds": float(execute_err.retry_after_seconds),
+                            "details_safe": details_safe,
+                        }
+                    else:
+                        result["error"] = str(execute_err)
+                        result["error_category"] = "SYSTEM_CRASH"
                     if "messages" not in result:
                         result["messages"] = []
 
@@ -1213,13 +1438,30 @@ async def run_agent_with_tracing(
                         logger.error("update_interaction tool missing!")
                         result["interaction_persisted"] = False
 
+                llm_budget_state = current_budget_state()
+                if llm_budget_state is not None:
+                    llm_calls_total = int(getattr(llm_budget_state, "call_count", 0) or 0)
+                    llm_token_total = int(getattr(llm_budget_state, "total", 0) or 0)
+                result["llm_calls"] = int(llm_calls_total)
+                result["llm_token_total"] = int(llm_token_total)
+
         # Metadata is already handled early and made sticky via telemetry_context
 
         # 3. Deterministic decision + retry summaries for debuggability
         decision_summary = build_decision_summary(result)
         retry_correction_summary = build_retry_correction_summary(result)
+        run_decision_summary = build_run_decision_summary(
+            result,
+            llm_calls=llm_calls_total,
+            llm_token_total=llm_token_total,
+        )
         result["decision_summary"] = decision_summary
         result["retry_correction_summary"] = retry_correction_summary
+        result["run_decision_summary"] = run_decision_summary
+        try:
+            get_run_summary_store().record(run_id=run_id, summary=run_decision_summary)
+        except Exception:
+            logger.warning("Failed to persist run decision summary", exc_info=True)
 
         retry_summary = result.get("retry_summary")
         if not isinstance(retry_summary, dict):
@@ -1336,7 +1578,22 @@ async def run_agent_with_tracing(
                 if isinstance(validation_report.get("affected_tables"), list)
                 else 0
             ),
+            "run.retries": int(run_decision_summary.get("retries", 0) or 0),
+            "run.llm_calls": int(run_decision_summary.get("llm_calls", 0) or 0),
+            "run.llm_token_total": int(run_decision_summary.get("llm_token_total", 0) or 0),
+            "run.schema_refresh_count": int(
+                run_decision_summary.get("schema_refresh_count", 0) or 0
+            ),
+            "run.prefetch_discard_count": int(
+                run_decision_summary.get("prefetch_discard_count", 0) or 0
+            ),
+            "run.error_categories_count": int(
+                len(run_decision_summary.get("error_categories_encountered", []))
+            ),
         }
+        terminated_reason = run_decision_summary.get("terminated_reason")
+        if terminated_reason:
+            summary_attrs["run.terminated_reason"] = str(terminated_reason)
         record_query_complexity_score(
             decision_summary.get("query_complexity", {}).get("query_complexity_score", 0)
         )
@@ -1353,7 +1610,18 @@ async def run_agent_with_tracing(
                         {
                             "decision_summary": decision_summary,
                             "retry_correction_summary": retry_correction_summary,
+                            "run_decision_summary": run_decision_summary,
                         },
+                        sort_keys=True,
+                        default=str,
+                    )[:2048]
+                },
+            )
+            active_span.add_event(
+                "agent.run_decision_summary",
+                {
+                    "summary_json": json.dumps(
+                        run_decision_summary,
                         sort_keys=True,
                         default=str,
                     )[:2048]

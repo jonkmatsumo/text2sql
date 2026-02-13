@@ -20,6 +20,12 @@ class AgentState(TypedDict):
     # Uses add_messages reducer to handle history persistence
     messages: Annotated[List[BaseMessage], add_messages]
 
+    # Unique identifier for this specific run execution
+    run_id: str
+
+    # Pinned policy snapshot for deterministic validation
+    policy_snapshot: Optional[Dict[str, Any]]
+
     # The resolved/contextualized query to use for retrieval/generation
     # If using history, this contains the synthesized standalone question
     active_query: Optional[str]
@@ -62,6 +68,7 @@ class AgentState(TypedDict):
     result_prefetch_enabled: Optional[bool]
     result_prefetch_scheduled: Optional[bool]
     result_prefetch_reason: Optional[str]
+    prefetch_discard_count: Optional[int]
     empty_result_guidance: Optional[str]
 
     # Pagination inputs for executing subsequent pages
@@ -75,6 +82,9 @@ class AgentState(TypedDict):
     deadline_ts: Optional[float]
     timeout_seconds: Optional[float]
     interactive_session: Optional[bool]
+    prefetch_kill_switch_enabled: Optional[bool]
+    schema_refresh_kill_switch_enabled: Optional[bool]
+    llm_retries_kill_switch_enabled: Optional[bool]
 
     # Schema snapshot identifier (versioning/fingerprint)
     schema_snapshot_id: Optional[str]
@@ -107,6 +117,8 @@ class AgentState(TypedDict):
     token_budget: Optional[dict]
     llm_prompt_bytes_used: Optional[int]
     llm_budget_exceeded: Optional[bool]
+    llm_calls: Optional[int]
+    llm_token_total: Optional[int]
 
     # History of error signatures in the current request to detect loops
     # Signatures are hashes of (category, normalized_message)
@@ -191,6 +203,9 @@ class AgentState(TypedDict):
     # Retry history for debugging and telemetry
     # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}
     retry_summary: Optional[dict]
+    decision_events: Optional[List[dict]]
+    decision_events_truncated: Optional[bool]
+    decision_events_dropped: Optional[int]
     correction_attempts: Optional[List[dict]]
     validation_failures: Optional[List[dict]]
     correction_attempts_truncated: Optional[bool]
@@ -199,6 +214,7 @@ class AgentState(TypedDict):
     validation_failures_dropped: Optional[int]
     retry_correction_summary: Optional[dict]
     decision_summary: Optional[dict]
+    run_decision_summary: Optional[dict]
 
     # =========================================================================
     # Cache and Metadata
@@ -253,6 +269,7 @@ class AgentState(TypedDict):
     last_tool_output: Optional[dict]
 
     # Replay bundle for deterministic execution
+    replay_mode: Optional[bool]
     replay_bundle: Optional[dict]
 
     # Explicit termination reason for better observability

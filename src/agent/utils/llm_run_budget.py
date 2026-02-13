@@ -15,6 +15,7 @@ class LLMBudgetState:
     max_tokens: int
     prompt_total: int = 0
     completion_total: int = 0
+    call_count: int = 0
 
     @property
     def total(self) -> int:
@@ -83,6 +84,7 @@ def consume_prompt_tokens(estimated_tokens: int) -> LLMBudgetState | None:
     if state.total + requested > state.max_tokens:
         raise LLMBudgetExceededError(state=state, requested_tokens=requested)
 
+    state.call_count += 1
     state.prompt_total += requested
     return state
 
@@ -123,6 +125,7 @@ def budget_telemetry_attributes(state: LLMBudgetState | None) -> dict[str, int]:
     if state is None:
         return {}
     return {
+        "llm.calls.total": int(state.call_count),
         "llm.tokens.prompt_total": int(state.prompt_total),
         "llm.tokens.completion_total": int(state.completion_total),
         "llm.budget.remaining_estimate": int(state.remaining),

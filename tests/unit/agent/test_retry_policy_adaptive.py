@@ -1,6 +1,6 @@
 """Tests for adaptive retry policy behavior."""
 
-from agent.graph import route_after_execution
+from agent.graph import route_after_execution, route_after_validation
 from common.constants.reason_codes import RetryDecisionReason
 
 
@@ -76,8 +76,9 @@ def test_adaptive_policy_keeps_retry_after_within_budget(monkeypatch):
     result = route_after_execution(state)
 
     assert result == "correct"
-    assert state["retry_after_seconds"] == 1.5
-    assert state["retry_summary"]["retry_after_seconds"] == 1.5
+    # Allow +/- 25% jitter tolerance since it is now randomized
+    assert 1.1 <= state["retry_after_seconds"] <= 1.9
+    assert 1.1 <= state["retry_summary"]["retry_after_seconds"] <= 1.9
 
 
 def test_adaptive_policy_fails_when_retry_after_exhausts_budget(monkeypatch):
@@ -251,3 +252,35 @@ def test_retry_decision_metrics_are_emitted(monkeypatch):
     assert decision == "failed"
     mock_add_counter.assert_called()
     mock_record_histogram.assert_called()
+
+
+def test_replay_mode_skips_retry_after_validation():
+    """Replay mode should not enter correction retries after validation failures."""
+    state = {
+        "error": "Validation failed",
+        "ast_validation_result": {"is_valid": False},
+        "retry_count": 0,
+        "replay_mode": True,
+    }
+
+    assert route_after_validation(state) == "synthesize"
+
+
+def test_replay_mode_disables_schema_refresh_and_retries(monkeypatch):
+    """Replay mode should fail fast instead of refreshing schema or retrying correction."""
+    monkeypatch.setenv("AGENT_RETRY_POLICY", "adaptive")
+    monkeypatch.setenv("AGENT_MAX_RETRIES", "3")
+
+    state = {
+        "error": "Schema drift detected",
+        "error_category": "schema_drift",
+        "retry_count": 0,
+        "schema_drift_suspected": True,
+        "schema_drift_auto_refresh": True,
+        "replay_mode": True,
+    }
+
+    result = route_after_execution(state)
+
+    assert result == "failed"
+    assert state["retry_summary"]["max_retries_reached"] is True
