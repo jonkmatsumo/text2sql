@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.audit import get_audit_event_buffer
+from agent.audit import AuditEventType, emit_audit_event, get_audit_event_buffer
 from agent.replay_bundle import (
     ValidationError,
     build_replay_bundle,
@@ -67,6 +67,7 @@ class AgentRunRequest(BaseModel):
     replay_mode: bool = False
     replay_bundle: Optional[dict[str, Any]] = None
     replay_allow_external_calls: bool = False
+    replay_integrity_check: bool = False
 
 
 class AgentRunResponse(BaseModel):
@@ -118,6 +119,48 @@ class AuditDiagnosticsResponse(BaseModel):
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _collect_replay_integrity_mismatches(
+    *,
+    state: dict[str, Any],
+    replay_bundle_payload: Optional[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Compare replay integrity markers between captured bundle and current run."""
+    if not isinstance(replay_bundle_payload, dict):
+        return {"replay_bundle": {"expected": "present", "actual": "missing"}}
+
+    mismatches: dict[str, dict[str, Any]] = {}
+    integrity = replay_bundle_payload.get("integrity")
+    if not isinstance(integrity, dict):
+        return {"integrity": {"expected": "present", "actual": "missing"}}
+
+    expected_schema = integrity.get("schema_snapshot_id")
+    if expected_schema is None and isinstance(replay_bundle_payload.get("schema_context"), dict):
+        expected_schema = replay_bundle_payload["schema_context"].get("schema_snapshot_id")
+    actual_schema = state.get("schema_snapshot_id") or state.get("pinned_schema_snapshot_id")
+    if expected_schema is not None and str(expected_schema) != str(actual_schema):
+        mismatches["schema_snapshot_id"] = {"expected": expected_schema, "actual": actual_schema}
+
+    expected_policy = integrity.get("policy_snapshot_id")
+    policy_snapshot = state.get("policy_snapshot")
+    actual_policy = (
+        policy_snapshot.get("snapshot_id") if isinstance(policy_snapshot, dict) else None
+    )
+    if expected_policy is not None and str(expected_policy) != str(actual_policy):
+        mismatches["policy_snapshot_id"] = {"expected": expected_policy, "actual": actual_policy}
+
+    expected_hash = integrity.get("decision_summary_hash")
+    run_decision_summary = state.get("run_decision_summary")
+    actual_hash = (
+        run_decision_summary.get("decision_summary_hash")
+        if isinstance(run_decision_summary, dict)
+        else None
+    )
+    if expected_hash is not None and str(expected_hash) != str(actual_hash):
+        mismatches["decision_summary_hash"] = {"expected": expected_hash, "actual": actual_hash}
+
+    return mismatches
 
 
 @app.post("/agent/run", response_model=AgentRunResponse)
@@ -248,6 +291,51 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                         f.write(replay_bundle_json)
                     if replay_metadata:
                         replay_metadata["export_path"] = export_path
+
+            if (
+                replay_bundle_mode == "replay"
+                and request.replay_integrity_check
+                and replay_bundle_payload is not None
+            ):
+                mismatches = _collect_replay_integrity_mismatches(
+                    state=state,
+                    replay_bundle_payload=replay_bundle_payload,
+                )
+                if mismatches:
+                    run_id = state.get("run_id") if isinstance(state, dict) else None
+                    emit_audit_event(
+                        AuditEventType.REPLAY_MISMATCH,
+                        tenant_id=request.tenant_id,
+                        run_id=run_id,
+                        error_category=ErrorCategory.INVALID_REQUEST,
+                        metadata={
+                            "mismatch_fields": ",".join(sorted(mismatches.keys())),
+                            "integrity_check": "failed",
+                        },
+                    )
+                    return AgentRunResponse(
+                        error="Replay integrity check failed.",
+                        trace_id=None,
+                        error_metadata={
+                            "category": ErrorCategory.INVALID_REQUEST.value,
+                            "code": "REPLAY_MISMATCH",
+                            "message": "Replay integrity check failed.",
+                            "provider": "agent_service",
+                            "retryable": False,
+                            "is_retryable": False,
+                            "details_safe": {
+                                "mismatch_fields": sorted(mismatches.keys()),
+                            },
+                        },
+                        replay_metadata={
+                            "mode": "replay",
+                            "execution_mode": "replay",
+                            "integrity_check": "failed",
+                        },
+                    )
+                if replay_metadata is None:
+                    replay_metadata = {}
+                replay_metadata["integrity_check"] = "passed"
 
             # Record metrics to monitor
             try:
