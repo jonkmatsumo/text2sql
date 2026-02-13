@@ -34,6 +34,7 @@ from agent.state.decision_summary import (
     build_retry_correction_summary,
     build_run_decision_summary,
 )
+from agent.state.run_summary_store import get_run_summary_store
 from agent.telemetry import SpanType, telemetry
 from agent.utils.retry_after import compute_retry_delay
 from agent.utils.schema_snapshot import (
@@ -1334,6 +1335,10 @@ async def run_agent_with_tracing(
         result["decision_summary"] = decision_summary
         result["retry_correction_summary"] = retry_correction_summary
         result["run_decision_summary"] = run_decision_summary
+        try:
+            get_run_summary_store().record(run_id=run_id, summary=run_decision_summary)
+        except Exception:
+            logger.warning("Failed to persist run decision summary", exc_info=True)
 
         retry_summary = result.get("retry_summary")
         if not isinstance(retry_summary, dict):
