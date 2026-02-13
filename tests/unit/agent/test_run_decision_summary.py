@@ -52,6 +52,14 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
     assert "rows" not in summary
 
 
+def test_build_run_decision_summary_records_replay_mode():
+    """Run summary should capture replay_mode flag for deterministic forensics."""
+    summary = build_run_decision_summary({"tenant_id": 3, "replay_mode": True})
+
+    assert summary["tenant_id"] == 3
+    assert summary["replay_mode"] is True
+
+
 @pytest.mark.asyncio
 async def test_run_agent_attaches_run_summary_and_emits_final_span_event(monkeypatch):
     """Agent entrypoint should attach run summary and emit final span summary event."""

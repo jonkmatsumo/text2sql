@@ -303,7 +303,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             )
             if bool(state.get("replay_mode")):
                 prefetch_enabled = False
-                prefetch_reason = PrefetchSuppressionReason.DISABLED.value
+                prefetch_reason = "disabled"
             seed_value = state.get("seed")
             seed = seed_value if isinstance(seed_value, int) else None
             query_signature = build_query_signature(rewritten_sql)
