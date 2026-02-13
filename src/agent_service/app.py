@@ -436,29 +436,51 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             )
     except TenantConcurrencyLimitExceeded as exc:
         agent_monitor.increment("tenant_limit_exceeded")
-        agent_metrics.add_counter(
-            "tenant.limit_exceeded.count", attributes={"tenant_id": request.tenant_id}
+        if exc.limit_kind == "rate":
+            agent_monitor.increment("rate_limited")
+        metric_name = (
+            "tenant.rate_limited.count"
+            if exc.limit_kind == "rate"
+            else "tenant.limit_exceeded.count"
         )
-        error_message = "Tenant concurrency limit exceeded. Please retry shortly."
+        agent_metrics.add_counter(
+            metric_name,
+            attributes={
+                "tenant_id": request.tenant_id,
+                "limit_kind": str(exc.limit_kind),
+            },
+        )
+        is_rate_limited = exc.limit_kind == "rate"
+        error_code = (
+            "TENANT_RATE_LIMIT_EXCEEDED" if is_rate_limited else "TENANT_CONCURRENCY_LIMIT_EXCEEDED"
+        )
+        error_message = (
+            "Tenant rate limit exceeded. Please retry shortly."
+            if is_rate_limited
+            else "Tenant concurrency limit exceeded. Please retry shortly."
+        )
         telemetry.update_current_trace(
             {
                 "tenant.active_runs": exc.active_runs,
                 "tenant.limit": exc.limit,
                 "tenant.limit_exceeded": True,
+                "tenant.limit_kind": str(exc.limit_kind),
+                "tenant.retry_after_seconds": float(exc.retry_after_seconds),
             }
         )
         return AgentRunResponse(
             error=error_message,
             trace_id=None,
             error_metadata={
-                "category": ErrorCategory.RESOURCE_EXHAUSTED.value,
-                "code": "TENANT_CONCURRENCY_LIMIT_EXCEEDED",
+                "category": ErrorCategory.LIMIT_EXCEEDED.value,
+                "code": error_code,
                 "message": error_message,
                 "provider": "agent_service",
                 "retryable": True,
                 "is_retryable": True,
                 "retry_after_seconds": exc.retry_after_seconds,
                 "details_safe": {
+                    "limit_kind": str(exc.limit_kind),
                     "tenant_active_runs": exc.active_runs,
                     "tenant_limit": exc.limit,
                 },
