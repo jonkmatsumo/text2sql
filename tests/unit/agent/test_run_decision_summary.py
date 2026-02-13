@@ -44,6 +44,9 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
         "llm_token_total": 321,
         "schema_refresh_count": 1,
         "prefetch_discard_count": 3,
+        "decision_event_counts": {},
+        "decision_events_truncated": False,
+        "decision_events_dropped": 0,
         "error_categories_encountered": ["syntax", "timeout"],
         "terminated_reason": "timeout",
     }

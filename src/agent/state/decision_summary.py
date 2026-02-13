@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from agent.state.decision_events import summarize_decision_events
 from common.config.env import get_env_int
 from common.constants.reason_codes import RejectedPlanCandidateReason
 from common.sanitization.text import redact_sensitive_info
@@ -350,6 +351,9 @@ def build_run_decision_summary(
         "llm_token_total": max(0, resolved_llm_token_total),
         "schema_refresh_count": int(normalized_state.get("schema_refresh_count", 0) or 0),
         "prefetch_discard_count": int(normalized_state.get("prefetch_discard_count", 0) or 0),
+        "decision_event_counts": summarize_decision_events(normalized_state),
+        "decision_events_truncated": bool(normalized_state.get("decision_events_truncated", False)),
+        "decision_events_dropped": int(normalized_state.get("decision_events_dropped", 0) or 0),
         "error_categories_encountered": _collect_error_categories_encountered(normalized_state),
         "terminated_reason": _resolve_final_stopping_reason(normalized_state),
     }

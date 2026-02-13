@@ -200,6 +200,9 @@ class AgentState(TypedDict):
     # Retry history for debugging and telemetry
     # Structure: {"attempts": [{"reason": str, "timestamp": float}], "budget_exhausted": bool}
     retry_summary: Optional[dict]
+    decision_events: Optional[List[dict]]
+    decision_events_truncated: Optional[bool]
+    decision_events_dropped: Optional[int]
     correction_attempts: Optional[List[dict]]
     validation_failures: Optional[List[dict]]
     correction_attempts_truncated: Optional[bool]

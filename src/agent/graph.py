@@ -29,6 +29,7 @@ from agent.runtime_metrics import (
     record_truncation_event,
 )
 from agent.state import AgentState
+from agent.state.decision_events import append_decision_event
 from agent.state.decision_summary import (
     build_decision_summary,
     build_retry_correction_summary,
@@ -428,6 +429,15 @@ def route_after_execution(state: AgentState) -> str:
                     "will_retry": False,
                 },
             )
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="fail",
+            reason=RetryDecisionReason.UNSUPPORTED_CAPABILITY.value,
+            retry_count=int(state.get("retry_count", 0) or 0),
+            error_category=error_category,
+            span=span,
+        )
         return "failed"
 
     # Guarded Automatic Schema Refresh
@@ -438,6 +448,15 @@ def route_after_execution(state: AgentState) -> str:
     ):
         refresh_count = state.get("schema_refresh_count", 0)
         if refresh_count < 1:
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="refresh_schema",
+                reason="schema_drift_auto_refresh",
+                retry_count=int(state.get("retry_count", 0) or 0),
+                error_category=error_category,
+                span=telemetry.get_current_span(),
+            )
             return "refresh_schema"
 
     deadline_ts = state.get("deadline_ts")
@@ -506,6 +525,15 @@ def route_after_execution(state: AgentState) -> str:
             )
             if span:
                 span.add_event("system.decision", decision_summary.to_dict())
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="fail",
+                reason=RetryDecisionReason.NON_RETRYABLE_CATEGORY.value,
+                retry_count=retry_count,
+                error_category=error_category,
+                span=span,
+            )
             return "failed"
 
         if retry_after_seconds is not None and float(retry_after_seconds) > 0:
@@ -551,6 +579,16 @@ def route_after_execution(state: AgentState) -> str:
                 )
                 if span:
                     span.add_event("system.decision", decision_summary.to_dict())
+                append_decision_event(
+                    state,
+                    node="route_after_execution",
+                    decision="stop_budget",
+                    reason=RetryDecisionReason.BUDGET_EXHAUSTED_RETRY_AFTER.value,
+                    retry_count=retry_count,
+                    error_category=state.get("error_category"),
+                    retry_after_seconds=bounded_retry_after,
+                    span=span,
+                )
                 return "failed"
             state["retry_after_seconds"] = bounded_retry_after
             retry_summary["retry_after_seconds"] = bounded_retry_after
@@ -604,6 +642,16 @@ def route_after_execution(state: AgentState) -> str:
             )
             if span:
                 span.add_event("system.decision", decision_summary.to_dict())
+            append_decision_event(
+                state,
+                node="route_after_execution",
+                decision="stop_budget",
+                reason=RetryDecisionReason.INSUFFICIENT_BUDGET.value,
+                retry_count=retry_count,
+                error_category=state.get("error_category"),
+                retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+                span=span,
+            )
             return "failed"
 
     if span:
@@ -630,6 +678,16 @@ def route_after_execution(state: AgentState) -> str:
         )
         if span:
             span.add_event("system.decision", decision_summary.to_dict())
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="stop_budget",
+            reason=RetryDecisionReason.DEADLINE_EXCEEDED.value,
+            retry_count=retry_count,
+            error_category=state.get("error_category"),
+            retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+            span=span,
+        )
         return "failed"
 
     if retry_count >= max_retries:
@@ -654,6 +712,16 @@ def route_after_execution(state: AgentState) -> str:
         )
         if span:
             span.add_event("system.decision", decision_summary.to_dict())
+        append_decision_event(
+            state,
+            node="route_after_execution",
+            decision="fail",
+            reason=RetryDecisionReason.MAX_RETRIES_REACHED.value,
+            retry_count=retry_count,
+            error_category=error_category,
+            retry_after_seconds=bounded_retry_after if bounded_retry_after > 0 else None,
+            span=span,
+        )
         return "failed"
 
     state["retry_summary"] = retry_summary
@@ -694,6 +762,16 @@ def route_after_execution(state: AgentState) -> str:
     )
     if span:
         span.add_event("system.decision", decision_summary.to_dict())
+    append_decision_event(
+        state,
+        node="route_after_execution",
+        decision="retry",
+        reason=reason_code.value,
+        retry_count=retry_count,
+        error_category=error_category,
+        retry_after_seconds=state.get("retry_after_seconds"),
+        span=span,
+    )
     return "correct"  # Go to self-correction
 
 
@@ -945,6 +1023,9 @@ async def run_agent_with_tracing(
             "llm_prompt_bytes_used": 0,
             "llm_budget_exceeded": False,
             "error_signatures": [],
+            "decision_events": [],
+            "decision_events_truncated": False,
+            "decision_events_dropped": 0,
         }
 
         # Config with thread_id for checkpointer
