@@ -12,7 +12,7 @@ from typing import Any, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.clarify import clarify_node
 from agent.nodes.correct import correct_sql_node
@@ -487,10 +487,13 @@ def route_after_execution(state: AgentState) -> str:
         if refresh_disabled_reason == "kill_switch_disable_schema_refresh":
             emit_audit_event(
                 AuditEventType.KILL_SWITCH_OVERRIDE,
+                source=AuditEventSource.AGENT,
                 tenant_id=state.get("tenant_id"),
                 run_id=state.get("run_id"),
                 metadata={
+                    "reason_code": "kill_switch_disable_schema_refresh",
                     "kill_switch": "disable_schema_refresh",
+                    "decision": "override",
                     "scope": "route_after_execution",
                 },
             )
@@ -764,10 +767,13 @@ def route_after_execution(state: AgentState) -> str:
             reason_value = "kill_switch_disable_llm_retries"
             emit_audit_event(
                 AuditEventType.KILL_SWITCH_OVERRIDE,
+                source=AuditEventSource.AGENT,
                 tenant_id=state.get("tenant_id"),
                 run_id=state.get("run_id"),
                 metadata={
+                    "reason_code": "kill_switch_disable_llm_retries",
                     "kill_switch": "disable_llm_retries",
+                    "decision": "override",
                     "scope": "route_after_execution",
                 },
             )
@@ -1030,9 +1036,12 @@ async def run_agent_with_tracing(
         if replay_mode or replay_bundle:
             emit_audit_event(
                 AuditEventType.REPLAY_MODE_ACTIVATED,
+                source=AuditEventSource.AGENT,
                 tenant_id=tenant_id,
                 run_id=run_id,
                 metadata={
+                    "reason_code": "replay_mode_enabled",
+                    "decision": "record",
                     "replay_mode_flag": bool(replay_mode),
                     "replay_bundle_present": bool(replay_bundle),
                 },

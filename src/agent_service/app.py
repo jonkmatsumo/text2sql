@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.audit import AuditEventType, emit_audit_event, get_audit_event_buffer
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event, get_audit_event_buffer
 from agent.replay_bundle import (
     ValidationError,
     build_replay_bundle,
@@ -305,10 +305,13 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     run_id = state.get("run_id") if isinstance(state, dict) else None
                     emit_audit_event(
                         AuditEventType.REPLAY_MISMATCH,
+                        source=AuditEventSource.AGENT,
                         tenant_id=request.tenant_id,
                         run_id=run_id,
                         error_category=ErrorCategory.INVALID_REQUEST,
                         metadata={
+                            "reason_code": "replay_integrity_mismatch",
+                            "decision": "reject",
                             "mismatch_fields": ",".join(sorted(mismatches.keys())),
                             "integrity_check": "failed",
                         },

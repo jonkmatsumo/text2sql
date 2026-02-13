@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from agent.models.run_budget import RunBudgetExceededError, consume_tool_call_budget
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
@@ -85,8 +85,11 @@ class MCPToolWrapper:
         except RunBudgetExceededError as exc:
             emit_audit_event(
                 AuditEventType.BUDGET_EXCEEDED,
+                source=AuditEventSource.AGENT,
                 error_category=ErrorCategory.BUDGET_EXCEEDED,
                 metadata={
+                    "reason_code": "run_budget_exceeded",
+                    "decision": "reject",
                     "budget_dimension": exc.dimension,
                     "budget_limit": exc.limit,
                     "budget_used": exc.used,

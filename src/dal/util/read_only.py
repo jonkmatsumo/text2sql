@@ -73,16 +73,18 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
     if not read_only:
         return
     if is_mutating_sql(sql, provider):
-        from agent.audit import AuditEventType, emit_audit_event
+        from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
         from common.models.error_metadata import ErrorCategory
 
         emit_audit_event(
             AuditEventType.READONLY_VIOLATION,
+            source=AuditEventSource.DAL,
             error_category=ErrorCategory.INVALID_REQUEST,
             metadata={
                 "provider": provider,
                 "read_only": bool(read_only),
-                "reason": "mutating_sql_blocked",
+                "reason_code": "mutating_sql_blocked",
+                "decision": "reject",
             },
         )
         raise PermissionError(

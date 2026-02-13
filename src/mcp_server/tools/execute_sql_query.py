@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from opentelemetry import trace
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorCategory
@@ -356,11 +356,13 @@ async def handler(
         if "forbidden statement type" in validation_error.lower():
             emit_audit_event(
                 AuditEventType.READONLY_VIOLATION,
+                source=AuditEventSource.MCP,
                 tenant_id=tenant_id,
                 error_category=ErrorCategory.INVALID_REQUEST,
                 metadata={
                     "provider": provider,
-                    "reason": "ast_forbidden_statement_type",
+                    "reason_code": "ast_forbidden_statement_type",
+                    "decision": "reject",
                 },
             )
         return _construct_error_response(
@@ -374,10 +376,13 @@ async def handler(
     if complexity_error:
         emit_audit_event(
             AuditEventType.SQL_COMPLEXITY_REJECTION,
+            source=AuditEventSource.MCP,
             tenant_id=tenant_id,
             error_category=ErrorCategory.INVALID_REQUEST,
             metadata={
                 "provider": provider,
+                "reason_code": "sql_complexity_limit_exceeded",
+                "decision": "reject",
                 "limit_name": (complexity_metadata or {}).get("complexity_limit_name"),
                 "limit_value": (complexity_metadata or {}).get("complexity_limit_value"),
                 "limit_measured": (complexity_metadata or {}).get("complexity_limit_measured"),
@@ -423,6 +428,22 @@ async def handler(
         fallback_policy = negotiation.fallback_policy if negotiation else "off"
         fallback_applied = negotiation.fallback_applied if negotiation else False
         fallback_mode = negotiation.fallback_mode if negotiation else "none"
+        emit_audit_event(
+            AuditEventType.POLICY_REJECTION,
+            source=AuditEventSource.MCP,
+            tenant_id=tenant_id,
+            error_category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            metadata={
+                "provider": provider_name,
+                "reason_code": "capability_denied",
+                "decision": "reject",
+                "required_capability": required_capability,
+                "capability_supported": bool(capability_supported),
+                "fallback_policy": fallback_policy,
+                "fallback_applied": bool(fallback_applied),
+                "fallback_mode": fallback_mode,
+            },
+        )
 
         return _construct_error_response(
             message=f"Requested capability is not supported: {required_capability}.",

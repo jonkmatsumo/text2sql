@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from agent.models.run_budget import RunBudgetExceededError, consume_sql_row_budget
 from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
@@ -186,11 +186,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
             logger.warning("Blocked unsafe SQL due to policy enforcement: %s", type(e).__name__)
             emit_audit_event(
                 AuditEventType.POLICY_REJECTION,
+                source=AuditEventSource.AGENT,
                 tenant_id=tenant_id,
                 run_id=state.get("run_id"),
                 error_category=ErrorCategory.INVALID_REQUEST,
                 metadata={
-                    "reason": "agent_policy_enforcer_rejection",
+                    "reason_code": "agent_policy_enforcer_rejection",
+                    "decision": "reject",
                     "exception_type": type(e).__name__,
                 },
             )
@@ -321,10 +323,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 prefetch_reason = "disabled_kill_switch"
                 emit_audit_event(
                     AuditEventType.KILL_SWITCH_OVERRIDE,
+                    source=AuditEventSource.AGENT,
                     tenant_id=tenant_id,
                     run_id=state.get("run_id"),
                     metadata={
+                        "reason_code": "kill_switch_disable_prefetch",
                         "kill_switch": "disable_prefetch",
+                        "decision": "override",
                         "scope": "execute_node",
                     },
                 )
@@ -858,10 +863,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     error_message = "Run SQL row budget exceeded for this request."
                     emit_audit_event(
                         AuditEventType.BUDGET_EXCEEDED,
+                        source=AuditEventSource.AGENT,
                         tenant_id=tenant_id,
                         run_id=state.get("run_id"),
                         error_category=ErrorCategory.BUDGET_EXCEEDED,
                         metadata={
+                            "reason_code": "run_budget_exceeded",
+                            "decision": "reject",
                             "budget_dimension": budget_exc.dimension,
                             "budget_limit": budget_exc.limit,
                             "budget_used": budget_exc.used,

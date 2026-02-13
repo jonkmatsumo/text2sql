@@ -133,6 +133,11 @@ class TenantConcurrencyLimiter:
         self._state_lock = asyncio.Lock()
         self._tenant_states: OrderedDict[int, _TenantState] = OrderedDict()
 
+    def _audit_source_for_scope(self) -> str:
+        if self._metrics_scope == "mcp_tool":
+            return "mcp"
+        return "agent"
+
     def _warm_start_active(self, now: float) -> bool:
         if self._warm_start_cooldown_seconds <= 0:
             return False
@@ -279,11 +284,14 @@ class TenantConcurrencyLimiter:
                 from common.models.error_metadata import ErrorCategory
 
                 emit_audit_event(
-                    AuditEventType.TENANT_CONCURRENCY_BLOCK,
+                    AuditEventType.TENANT_CONCURRENCY_LIMIT_EXCEEDED,
+                    source=self._audit_source_for_scope(),
                     tenant_id=tenant_id,
-                    error_category=ErrorCategory.RESOURCE_EXHAUSTED,
+                    error_category=ErrorCategory.LIMIT_EXCEEDED,
                     metadata={
                         "scope": self._metrics_scope,
+                        "reason_code": "tenant_concurrency_limit_exceeded",
+                        "decision": "reject",
                         "active_runs": int(state.active_runs),
                         "limit": int(effective_limit),
                         "warm_start": bool(warm_start_active),
@@ -306,14 +314,16 @@ class TenantConcurrencyLimiter:
                 from common.models.error_metadata import ErrorCategory
 
                 emit_audit_event(
-                    AuditEventType.TENANT_CONCURRENCY_BLOCK,
+                    AuditEventType.TENANT_RATE_LIMITED,
+                    source=self._audit_source_for_scope(),
                     tenant_id=tenant_id,
-                    error_category=ErrorCategory.RESOURCE_EXHAUSTED,
+                    error_category=ErrorCategory.LIMIT_EXCEEDED,
                     metadata={
                         "scope": self._metrics_scope,
+                        "reason_code": "tenant_rate_limited",
+                        "decision": "reject",
                         "active_runs": int(state.active_runs),
                         "limit": int(effective_limit),
-                        "limit_kind": "rate",
                         "burst_capacity": int(effective_burst_capacity),
                         "warm_start": bool(warm_start_active),
                         "retry_after_seconds": retry_after,
