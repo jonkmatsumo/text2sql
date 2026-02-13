@@ -61,6 +61,30 @@ def _safe_env_int(name: str, default: int, minimum: int) -> int:
     return max(minimum, int(parsed))
 
 
+def _is_replay_mode(state: AgentState) -> bool:
+    return bool(state.get("replay_mode"))
+
+
+def _resolve_run_seed(*, replay_mode: bool) -> Optional[int]:
+    """Resolve deterministic run seed, forcing one for replay mode."""
+    if replay_mode:
+        try:
+            seed = get_env_int("AGENT_LLM_SEED", 0)
+        except ValueError:
+            return 0
+        if seed is None:
+            return 0
+        return int(seed)
+
+    try:
+        seed = get_env_int("AGENT_LLM_SEED", None)
+    except ValueError:
+        return None
+    if seed is None:
+        return None
+    return int(seed)
+
+
 def run_telemetry_configure():
     """Configure telemetry at runtime to avoid import-time side effects."""
     # Configure Telemetry (OTEL only)
@@ -242,7 +266,7 @@ def route_after_validation(state: AgentState) -> str:
         str: Next node name
     """
     retry_count = state.get("retry_count", 0)
-    max_retries = _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
+    max_retries = 0 if _is_replay_mode(state) else _safe_env_int("AGENT_MAX_RETRIES", 3, 0)
     error_category = str(state.get("error_category") or "").strip().lower()
 
     ast_result = state.get("ast_validation_result")
@@ -275,6 +299,12 @@ def _max_retry_attempts() -> int:
     if configured is None:
         configured = 3
     return max(1, int(configured))
+
+
+def _effective_max_retry_attempts(state: AgentState) -> int:
+    if _is_replay_mode(state):
+        return 0
+    return _max_retry_attempts()
 
 
 def _adaptive_is_retryable(
@@ -400,7 +430,11 @@ def route_after_execution(state: AgentState) -> str:
         return "failed"
 
     # Guarded Automatic Schema Refresh
-    if state.get("schema_drift_suspected") and state.get("schema_drift_auto_refresh"):
+    if (
+        state.get("schema_drift_suspected")
+        and state.get("schema_drift_auto_refresh")
+        and not _is_replay_mode(state)
+    ):
         refresh_count = state.get("schema_refresh_count", 0)
         if refresh_count < 1:
             return "refresh_schema"
@@ -409,7 +443,7 @@ def route_after_execution(state: AgentState) -> str:
     remaining = None
     estimated_correction_budget = _estimate_correction_budget_seconds(state)
     retry_count = state.get("retry_count", 0)
-    max_retries = _max_retry_attempts()
+    max_retries = _effective_max_retry_attempts(state)
     retry_policy = _retry_policy_mode()
     retry_after_seconds = state.get("retry_after_seconds")
 
@@ -899,7 +933,7 @@ async def run_agent_with_tracing(
             "timeout_seconds": timeout_seconds,
             "page_token": page_token,
             "page_size": page_size,
-            "seed": get_env_int("AGENT_LLM_SEED", None),
+            "seed": _resolve_run_seed(replay_mode=bool(replay_mode)),
             "interactive_session": interactive_session,
             "replay_mode": bool(replay_mode),
             "replay_bundle": replay_bundle,

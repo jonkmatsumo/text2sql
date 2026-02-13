@@ -302,7 +302,10 @@ Be concise but informative. Use numbers and data from the results.
             ]
         )
 
-        chain = prompt | get_llm(temperature=get_synthesize_temperature(), seed=state.get("seed"))
+        synthesize_temperature = (
+            0.0 if bool(state.get("replay_mode")) else get_synthesize_temperature()
+        )
+        chain = prompt | get_llm(temperature=synthesize_temperature, seed=state.get("seed"))
 
         response = chain.invoke(
             {
