@@ -117,3 +117,28 @@ async def test_tenant_slot_released_when_call_is_cancelled(monkeypatch):
     follow_up = await traced(tenant_id=404)
     assert isinstance(follow_up, dict)
     assert follow_up.get("error") is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_rate_smoothing_rejects_rapid_burst(monkeypatch):
+    """Tool-level limiter should throttle rapid bursts based on token state."""
+    monkeypatch.setenv("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", "4")
+    monkeypatch.setenv("MCP_TENANT_RATE_BURST_CAPACITY", "1")
+    monkeypatch.setenv("MCP_TENANT_RATE_REFILL_PER_SECOND", "1")
+    monkeypatch.setenv("MCP_TENANT_LIMIT_RETRY_AFTER_SECONDS", "0.5")
+    reset_mcp_tool_tenant_limiter()
+
+    async def quick_handler(tenant_id: int):
+        _ = tenant_id
+        return _ok_execute_response()
+
+    traced = trace_tool("execute_sql_query")(quick_handler)
+
+    first = await traced(tenant_id=77)
+    assert isinstance(first, dict)
+    assert first.get("error") is None
+
+    second_raw = await traced(tenant_id=77)
+    second = json.loads(second_raw) if isinstance(second_raw, str) else second_raw
+    assert second["error"]["code"] == "TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED"
+    assert second["error"]["retry_after_seconds"] > 0

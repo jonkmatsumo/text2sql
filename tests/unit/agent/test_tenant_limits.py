@@ -92,3 +92,52 @@ async def test_cancellation_releases_tenant_slot():
     # Slot should be available again after cancellation cleanup.
     async with limiter.acquire(tenant_id=9):
         pass
+
+
+@pytest.mark.asyncio
+async def test_rate_smoothing_rejects_rapid_burst_with_retry_after():
+    """Rapid sequential bursts should be throttled when rate tokens are exhausted."""
+    limiter = TenantConcurrencyLimiter(
+        per_tenant_limit=4,
+        max_tracked_tenants=10,
+        idle_ttl_seconds=60.0,
+        retry_after_seconds=1.0,
+        refill_rate=1.0,
+        burst_capacity=2,
+    )
+
+    async with limiter.acquire(tenant_id=23):
+        pass
+    async with limiter.acquire(tenant_id=23):
+        pass
+
+    with pytest.raises(TenantConcurrencyLimitExceeded) as exc_info:
+        async with limiter.acquire(tenant_id=23):
+            pass
+    assert exc_info.value.limit_kind == "rate"
+    assert exc_info.value.retry_after_seconds > 0
+    assert exc_info.value.tokens_remaining is not None
+
+
+@pytest.mark.asyncio
+async def test_rate_smoothing_allows_calls_after_refill():
+    """Calls should resume once enough tokens have been refilled over time."""
+    limiter = TenantConcurrencyLimiter(
+        per_tenant_limit=2,
+        max_tracked_tenants=10,
+        idle_ttl_seconds=60.0,
+        retry_after_seconds=1.0,
+        refill_rate=5.0,
+        burst_capacity=1,
+    )
+
+    async with limiter.acquire(tenant_id=31):
+        pass
+
+    with pytest.raises(TenantConcurrencyLimitExceeded):
+        async with limiter.acquire(tenant_id=31):
+            pass
+
+    await asyncio.sleep(0.25)
+    async with limiter.acquire(tenant_id=31):
+        pass
