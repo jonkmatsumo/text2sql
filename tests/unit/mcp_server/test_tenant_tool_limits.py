@@ -123,8 +123,8 @@ async def test_tenant_slot_released_when_call_is_cancelled(monkeypatch):
 async def test_mcp_rate_smoothing_rejects_rapid_burst(monkeypatch):
     """Tool-level limiter should throttle rapid bursts based on token state."""
     monkeypatch.setenv("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", "4")
-    monkeypatch.setenv("MCP_TENANT_RATE_BURST_CAPACITY", "1")
-    monkeypatch.setenv("MCP_TENANT_RATE_REFILL_PER_SECOND", "1")
+    monkeypatch.setenv("TENANT_RATE_LIMIT_BURST", "1")
+    monkeypatch.setenv("TENANT_RATE_LIMIT_TOKENS_PER_SECOND", "1")
     monkeypatch.setenv("MCP_TENANT_LIMIT_RETRY_AFTER_SECONDS", "0.5")
     reset_mcp_tool_tenant_limiter()
 
@@ -140,5 +140,33 @@ async def test_mcp_rate_smoothing_rejects_rapid_burst(monkeypatch):
 
     second_raw = await traced(tenant_id=77)
     second = json.loads(second_raw) if isinstance(second_raw, str) else second_raw
-    assert second["error"]["code"] == "TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED"
+    assert second["error"]["code"] == "TENANT_TOOL_RATE_LIMIT_EXCEEDED"
     assert second["error"]["retry_after_seconds"] > 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_rate_smoothing_isolated_per_tenant(monkeypatch):
+    """Rate tokens should be tracked independently per tenant."""
+    monkeypatch.setenv("MCP_TENANT_MAX_CONCURRENT_TOOL_CALLS", "4")
+    monkeypatch.setenv("TENANT_RATE_LIMIT_BURST", "1")
+    monkeypatch.setenv("TENANT_RATE_LIMIT_TOKENS_PER_SECOND", "1")
+    reset_mcp_tool_tenant_limiter()
+
+    async def quick_handler(tenant_id: int):
+        _ = tenant_id
+        return _ok_execute_response()
+
+    traced = trace_tool("execute_sql_query")(quick_handler)
+    first_tenant_one = await traced(tenant_id=701)
+    assert isinstance(first_tenant_one, dict)
+    assert first_tenant_one.get("error") is None
+
+    second_tenant_one = await traced(tenant_id=701)
+    second_payload = (
+        json.loads(second_tenant_one) if isinstance(second_tenant_one, str) else second_tenant_one
+    )
+    assert second_payload["error"]["code"] == "TENANT_TOOL_RATE_LIMIT_EXCEEDED"
+
+    first_tenant_two = await traced(tenant_id=702)
+    assert isinstance(first_tenant_two, dict)
+    assert first_tenant_two.get("error") is None

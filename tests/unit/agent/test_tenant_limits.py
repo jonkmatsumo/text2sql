@@ -144,6 +144,30 @@ async def test_rate_smoothing_allows_calls_after_refill():
 
 
 @pytest.mark.asyncio
+async def test_rate_smoothing_is_independent_per_tenant():
+    """Rate limiting state should remain isolated per tenant."""
+    limiter = TenantConcurrencyLimiter(
+        per_tenant_limit=2,
+        max_tracked_tenants=10,
+        idle_ttl_seconds=60.0,
+        retry_after_seconds=1.0,
+        refill_rate=1.0,
+        burst_capacity=1,
+    )
+
+    async with limiter.acquire(tenant_id=41):
+        pass
+
+    with pytest.raises(TenantConcurrencyLimitExceeded):
+        async with limiter.acquire(tenant_id=41):
+            pass
+
+    # Independent tenant should still be admitted.
+    async with limiter.acquire(tenant_id=42):
+        pass
+
+
+@pytest.mark.asyncio
 async def test_warm_start_temporarily_reduces_tenant_concurrency():
     """Warm-start should enforce a lower temporary concurrency ceiling per tenant."""
     limiter = TenantConcurrencyLimiter(
