@@ -1664,6 +1664,15 @@ async def run_agent_with_tracing(
                 (run_decision_summary.get("tool_calls") or {}).get("total", 0) or 0
             ),
             "run.rows_total": int((run_decision_summary.get("rows") or {}).get("total", 0) or 0),
+            "run.rows_returned_total": int(
+                (run_decision_summary.get("rows_returned") or {}).get("total", 0) or 0
+            ),
+            "run.tool_calls_limit": int(
+                (run_decision_summary.get("tool_calls") or {}).get("limit", 0) or 0
+            ),
+            "run.rows_returned_limit": int(
+                (run_decision_summary.get("rows_returned") or {}).get("limit", 0) or 0
+            ),
             "run.budget_exceeded.llm": bool(
                 (run_decision_summary.get("budget_exceeded") or {}).get("llm", False)
             ),

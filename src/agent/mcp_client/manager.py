@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from agent.mcp_client.sdk_client import MCPClient
+from agent.models.run_budget import RunBudgetExceededError, consume_tool_call_budget
 from agent.telemetry import telemetry
 from common.models.error_metadata import ToolError
 
@@ -282,6 +283,9 @@ class McpClientSession:
 
         for attempt in range(config.max_retries + 1):
             try:
+                # The first attempt is consumed in MCPToolWrapper; retries are consumed here.
+                if attempt > 0:
+                    consume_tool_call_budget(1)
                 # Record attempt identifiers in the current span
                 span = telemetry.get_current_span()
                 if span:
@@ -324,6 +328,8 @@ class McpClientSession:
                 )
                 await asyncio.sleep(delay)
                 continue
+            except RunBudgetExceededError:
+                raise
             except Exception as exc:
                 last_exception = exc
 

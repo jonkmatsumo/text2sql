@@ -5,7 +5,7 @@ import time
 from typing import Any, Optional
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
-from agent.models.run_budget import RunBudgetExceededError, consume_sql_row_budget
+from agent.models.run_budget import RunBudgetExceededError, consume_rows_returned_budget
 from agent.models.termination import TerminationReason
 from agent.replay_bundle import lookup_replay_tool_output
 from agent.state import AgentState
@@ -639,6 +639,29 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                             )
 
                             if page_envelope.is_error():
+                                page_error = page_envelope.error
+                                page_error_category = (
+                                    page_error.category
+                                    if page_error is not None
+                                    else ErrorCategory.UNKNOWN.value
+                                )
+                                if page_error_category == ErrorCategory.BUDGET_EXCEEDED.value:
+                                    page_error_message = (
+                                        page_error.message
+                                        if page_error is not None
+                                        else "Run budget exceeded during auto-pagination."
+                                    )
+                                    return {
+                                        "error": page_error_message,
+                                        "query_result": None,
+                                        "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
+                                        "error_metadata": (
+                                            page_error.to_dict() if page_error is not None else None
+                                        ),
+                                        "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                                        "prefetch_discard_count": prefetch_discard_count,
+                                        **_latency_payload(),
+                                    }
                                 result_auto_pagination_stopped_reason = (
                                     PaginationStopReason.FETCH_ERROR.value
                                 )
@@ -854,57 +877,64 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
                 result_columns = envelope.columns
                 error = None
-
                 try:
-                    consume_sql_row_budget(
-                        len(query_result) if isinstance(query_result, list) else 0
-                    )
-                except RunBudgetExceededError as budget_exc:
-                    error_message = "Run SQL row budget exceeded for this request."
-                    emit_audit_event(
-                        AuditEventType.BUDGET_EXCEEDED,
-                        source=AuditEventSource.AGENT,
-                        tenant_id=tenant_id,
-                        run_id=state.get("run_id"),
-                        error_category=ErrorCategory.BUDGET_EXCEEDED,
-                        metadata={
-                            "reason_code": "run_budget_exceeded",
-                            "decision": "reject",
-                            "budget_dimension": budget_exc.dimension,
-                            "budget_limit": budget_exc.limit,
-                            "budget_used": budget_exc.used,
-                            "budget_requested": budget_exc.requested,
-                        },
-                    )
-                    span.set_outputs(
-                        {
-                            "error": error_message,
-                            "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
-                        }
-                    )
-                    span.set_attribute("error_category", ErrorCategory.BUDGET_EXCEEDED.value)
-                    span.set_attribute("timeout.triggered", False)
-                    return {
-                        "error": error_message,
-                        "query_result": None,
-                        "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
-                        "error_metadata": {
-                            "category": ErrorCategory.BUDGET_EXCEEDED.value,
-                            "code": RunBudgetExceededError.code,
-                            "message": error_message,
-                            "is_retryable": False,
-                            "provider": "agent_execute",
-                            "details_safe": {
+                    from agent.mcp_client.tool_wrapper import MCPToolWrapper
+
+                    wrapper_enforced = isinstance(executor_tool, MCPToolWrapper)
+                except Exception:
+                    wrapper_enforced = False
+
+                if not wrapper_enforced:
+                    try:
+                        consume_rows_returned_budget(
+                            len(query_result) if isinstance(query_result, list) else 0
+                        )
+                    except RunBudgetExceededError as budget_exc:
+                        error_message = "Run row-returned budget exceeded for this request."
+                        emit_audit_event(
+                            AuditEventType.RUN_BUDGET_EXCEEDED,
+                            source=AuditEventSource.AGENT,
+                            tenant_id=tenant_id,
+                            run_id=state.get("run_id"),
+                            error_category=ErrorCategory.BUDGET_EXCEEDED,
+                            metadata={
+                                "reason_code": "run_budget_exceeded",
+                                "decision": "reject",
                                 "budget_dimension": budget_exc.dimension,
                                 "budget_limit": budget_exc.limit,
                                 "budget_used": budget_exc.used,
                                 "budget_requested": budget_exc.requested,
                             },
-                        },
-                        "sql_row_budget_exceeded": True,
-                        "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
-                        **_latency_payload(),
-                    }
+                        )
+                        span.set_outputs(
+                            {
+                                "error": error_message,
+                                "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
+                            }
+                        )
+                        span.set_attribute("error_category", ErrorCategory.BUDGET_EXCEEDED.value)
+                        span.set_attribute("timeout.triggered", False)
+                        return {
+                            "error": error_message,
+                            "query_result": None,
+                            "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
+                            "error_metadata": {
+                                "category": ErrorCategory.BUDGET_EXCEEDED.value,
+                                "code": RunBudgetExceededError.code,
+                                "message": error_message,
+                                "is_retryable": False,
+                                "provider": "agent_execute",
+                                "details_safe": {
+                                    "budget_dimension": budget_exc.dimension,
+                                    "budget_limit": budget_exc.limit,
+                                    "budget_used": budget_exc.used,
+                                    "budget_requested": budget_exc.requested,
+                                },
+                            },
+                            "sql_row_budget_exceeded": True,
+                            "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                            **_latency_payload(),
+                        }
 
                 span.set_outputs(
                     {

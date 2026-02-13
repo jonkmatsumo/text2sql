@@ -23,7 +23,13 @@ from common.sanitization.text import redact_sensitive_info
 from common.utils.hashing import canonical_json_hash
 
 _MAX_REASON_TEXT_LENGTH = 96
-_VOLATILE_RUN_SUMMARY_FIELDS = {"llm_calls", "llm_token_total", "tool_calls", "rows"}
+_VOLATILE_RUN_SUMMARY_FIELDS = {
+    "llm_calls",
+    "llm_token_total",
+    "tool_calls",
+    "rows",
+    "rows_returned",
+}
 
 
 def _bounded_events(events: Any, max_items: int) -> list[dict]:
@@ -340,6 +346,25 @@ def build_run_decision_summary(
         if llm_token_total is not None
         else int(normalized_state.get("llm_token_total", 0) or 0)
     )
+    run_budget = normalized_state.get("run_budget")
+    run_budget_payload = run_budget if isinstance(run_budget, dict) else {}
+    tool_calls_limit = int(
+        run_budget_payload.get(
+            "run_max_tool_calls",
+            run_budget_payload.get("tool_call_budget", 0),
+        )
+        or 0
+    )
+    rows_returned_limit = int(
+        run_budget_payload.get(
+            "run_max_rows_returned",
+            run_budget_payload.get("sql_row_budget", 0),
+        )
+        or 0
+    )
+    llm_tokens_limit = int(run_budget_payload.get("llm_token_budget", 0) or 0)
+    tool_calls_total = int(normalized_state.get("tool_calls_total", 0) or 0)
+    rows_returned_total = int(normalized_state.get("rows_total", 0) or 0)
 
     summary = {
         "tenant_id": normalized_state.get("tenant_id"),
@@ -352,10 +377,21 @@ def build_run_decision_summary(
         "llm_calls": max(0, resolved_llm_calls),
         "llm_token_total": max(0, resolved_llm_token_total),
         "tool_calls": {
-            "total": int(normalized_state.get("tool_calls_total", 0) or 0),
+            "total": tool_calls_total,
+            "limit": tool_calls_limit,
+        },
+        "rows_returned": {
+            "total": rows_returned_total,
+            "limit": rows_returned_limit,
         },
         "rows": {
-            "total": int(normalized_state.get("rows_total", 0) or 0),
+            "total": rows_returned_total,
+            "limit": rows_returned_limit,
+        },
+        "budget_ceilings": {
+            "llm_tokens": llm_tokens_limit,
+            "tool_calls": tool_calls_limit,
+            "rows_returned": rows_returned_limit,
         },
         "budget_exceeded": {
             "llm": bool(normalized_state.get("llm_budget_exceeded", False)),

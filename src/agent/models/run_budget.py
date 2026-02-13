@@ -205,6 +205,9 @@ def extract_rows_returned_from_tool_result(payload: Any) -> int:
         except Exception:
             return 0
 
+    if isinstance(data, list):
+        return len(data)
+
     if not isinstance(data, dict):
         return 0
 
