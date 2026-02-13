@@ -151,7 +151,7 @@ def _record_schema_refresh_cooldown_active(retry_after_seconds: float) -> None:
         span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
     agent_monitor.increment("schema_refresh_storm")
     agent_metrics.add_counter(
-        "schema.refresh.cooldown_active",
+        "schema.refresh.cooldown_block.count",
         attributes={"scope": "schema_snapshot_id"},
         description="Schema refresh cooldown rejections",
     )

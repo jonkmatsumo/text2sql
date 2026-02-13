@@ -20,6 +20,7 @@ from agent.replay_bundle import (
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
 from common.models.error_metadata import ErrorCategory
+from common.observability.metrics import agent_metrics
 from common.observability.monitor import RunSummary, agent_monitor
 from common.sanitization.text import redact_sensitive_info
 from common.tenancy.limits import TenantConcurrencyLimitExceeded, get_agent_run_tenant_limiter
@@ -256,8 +257,10 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
                 if err_cat == "LLM_CIRCUIT_OPEN":
                     agent_monitor.increment("circuit_breaker_open")
+                    agent_metrics.add_counter("llm.circuit.open.count")
                 elif err_cat == "LLM_RATE_LIMIT_EXCEEDED":
                     agent_monitor.increment("rate_limited")
+                    agent_metrics.add_counter("llm.rate_limited.count")
             except Exception:
                 pass  # Don't fail request on monitoring error
 
@@ -331,6 +334,9 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             )
     except TenantConcurrencyLimitExceeded as exc:
         agent_monitor.increment("tenant_limit_exceeded")
+        agent_metrics.add_counter(
+            "tenant.limit_exceeded.count", attributes={"tenant_id": request.tenant_id}
+        )
         error_message = "Tenant concurrency limit exceeded. Please retry shortly."
         telemetry.update_current_trace(
             {
