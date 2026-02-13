@@ -10,7 +10,9 @@ from typing import Optional, Set
 import sqlglot
 from sqlglot import exp
 
+from agent.audit import AuditEventType, emit_audit_event
 from common.config.env import get_env_bool
+from common.models.error_metadata import ErrorCategory
 from common.policy.sql_policy import is_sensitive_column_name
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,10 @@ class PolicyEnforcer:
             # Parse SQL to AST
             parsed = sqlglot.parse(sql)
         except Exception as e:
+            cls._emit_policy_rejection(
+                reason="invalid_sql_syntax",
+                details={"error_type": type(e).__name__},
+            )
             raise ValueError(f"Invalid SQL syntax: {e}")
 
         allowed_tables = cls.get_allowed_tables()
@@ -126,6 +132,10 @@ class PolicyEnforcer:
             # 1. Enforce specific statement types
             if statement.key not in cls.ALLOWED_STATEMENT_TYPES:
                 # Allow specific SET commands if needed for session config, but generally block
+                cls._emit_policy_rejection(
+                    reason="statement_type_not_allowed",
+                    details={"statement_type": type(statement).__name__},
+                )
                 raise ValueError(
                     f"Statement type not allowed: {type(statement).__name__}. "
                     f"Only {', '.join(sorted([t.upper() for t in cls.ALLOWED_STATEMENT_TYPES]))} "
@@ -144,6 +154,10 @@ class PolicyEnforcer:
                             node.db.lower() if isinstance(node.db, str) else str(node.db).lower()
                         )
                         if schema != "public":
+                            cls._emit_policy_rejection(
+                                reason="cross_schema_access",
+                                details={"schema": schema, "table": table_name},
+                            )
                             raise ValueError(
                                 f"Cross-schema access not allowed: {schema}.{table_name}"
                             )
@@ -152,6 +166,10 @@ class PolicyEnforcer:
                         # Allow CTE references (which appear as tables)
                         # Helper: check if it's a CTE defined in the query
                         if not cls._is_cte(node, statement):
+                            cls._emit_policy_rejection(
+                                reason="table_not_allowed",
+                                details={"table": table_name},
+                            )
                             raise ValueError(f"Access to table '{table_name}' is not allowed.")
 
                 # Check for functions
@@ -161,12 +179,20 @@ class PolicyEnforcer:
                     # For Anonymous functions, check node.name instead
                     func_name = node.sql_name().lower()
                     if func_name in cls.BLOCKED_FUNCTIONS:
+                        cls._emit_policy_rejection(
+                            reason="blocked_function",
+                            details={"function": func_name},
+                        )
                         raise ValueError(f"Function '{func_name}' is restricted.")
 
                     # Handle Anonymous functions (e.g., pg_read_file)
                     if hasattr(node, "name") and node.name:
                         actual_name = node.name.lower()
                         if actual_name in cls.BLOCKED_FUNCTIONS:
+                            cls._emit_policy_rejection(
+                                reason="blocked_function",
+                                details={"function": actual_name},
+                            )
                             raise ValueError(f"Function '{actual_name}' is restricted.")
 
                 if isinstance(node, exp.Column):
@@ -178,6 +204,10 @@ class PolicyEnforcer:
                 sensitive_list = ", ".join(sorted(sensitive_columns))
                 message = f"Sensitive column reference detected: {sensitive_list}."
                 if get_env_bool("AGENT_BLOCK_SENSITIVE_COLUMNS", False):
+                    cls._emit_policy_rejection(
+                        reason="sensitive_column_reference",
+                        details={"columns": sensitive_list},
+                    )
                     raise ValueError(message)
                 logger.warning(
                     "%s Query allowed because AGENT_BLOCK_SENSITIVE_COLUMNS=false.",
@@ -196,3 +226,11 @@ class PolicyEnforcer:
                 if cte.alias == table_node.name:
                     return True
         return False
+
+    @staticmethod
+    def _emit_policy_rejection(*, reason: str, details: Optional[dict[str, str]] = None) -> None:
+        emit_audit_event(
+            AuditEventType.POLICY_REJECTION,
+            error_category=ErrorCategory.INVALID_REQUEST,
+            metadata={"reason": reason, **(details or {})},
+        )

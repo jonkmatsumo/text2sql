@@ -12,6 +12,7 @@ from typing import Any, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from agent.audit import AuditEventType, emit_audit_event
 from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.clarify import clarify_node
 from agent.nodes.correct import correct_sql_node
@@ -483,6 +484,16 @@ def route_after_execution(state: AgentState) -> str:
             if _is_replay_mode(state)
             else "kill_switch_disable_schema_refresh"
         )
+        if refresh_disabled_reason == "kill_switch_disable_schema_refresh":
+            emit_audit_event(
+                AuditEventType.KILL_SWITCH_OVERRIDE,
+                tenant_id=state.get("tenant_id"),
+                run_id=state.get("run_id"),
+                metadata={
+                    "kill_switch": "disable_schema_refresh",
+                    "scope": "route_after_execution",
+                },
+            )
         append_decision_event(
             state,
             node="route_after_execution",
@@ -751,6 +762,15 @@ def route_after_execution(state: AgentState) -> str:
         reason_value = RetryDecisionReason.MAX_RETRIES_REACHED.value
         if bool(state.get("llm_retries_kill_switch_enabled")) and not _is_replay_mode(state):
             reason_value = "kill_switch_disable_llm_retries"
+            emit_audit_event(
+                AuditEventType.KILL_SWITCH_OVERRIDE,
+                tenant_id=state.get("tenant_id"),
+                run_id=state.get("run_id"),
+                metadata={
+                    "kill_switch": "disable_llm_retries",
+                    "scope": "route_after_execution",
+                },
+            )
         append_decision_event(
             state,
             node="route_after_execution",
@@ -1007,6 +1027,16 @@ async def run_agent_with_tracing(
     with telemetry.start_span("agent_workflow", span_type=SpanType.CHAIN, attributes=base_metadata):
         # Make metadata sticky for all child spans
         telemetry.update_current_trace(base_metadata)
+        if replay_mode or replay_bundle:
+            emit_audit_event(
+                AuditEventType.REPLAY_MODE_ACTIVATED,
+                tenant_id=tenant_id,
+                run_id=run_id,
+                metadata={
+                    "replay_mode_flag": bool(replay_mode),
+                    "replay_bundle_present": bool(replay_bundle),
+                },
+            )
 
         # Capture context and serialize it for state persistence
         telemetry_context = telemetry.capture_context()

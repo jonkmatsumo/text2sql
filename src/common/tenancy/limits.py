@@ -154,6 +154,19 @@ class TenantConcurrencyLimiter:
             if state.active_runs >= self._per_tenant_limit:
                 state.last_access_ts = now
                 self._tenant_states.move_to_end(tenant_id)
+                from agent.audit import AuditEventType, emit_audit_event
+                from common.models.error_metadata import ErrorCategory
+
+                emit_audit_event(
+                    AuditEventType.TENANT_CONCURRENCY_BLOCK,
+                    tenant_id=tenant_id,
+                    error_category=ErrorCategory.RESOURCE_EXHAUSTED,
+                    metadata={
+                        "scope": self._metrics_scope,
+                        "active_runs": int(state.active_runs),
+                        "limit": int(self._per_tenant_limit),
+                    },
+                )
                 return None
             state.active_runs += 1
             state.last_access_ts = now

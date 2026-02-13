@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from opentelemetry import trace
 
+from agent.audit import AuditEventType, emit_audit_event
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.models.error_metadata import ErrorCategory
@@ -352,6 +353,16 @@ async def handler(
     # 2. Server-Side AST Validation
     validation_error = _validate_sql_ast(sql_query, provider)
     if validation_error:
+        if "forbidden statement type" in validation_error.lower():
+            emit_audit_event(
+                AuditEventType.READONLY_VIOLATION,
+                tenant_id=tenant_id,
+                error_category=ErrorCategory.INVALID_REQUEST,
+                metadata={
+                    "provider": provider,
+                    "reason": "ast_forbidden_statement_type",
+                },
+            )
         return _construct_error_response(
             validation_error,
             category=ErrorCategory.INVALID_REQUEST,
@@ -361,6 +372,17 @@ async def handler(
     # 2.5 Complexity Guard
     complexity_error, complexity_metadata = _validate_sql_complexity(sql_query, provider)
     if complexity_error:
+        emit_audit_event(
+            AuditEventType.SQL_COMPLEXITY_REJECTION,
+            tenant_id=tenant_id,
+            error_category=ErrorCategory.INVALID_REQUEST,
+            metadata={
+                "provider": provider,
+                "limit_name": (complexity_metadata or {}).get("complexity_limit_name"),
+                "limit_value": (complexity_metadata or {}).get("complexity_limit_value"),
+                "limit_measured": (complexity_metadata or {}).get("complexity_limit_measured"),
+            },
+        )
         return _construct_error_response(
             complexity_error,
             category=ErrorCategory.INVALID_REQUEST,
