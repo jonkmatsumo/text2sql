@@ -108,6 +108,7 @@ class AgentDiagnosticsResponse(BaseModel):
     enabled_flags: dict[str, Any]
     monitor_snapshot: Optional[dict[str, Any]] = None
     run_summary_store: Optional[dict[str, Any]] = None
+    audit_events: Optional[list[dict[str, Any]]] = None
     debug: Optional[dict[str, Any]] = None
     self_test: Optional[dict[str, Any]] = None
 
@@ -477,6 +478,8 @@ def get_agent_diagnostics(
     self_test: bool = False,
     recent_runs_limit: int = 20,
     run_id: Optional[str] = None,
+    audit_limit: int = 100,
+    audit_run_id: Optional[str] = None,
 ) -> AgentDiagnosticsResponse:
     """Return non-sensitive runtime diagnostics for operators."""
     from agent.state.run_summary_store import get_run_summary_store
@@ -503,15 +506,21 @@ def get_agent_diagnostics(
         ],
         "selected_run": summary_store.get(run_id) if run_id else None,
     }
+    bounded_audit_limit = max(0, min(500, int(audit_limit)))
+    payload["audit_events"] = get_audit_event_buffer().list_recent(
+        limit=bounded_audit_limit, run_id=audit_run_id
+    )
     if self_test:
         payload["self_test"] = run_diagnostics_self_test()
     return AgentDiagnosticsResponse(**payload)
 
 
 @app.get("/diagnostics/audit", response_model=AuditDiagnosticsResponse)
-def get_audit_diagnostics(limit: int = 100) -> AuditDiagnosticsResponse:
+def get_audit_diagnostics(
+    limit: int = 100, run_id: Optional[str] = None
+) -> AuditDiagnosticsResponse:
     """Return recent structured audit events from bounded in-memory storage."""
     bounded_limit = max(0, min(500, int(limit)))
     return AuditDiagnosticsResponse(
-        recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit)
+        recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit, run_id=run_id)
     )
