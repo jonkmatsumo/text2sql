@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from agent.audit import get_audit_event_buffer
 from agent.replay_bundle import (
     ValidationError,
     build_replay_bundle,
@@ -108,6 +109,12 @@ class AgentDiagnosticsResponse(BaseModel):
     run_summary_store: Optional[dict[str, Any]] = None
     debug: Optional[dict[str, Any]] = None
     self_test: Optional[dict[str, Any]] = None
+
+
+class AuditDiagnosticsResponse(BaseModel):
+    """Bounded operator-safe audit event diagnostics."""
+
+    recent_events: list[dict[str, Any]]
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -408,3 +415,12 @@ def get_agent_diagnostics(
     if self_test:
         payload["self_test"] = run_diagnostics_self_test()
     return AgentDiagnosticsResponse(**payload)
+
+
+@app.get("/diagnostics/audit", response_model=AuditDiagnosticsResponse)
+def get_audit_diagnostics(limit: int = 100) -> AuditDiagnosticsResponse:
+    """Return recent structured audit events from bounded in-memory storage."""
+    bounded_limit = max(0, min(500, int(limit)))
+    return AuditDiagnosticsResponse(
+        recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit)
+    )
