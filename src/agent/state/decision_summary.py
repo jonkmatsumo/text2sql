@@ -20,8 +20,10 @@ from agent.state.decision_events import summarize_decision_events
 from common.config.env import get_env_int
 from common.constants.reason_codes import RejectedPlanCandidateReason
 from common.sanitization.text import redact_sensitive_info
+from common.utils.hashing import canonical_json_hash
 
 _MAX_REASON_TEXT_LENGTH = 96
+_VOLATILE_RUN_SUMMARY_FIELDS = {"llm_calls", "llm_token_total", "tool_calls", "rows"}
 
 
 def _bounded_events(events: Any, max_items: int) -> list[dict]:
@@ -339,7 +341,7 @@ def build_run_decision_summary(
         else int(normalized_state.get("llm_token_total", 0) or 0)
     )
 
-    return {
+    summary = {
         "tenant_id": normalized_state.get("tenant_id"),
         "replay_mode": bool(normalized_state.get("replay_mode", False)),
         "schema_snapshot_id": (
@@ -377,3 +379,8 @@ def build_run_decision_summary(
         "error_categories_encountered": _collect_error_categories_encountered(normalized_state),
         "terminated_reason": _resolve_final_stopping_reason(normalized_state),
     }
+    hashable_summary = dict(summary)
+    for field_name in _VOLATILE_RUN_SUMMARY_FIELDS:
+        hashable_summary.pop(field_name, None)
+    summary["decision_summary_hash"] = canonical_json_hash(hashable_summary)
+    return summary
