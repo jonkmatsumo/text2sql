@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.mcp_client.tool_wrapper import create_tool_wrapper
+from agent.models.run_budget import RunBudget, run_budget_context
+from agent.models.termination import TerminationReason
 from agent.nodes.execute import validate_and_execute_node
 from agent.state import AgentState
 
@@ -316,6 +319,81 @@ class TestValidateAndExecuteNode:
         assert result["error"] == "Execution timed out before query could start."
         assert result["error_category"] == "timeout"
         assert mock_tool.ainvoke.call_count == 0
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_returns_budget_exceeded_when_tool_call_budget_is_spent(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Tool-call budget overflow should surface as typed budget_exceeded."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+
+        wrapped_tool = create_tool_wrapper(
+            name="execute_sql_query",
+            description="Execute SQL",
+            input_schema={},
+            invoke_fn=AsyncMock(return_value=_envelope(rows=[{"id": 1}])),
+        )
+        mock_get_tools.return_value = [wrapped_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+        budget = RunBudget(
+            llm_token_budget=1000,
+            tool_call_budget=0,
+            sql_row_budget=100,
+            time_budget_ms=30_000,
+        )
+        with run_budget_context(budget):
+            result = await validate_and_execute_node(state)
+
+        assert result["error_category"] == "budget_exceeded"
+        assert result["termination_reason"] == TerminationReason.BUDGET_EXHAUSTED
+
+    @pytest.mark.asyncio
+    @patch("agent.nodes.execute.get_mcp_tools")
+    @patch("agent.nodes.execute.PolicyEnforcer")
+    @patch("agent.nodes.execute.TenantRewriter")
+    async def test_execute_returns_budget_exceeded_when_sql_row_budget_exceeded(
+        self, mock_rewriter, mock_enforcer, mock_get_tools, schema_fixture
+    ):
+        """Row-budget overflow should fail execution with typed budget metadata."""
+        mock_enforcer.validate_sql.return_value = None
+        mock_rewriter.rewrite_sql = AsyncMock(side_effect=lambda sql, tid: sql)
+        mock_tool = AsyncMock()
+        mock_tool.name = "execute_sql_query"
+        mock_tool.ainvoke = AsyncMock(return_value=_envelope(rows=[{"id": 1}, {"id": 2}]))
+        mock_get_tools.return_value = [mock_tool]
+
+        state = AgentState(
+            messages=[],
+            schema_context="",
+            current_sql=schema_fixture.sample_query,
+            query_result=None,
+            error=None,
+            retry_count=0,
+        )
+        budget = RunBudget(
+            llm_token_budget=1000,
+            tool_call_budget=10,
+            sql_row_budget=1,
+            time_budget_ms=30_000,
+        )
+        with run_budget_context(budget):
+            result = await validate_and_execute_node(state)
+
+        assert result["error_category"] == "budget_exceeded"
+        assert result["termination_reason"] == TerminationReason.BUDGET_EXHAUSTED
+        assert result["query_result"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio

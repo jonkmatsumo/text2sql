@@ -43,6 +43,13 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
         "retries": 2,
         "llm_calls": 4,
         "llm_token_total": 321,
+        "tool_calls": {"total": 0},
+        "rows": {"total": 0},
+        "budget_exceeded": {
+            "llm": False,
+            "tool_calls": False,
+            "rows": False,
+        },
         "schema_refresh_count": 1,
         "prefetch_discard_count": 3,
         "kill_switches": {
@@ -58,7 +65,7 @@ def test_build_run_decision_summary_has_expected_shape_and_no_sensitive_fields()
     }
     assert "current_sql" not in summary
     assert "query_result" not in summary
-    assert "rows" not in summary
+    assert summary["rows"]["total"] == 0
 
 
 def test_build_run_decision_summary_records_replay_mode():
