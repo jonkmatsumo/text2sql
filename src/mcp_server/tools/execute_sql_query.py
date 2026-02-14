@@ -335,6 +335,21 @@ async def handler(
     if err := validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
         return err
 
+    # 4. Final Safety Guardrail
+    # Even if the provider claims to be read-only, we enforce it at the SQL level
+    # to prevent driver bugs or misconfigurations from allowing writes.
+    from dal.util.read_only import enforce_read_only_sql
+
+    try:
+        enforce_read_only_sql(sql_query, provider, read_only=True)
+    except PermissionError as e:
+        return _construct_error_response(
+            str(e),
+            category=ErrorCategory.FORBIDDEN,
+            provider=provider,
+        )
+
+    # 5. Execute Query
     from mcp_server.utils.validation import require_tenant_id
 
     # 0. Enforce Tenant ID
