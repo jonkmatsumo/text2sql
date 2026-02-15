@@ -163,6 +163,12 @@ class SchemaCache:
         table: Optional[str] = None,
     ) -> None:
         """Invalidate cached entries based on scope."""
+        self._logger.info(
+            "schema_cache_invalidate provider=%s schema=%s table=%s",
+            provider,
+            schema,
+            table,
+        )
         self._backend.clear(provider=provider, schema=schema, table=table)
 
 
