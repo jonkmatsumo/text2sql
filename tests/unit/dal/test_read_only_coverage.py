@@ -1,6 +1,6 @@
 """Unit tests for read-only enforcement across provider execution paths."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,7 +13,8 @@ class TestDatabase(Database):
 
     _query_target_provider = "postgres"
     _query_target_sync_max_rows = 0
-    _pool = MagicMock()
+    # Will be set in test
+    _pool = None
 
     @classmethod
     def get_query_target_capabilities(cls):
@@ -23,33 +24,82 @@ class TestDatabase(Database):
         return mock_caps
 
 
+class DummyTransaction:
+    """Dummy async context manager for transaction."""
+
+    async def __aenter__(self):
+        """Enter context."""
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        """Exit context."""
+        pass
+
+
+class DummyConn:
+    """Dummy connection object."""
+
+    def transaction(self, readonly=False):
+        """Return dummy transaction."""
+        return DummyTransaction()
+
+    async def execute(self, sql, *args):
+        """Execute dummy query."""
+        pass
+
+
+class DummyCM:
+    """Dummy async context manager for get_connection/acquire."""
+
+    def __init__(self, conn):
+        """Initialize with connection."""
+        self.conn = conn
+
+    async def __aenter__(self):
+        """Enter context and return connection."""
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        """Exit context."""
+        pass
+
+
+class DummyPool:
+    """Dummy pool."""
+
+    def __init__(self, conn):
+        """Initialize with connection."""
+        self.conn = conn
+
+    def acquire(self):
+        """Acquire connection context manager."""
+        return DummyCM(self.conn)
+
+
+class DummyQueryTarget:
+    """Dummy query target."""
+
+    def __init__(self, conn):
+        """Initialize with connection."""
+        self.conn = conn
+
+    def get_connection(self, tenant_id=None, read_only=False):
+        """Get connection context manager."""
+        return DummyCM(self.conn)
+
+
 @pytest.mark.asyncio
 async def test_postgres_read_only_enforcement_without_tracing():
-    """Verify that Postgres connections enforce read-only SQL even when tracing is disabled.
+    """Verify that Postgres connections enforce read-only SQL even when tracing is disabled."""
+    # Use full stack of dummies
+    real_conn = DummyConn()
+    dummy_pool = DummyPool(real_conn)
+    dummy_qt = DummyQueryTarget(real_conn)
 
-    This covers the gap identified in Phase 6 where TracedAsyncpgConnection
-    (and thus the guard) was bypassed if tracing was off.
-    """
-    # Mock the underlying connection
-    mock_conn = MagicMock()
-    # transaction() is a sync method that returns an async context manager
-    mock_transaction_cm = MagicMock()
-    mock_transaction_cm.__aenter__ = AsyncMock(return_value=None)
-    mock_transaction_cm.__aexit__ = AsyncMock(return_value=None)
-    mock_conn.transaction.side_effect = lambda *args, **kwargs: mock_transaction_cm
-
-    # We need to mock the query_target.get_connection context manager
-    # Database.get_connection calls cls.query_target.get_connection
-    # failing to set cls.query_target would raise AttributeError
-
-    mock_qt = MagicMock()
-    mock_qt.get_connection.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_qt.get_connection.return_value.__aexit__ = AsyncMock(return_value=None)
-
-    TestDatabase.query_target = mock_qt
+    TestDatabase.query_target = dummy_qt
+    TestDatabase._pool = dummy_pool
 
     # Mock trace_enabled to False
-    # Note: trace_enabled is imported from dal.tracing inside methods, so we patch it there.
     with patch("dal.tracing.trace_enabled", return_value=False):
 
         # Execute code under test
@@ -59,18 +109,16 @@ async def test_postgres_read_only_enforcement_without_tracing():
             # Assert that we got the TracedAsyncpgConnection wrapper
             assert isinstance(wrapper, TracedAsyncpgConnection)
             assert wrapper._read_only is True
-            # Assert it wraps our mock_conn
-            assert wrapper._conn == mock_conn
+            # Assert calls are delegated to our dummy
+            assert wrapper._conn == real_conn
 
             # Further verify that executing a write query raises PermissionError
-            # The wrapper calls enforce_read_only_sql
             with pytest.raises(PermissionError, match="Read-only enforcement blocked"):
                 await wrapper.execute("INSERT INTO foo VALUES (1)")
 
-        # Verify that if read_only=False and tracing=False, we get the raw connection
+        # Verify raw connection path
         async with TestDatabase.get_connection(read_only=False) as raw_conn:
-            # When read_only=False and trace_enabled=False, we expect the raw connection
-            assert raw_conn == mock_conn
+            assert raw_conn == real_conn
             assert not isinstance(raw_conn, TracedAsyncpgConnection)
 
 
