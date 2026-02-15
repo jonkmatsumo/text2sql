@@ -30,6 +30,7 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
     """
     import time
 
+    from common.models.error_metadata import ErrorCategory
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
     from mcp_server.utils.errors import build_error_metadata
@@ -57,7 +58,7 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
             result={"success": False, "error": {"code": error_code}},
             error=build_error_metadata(
                 message="Failed to update semantic cache.",
-                category="internal",
+                category=ErrorCategory.INTERNAL,
                 provider="cache_service",
                 retryable=False,
                 code=error_code,

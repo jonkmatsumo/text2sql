@@ -11,8 +11,8 @@ from mcp_server.tools.execute_sql_query import handler as execute_sql_query_hand
 
 @pytest.fixture(autouse=True)
 def mock_policy_enforcer():
-    """Mock PolicyEnforcer to bypass validation."""
-    with patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"):
+    """Bypass policy enforcement for all tests in this module."""
+    with patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None):
         yield
 
 

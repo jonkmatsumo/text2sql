@@ -29,6 +29,7 @@ async def handler(dry_run: bool = False) -> str:
     # We collect the logs but primary goal is to return the final run status
     import time
 
+    from common.models.error_metadata import ErrorCategory
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.utils.errors import build_error_metadata
 
@@ -99,7 +100,11 @@ async def handler(dry_run: bool = False) -> str:
             },
             error=build_error_metadata(
                 message="Pattern generation failed.",
+<<<<<<< HEAD
                 category="internal",
+=======
+                category=ErrorCategory.INTERNAL,
+>>>>>>> 03e1e11b (feat(obs): add explicit read-only enforcement telemetry across DAL and MCP)
                 provider="pattern_generator",
                 retryable=False,
                 code=error_code,

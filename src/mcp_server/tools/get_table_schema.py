@@ -35,6 +35,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
 
     start_time = time.monotonic()
 
+    from common.models.error_metadata import ErrorCategory
     from mcp_server.utils.auth import validate_role
     from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import require_tenant_id
@@ -58,15 +59,19 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
             # Differentiate missing vs inaccessible
             error_msg = str(e).lower()
             status = "error"
+<<<<<<< HEAD
             category = "internal"
+=======
+            category = ErrorCategory.DEPENDENCY_FAILURE
+>>>>>>> 03e1e11b (feat(obs): add explicit read-only enforcement telemetry across DAL and MCP)
             message = "Failed to retrieve table schema."
             if "not found" in error_msg or "does not exist" in error_msg:
                 status = "TABLE_NOT_FOUND"
-                category = "invalid_request"
+                category = ErrorCategory.INVALID_REQUEST
                 message = "Requested table was not found."
             elif "permission" in error_msg or "access denied" in error_msg:
                 status = "TABLE_INACCESSIBLE"
-                category = "auth"
+                category = ErrorCategory.AUTH
                 message = "Requested table is inaccessible."
 
             schema_list.append(

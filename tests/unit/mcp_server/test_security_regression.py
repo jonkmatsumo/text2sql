@@ -35,8 +35,15 @@ class TestSecurityRegression:
         mock_caps.supports_column_metadata = True
         mock_caps.execution_model = "async"
 
-        with patch.object(
-            execute_sql_query_mod.Database, "get_query_target_capabilities", return_value=mock_caps
+        with (
+            patch.object(
+                execute_sql_query_mod.Database,
+                "get_query_target_capabilities",
+                return_value=mock_caps,
+            ),
+            patch(
+                "agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None
+            ),
         ):
             yield
 
@@ -80,11 +87,13 @@ class TestSecurityRegression:
             # Bypass AST validation to test DB layer
             with patch("mcp_server.tools.execute_sql_query._validate_sql_ast", return_value=None):
                 query = "SET session_replication_role = 'replica';"
-                await execute_sql_query(query, tenant_id=1)
+                response_json = await execute_sql_query(query, tenant_id=1)
+                response = json.loads(response_json)
 
-            # Verification: context manager called with read_only=True
-            mock_get.assert_called_once_with(1, read_only=True)
-            mock_conn.fetch.assert_called_once_with(query)
+            # Verification: blocked by safety guardrail
+            assert "error" in response
+            assert "Read-only enforcement blocked" in response["error"]["message"]
+            mock_get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_db_enforcement_prevents_write(self):
@@ -109,7 +118,8 @@ class TestSecurityRegression:
                 response = json.loads(response_json)
 
                 assert "error" in response
-                assert "cannot execute INSERT" in response["error"]["message"]
+                msg = response["error"]["message"]
+                assert "cannot execute INSERT" in msg or "Read-only enforcement blocked" in msg
 
     @pytest.mark.asyncio
     async def test_bypass_with_cte_mutation(self):
@@ -146,4 +156,8 @@ class TestSecurityRegression:
             assert "error" in response
             msg = response["error"]["message"]
             # Accepts either AST block or DB block
-            assert "Forbidden" in msg or "cannot execute DELETE" in msg
+            assert (
+                "Forbidden" in msg
+                or "cannot execute DELETE" in msg
+                or "Read-only enforcement blocked" in msg
+            )
