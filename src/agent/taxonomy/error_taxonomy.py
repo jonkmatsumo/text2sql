@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from common.models.error_metadata import ErrorCategory
+
 
 @dataclass
 class ErrorTaxonomyEntry:
@@ -19,66 +21,67 @@ class ErrorTaxonomyEntry:
     example_fix: Optional[str] = None  # Example of how to fix
 
 
-# Comprehensive error taxonomy based on common SQL failure modes
+# Comprehensive error taxonomy based on common SQL failure modes, mapped to canonical categories
 ERROR_TAXONOMY = {
-    "AGGREGATION_MISUSE": ErrorTaxonomyEntry(
-        name="Aggregation Misuse",
+    ErrorCategory.INVALID_REQUEST: ErrorTaxonomyEntry(
+        name="Invalid Request",
         patterns=[
+            # Aggregation
             r"must appear in the GROUP BY clause",
             r"aggregate functions are not allowed",
             r"column.*must appear in the GROUP BY",
             r"not a single-group group function",
-        ],
-        strategy=(
-            "Add missing columns to GROUP BY clause, or wrap columns in aggregate functions. "
-            "Every non-aggregated column in SELECT must appear in GROUP BY."
-        ),
-        example_fix="Add 'column_name' to GROUP BY or use MAX(column_name) in SELECT",
-    ),
-    "MISSING_JOIN": ErrorTaxonomyEntry(
-        name="Missing Join",
-        patterns=[
+            # Missing Join
             r"missing FROM-clause entry",
             r"invalid reference to FROM-clause",
             r"relation.*does not exist",
             r"unknown column.*in.*clause",
             r"no such column",
-        ],
-        strategy=(
-            "The query references a table or column not included in FROM clause. "
-            "Add the required JOIN to connect the missing table."
-        ),
-        example_fix="Add JOIN table_name ON table_name.id = existing_table.foreign_key",
-    ),
-    "TYPE_MISMATCH": ErrorTaxonomyEntry(
-        name="Type Mismatch",
-        patterns=[
+            # Type Mismatch
             r"operator does not exist",
             r"cannot compare",
             r"type mismatch",
             r"invalid input syntax for type",
             r"cannot cast",
-        ],
-        strategy=(
-            "Cast one or both values to compatible types using ::type or CAST(). "
-            "Common casts: ::text, ::integer, ::date, ::timestamp."
-        ),
-        example_fix="Change column = value to column = value::appropriate_type",
-    ),
-    "AMBIGUOUS_COLUMN": ErrorTaxonomyEntry(
-        name="Ambiguous Column Reference",
-        patterns=[
+            # Ambiguous
             r"ambiguous column",
             r"column reference.*is ambiguous",
             r"ambiguously refers to",
+            # Function
+            r"function.*does not exist",
+            r"function.*with argument types",
+            r"unknown function",
+            r"no function matches",
+            # Nulls
+            r"null value in column.*violates",
+            r"cannot insert null",
+            r"division by zero",
+            r"null value not allowed",
+            # Subquery
+            r"subquery must return only one column",
+            r"more than one row returned",
+            r"subquery returns more than one row",
+            r"scalar subquery",
+            # Date/Time
+            r"invalid input syntax for type date",
+            r"invalid input syntax for type timestamp",
+            r"date/time field value out of range",
+            r"cannot subtract",
+            # Constraints
+            r"duplicate key value violates",
+            r"violates check constraint",
+            r"violates foreign key constraint",
+            r"unique constraint",
         ],
         strategy=(
-            "Prefix the column with its table name or alias to disambiguate. "
-            "Use table_name.column_name or alias.column_name."
+            "Analyze the specific error message to identify the logical flaw. "
+            "Common issues include: missing GROUP BY columns, missing JOINs for referenced tables, "
+            "type mismatches (requires CAST), ambiguous column names (requires table alias), "
+            "or logic errors in subqueries/aggregates."
         ),
-        example_fix="Change 'id' to 'table_name.id' or 't.id'",
+        example_fix="Add missing JOINs, fix GROUP BY columns, or CAST types as needed.",
     ),
-    "SYNTAX_ERROR": ErrorTaxonomyEntry(
+    ErrorCategory.SYNTAX: ErrorTaxonomyEntry(
         name="SQL Syntax Error",
         patterns=[
             r"syntax error at or near",
@@ -88,39 +91,12 @@ ERROR_TAXONOMY = {
         ],
         strategy=(
             "Check for missing keywords (SELECT, FROM, WHERE), unmatched parentheses, "
-            "missing commas, or incorrect clause ordering."
+            "missing commas, or incorrect clause ordering. Ensure the SQL dialect is valid "
+            "PostgreSQL."
         ),
         example_fix="Verify SQL structure: SELECT columns FROM table WHERE condition",
     ),
-    "NULL_HANDLING": ErrorTaxonomyEntry(
-        name="NULL Handling Error",
-        patterns=[
-            r"null value in column.*violates",
-            r"cannot insert null",
-            r"division by zero",
-            r"null value not allowed",
-        ],
-        strategy=(
-            "Use COALESCE() or NULLIF() to handle NULL values. "
-            "For division, use NULLIF(divisor, 0) to avoid divide-by-zero."
-        ),
-        example_fix="Change a/b to a/NULLIF(b, 0) or use COALESCE(column, default)",
-    ),
-    "SUBQUERY_ERROR": ErrorTaxonomyEntry(
-        name="Subquery Error",
-        patterns=[
-            r"subquery must return only one column",
-            r"more than one row returned",
-            r"subquery returns more than one row",
-            r"scalar subquery",
-        ],
-        strategy=(
-            "Ensure scalar subqueries return exactly one value. "
-            "Use LIMIT 1, aggregate functions, or switch to IN/EXISTS for multi-row results."
-        ),
-        example_fix="Add LIMIT 1 or use IN (subquery) instead of = (subquery)",
-    ),
-    "PERMISSION_DENIED": ErrorTaxonomyEntry(
+    ErrorCategory.UNAUTHORIZED: ErrorTaxonomyEntry(
         name="Permission Denied",
         patterns=[
             r"permission denied",
@@ -133,83 +109,66 @@ ERROR_TAXONOMY = {
         ),
         example_fix="Remove access to restricted tables or columns",
     ),
-    "FUNCTION_ERROR": ErrorTaxonomyEntry(
-        name="Function Error",
-        patterns=[
-            r"function.*does not exist",
-            r"function.*with argument types",
-            r"unknown function",
-            r"no function matches",
-        ],
-        strategy=(
-            "Check function name spelling and argument types. "
-            "PostgreSQL is case-sensitive for quoted identifiers."
-        ),
-        example_fix="Verify function exists: Use pg-specific functions like date_trunc()",
-    ),
-    "CONSTRAINT_VIOLATION": ErrorTaxonomyEntry(
-        name="Constraint Violation",
-        patterns=[
-            r"duplicate key value violates",
-            r"violates check constraint",
-            r"violates foreign key constraint",
-            r"unique constraint",
-        ],
-        strategy=(
-            "For SELECT queries, this shouldn't occur. If it does, check for "
-            "INSERT/UPDATE operations that should not be present in read-only mode."
-        ),
-        example_fix="Ensure query is read-only SELECT statement",
-    ),
-    "LIMIT_EXCEEDED": ErrorTaxonomyEntry(
-        name="Result Limit Exceeded",
+    ErrorCategory.RESOURCE_EXHAUSTED: ErrorTaxonomyEntry(
+        name="Resource Exhausted",
         patterns=[
             r"result set too large",
             r"exceeded.*rows",
             r"memory exceeded",
         ],
         strategy=(
-            "Add or reduce LIMIT clause. Use pagination with OFFSET, "
-            "or add filtering conditions to reduce result size."
+            "The query matches too many rows or consumes too much memory. "
+            "Add or reduce LIMIT clause, use pagination, or add stronger WHERE filtering."
         ),
         example_fix="Add LIMIT 1000 or refine WHERE conditions",
     ),
-    "DATE_TIME_ERROR": ErrorTaxonomyEntry(
-        name="Date/Time Error",
+    ErrorCategory.TIMEOUT: ErrorTaxonomyEntry(
+        name="Timeout",
         patterns=[
-            r"invalid input syntax for type date",
-            r"invalid input syntax for type timestamp",
-            r"date/time field value out of range",
-            r"cannot subtract",
+            r"statement timeout",
+            r"query cancelled on user request",
+            r"deadline exceeded",
         ],
         strategy=(
-            "Ensure date formats match PostgreSQL expectations (YYYY-MM-DD). "
-            "Use proper date functions: date_trunc(), extract(), age()."
+            "The query took too long to execute. Optimize for performance: "
+            "avoid expensive JOINs on unindexed columns, avoid leading wildcards in LIKE, "
+            "and reduce result size."
         ),
-        example_fix="Use '2024-01-01' format or CURRENT_DATE for dates",
+        example_fix="Optimize JOINs or filter earlier",
+    ),
+    ErrorCategory.SCHEMA_DRIFT: ErrorTaxonomyEntry(
+        name="Schema Drift",
+        patterns=[
+            r"schema drift detected",
+        ],
+        strategy=(
+            "The schema has changed since the query was generated. "
+            "Regenerate the query using the updated schema context."
+        ),
     ),
 }
 
 
 def classify_error(error_message: str) -> tuple[str, ErrorTaxonomyEntry]:
     """
-    Classify an error message into a category from the taxonomy.
+    Classify an error message into a canonical category from the taxonomy.
 
     Args:
         error_message: The database error message string
 
     Returns:
-        Tuple of (category_key, ErrorTaxonomyEntry) or ("UNKNOWN", generic_category)
+        Tuple of (category_key, ErrorTaxonomyEntry) or ("unknown", generic_category)
     """
     error_lower = error_message.lower()
 
     for category_key, category in ERROR_TAXONOMY.items():
         for pattern in category.patterns:
             if re.search(pattern, error_lower, re.IGNORECASE):
-                return category_key, category
+                # Return the canonical ErrorCategory value (string)
+                return category_key.value, category
 
     # Return unknown category
-    return "UNKNOWN", ErrorTaxonomyEntry(
+    return ErrorCategory.UNKNOWN.value, ErrorTaxonomyEntry(
         name="Unknown Error",
         patterns=[],
         strategy=(
