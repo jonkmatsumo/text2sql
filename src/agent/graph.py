@@ -12,7 +12,7 @@ from typing import Any, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.clarify import clarify_node
 from agent.nodes.correct import correct_sql_node
@@ -72,6 +72,16 @@ def _safe_env_bool(name: str, default: bool) -> bool:
     if parsed is None:
         return bool(default)
     return bool(parsed)
+
+
+def _resolve_budget_env_int(shared_name: str, legacy_name: str, default: int, minimum: int) -> int:
+    try:
+        shared_value = get_env_int(shared_name, None)
+    except ValueError:
+        shared_value = None
+    if shared_value is not None:
+        return max(minimum, int(shared_value))
+    return _safe_env_int(legacy_name, default, minimum)
 
 
 def _is_replay_mode(state: AgentState) -> bool:
@@ -487,10 +497,13 @@ def route_after_execution(state: AgentState) -> str:
         if refresh_disabled_reason == "kill_switch_disable_schema_refresh":
             emit_audit_event(
                 AuditEventType.KILL_SWITCH_OVERRIDE,
+                source=AuditEventSource.AGENT,
                 tenant_id=state.get("tenant_id"),
                 run_id=state.get("run_id"),
                 metadata={
+                    "reason_code": "kill_switch_disable_schema_refresh",
                     "kill_switch": "disable_schema_refresh",
+                    "decision": "override",
                     "scope": "route_after_execution",
                 },
             )
@@ -764,10 +777,13 @@ def route_after_execution(state: AgentState) -> str:
             reason_value = "kill_switch_disable_llm_retries"
             emit_audit_event(
                 AuditEventType.KILL_SWITCH_OVERRIDE,
+                source=AuditEventSource.AGENT,
                 tenant_id=state.get("tenant_id"),
                 run_id=state.get("run_id"),
                 metadata={
+                    "reason_code": "kill_switch_disable_llm_retries",
                     "kill_switch": "disable_llm_retries",
+                    "decision": "override",
                     "scope": "route_after_execution",
                 },
             )
@@ -1030,9 +1046,12 @@ async def run_agent_with_tracing(
         if replay_mode or replay_bundle:
             emit_audit_event(
                 AuditEventType.REPLAY_MODE_ACTIVATED,
+                source=AuditEventSource.AGENT,
                 tenant_id=tenant_id,
                 run_id=run_id,
                 metadata={
+                    "reason_code": "replay_mode_enabled",
+                    "decision": "record",
                     "replay_mode_flag": bool(replay_mode),
                     "replay_bundle_present": bool(replay_bundle),
                 },
@@ -1129,10 +1148,22 @@ async def run_agent_with_tracing(
         base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
         llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
         default_time_budget_ms = int(max(0.0, float(timeout_seconds or 30.0)) * 1000.0)
+        tool_call_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_TOOL_CALLS",
+            "AGENT_TOOL_CALL_BUDGET",
+            50,
+            0,
+        )
+        rows_returned_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_ROWS_RETURNED",
+            "AGENT_SQL_ROW_BUDGET",
+            5000,
+            0,
+        )
         run_budget = RunBudget(
             llm_token_budget=llm_budget_limit,
-            tool_call_budget=_safe_env_int("AGENT_TOOL_CALL_BUDGET", 40, 0),
-            sql_row_budget=_safe_env_int("AGENT_SQL_ROW_BUDGET", 10000, 0),
+            tool_call_budget=tool_call_budget_limit,
+            sql_row_budget=rows_returned_budget_limit,
             time_budget_ms=_safe_env_int("AGENT_TIME_BUDGET_MS", default_time_budget_ms, 0),
         )
         inputs["run_budget"] = run_budget.to_state_dict()
@@ -1633,6 +1664,15 @@ async def run_agent_with_tracing(
                 (run_decision_summary.get("tool_calls") or {}).get("total", 0) or 0
             ),
             "run.rows_total": int((run_decision_summary.get("rows") or {}).get("total", 0) or 0),
+            "run.rows_returned_total": int(
+                (run_decision_summary.get("rows_returned") or {}).get("total", 0) or 0
+            ),
+            "run.tool_calls_limit": int(
+                (run_decision_summary.get("tool_calls") or {}).get("limit", 0) or 0
+            ),
+            "run.rows_returned_limit": int(
+                (run_decision_summary.get("rows_returned") or {}).get("limit", 0) or 0
+            ),
             "run.budget_exceeded.llm": bool(
                 (run_decision_summary.get("budget_exceeded") or {}).get("llm", False)
             ),

@@ -10,7 +10,7 @@ from typing import Optional, Set
 import sqlglot
 from sqlglot import exp
 
-from agent.audit import AuditEventType, emit_audit_event
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_bool
 from common.models.error_metadata import ErrorCategory
 from common.policy.sql_policy import is_sensitive_column_name
@@ -231,6 +231,11 @@ class PolicyEnforcer:
     def _emit_policy_rejection(*, reason: str, details: Optional[dict[str, str]] = None) -> None:
         emit_audit_event(
             AuditEventType.POLICY_REJECTION,
+            source=AuditEventSource.AGENT,
             error_category=ErrorCategory.INVALID_REQUEST,
-            metadata={"reason": reason, **(details or {})},
+            metadata={
+                "reason_code": reason,
+                "decision": "reject",
+                **(details or {}),
+            },
         )

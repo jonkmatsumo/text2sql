@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from agent.audit import AuditEventType, emit_audit_event, get_audit_event_buffer
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event, get_audit_event_buffer
 from agent.replay_bundle import (
     ValidationError,
     build_replay_bundle,
@@ -108,6 +108,7 @@ class AgentDiagnosticsResponse(BaseModel):
     enabled_flags: dict[str, Any]
     monitor_snapshot: Optional[dict[str, Any]] = None
     run_summary_store: Optional[dict[str, Any]] = None
+    audit_events: Optional[list[dict[str, Any]]] = None
     debug: Optional[dict[str, Any]] = None
     self_test: Optional[dict[str, Any]] = None
 
@@ -305,10 +306,13 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     run_id = state.get("run_id") if isinstance(state, dict) else None
                     emit_audit_event(
                         AuditEventType.REPLAY_MISMATCH,
+                        source=AuditEventSource.AGENT,
                         tenant_id=request.tenant_id,
                         run_id=run_id,
                         error_category=ErrorCategory.INVALID_REQUEST,
                         metadata={
+                            "reason_code": "replay_integrity_mismatch",
+                            "decision": "reject",
                             "mismatch_fields": ",".join(sorted(mismatches.keys())),
                             "integrity_check": "failed",
                         },
@@ -432,29 +436,51 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             )
     except TenantConcurrencyLimitExceeded as exc:
         agent_monitor.increment("tenant_limit_exceeded")
-        agent_metrics.add_counter(
-            "tenant.limit_exceeded.count", attributes={"tenant_id": request.tenant_id}
+        if exc.limit_kind == "rate":
+            agent_monitor.increment("rate_limited")
+        metric_name = (
+            "tenant.rate_limited.count"
+            if exc.limit_kind == "rate"
+            else "tenant.limit_exceeded.count"
         )
-        error_message = "Tenant concurrency limit exceeded. Please retry shortly."
+        agent_metrics.add_counter(
+            metric_name,
+            attributes={
+                "tenant_id": request.tenant_id,
+                "limit_kind": str(exc.limit_kind),
+            },
+        )
+        is_rate_limited = exc.limit_kind == "rate"
+        error_code = (
+            "TENANT_RATE_LIMIT_EXCEEDED" if is_rate_limited else "TENANT_CONCURRENCY_LIMIT_EXCEEDED"
+        )
+        error_message = (
+            "Tenant rate limit exceeded. Please retry shortly."
+            if is_rate_limited
+            else "Tenant concurrency limit exceeded. Please retry shortly."
+        )
         telemetry.update_current_trace(
             {
                 "tenant.active_runs": exc.active_runs,
                 "tenant.limit": exc.limit,
                 "tenant.limit_exceeded": True,
+                "tenant.limit_kind": str(exc.limit_kind),
+                "tenant.retry_after_seconds": float(exc.retry_after_seconds),
             }
         )
         return AgentRunResponse(
             error=error_message,
             trace_id=None,
             error_metadata={
-                "category": ErrorCategory.RESOURCE_EXHAUSTED.value,
-                "code": "TENANT_CONCURRENCY_LIMIT_EXCEEDED",
+                "category": ErrorCategory.LIMIT_EXCEEDED.value,
+                "code": error_code,
                 "message": error_message,
                 "provider": "agent_service",
                 "retryable": True,
                 "is_retryable": True,
                 "retry_after_seconds": exc.retry_after_seconds,
                 "details_safe": {
+                    "limit_kind": str(exc.limit_kind),
                     "tenant_active_runs": exc.active_runs,
                     "tenant_limit": exc.limit,
                 },
@@ -474,6 +500,8 @@ def get_agent_diagnostics(
     self_test: bool = False,
     recent_runs_limit: int = 20,
     run_id: Optional[str] = None,
+    audit_limit: int = 100,
+    audit_run_id: Optional[str] = None,
 ) -> AgentDiagnosticsResponse:
     """Return non-sensitive runtime diagnostics for operators."""
     from agent.state.run_summary_store import get_run_summary_store
@@ -500,15 +528,21 @@ def get_agent_diagnostics(
         ],
         "selected_run": summary_store.get(run_id) if run_id else None,
     }
+    bounded_audit_limit = max(0, min(500, int(audit_limit)))
+    payload["audit_events"] = get_audit_event_buffer().list_recent(
+        limit=bounded_audit_limit, run_id=audit_run_id
+    )
     if self_test:
         payload["self_test"] = run_diagnostics_self_test()
     return AgentDiagnosticsResponse(**payload)
 
 
 @app.get("/diagnostics/audit", response_model=AuditDiagnosticsResponse)
-def get_audit_diagnostics(limit: int = 100) -> AuditDiagnosticsResponse:
+def get_audit_diagnostics(
+    limit: int = 100, run_id: Optional[str] = None
+) -> AuditDiagnosticsResponse:
     """Return recent structured audit events from bounded in-memory storage."""
     bounded_limit = max(0, min(500, int(limit)))
     return AuditDiagnosticsResponse(
-        recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit)
+        recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit, run_id=run_id)
     )

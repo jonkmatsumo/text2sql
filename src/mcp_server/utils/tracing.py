@@ -216,17 +216,42 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                             span.set_attribute("tenant.limit", int(exc.limit))
                             span.set_attribute("tenant.active_tool_calls", int(exc.active_runs))
                             span.set_attribute("tenant.limit_exceeded", True)
+                            span.set_attribute("tenant.limit_kind", str(exc.limit_kind))
+                            span.set_attribute(
+                                "tenant.retry_after_seconds", float(exc.retry_after_seconds)
+                            )
+                            is_rate_limited = str(exc.limit_kind) == "rate"
+                            metric_name = (
+                                "mcp.tenant_rate_limited.count"
+                                if is_rate_limited
+                                else "mcp.tenant_limit_exceeded.count"
+                            )
                             mcp_metrics.add_counter(
-                                "mcp.tenant_limit_exceeded.count",
-                                description="Count of MCP tenant tool concurrency rejections",
-                                attributes={"tool_name": tool_name},
+                                metric_name,
+                                description=(
+                                    "Count of MCP tenant tool rate-limit rejections"
+                                    if is_rate_limited
+                                    else "Count of MCP tenant tool concurrency rejections"
+                                ),
+                                attributes={
+                                    "tool_name": tool_name,
+                                    "tenant_id": str(tenant_id_int),
+                                    "limit_kind": str(exc.limit_kind),
+                                },
+                            )
+                            error_message = (
+                                "Tenant tool rate limit exceeded. Please retry shortly."
+                                if is_rate_limited
+                                else "Tenant tool concurrency limit exceeded. Please retry shortly."
+                            )
+                            error_code = (
+                                "TENANT_TOOL_RATE_LIMIT_EXCEEDED"
+                                if is_rate_limited
+                                else "TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED"
                             )
                             return tool_error_response(
-                                message=(
-                                    "Tenant tool concurrency limit exceeded. "
-                                    "Please retry shortly."
-                                ),
-                                code="TENANT_TOOL_CONCURRENCY_LIMIT_EXCEEDED",
+                                message=error_message,
+                                code=error_code,
                                 category=ErrorCategory.LIMIT_EXCEEDED,
                                 provider=tool_name,
                                 retryable=True,

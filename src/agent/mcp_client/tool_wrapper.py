@@ -11,8 +11,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
 
-from agent.audit import AuditEventType, emit_audit_event
-from agent.models.run_budget import RunBudgetExceededError, consume_tool_call_budget
+from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
+from agent.models.run_budget import (
+    RunBudgetExceededError,
+    consume_rows_returned_budget,
+    consume_tool_call_budget,
+    current_run_budget,
+    extract_rows_returned_from_tool_result,
+)
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import tool_error_invalid_request
@@ -53,6 +59,54 @@ class MCPToolWrapper:
         if self.input_schema and "input_schema" not in self.metadata:
             self.metadata["input_schema"] = self.input_schema
 
+    def _budget_error_response(
+        self, exc: RunBudgetExceededError, *, run_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        budget_state = current_run_budget()
+        details_safe = {
+            "budget_dimension": exc.dimension,
+            "budget_limit": exc.limit,
+            "budget_used": exc.used,
+            "budget_requested": exc.requested,
+            "tool_name": self.name,
+        }
+        if budget_state is not None:
+            details_safe["tool_calls_total"] = int(budget_state.tool_calls_total)
+            details_safe["rows_returned_total"] = int(budget_state.rows_total)
+
+        message = (
+            "Run row-returned budget exceeded for this request."
+            if exc.dimension == "rows_returned"
+            else (
+                "Run tool-call budget exceeded for this request."
+                if exc.dimension == "tool_calls"
+                else "Run budget exceeded before tool execution."
+            )
+        )
+        emit_audit_event(
+            AuditEventType.RUN_BUDGET_EXCEEDED,
+            source=AuditEventSource.AGENT,
+            run_id=run_id,
+            error_category=ErrorCategory.BUDGET_EXCEEDED,
+            metadata={
+                "reason_code": "run_budget_exceeded",
+                "decision": "reject",
+                **details_safe,
+            },
+        )
+        return ToolResponseEnvelope(
+            result=None,
+            metadata=GenericToolMetadata(provider="agent_mcp_client"),
+            error=ToolError(
+                category=ErrorCategory.BUDGET_EXCEEDED,
+                code=RunBudgetExceededError.code,
+                message=message,
+                retryable=False,
+                provider="agent_mcp_client",
+                details_safe=details_safe,
+            ),
+        ).model_dump(exclude_none=True)
+
     async def ainvoke(self, input: dict, config: Optional[dict] = None) -> Any:
         """Invoke the MCP tool asynchronously.
 
@@ -80,44 +134,28 @@ class MCPToolWrapper:
                 error=validation_error,
             ).model_dump(exclude_none=True)
 
+        run_id = (
+            str(input.get("run_id")) if isinstance(input, dict) and input.get("run_id") else None
+        )
         try:
             consume_tool_call_budget(1)
         except RunBudgetExceededError as exc:
-            emit_audit_event(
-                AuditEventType.BUDGET_EXCEEDED,
-                error_category=ErrorCategory.BUDGET_EXCEEDED,
-                metadata={
-                    "budget_dimension": exc.dimension,
-                    "budget_limit": exc.limit,
-                    "budget_used": exc.used,
-                    "budget_requested": exc.requested,
-                    "tool_name": self.name,
-                },
-            )
-            return ToolResponseEnvelope(
-                result=None,
-                metadata=GenericToolMetadata(provider="agent_mcp_client"),
-                error=ToolError(
-                    category=ErrorCategory.BUDGET_EXCEEDED,
-                    code=RunBudgetExceededError.code,
-                    message=(
-                        "Run budget exceeded before tool execution. "
-                        "Please narrow the request scope."
-                    ),
-                    retryable=False,
-                    provider="agent_mcp_client",
-                    details_safe={
-                        "budget_dimension": exc.dimension,
-                        "budget_limit": exc.limit,
-                        "budget_used": exc.used,
-                        "budget_requested": exc.requested,
-                    },
-                ),
-            ).model_dump(exclude_none=True)
+            return self._budget_error_response(exc, run_id=run_id)
 
         # Config is accepted for LangGraph compatibility but not used by MCP
         # Telemetry wrapping is handled by tools.py _wrap_tool()
-        return await self._invoke_fn(input)
+        try:
+            result = await self._invoke_fn(input)
+        except RunBudgetExceededError as exc:
+            return self._budget_error_response(exc, run_id=run_id)
+
+        try:
+            returned_rows = extract_rows_returned_from_tool_result(result)
+            consume_rows_returned_budget(returned_rows)
+        except RunBudgetExceededError as exc:
+            return self._budget_error_response(exc, run_id=run_id)
+
+        return result
 
     def _validate_input(self, input_payload: Any):
         """Validate outgoing tool arguments against MCP input_schema."""

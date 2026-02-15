@@ -1,6 +1,6 @@
-"""Structured audit event helpers."""
+"""Shared structured audit event helpers."""
 
-from agent.audit.audit_events import (
+from common.audit.audit_event import (
     AuditEvent,
     AuditEventBuffer,
     AuditEventSource,

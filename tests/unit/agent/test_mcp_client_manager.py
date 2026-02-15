@@ -12,6 +12,7 @@ from agent.mcp_client.manager import (
     is_retryable_tool_error,
     is_transient_error,
 )
+from agent.models.run_budget import RunBudget, RunBudgetExceededError, run_budget_context
 from common.models.error_metadata import ToolError
 
 
@@ -173,6 +174,31 @@ class TestMcpClientSession:
 
         assert result["result"] == {"ok": True}
         assert mock_mcp.call_tool.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_attempts_respect_run_budget(self):
+        """Retry attempts should consume tool-call budget and fail once exhausted."""
+        mock_mcp = MagicMock()
+        mock_mcp.call_tool = AsyncMock(
+            side_effect=[ConnectionError("Connection refused"), {"result": "success"}]
+        )
+
+        config = RetryConfig(max_retries=2, base_delay_seconds=0.01)
+        session = McpClientSession(mock_mcp, config)
+        budget = RunBudget(
+            llm_token_budget=100,
+            tool_call_budget=0,
+            sql_row_budget=100,
+            time_budget_ms=30_000,
+        )
+
+        with run_budget_context(budget):
+            with pytest.raises(RunBudgetExceededError):
+                await session.call_tool_with_retry("test_tool", {"arg": "value"})
+
+        assert budget.tool_call_budget_exceeded is True
+        # Retry attempt should fail before invoking the second MCP call.
+        assert mock_mcp.call_tool.call_count == 1
 
     @pytest.mark.asyncio
     async def test_call_tool_does_not_retry_structured_non_retryable_error(self):

@@ -2,6 +2,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_service import app as agent_app
+from common.tenancy.limits import reset_agent_run_tenant_limiter
+
+
+@pytest.fixture(autouse=True)
+def _reset_agent_run_limiter():
+    """Reset limiter singleton to avoid cross-test token/counter leakage."""
+    reset_agent_run_tenant_limiter()
+    yield
+    reset_agent_run_tenant_limiter()
 
 
 def test_run_agent_success(monkeypatch):
