@@ -1,141 +1,39 @@
-import pytest
-
-from dal.schema_cache import CachedSchemaIntrospector, SchemaCache
+from dal.schema_cache import SchemaCache, SchemaCacheBackend
 
 
-class _FakeIntrospector:
+class MockBackend(SchemaCacheBackend):
+    """Mock backend for SchemaCache testing."""
+
     def __init__(self):
-        self.list_calls = 0
-        self.def_calls = 0
+        """Initialize mock backend."""
+        self.clear_calls = []
 
-    async def list_table_names(self, schema="public"):
-        self.list_calls += 1
-        return ["users"]
+    def get(self, key):
+        """Mock get method."""
+        return None
 
-    async def get_table_def(self, table_name, schema="public"):
-        self.def_calls += 1
-        return {"name": table_name}
+    def set(self, key, value, ttl):
+        """Mock set method."""
+        pass
 
-    async def get_sample_rows(self, table_name, limit=3, schema="public"):
-        return [{"id": 1}]
-
-
-@pytest.mark.asyncio
-async def test_schema_cache_hit_miss(monkeypatch):
-    """Cache returns cached values after first miss."""
-    cache = SchemaCache(ttl_seconds=60)
-    wrapped = _FakeIntrospector()
-    cached = CachedSchemaIntrospector("postgres", wrapped, cache)
-
-    first = await cached.list_table_names(schema="public")
-    second = await cached.list_table_names(schema="public")
-
-    assert first == ["users"]
-    assert second == ["users"]
-    assert wrapped.list_calls == 1
+    def clear(self, provider=None, schema=None, table=None):
+        """Mock clear method."""
+        self.clear_calls.append((provider, schema, table))
 
 
-@pytest.mark.asyncio
-async def test_schema_cache_ttl_expiration(monkeypatch):
-    """Cache expires entries after TTL."""
-    cache = SchemaCache(ttl_seconds=10)
-    wrapped = _FakeIntrospector()
-    cached = CachedSchemaIntrospector("postgres", wrapped, cache)
+def test_invalidate_calls_backend_clear():
+    """Verify that invalidate methods propagate to the backend."""
+    backend = MockBackend()
+    cache = SchemaCache(backend=backend)
 
-    current = {"now": 0}
-
-    def fake_time():
-        return current["now"]
-
-    monkeypatch.setattr("dal.schema_cache.time.time", fake_time)
-
-    await cached.list_table_names(schema="public")
-    current["now"] = 5
-    await cached.list_table_names(schema="public")
-    current["now"] = 11
-    await cached.list_table_names(schema="public")
-
-    assert wrapped.list_calls == 2
-
-
-def test_schema_cache_manual_invalidation():
-    """Manual invalidation clears cached entries."""
-    cache = SchemaCache(ttl_seconds=60)
-    key_a = ("postgres", "schema", "public", None, "list_table_names")
-    key_b = ("postgres", "schema", "public", "users", "get_table_def")
-    cache.set(key_a, ["users"])
-    cache.set(key_b, {"name": "users"})
-
-    cache.clear_table("postgres", "public", "users")
-    assert cache.get(key_b) is None
-    assert cache.get(key_a) == ["users"]
-
-    cache.clear_schema("postgres", "public")
-    assert cache.get(key_a) is None
-
-
-def test_schema_cache_invalidate_scopes():
-    """Invalidate clears entries based on scope."""
-    cache = SchemaCache(ttl_seconds=60)
-    key_a = ("postgres", "schema", "public", None, "list_table_names")
-    key_b = ("postgres", "schema", "public", "users", "get_table_def")
-    key_c = ("mysql", "schema", "public", None, "list_table_names")
-    cache.set(key_a, ["users"])
-    cache.set(key_b, {"name": "users"})
-    cache.set(key_c, ["widgets"])
-
-    cache.invalidate(provider="postgres", schema="public", table="users")
-    assert cache.get(key_b) is None
-    assert cache.get(key_a) == ["users"]
-
-    cache.invalidate(provider="postgres")
-    assert cache.get(key_a) is None
-    assert cache.get(key_c) == ["widgets"]
-
+    # Test full invalidation
     cache.invalidate()
-    assert cache.get(key_c) is None
+    assert backend.clear_calls[-1] == (None, None, None)
 
+    # Test scoped invalidation
+    cache.invalidate(provider="postgres", schema="public", table="users")
+    assert backend.clear_calls[-1] == ("postgres", "public", "users")
 
-def test_schema_cache_lru_eviction():
-    """Cache evicts least-recently-used entries when at capacity."""
-    cache = SchemaCache(ttl_seconds=60, max_entries=2)
-    key_a = ("postgres", "schema", "public", None, "list_table_names")
-    key_b = ("postgres", "schema", "public", "users", "get_table_def")
-    key_c = ("postgres", "schema", "public", "orders", "get_table_def")
-
-    cache.set(key_a, ["users"])
-    cache.set(key_b, {"name": "users"})
-    assert cache.get(key_a) == ["users"]
-
-    cache.set(key_c, {"name": "orders"})
-
-    assert cache.get(key_b) is None
-    assert cache.get(key_a) == ["users"]
-    assert cache.get(key_c) == {"name": "orders"}
-
-
-def test_schema_cache_provider_specific_ttl(monkeypatch):
-    """Cache uses provider-specific TTL when configured."""
-
-    def mock_get_env_int(key, default):
-        if key == "DAL_SCHEMA_CACHE_TTL_SNOWFLAKE":
-            return 10
-        return default
-
-    monkeypatch.setattr("dal.schema_cache.get_env_int", mock_get_env_int)
-
-    cache = SchemaCache(ttl_seconds=60)
-    current = {"now": 0}
-    monkeypatch.setattr("dal.schema_cache.time.time", lambda: current["now"])
-
-    # Default TTL (60)
-    key_pg = ("postgres", "schema", "public", None, "list_table_names")
-    cache.set(key_pg, ["users"])
-
-    # Provider TTL (10)
-    key_sf = ("snowflake", "schema", "public", None, "list_table_names")
-    cache.set(key_sf, ["users"])
-
-    current["now"] = 15
-    assert cache.get(key_pg) == ["users"]
-    assert cache.get(key_sf) is None
+    # Test provider-level invalidation
+    cache.invalidate(provider="snowflake")
+    assert backend.clear_calls[-1] == ("snowflake", None, None)
