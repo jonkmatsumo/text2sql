@@ -9,11 +9,20 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from opentelemetry import metrics, trace
+
 from common.config.env import get_env_int
 from common.lib.otel import get_tracer
 from mcp_server.config.control_plane import ControlPlaneDatabase
 
 logger = logging.getLogger(__name__)
+
+meter = metrics.get_meter(__name__)
+refresh_duration_histogram = meter.create_histogram(
+    name="policy_loader.refresh_duration",
+    description="Duration of policy refresh operations in milliseconds",
+    unit="ms",
+)
 
 
 @dataclass
@@ -97,59 +106,72 @@ class PolicyLoader:
 
     async def _refresh_policies(self) -> None:
         """Reload policies from the control-plane database."""
+        start_time = time.perf_counter()
+        status = "unknown"
+
         query = """
             SELECT table_name, tenant_column, policy_expression
             FROM row_policies
             WHERE is_enabled = TRUE
         """
 
-        with self._tracer.start_as_current_span("policy.refresh_policies") as span:
-            try:
-                if not ControlPlaneDatabase.is_enabled():
-                    # Fallback to hardcoded defaults
-                    self._policies = self._get_default_policies()
-                    self._last_load_time = time.time()
-                    span.set_attribute("policy.source", "defaults")
-                    return
-
-                if not ControlPlaneDatabase._pool:
-                    # Try to init if not already (might happen if agent runs separately)
-                    try:
-                        await ControlPlaneDatabase.init()
-                    except Exception:
-                        # If generic init fails (e.g. env vars missing), fall back to defaults
-                        logger.warning(
-                            "Could not initialize ControlPlaneDatabase, " "using default policies."
-                        )
+        try:
+            with self._tracer.start_as_current_span("policy.refresh_policies") as span:
+                try:
+                    if not ControlPlaneDatabase.is_enabled():
+                        # Fallback to hardcoded defaults
                         self._policies = self._get_default_policies()
                         self._last_load_time = time.time()
-                        span.set_attribute("policy.source", "defaults_init_fail")
+                        span.set_attribute("policy.source", "defaults")
+                        status = "disabled"
                         return
 
-                async with ControlPlaneDatabase.get_connection() as conn:
-                    rows = await conn.fetch(query)
+                    if not ControlPlaneDatabase._pool:
+                        # Try to init if not already (might happen if agent runs separately)
+                        try:
+                            await ControlPlaneDatabase.init()
+                        except Exception as e:
+                            # If generic init fails (e.g. env vars missing), fall back to defaults
+                            logger.warning(
+                                "Could not initialize ControlPlaneDatabase, " "using default policies."
+                            )
+                            self._policies = self._get_default_policies()
+                            self._last_load_time = time.time()
+                            span.set_attribute("policy.source", "defaults_init_fail")
+                            span.record_exception(e)
+                            status = "init_failed"
+                            return
 
-                new_policies = {}
-                for row in rows:
-                    definition = PolicyDefinition(
-                        table_name=row["table_name"],
-                        tenant_column=row["tenant_column"],
-                        expression_template=row["policy_expression"],
-                    )
-                    new_policies[definition.table_name] = definition
+                    async with ControlPlaneDatabase.get_connection() as conn:
+                        rows = await conn.fetch(query)
 
-                self._policies = new_policies
-                self._last_load_time = time.time()
-                logger.info(f"Loaded {len(self._policies)} row policies from control-plane.")
-                span.set_attribute("policy.source", "database")
-                span.set_attribute("policy.count", len(new_policies))
+                    new_policies = {}
+                    for row in rows:
+                        definition = PolicyDefinition(
+                            table_name=row["table_name"],
+                            tenant_column=row["tenant_column"],
+                            expression_template=row["policy_expression"],
+                        )
+                        new_policies[definition.table_name] = definition
 
-            except Exception as e:
-                logger.error(f"Failed to load row policies: {e}")
-                span.record_exception(e)
-                # retain existing policies if refresh fails
-                if not self._policies:
-                    self._policies = self._get_default_policies()
+                    self._policies = new_policies
+                    self._last_load_time = time.time()
+                    logger.info(f"Loaded {len(self._policies)} row policies from control-plane.")
+                    span.set_attribute("policy.source", "database")
+                    span.set_attribute("policy.count", len(new_policies))
+                    status = "success"
+
+                except Exception as e:
+                    logger.error(f"Failed to load row policies: {e}")
+                    span.record_exception(e)
+                    # retain existing policies if refresh fails
+                    if not self._policies:
+                        self._policies = self._get_default_policies()
+                    status = "error"
+                    raise e
+        finally:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            refresh_duration_histogram.record(duration_ms, {"status": status})
 
     @staticmethod
     def _get_default_policies() -> Dict[str, PolicyDefinition]:

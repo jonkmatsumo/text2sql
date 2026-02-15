@@ -39,8 +39,15 @@ def mock_otel():
         yield mock_span
 
 
+@pytest.fixture
+def mock_metrics():
+    """Mock OpenTelemetry metrics."""
+    with patch("agent.validation.policy_loader.refresh_duration_histogram") as mock_hist:
+        yield mock_hist
+
+
 @pytest.mark.asyncio
-async def test_get_policies_loads_from_db(mock_control_plane, mock_otel):
+async def test_get_policies_loads_from_db(mock_control_plane, mock_otel, mock_metrics):
     """Verify that get_policies loads from DB and logs telemetry."""
     # Reset state
     PolicyLoader._policies = {}
@@ -55,6 +62,20 @@ async def test_get_policies_loads_from_db(mock_control_plane, mock_otel):
     # Verify tracing
     mock_otel.set_attribute.assert_any_call("policy_loader.source", "control_plane")
     mock_otel.set_attribute.assert_any_call("policy_loader.loaded_count", 1)
+
+    # Verify new metrics/attributes
+    mock_otel.set_attribute.assert_any_call("policy_loader.refresh_status", "success")
+    # check duration attribute exists (value is dynamic)
+    duration_calls = [
+        call
+        for call in mock_otel.set_attribute.call_args_list
+        if call[0][0] == "policy_loader.refresh_duration_ms"
+    ]
+    assert len(duration_calls) == 1
+
+    # Verify histogram record
+    assert mock_metrics.record.called
+    assert mock_metrics.record.call_args[0][1] == {"status": "success"}
 
 
 @pytest.mark.asyncio
