@@ -689,7 +689,7 @@ class Database:
                     from dal.util.row_limits import get_sync_max_rows
 
                     sync_max_rows = cls._query_target_sync_max_rows or get_sync_max_rows()
-                    if trace_enabled() or sync_max_rows:
+                    if trace_enabled() or sync_max_rows or read_only:
                         yield TracedAsyncpgConnection(
                             conn,
                             provider=cls._query_target_provider,
@@ -710,7 +710,7 @@ class Database:
                 from dal.util.row_limits import get_sync_max_rows
 
                 sync_max_rows = cls._query_target_sync_max_rows or get_sync_max_rows()
-                if trace_enabled() or sync_max_rows:
+                if trace_enabled() or sync_max_rows or read_only:
                     yield TracedAsyncpgConnection(
                         conn,
                         provider=cls._query_target_provider,
