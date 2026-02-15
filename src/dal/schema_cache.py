@@ -4,6 +4,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, Tuple, runtime_checkable
 
+from opentelemetry import trace
+
 from common.config.env import get_env_int
 from common.interfaces.schema_introspector import SchemaIntrospector
 
@@ -33,8 +35,8 @@ class SchemaCacheBackend(Protocol):
         provider: Optional[str] = None,
         schema: Optional[str] = None,
         table: Optional[str] = None,
-    ) -> None:
-        """Invalidate entries by scope."""
+    ) -> int:
+        """Invalidate entries by scope and return count returned."""
         ...
 
 
@@ -73,11 +75,12 @@ class InMemorySchemaCacheBackend:
         provider: Optional[str] = None,
         schema: Optional[str] = None,
         table: Optional[str] = None,
-    ) -> None:
-        """Clear entries by scope."""
+    ) -> int:
+        """Clear entries by scope and return count."""
         if provider is None:
+            count = len(self._cache)
             self._cache.clear()
-            return
+            return count
 
         # Filter based on scope
         if schema is None:
@@ -91,6 +94,8 @@ class InMemorySchemaCacheBackend:
 
         for k in keys_to_remove:
             self._cache.pop(k, None)
+
+        return len(keys_to_remove)
 
     def _evict_if_needed(self) -> None:
         if self._max_entries <= 0:
@@ -123,6 +128,7 @@ class SchemaCache:
 
         self._backend = backend or InMemorySchemaCacheBackend(max_entries=max_entries or 1000)
         self._logger = logging.getLogger(__name__)
+        self._tracer = trace.get_tracer(__name__)
 
     def _get_ttl_for_provider(self, provider: str) -> int:
         """Get TTL for a specific provider from env or default."""
@@ -140,21 +146,19 @@ class SchemaCache:
 
     def clear_all(self) -> None:
         """Clear all cached entries."""
-        self._logger.info("schema_cache_clear_all")
-        self._backend.clear()
+        self.invalidate()
 
     def clear_provider(self, provider: str) -> None:
         """Clear cached entries for a provider."""
-        self._logger.info("schema_cache_clear_provider provider=%s", provider)
-        self._backend.clear(provider=provider)
+        self.invalidate(provider=provider)
 
     def clear_schema(self, provider: str, schema: str) -> None:
         """Clear cached entries for a provider+schema."""
-        self._backend.clear(provider=provider, schema=schema)
+        self.invalidate(provider=provider, schema=schema)
 
     def clear_table(self, provider: str, schema: str, table: str) -> None:
         """Clear cached entries for a provider+schema+table."""
-        self._backend.clear(provider=provider, schema=schema, table=table)
+        self.invalidate(provider=provider, schema=schema, table=table)
 
     def invalidate(
         self,
@@ -162,14 +166,33 @@ class SchemaCache:
         schema: Optional[str] = None,
         table: Optional[str] = None,
     ) -> None:
-        """Invalidate cached entries based on scope."""
-        self._logger.info(
-            "schema_cache_invalidate provider=%s schema=%s table=%s",
-            provider,
-            schema,
-            table,
-        )
-        self._backend.clear(provider=provider, schema=schema, table=table)
+        """Invalidate cached entries based on scope and emit telemetry."""
+        scope = "global"
+        if provider:
+            scope = "provider"
+            if schema:
+                scope = "schema"
+                if table:
+                    scope = "table"
+
+        with self._tracer.start_as_current_span("schema.cache.invalidate") as span:
+            span.set_attribute("schema.cache.scope", scope)
+            if provider:
+                span.set_attribute("schema.cache.provider", provider)
+            if schema:
+                span.set_attribute("schema.cache.schema_name", schema)
+            if table:
+                span.set_attribute("schema.cache.table_name", table)
+
+            self._logger.info(
+                "schema_cache_invalidate scope=%s provider=%s schema=%s table=%s",
+                scope,
+                provider,
+                schema,
+                table,
+            )
+            count = self._backend.clear(provider=provider, schema=schema, table=table)
+            span.set_attribute("schema.cache.entries_cleared", count)
 
 
 class CachedSchemaIntrospector(SchemaIntrospector):
