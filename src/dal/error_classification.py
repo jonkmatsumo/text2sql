@@ -154,7 +154,7 @@ def classify_error_info(provider: str, exc: Exception) -> ErrorClassification:
     if provider in {"athena", "databricks"} and _matches_any(
         message, ("too many requests", "service unavailable", "temporarily unavailable")
     ):
-        return _classification(ErrorCategory.TRANSIENT, provider, retry_after)
+        return _classification(ErrorCategory.THROTTLING, provider, retry_after)
 
     # Validation / Generic fallbacks
     if _matches_any(
