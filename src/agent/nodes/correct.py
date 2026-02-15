@@ -17,6 +17,7 @@ from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.utils.budgeting import update_latency_ema
 from agent.utils.prompt_budget import consume_prompt_budget
 from common.config.env import get_env_bool, get_env_float, get_env_int, get_env_str
+from common.models.error_metadata import ErrorCategory
 
 logger = logging.getLogger(__name__)
 
@@ -150,15 +151,48 @@ def correct_sql_node(state: AgentState) -> dict:
         from agent.taxonomy.error_taxonomy import ERROR_TAXONOMY
 
         state_error_category = state.get("error_category")
-        if state_error_category and state_error_category in ERROR_TAXONOMY:
-            error_category = state_error_category
-            category_info = ERROR_TAXONOMY[error_category]
-        else:
-            error_category, category_info = classify_error(error or "")
+        category_info = None
+        error_category = None
+
+        # Check if state category maps to a taxonomy entry (legacy string or enum value)
+        if state_error_category:
+            # Try exact match (if state has canonical value)
+            if state_error_category in ERROR_TAXONOMY:
+                error_category = state_error_category
+                category_info = ERROR_TAXONOMY[error_category]
+            else:
+                # Try matching by enum value string
+                try:
+                    enum_cat = ErrorCategory(state_error_category)
+                    if enum_cat in ERROR_TAXONOMY:
+                        error_category = enum_cat
+                        category_info = ERROR_TAXONOMY[enum_cat]
+                except ValueError:
+                    pass
+
+        if not category_info:
+            # Fallback to regex classification or unknown
+            cat_val, cat_info = classify_error(error or "")
+            # classify_error returns (value_str, entry)
+            # We want the Key (enum) for logic, but Value (str) for storage
+            # Let's map back to enum key for taxonomy lookup if possible, or just use info
+            try:
+                error_category = ErrorCategory(cat_val)
+            except ValueError:
+                error_category = ErrorCategory.UNKNOWN
+
+            category_info = cat_info
+
+        # Normalize to string for storage
+        error_category_str = (
+            error_category.value
+            if isinstance(error_category, ErrorCategory)
+            else str(error_category)
+        )
 
         correction_event = {
             "attempt": int(retry),
-            "error_category": str(error_category),
+            "error_category": error_category_str,
             "has_retry_after": bool(retry_after_seconds),
         }
         (
@@ -168,13 +202,14 @@ def correct_sql_node(state: AgentState) -> dict:
         ) = _append_bounded_correction_event(state, correction_event)
 
         # Terminal Error Gating (Phase C)
-        if error_category in ("TABLE_INACCESSIBLE", "auth"):
+        # Use canonical categories
+        if error_category in (ErrorCategory.UNAUTHORIZED,):
             span.set_attribute("retry.terminated_early", True)
-            span.set_attribute("retry.terminal_category", error_category)
+            span.set_attribute("retry.terminal_category", error_category_str)
             correction_event["outcome"] = "terminal_stop"
             return {
-                "error": f"Terminal error: {error_category}. No correction possible.",
-                "error_category": error_category,
+                "error": f"Terminal error: {error_category_str}. No correction possible.",
+                "error_category": error_category_str,
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
                 "correction_attempts_truncated": correction_attempts_truncated,
@@ -182,18 +217,18 @@ def correct_sql_node(state: AgentState) -> dict:
                 **_correction_loop_payload(),
             }
 
-        span.set_attribute("error_category", error_category)
+        span.set_attribute("error_category", error_category_str)
         max_attempts = 3
         span.set_attribute("retry.attempt", retry)
         span.set_attribute("retry.max_attempts", max_attempts)
-        span.set_attribute("retry.reason_category", error_category)
+        span.set_attribute("retry.reason_category", error_category_str)
 
         if telemetry.get_current_span():
             telemetry.get_current_span().add_event(
                 "agent.retry",
                 {
                     "stage": "correct_sql",
-                    "reason_category": error_category,
+                    "reason_category": error_category_str,
                     "attempt": retry,
                     "max_attempts": max_attempts,
                     "provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
@@ -277,7 +312,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             correction_event["outcome"] = "budget_exhausted"
             return {
                 "error": "Token budget exhausted during correction loop.",
-                "error_category": "budget_exhausted",
+                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
                 "correction_attempts_truncated": correction_attempts_truncated,
@@ -293,7 +328,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
         error_msg_norm = (error or "").strip().lower()
         # Simple normalization: remove very platform-specific bits if needed,
         # but here simple trim is okay
-        sig_data = {"category": error_category, "message": error_msg_norm}
+        sig_data = {"category": error_category_str, "message": error_msg_norm}
         current_sig = canonical_json_hash(sig_data)
 
         signatures = state.get("error_signatures", [])
@@ -302,7 +337,9 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             span.set_attribute("retry.repeated_signature", current_sig)
             correction_event["outcome"] = "repeated_error"
             return {
-                "error": f"Stopping correction loop: Repeated error detected ({error_category})",
+                "error": (
+                    f"Stopping correction loop: Repeated error detected ({error_category_str})"
+                ),
                 "error_category": "repeated_error",
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
@@ -357,7 +394,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 correction_event["outcome"] = "prompt_budget_exhausted"
                 return {
                     "error": "LLM prompt budget exceeded during correction loop.",
-                    "error_category": "budget_exhausted",
+                    "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                     "retry_after_seconds": None,
                     "correction_attempts": correction_attempts,
                     "correction_attempts_truncated": correction_attempts_truncated,
@@ -502,7 +539,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             {
                 "corrected_sql": corrected_sql,
                 "retry_count": retry,
-                "error_category": error_category,
+                "error_category": error_category_str,
             }
         )
         correction_event["outcome"] = "corrected"
@@ -511,7 +548,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             "current_sql": corrected_sql,
             "retry_count": retry,
             "error": None,  # Reset error for next attempt
-            "error_category": error_category,
+            "error_category": error_category_str,
             "correction_plan": correction_strategy,
             "latency_correct_seconds": latency_seconds,
             "ema_llm_latency_seconds": ema_latency,

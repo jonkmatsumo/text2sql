@@ -120,7 +120,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
         # Initialize required contract attributes to satisfy enforcement on early exits
         span.set_attribute("result.rows_returned", 0)
         span.set_attribute("result.is_truncated", False)
-        span.set_attribute("error.category", "unknown")
+        span.set_attribute("error.category", ErrorCategory.UNKNOWN.value)
         original_sql = state.get("current_sql")
         tenant_id = state.get("tenant_id")
         pinned_snapshot_id = resolve_pinned_schema_snapshot_id(state)
@@ -277,7 +277,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     )
                     return {
                         "error": error,
-                        "error_category": "schema_mismatch",
+                        "error_category": ErrorCategory.SCHEMA_DRIFT.value,
                         "query_result": None,
                         "missing_identifiers": sorted(missing_identifiers),
                         "termination_reason": TerminationReason.VALIDATION_FAILED,
@@ -299,7 +299,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_outputs({"error": error})
                     return {
                         "error": error,
-                        "error_category": "timeout",
+                        "error_category": ErrorCategory.TIMEOUT.value,
                         "query_result": None,
                         **_latency_payload(),
                     }
@@ -495,12 +495,14 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         if error_obj
                         else (envelope.error_message or "Unknown error")
                     )
-                    error_category = error_obj.category if error_obj else "unknown"
+                    error_category = (
+                        error_obj.category if error_obj else ErrorCategory.UNKNOWN.value
+                    )
                     error_metadata = error_obj.to_dict() if error_obj else {}
 
                     # Preserve raw malformed string payloads from the tool for diagnostics.
                     # Only mask parser-generated malformed payloads with a trace-id envelope.
-                    if error_category == "tool_response_malformed":
+                    if error_category == ErrorCategory.TOOL_RESPONSE_MALFORMED.value:
                         span.set_attribute("tool.response_shape", "malformed")
                         parser_generated_malformed = isinstance(error_msg, str) and (
                             error_msg == "Malformed response payload"
@@ -521,11 +523,13 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_outputs({"error": error_msg, "error_category": error_category})
                     if error_category:
                         span.set_attribute("error_category", error_category)
-                        span.set_attribute("timeout.triggered", error_category == "timeout")
+                        span.set_attribute(
+                            "timeout.triggered", error_category == ErrorCategory.TIMEOUT.value
+                        )
                     if retry_after_seconds is not None:
                         span.set_attribute("retry.retry_after_seconds", float(retry_after_seconds))
 
-                    if error_category == "unsupported_capability":
+                    if error_category == ErrorCategory.UNSUPPORTED_CAPABILITY.value:
                         error_msg = (
                             f"This backend does not support {result_capability_required} "
                             "for this request."
@@ -535,15 +539,15 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         )
 
                     reason = TerminationReason.UNKNOWN
-                    if error_category == "unauthorized":
+                    if error_category == ErrorCategory.UNAUTHORIZED.value:
                         reason = TerminationReason.PERMISSION_DENIED
-                    elif error_category == "timeout":
+                    elif error_category == ErrorCategory.TIMEOUT.value:
                         reason = TerminationReason.TIMEOUT
-                    elif error_category == "unsupported_capability":
+                    elif error_category == ErrorCategory.UNSUPPORTED_CAPABILITY.value:
                         reason = TerminationReason.UNSUPPORTED_CAPABILITY
-                    elif error_category == "tool_response_malformed":
+                    elif error_category == ErrorCategory.TOOL_RESPONSE_MALFORMED.value:
                         reason = TerminationReason.TOOL_RESPONSE_MALFORMED
-                    elif error_category == "invalid_request":
+                    elif error_category == ErrorCategory.INVALID_REQUEST.value:
                         reason = TerminationReason.INVALID_REQUEST
                     elif error_category == "budget_exceeded":
                         reason = TerminationReason.BUDGET_EXHAUSTED
@@ -563,7 +567,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
 
                 # Success path
                 span.set_attribute("tool.response_shape", "enveloped")
-                query_result = envelope.rows
+                query_result = envelope.rows or []
 
                 auto_pagination_enabled, auto_max_pages, auto_max_rows = _auto_pagination_config()
                 if auto_pagination_enabled:
@@ -967,28 +971,8 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     span.set_attribute("capability.fallback_applied", bool(result_fallback_applied))
                 if result_fallback_mode:
                     span.set_attribute("capability.fallback_mode", str(result_fallback_mode))
-                if result_cap_detected is not None:
-                    span.set_attribute("result.cap_detected", bool(result_cap_detected))
-                if result_cap_mitigation_applied is not None:
-                    span.set_attribute(
-                        "result.cap_mitigation_applied", bool(result_cap_mitigation_applied)
-                    )
-                if result_cap_mitigation_mode:
-                    span.set_attribute(
-                        "result.cap_mitigation_mode", str(result_cap_mitigation_mode)
-                    )
-                span.set_attribute("pagination.auto_paginated", bool(result_auto_paginated))
-                span.set_attribute("pagination.pages_fetched", int(result_pages_fetched))
-                if result_auto_pagination_stopped_reason:
-                    span.set_attribute(
-                        "pagination.auto_stopped_reason", str(result_auto_pagination_stopped_reason)
-                    )
-                span.set_attribute("prefetch.enabled", bool(result_prefetch_enabled))
-                span.set_attribute("prefetch.scheduled", bool(result_prefetch_scheduled))
-                span.set_attribute("prefetch.max_concurrency", int(prefetch_max_concurrency))
-                if result_prefetch_reason:
-                    span.set_attribute("prefetch.reason", str(result_prefetch_reason))
 
+<<<<<<< HEAD
                 # Cache successful SQL generation (if not from cache and tenant_id exists)
                 from_cache = state.get("from_cache", False)
                 if not error and original_sql and tenant_id and not from_cache:
@@ -1017,27 +1001,32 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 )
                 is_limited = bool(state.get("result_is_limited"))
                 query_limit = state.get("result_limit") if is_limited else None
+=======
+>>>>>>> a9fd1397 (refactor(agent): unify retry taxonomy on canonical ErrorCategory and add regression tests)
                 return {
                     "query_result": query_result,
                     "error": error,
-                    "result_is_truncated": result_is_truncated or False,
+                    "result_is_truncated": result_is_truncated,
                     "result_row_limit": result_row_limit,
-                    "result_rows_returned": (rows_returned),
+                    "result_rows_returned": result_rows_returned,
                     "result_columns": result_columns,
+                    "result_partial_reason": result_partial_reason,
+                    "result_is_limited": is_limited,
                     "result_capability_required": result_capability_required,
                     "result_capability_supported": result_capability_supported,
                     "result_fallback_policy": result_fallback_policy,
-                    "result_fallback_applied": bool(result_fallback_applied),
+                    "result_fallback_applied": result_fallback_applied,
                     "result_fallback_mode": result_fallback_mode,
-                    "result_cap_detected": bool(result_cap_detected),
-                    "result_cap_mitigation_applied": bool(result_cap_mitigation_applied),
+                    "result_cap_detected": result_cap_detected,
+                    "result_cap_mitigation_applied": result_cap_mitigation_applied,
                     "result_cap_mitigation_mode": result_cap_mitigation_mode,
-                    "result_auto_paginated": bool(result_auto_paginated),
-                    "result_pages_fetched": int(result_pages_fetched),
+                    "result_auto_paginated": result_auto_paginated,
+                    "result_pages_fetched": result_pages_fetched,
                     "result_auto_pagination_stopped_reason": result_auto_pagination_stopped_reason,
-                    "result_prefetch_enabled": bool(result_prefetch_enabled),
-                    "result_prefetch_scheduled": bool(result_prefetch_scheduled),
+                    "result_prefetch_enabled": result_prefetch_enabled,
+                    "result_prefetch_scheduled": result_prefetch_scheduled,
                     "result_prefetch_reason": result_prefetch_reason,
+<<<<<<< HEAD
                     "prefetch_discard_count": prefetch_discard_count,
                     "retry_after_seconds": None,
                     "termination_reason": TerminationReason.SUCCESS,
@@ -1060,19 +1049,19 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         prefetch_scheduled=bool(result_prefetch_scheduled),
                         prefetch_reason=result_prefetch_reason,
                     ).to_dict(),
+=======
+                    "page_token": result_next_page_token,
+>>>>>>> a9fd1397 (refactor(agent): unify retry taxonomy on canonical ErrorCategory and add regression tests)
                     **_latency_payload(),
                 }
 
         except Exception as e:
-            if hasattr(e, "exceptions"):
-                # Unwrap ExceptionGroup from TaskGroup
-                error = "; ".join([str(ex) for ex in e.exceptions])
-            else:
-                error = str(e)
+            error = f"Execution critical failure: {e}"
+            logger.error(error, exc_info=True)
             span.set_outputs({"error": error})
-            span.set_attribute("error.type", type(e).__name__)
             return {
                 "error": error,
                 "query_result": None,
+                "termination_reason": TerminationReason.UNKNOWN,
                 **_latency_payload(),
             }
