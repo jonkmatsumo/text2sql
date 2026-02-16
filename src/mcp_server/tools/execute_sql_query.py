@@ -335,6 +335,7 @@ async def handler(
     if err := validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
         return err
 
+    # 5. Execute Query
     from mcp_server.utils.validation import require_tenant_id
 
     # 0. Enforce Tenant ID
@@ -369,7 +370,7 @@ async def handler(
             validation_error,
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
-        )
+            )
 
     # 2.5 Complexity Guard
     complexity_error, complexity_metadata = _validate_sql_complexity(sql_query, provider)
@@ -393,6 +394,40 @@ async def handler(
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata=complexity_metadata,
+        )
+
+    # 4. Final Safety Guardrail
+    # Even if the provider claims to be read-only, we enforce it at the SQL level
+    # to prevent driver bugs or misconfigurations from allowing writes.
+    from dal.util.read_only import enforce_read_only_sql
+
+    try:
+        enforce_read_only_sql(sql_query, provider, read_only=True)
+    except PermissionError as e:
+        # Emit telemetry for blocked mutation
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            try:
+                # Basic best-effort extraction since we might not have AST yet
+                statement_type = (
+                    sql_query.strip().split()[0].upper() if sql_query.strip() else "UNKNOWN"
+                )
+            except Exception:
+                statement_type = "UNKNOWN"
+
+            span.add_event(
+                "mcp.read_only.blocked",
+                attributes={
+                    "provider": provider,
+                    "category": ErrorCategory.MUTATION_BLOCKED.value,
+                    "statement_type": statement_type,
+                },
+            )
+
+        return _construct_error_response(
+            str(e),
+            category=ErrorCategory.MUTATION_BLOCKED,
+            provider=provider,
         )
 
     # 3. Policy Enforcement (Table Allowlist & Sensitive Columns)

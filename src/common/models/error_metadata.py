@@ -30,6 +30,7 @@ class ErrorCategory(str, Enum):
 
     # MCP / Extension categories
     DEPENDENCY_FAILURE = "dependency_failure"
+    MUTATION_BLOCKED = "mutation_blocked"
     UNAUTHORIZED = "unauthorized"
     TOOL_VERSION_INVALID = "tool_version_invalid"
     TOOL_VERSION_UNSUPPORTED = "tool_version_unsupported"

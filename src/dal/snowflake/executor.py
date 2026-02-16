@@ -12,12 +12,18 @@ from dal.tracing import trace_query_operation
 class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
     """AsyncQueryExecutor backed by Snowflake query IDs."""
 
-    def __init__(self, conn: snowflake.connector.SnowflakeConnection) -> None:
+    def __init__(
+        self, conn: snowflake.connector.SnowflakeConnection, read_only: bool = False
+    ) -> None:
         """Initialize the executor with a Snowflake connection."""
         self._conn = conn
+        self._read_only = read_only
 
     async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
         """Submit a query for asynchronous execution."""
+        from dal.util.read_only import enforce_read_only_sql
+
+        enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         bound_params = params if params is not None else []
         return await trace_query_operation(
             "dal.query.submit",

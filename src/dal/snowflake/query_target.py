@@ -94,7 +94,7 @@ class _SnowflakeConnection:
         self._max_rows = max_rows
         self._warn_after_seconds = warn_after_seconds
         self._read_only = read_only
-        self._executor = SnowflakeAsyncQueryExecutor(conn)
+        self._executor = SnowflakeAsyncQueryExecutor(conn, read_only=read_only)
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 

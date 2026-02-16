@@ -3,8 +3,10 @@
 import re
 
 import sqlglot
+from opentelemetry import trace
 from sqlglot import exp
 
+from common.models.error_metadata import ErrorCategory
 from common.policy.sql_policy import ALLOWED_STATEMENT_TYPES
 from common.sql.dialect import normalize_sqlglot_dialect
 
@@ -29,8 +31,10 @@ def is_mutating_sql(sql: str, provider: str) -> bool:
         return True
 
     dialect = normalize_sqlglot_dialect(provider)
+    # Strip comments to ensure consistent parsing behavior (aligns with AST validator)
+    stripped = _SQL_COMMENT_RE.sub(" ", sql).strip()
     try:
-        expressions = sqlglot.parse(sql, read=dialect)
+        expressions = sqlglot.parse(stripped, read=dialect)
     except Exception:
         expressions = None
 
@@ -74,7 +78,6 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
         return
     if is_mutating_sql(sql, provider):
         from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
-        from common.models.error_metadata import ErrorCategory
 
         emit_audit_event(
             AuditEventType.READONLY_VIOLATION,
@@ -87,6 +90,25 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
                 "decision": "reject",
             },
         )
+
+        # Emit telemetry for blocked mutation
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            # Best-effort extraction of statement type for telemetry
+            try:
+                stripped = _SQL_COMMENT_RE.sub(" ", sql).lstrip()
+                statement_type = stripped.split(maxsplit=1)[0].upper() if stripped else "UNKNOWN"
+            except Exception:
+                statement_type = "UNKNOWN"
+
+            span.add_event(
+                "dal.read_only.blocked",
+                attributes={
+                    "provider": provider,
+                    "category": ErrorCategory.MUTATION_BLOCKED.value,
+                    "statement_type": statement_type,
+                },
+            )
         raise PermissionError(
             f"Read-only enforcement blocked non-SELECT statement for provider '{provider}'."
         )

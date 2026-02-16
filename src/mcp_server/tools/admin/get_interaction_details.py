@@ -28,6 +28,7 @@ async def handler(interaction_id: str) -> str:
     """
     import time
 
+    from common.models.error_metadata import ErrorCategory
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from mcp_server.utils.errors import tool_error_response
 
@@ -46,7 +47,7 @@ async def handler(interaction_id: str) -> str:
         return tool_error_response(
             message=f"Interaction {interaction_id} not found",
             code="INTERACTION_NOT_FOUND",
-            category="invalid_request",
+            category=ErrorCategory.INVALID_REQUEST,
             provider="interaction_store",
             retryable=False,
         )

@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from common.models.error_metadata import ErrorCategory
 from dal.factory import get_feedback_store
 from mcp_server.utils.envelopes import tool_success_response
 from mcp_server.utils.errors import tool_error_response
@@ -75,5 +76,5 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
         return tool_error_response(
             message="Failed to submit feedback.",
             code="SUBMIT_FEEDBACK_FAILED",
-            category="internal",
+            category=ErrorCategory.INTERNAL,
         )

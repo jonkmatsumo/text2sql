@@ -147,7 +147,7 @@ async def test_failure_mode_matrix_covers_stopping_reason_and_output_shape(monke
         truncation_payload,
     )
     mismatch_summary = build_retry_correction_summary({**mismatch_state, **mismatch_result})
-    assert mismatch_result["error_category"] == "schema_mismatch"
+    assert mismatch_result["error_category"] == "schema_drift"
     assert mismatch_result["termination_reason"] == TerminationReason.VALIDATION_FAILED
     assert mismatch_summary["final_stopping_reason"] in {
         "schema_mismatch",
