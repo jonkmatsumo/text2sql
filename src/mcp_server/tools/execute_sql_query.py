@@ -370,7 +370,7 @@ async def handler(
             validation_error,
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
-            )
+        )
 
     # 2.5 Complexity Guard
     complexity_error, complexity_metadata = _validate_sql_complexity(sql_query, provider)

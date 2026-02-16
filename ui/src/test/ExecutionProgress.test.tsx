@@ -1,4 +1,4 @@
-
+import { describe, it, expect } from "vitest";
 import { ExecutionProgress } from "../components/common/ExecutionProgress";
 import { render, screen } from "@testing-library/react";
 
