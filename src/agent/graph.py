@@ -1110,6 +1110,7 @@ async def run_agent_with_tracing(
             "interactive_session": interactive_session,
             "replay_mode": bool(replay_mode),
             "replay_bundle": replay_bundle,
+            "generate_only": generate_only,
             "token_budget": {
                 "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
                 "consumed_tokens": 0,
