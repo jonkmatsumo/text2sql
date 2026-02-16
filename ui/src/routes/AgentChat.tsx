@@ -268,11 +268,17 @@ export default function AgentChat() {
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
   const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
+  const abortRef = useRef<AbortController | null>(null);
   const threadIdRef = useRef<string>(crypto.randomUUID());
   const [searchParams] = useSearchParams();
   const [verboseMode, setVerboseMode] = useState(() =>
     loadVerboseMode(searchParams.toString())
   );
+
+  // Abort any in-flight stream on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   // Check configuration on mount
   useEffect(() => {
@@ -347,6 +353,11 @@ export default function AgentChat() {
       return;
     }
 
+    // Abort any previous in-flight stream
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const prompt = question.trim();
     const request = {
       question: prompt,
@@ -370,15 +381,18 @@ export default function AgentChat() {
         const stream = runAgentStream(request);
         const STREAM_TIMEOUT_MS = 30_000;
 
-        // Iterate with per-event timeout
+        // Iterate with per-event timeout and abort support
         const iterator = stream[Symbol.asyncIterator]();
-        let timedOut = false;
-        while (!timedOut) {
+        while (!controller.signal.aborted) {
           const next = await Promise.race([
             iterator.next(),
             new Promise<never>((_, reject) =>
               setTimeout(() => reject(new Error("STREAM_TIMEOUT")), STREAM_TIMEOUT_MS)
             ),
+            new Promise<never>((_, reject) => {
+              controller.signal.addEventListener("abort", () =>
+                reject(new Error("ABORTED")), { once: true });
+            }),
           ]);
           if (next.done) break;
           const evt = next.value;
@@ -412,6 +426,8 @@ export default function AgentChat() {
           }
         }
       } catch (streamErr: any) {
+        // Don't fall back if this run was aborted (new run started)
+        if (controller.signal.aborted) return;
         // If stream endpoint fails (404, network, timeout), fall back to blocking runAgent
         if (!finalResult) {
           setRunStatus("finalizing");
@@ -430,10 +446,12 @@ export default function AgentChat() {
         ]);
       }
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       didFail = true;
       setRunStatus("failed");
       setError(buildErrorData(err));
     } finally {
+      if (controller.signal.aborted) return;
       if (!didFail) setRunStatus("idle");
       setCurrentPhase(null);
       setCompletedPhases([]);

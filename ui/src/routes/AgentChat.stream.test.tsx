@@ -290,6 +290,63 @@ describe("AgentChat streaming", () => {
     globalThis.setTimeout = origSetTimeout;
   });
 
+  it("aborts previous stream when new query is submitted", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    let callCount = 0;
+
+    mockedStream.mockImplementation(() => ({
+      [Symbol.asyncIterator]() {
+        callCount++;
+        const myCallNum = callCount;
+        let yielded = false;
+        return {
+          next() {
+            if (myCallNum === 1) {
+              // First stream: hang forever (will be aborted)
+              return new Promise<IteratorResult<any>>(() => {});
+            }
+            // Second stream: return result then done
+            if (!yielded) {
+              yielded = true;
+              return Promise.resolve({
+                done: false,
+                value: { event: "result", data: { response: "Second query result" } },
+              });
+            }
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    }));
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+
+    // Submit first query (stream will hang)
+    fireEvent.change(input, { target: { value: "first query" } });
+    fireEvent.submit(input.closest("form")!);
+
+    // Wait a tick for the stream to start
+    await waitFor(() => { expect(callCount).toBe(1); });
+
+    // Submit second query (should abort first and start new stream)
+    fireEvent.change(input, { target: { value: "second query" } });
+    fireEvent.submit(input.closest("form")!);
+
+    // Second query result should render
+    await waitFor(() => {
+      expect(screen.getByText("Second query result")).toBeInTheDocument();
+    });
+
+    // Both streams were created
+    expect(callCount).toBe(2);
+  });
+
   it("does not call runAgent fallback when stream already produced a result", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
