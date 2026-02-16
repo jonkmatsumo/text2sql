@@ -14,6 +14,7 @@ import { ChartRenderer } from "../components/charts/ChartRenderer";
 import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
+import { dedupeRows } from "../utils/dedupeRows";
 
 interface Message {
   role: "user" | "assistant";
@@ -522,9 +523,10 @@ export default function AgentChat() {
           }
         }
 
+        const dedupedNewRows = dedupeRows(existingRows, newRows);
         updated[msgIdx] = {
           ...existing,
-          result: [...existingRows, ...newRows],
+          result: [...existingRows, ...dedupedNewRows],
           resultCompleteness: result.result_completeness,
         };
         return updated;
