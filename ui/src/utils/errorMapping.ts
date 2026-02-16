@@ -77,15 +77,20 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     severity: "warn",
     actions: [],
   },
+  budget_exhausted: {
+    title: "Budget Exhausted",
+    severity: "warn",
+    actions: [{ label: "View Quotas", href: "/admin/settings/query-target" }],
+  },
   budget_exceeded: {
     title: "Budget Exceeded",
     severity: "warn",
-    actions: [],
+    actions: [{ label: "View Quotas", href: "/admin/settings/query-target" }],
   },
   resource_exhausted: {
     title: "Resource Exhausted",
     severity: "error",
-    actions: [],
+    actions: [{ label: "System Operations", href: "/admin/operations" }],
   },
   mutation_blocked: {
     title: "Mutation Blocked",
