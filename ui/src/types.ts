@@ -48,3 +48,15 @@ export interface TraceAggregationsResponse {
 export type MetricsBucket = OtelComponents["schemas"]["MetricsBucket"];
 export type MetricsSummary = OtelComponents["schemas"]["MetricsSummary"];
 export type MetricsPreviewResponse = OtelComponents["schemas"]["MetricsPreviewResponse"];
+
+export interface AgentProgressData {
+    phase: string;
+    timestamp: number;
+}
+
+export type AgentStreamEventType = "startup" | "progress" | "result" | "error";
+
+export interface AgentStreamEvent {
+    event: AgentStreamEventType;
+    data: any; // Flexible data based on event type
+}

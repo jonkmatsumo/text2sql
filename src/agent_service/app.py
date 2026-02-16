@@ -1,6 +1,7 @@
 """HTTP service for running the Text2SQL agent."""
 
 import asyncio
+import json
 import re
 import time
 import uuid
@@ -9,6 +10,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event, get_audit_event_buffer
@@ -553,3 +555,86 @@ def get_audit_diagnostics(
     return AuditDiagnosticsResponse(
         recent_events=get_audit_event_buffer().list_recent(limit=bounded_limit, run_id=run_id)
     )
+
+
+@app.post("/agent/run/stream")
+async def run_agent_stream(request: AgentRunRequest) -> StreamingResponse:
+    """Run the agent and stream progress events via SSE."""
+    thread_id = request.thread_id or str(uuid.uuid4())
+    limiter = get_agent_run_tenant_limiter()
+
+    async def event_generator():
+        try:
+            async with limiter.acquire(request.tenant_id) as lease:
+                telemetry.update_current_trace(
+                    {
+                        "tenant.active_runs": lease.active_runs,
+                        "tenant.limit": lease.limit,
+                        "tenant.limit_exceeded": False,
+                    }
+                )
+
+                # Dynamic import to avoid circular dep issues if any
+                from agent.graph import run_agent_with_tracing_stream
+
+                timeout_seconds = request.timeout_seconds or 30.0
+                deadline_ts = time.monotonic() + timeout_seconds
+
+                # Yield startup event
+                startup_data = json.dumps(
+                    {
+                        "timestamp": time.time(),
+                        "thread_id": thread_id,
+                    }
+                )
+                yield f"event: startup\ndata: {startup_data}\n\n"
+
+                # Replay mode not yet supported in stream path.
+
+                try:
+                    async for event in run_agent_with_tracing_stream(
+                        question=request.question,
+                        tenant_id=request.tenant_id,
+                        thread_id=thread_id,
+                        timeout_seconds=timeout_seconds,
+                        deadline_ts=deadline_ts,
+                        page_token=request.page_token,
+                        page_size=request.page_size,
+                        interactive_session=True,  # Always interactive for chat
+                    ):
+                        if event["event"] == "progress":
+                            yield f"event: progress\ndata: {json.dumps(event['data'])}\n\n"
+                        elif event["event"] == "error":
+                            yield f"event: error\ndata: {json.dumps(event['data'])}\n\n"
+                        elif event["event"] == "final":
+                            # Yield as raw JSON (not via Pydantic).
+                            payload = event["data"]
+
+                            if payload.get("error"):
+                                payload["error"] = redact_sensitive_info(payload["error"])
+
+                            result_data = json.dumps(payload, default=str)
+                            yield (f"event: result\ndata: {result_data}\n\n")
+
+                except asyncio.TimeoutError:
+                    err = json.dumps({"error": "Request timed out."})
+                    yield f"event: error\ndata: {err}\n\n"
+                except Exception as exc:
+                    sanitized = redact_sensitive_info(str(exc))
+                    err = json.dumps({"error": sanitized})
+                    yield f"event: error\ndata: {err}\n\n"
+
+        except TenantConcurrencyLimitExceeded:
+            agent_monitor.increment("tenant_limit_exceeded")
+            err = json.dumps(
+                {
+                    "error": "Tenant concurrency limit exceeded.",
+                    "category": "LIMIT_EXCEEDED",
+                }
+            )
+            yield f"event: error\ndata: {err}\n\n"
+        except Exception as e:
+            err = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {err}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

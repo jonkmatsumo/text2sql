@@ -14,8 +14,9 @@ vi.mock("../hooks/useToast", () => ({
   useToast: () => ({ show: vi.fn() }),
 }));
 
+let mockJobPollingReturn: any = { job: null, progress: null };
 vi.mock("../hooks/useJobPolling", () => ({
-  useJobPolling: () => ({ job: null }),
+  useJobPolling: () => mockJobPollingReturn,
 }));
 
 class MockEventSource {
@@ -49,6 +50,7 @@ class MockEventSource {
 describe("SystemOperations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockJobPollingReturn = { job: null, progress: null };
     (globalThis as any).EventSource = MockEventSource;
     MockEventSource.instances.length = 0;
   });
@@ -84,5 +86,29 @@ describe("SystemOperations", () => {
 
     expect(screen.getByText(/Generation complete/i)).toBeInTheDocument();
     expect(OpsService.generatePatterns).not.toHaveBeenCalled();
+  });
+
+  it("renders progress bar when job is RUNNING with progress", () => {
+    mockJobPollingReturn = {
+      job: { id: "job-1", job_type: "schema_hydration", status: "RUNNING" },
+      progress: { processed: 30, total: 100 },
+    };
+
+    render(<SystemOperations />);
+
+    expect(screen.getByTestId("job-progress-bar")).toBeInTheDocument();
+    expect(screen.getByText("30 / 100")).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+  });
+
+  it("does not render progress bar when job is COMPLETED", () => {
+    mockJobPollingReturn = {
+      job: { id: "job-1", job_type: "schema_hydration", status: "COMPLETED" },
+      progress: { processed: 100, total: 100 },
+    };
+
+    render(<SystemOperations />);
+
+    expect(screen.queryByTestId("job-progress-bar")).not.toBeInTheDocument();
   });
 });

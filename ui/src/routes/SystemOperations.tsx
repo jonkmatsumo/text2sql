@@ -67,7 +67,7 @@ export default function SystemOperations() {
         showToast(`${job.job_type} failed: ${job.error_message}`, "error");
     }, [showToast]);
 
-    const { job: activeJob } = useJobPolling({
+    const { job: activeJob, progress: jobProgress } = useJobPolling({
         jobId: activeJobId,
         enabled: true,
         onComplete: handleJobComplete,
@@ -286,6 +286,34 @@ export default function SystemOperations() {
                                 {activeJob.status}
                             </div>
                         </div>
+                        {activeJob.status === "RUNNING" && jobProgress && jobProgress.total > 0 && (
+                            <div data-testid="job-progress-bar" style={{ marginTop: "12px" }}>
+                                <div style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    fontSize: "0.75rem",
+                                    color: "var(--muted)",
+                                    marginBottom: "4px",
+                                }}>
+                                    <span>{jobProgress.processed} / {jobProgress.total}</span>
+                                    <span>{Math.round((jobProgress.processed / jobProgress.total) * 100)}%</span>
+                                </div>
+                                <div style={{
+                                    height: "6px",
+                                    borderRadius: "3px",
+                                    background: "var(--border, #e2e8f0)",
+                                    overflow: "hidden",
+                                }}>
+                                    <div style={{
+                                        height: "100%",
+                                        borderRadius: "3px",
+                                        background: "var(--accent, #6366f1)",
+                                        width: `${Math.min(100, Math.round((jobProgress.processed / jobProgress.total) * 100))}%`,
+                                        transition: "width 0.3s ease",
+                                    }} />
+                                </div>
+                            </div>
+                        )}
                         {activeJob.error_message && (
                             <div style={{ marginTop: "8px", color: "var(--error)", fontSize: "0.85rem" }}>
                                 {activeJob.error_message}

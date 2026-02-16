@@ -1,10 +1,27 @@
-import React from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import OtelHealthBanner from "./OtelHealthBanner";
+import { fetchQueryTargetSettings } from "../../api";
 
 interface LayoutProps {
     children: React.ReactNode;
 }
+
+type HealthStatus = "loading" | "healthy" | "not_configured" | "error";
+
+const HEALTH_COLORS: Record<HealthStatus, string> = {
+    loading: "#94a3b8",
+    healthy: "#10b981",
+    not_configured: "#f59e0b",
+    error: "#ef4444",
+};
+
+const HEALTH_LABELS: Record<HealthStatus, string> = {
+    loading: "Checking...",
+    healthy: "System Online",
+    not_configured: "Not Configured",
+    error: "Connection Failed",
+};
 
 const navItems = [
     { path: "/", label: "Agent Chat", icon: "💬" },
@@ -17,6 +34,26 @@ const navItems = [
 
 export default function Layout({ children }: LayoutProps) {
     const location = useLocation();
+    const [healthStatus, setHealthStatus] = useState<HealthStatus>("loading");
+
+    const checkHealth = useCallback(async () => {
+        try {
+            const settings = await fetchQueryTargetSettings();
+            if (settings.active) {
+                setHealthStatus("healthy");
+            } else {
+                setHealthStatus("not_configured");
+            }
+        } catch {
+            setHealthStatus("error");
+        }
+    }, []);
+
+    useEffect(() => {
+        checkHealth();
+        const interval = setInterval(checkHealth, 30000);
+        return () => clearInterval(interval);
+    }, [checkHealth]);
 
     return (
         <>
@@ -74,10 +111,29 @@ export default function Layout({ children }: LayoutProps) {
                 </nav>
 
                 <div style={{ marginTop: "auto", padding: "20px 12px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: "0.85rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#10b981" }}></div>
-                        System Online
-                    </div>
+                    <Link
+                        to="/admin/settings/query-target"
+                        data-testid="health-badge"
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            textDecoration: "none",
+                            color: "inherit",
+                        }}
+                    >
+                        <div
+                            data-testid="health-dot"
+                            style={{
+                                width: "8px",
+                                height: "8px",
+                                borderRadius: "50%",
+                                backgroundColor: HEALTH_COLORS[healthStatus],
+                                transition: "background-color 0.3s ease",
+                            }}
+                        />
+                        {HEALTH_LABELS[healthStatus]}
+                    </Link>
                 </div>
             </aside>
 

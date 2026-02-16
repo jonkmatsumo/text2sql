@@ -1734,3 +1734,381 @@ async def run_agent_with_tracing(
         telemetry.flush(timeout_ms=500)
 
         return result
+
+
+async def run_agent_with_tracing_stream(
+    question: str,
+    tenant_id: int,
+    thread_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
+    deadline_ts: Optional[float] = None,
+    page_token: Optional[str] = None,
+    page_size: Optional[int] = None,
+    interactive_session: bool = False,
+    replay_mode: bool = False,
+    replay_bundle: Optional[dict[str, Any]] = None,
+) -> Any:  # AsyncIterator[dict[str, Any]]
+    """Run the agent workflow with telemetry tracing, streaming progress events."""
+    if not tenant_id:
+        raise ValueError("tenant_id is required")
+
+    from common.config.sanity import validate_runtime_configuration
+
+    validate_runtime_configuration()
+
+    # 0. Centralized Ingress Sanitization
+    from langchain_core.messages import HumanMessage
+
+    from common.sanitization.text import sanitize_text
+
+    raw_question = question
+    res = sanitize_text(question)
+    question = res.sanitized or ""
+
+    # Ensure telemetry is configured at runtime
+    run_telemetry_configure()
+
+    # Generate thread_id if not provided
+    if thread_id is None:
+        thread_id = session_id or str(uuid.uuid4())
+
+    # Generate stable run_id for this execution
+    run_id = str(uuid.uuid4())
+
+    # Prepare base metadata
+    base_metadata = {
+        "tenant_id": str(tenant_id),
+        "run_id": run_id,
+        "environment": get_env_str("ENVIRONMENT", "development"),
+        "deployment": get_env_str("DEPLOYMENT", "development"),
+        "version": "2.0.0",
+        "thread_id": thread_id,
+    }
+    if replay_mode:
+        base_metadata["replay_mode"] = "deterministic"
+    if replay_bundle:
+        base_metadata["replay_mode"] = "active"
+    if session_id:
+        base_metadata["telemetry.session_id"] = session_id
+    if user_id:
+        base_metadata["telemetry.user_id"] = user_id
+
+    # We yield events, so this function is an async generator
+    with telemetry.start_span(
+        "agent_workflow_stream", span_type=SpanType.CHAIN, attributes=base_metadata
+    ):
+        telemetry.update_current_trace(base_metadata)
+
+        # Telemetry context capture
+        telemetry_context = telemetry.capture_context()
+        serialized_ctx = telemetry.serialize_context(telemetry_context)
+
+        if deadline_ts is None and timeout_seconds:
+            deadline_ts = time.monotonic() + timeout_seconds
+
+        policy_snapshot = load_policy_snapshot()
+        schema_snapshot_id = None  # Logic to resolve this comes later in context
+
+        inputs = {
+            "messages": [HumanMessage(content=question)],
+            "run_id": run_id,
+            "policy_snapshot": policy_snapshot,
+            "schema_context": "",
+            "current_sql": None,
+            "query_result": None,
+            "error": None,
+            "retry_after_seconds": None,
+            "retry_count": 0,
+            "schema_refresh_count": 0,
+            "active_query": None,
+            "procedural_plan": None,
+            "rejected_cache_context": None,
+            "clause_map": None,
+            "tenant_id": tenant_id,
+            "from_cache": False,
+            "telemetry_context": serialized_ctx,
+            "raw_user_input": raw_question,
+            "schema_snapshot_id": None,
+            "pinned_schema_snapshot_id": None,
+            "pending_schema_snapshot_id": None,
+            "pending_schema_fingerprint": None,
+            "pending_schema_version_ts": None,
+            "schema_snapshot_transition": None,
+            "schema_snapshot_refresh_applied": 0,
+            "schema_fingerprint": None,
+            "schema_version_ts": None,
+            "deadline_ts": deadline_ts,
+            "timeout_seconds": timeout_seconds,
+            "page_token": page_token,
+            "page_size": page_size,
+            "seed": _resolve_run_seed(replay_mode=bool(replay_mode)),
+            "interactive_session": interactive_session,
+            "replay_mode": bool(replay_mode),
+            "replay_bundle": replay_bundle,
+            "token_budget": {
+                "max_tokens": get_env_int("AGENT_TOKEN_BUDGET", 50000),
+                "consumed_tokens": 0,
+            },
+            "llm_prompt_bytes_used": 0,
+            "llm_budget_exceeded": False,
+            "error_signatures": [],
+            "decision_events": [],
+            "decision_events_truncated": False,
+            "decision_events_dropped": 0,
+            "prefetch_kill_switch_enabled": _safe_env_bool("DISABLE_PREFETCH", False),
+            "schema_refresh_kill_switch_enabled": _safe_env_bool("DISABLE_SCHEMA_REFRESH", False),
+            "llm_retries_kill_switch_enabled": _safe_env_bool("DISABLE_LLM_RETRIES", False),
+        }
+
+        config = {"configurable": {"thread_id": thread_id}}
+
+        from agent.models.run_budget import RunBudget, run_budget_context
+        from agent.tools import mcp_tools_context, unpack_mcp_result
+        from agent.utils.llm_run_budget import current_budget_state, llm_run_budget_context
+        from agent.utils.retry import retry_with_backoff
+
+        persistence_mode = (get_env_str("AGENT_INTERACTION_PERSISTENCE_MODE", "") or "").strip()
+        if not persistence_mode:
+            persistence_mode = "best_effort"
+
+        base_llm_budget = _safe_env_int("AGENT_TOKEN_BUDGET", 50000, 0)
+        llm_budget_limit = _safe_env_int("AGENT_LLM_TOKEN_BUDGET", base_llm_budget, 0)
+        default_time_budget_ms = int(max(0.0, float(timeout_seconds or 30.0)) * 1000.0)
+        tool_call_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_TOOL_CALLS", "AGENT_TOOL_CALL_BUDGET", 50, 0
+        )
+        rows_returned_budget_limit = _resolve_budget_env_int(
+            "RUN_MAX_ROWS_RETURNED", "AGENT_SQL_ROW_BUDGET", 5000, 0
+        )
+
+        run_budget = RunBudget(
+            llm_token_budget=llm_budget_limit,
+            tool_call_budget=tool_call_budget_limit,
+            sql_row_budget=rows_returned_budget_limit,
+            time_budget_ms=_safe_env_int("AGENT_TIME_BUDGET_MS", default_time_budget_ms, 0),
+        )
+        inputs["run_budget"] = run_budget.to_state_dict()
+        inputs["tool_calls_total"] = int(run_budget.tool_calls_total)
+        inputs["rows_total"] = int(run_budget.rows_total)
+        inputs["tool_call_budget_exceeded"] = bool(run_budget.tool_call_budget_exceeded)
+        inputs["sql_row_budget_exceeded"] = bool(run_budget.sql_row_budget_exceeded)
+        llm_calls_total = 0
+        llm_token_total = 0
+
+        with llm_run_budget_context(llm_budget_limit), run_budget_context(run_budget):
+            async with mcp_tools_context() as tools:
+                # Same schema snapshot logic as original
+                schema_snapshot_id = inputs.get("schema_snapshot_id")
+                if not schema_snapshot_id:
+                    snapshot_mode = (
+                        get_env_str("SCHEMA_SNAPSHOT_MODE", "fingerprint").strip().lower()
+                    )
+                    if snapshot_mode == "static":
+                        schema_snapshot_id = "v1.0"
+                    elif snapshot_mode == "fingerprint":
+                        from agent.utils.schema_cache import get_or_refresh_schema_snapshot_id
+
+                        subgraph_tool = next(
+                            (t for t in tools if t.name == "get_semantic_subgraph"), None
+                        )
+                        if subgraph_tool:
+
+                            async def _refresh_snapshot_id() -> Optional[str]:
+                                try:
+                                    payload = {"query": question}
+                                    if tenant_id is not None:
+                                        payload["tenant_id"] = tenant_id
+                                    raw_subgraph = await subgraph_tool.ainvoke(payload)
+                                    from agent.utils.parsing import (
+                                        parse_tool_output,
+                                        unwrap_envelope,
+                                    )
+                                    from agent.utils.schema_fingerprint import (
+                                        resolve_schema_snapshot_id,
+                                    )
+
+                                    parsed = parse_tool_output(raw_subgraph)
+                                    if isinstance(parsed, list) and parsed:
+                                        parsed = parsed[0]
+                                    parsed = unwrap_envelope(parsed)
+                                    nodes = (
+                                        parsed.get("nodes", []) if isinstance(parsed, dict) else []
+                                    )
+                                    return resolve_schema_snapshot_id(nodes)
+                                except Exception:
+                                    return None
+
+                            schema_snapshot_id = await get_or_refresh_schema_snapshot_id(
+                                tenant_id, _refresh_snapshot_id
+                            )
+
+                    schema_snapshot_id = schema_snapshot_id or "unknown"
+                    inputs["schema_snapshot_id"] = schema_snapshot_id
+                inputs["pinned_schema_snapshot_id"] = schema_snapshot_id
+                telemetry.update_current_trace({"schema_snapshot_id": schema_snapshot_id})
+
+                # 1. Start Interaction Logging
+                interaction_id = None
+                interaction_persisted = False
+                create_tool = next((t for t in tools if t.name == "create_interaction"), None)
+                if create_tool:
+                    try:
+
+                        async def _create_interaction():
+                            otel_trace_id = telemetry.get_current_trace_id()
+                            final_trace_id = (
+                                otel_trace_id
+                                if otel_trace_id and _TRACE_ID_RE.fullmatch(otel_trace_id)
+                                else None
+                            )
+                            return await create_tool.ainvoke(
+                                {
+                                    "conversation_id": session_id or thread_id,
+                                    "schema_snapshot_id": schema_snapshot_id or "unknown",
+                                    "user_nlq_text": question,
+                                    "tenant_id": tenant_id,
+                                    "model_version": get_env_str("LLM_MODEL", "gpt-4o"),
+                                    "prompt_version": "v1.0",
+                                    "trace_id": final_trace_id,
+                                },
+                                config=config,
+                            )
+
+                        raw_interaction_id = await asyncio.wait_for(
+                            retry_with_backoff(
+                                _create_interaction,
+                                "create_interaction",
+                                extra_context={"trace_id": thread_id},
+                            ),
+                            timeout=0.5,
+                        )
+                        if raw_interaction_id:
+                            interaction_id = unpack_mcp_result(raw_interaction_id)
+                            inputs["interaction_id"] = interaction_id
+                            interaction_persisted = True
+                            inputs["interaction_persisted"] = True
+                            telemetry.update_current_trace({"interaction_id": interaction_id})
+                    except Exception as e:
+                        logger.warning("Failed to create interaction: %s", e)
+                        inputs["interaction_persisted"] = False
+                else:
+                    inputs["interaction_persisted"] = False
+
+                # Execute workflow with streaming
+                result = inputs.copy()
+                try:
+                    # Stream events
+                    final_output = None
+                    async for event in app.astream_events(inputs, config=config, version="v2"):
+                        kind = event["event"]
+
+                        # Yield interesting events for UI progress
+                        if kind == "on_chain_start":
+                            name = event["name"]
+                            if name in [
+                                "router",
+                                "plan",
+                                "execute",
+                                "synthesize",
+                                "visualize",
+                                "correct",
+                                "clarify",
+                            ]:
+                                yield {
+                                    "event": "progress",
+                                    "data": {"phase": name, "timestamp": time.time()},
+                                }
+                        elif kind == "on_chain_end":
+                            name = event["name"]
+                            if name == "LangGraph":
+                                final_output = event["data"]["output"]
+
+                    if final_output:
+                        result = final_output
+                        # Ensure interaction persistence status is preserved
+                        if "interaction_persisted" not in result:
+                            result["interaction_persisted"] = interaction_persisted
+
+                except Exception as execute_err:
+                    # Handle error similar to original
+                    logger.error("Error in agent stream: %s", execute_err)
+                    result["error"] = str(execute_err)
+                    result["error_category"] = "SYSTEM_CRASH"
+                    if "messages" not in result:
+                        result["messages"] = []
+                    yield {
+                        "event": "error",
+                        "data": {"error": str(execute_err), "category": "SYSTEM_CRASH"},
+                    }
+
+                # 2. Update Interaction Logging (Post-execution)
+                if interaction_id:
+                    update_tool = next((t for t in tools if t.name == "update_interaction"), None)
+                    if update_tool:
+                        try:
+                            status = "SUCCESS"
+                            if result.get("error"):
+                                status = "FAILURE"
+                            elif result.get("ambiguity_type"):
+                                status = "CLARIFICATION_REQUIRED"
+
+                            last_msg = ""
+                            if result.get("messages") and len(result["messages"]) > 0:
+                                last_message_obj = result["messages"][-1]
+                                last_msg = getattr(
+                                    last_message_obj, "content", str(last_message_obj)
+                                )
+
+                            if not last_msg and result.get("error"):
+                                last_msg = f"System Error: {result['error']}"
+
+                            update_payload = {
+                                "interaction_id": interaction_id,
+                                "tenant_id": tenant_id,
+                                "generated_sql": result.get("current_sql"),
+                                "response_payload": json.dumps(
+                                    {"text": last_msg, "error": result.get("error")}
+                                ),
+                                "execution_status": status,
+                                "error_type": result.get("error_category"),
+                                "tables_used": result.get("table_names", []),
+                            }
+
+                            # Simple retry for update
+                            async def _update_interaction():
+                                return await update_tool.ainvoke(update_payload, config=config)
+
+                            await asyncio.wait_for(
+                                retry_with_backoff(_update_interaction, "update_interaction"),
+                                timeout=0.5,
+                            )
+                        except Exception as e:
+                            logger.error("Update failed for %s: %s", interaction_id, e)
+                            result["persistence_failed"] = True
+                            result["interaction_persisted"] = False
+
+                # Update budget stats
+                llm_budget_state = current_budget_state()
+                if llm_budget_state:
+                    llm_calls_total = int(getattr(llm_budget_state, "call_count", 0) or 0)
+                    llm_token_total = int(getattr(llm_budget_state, "total", 0) or 0)
+                result["llm_calls"] = int(llm_calls_total)
+                result["llm_token_total"] = int(llm_token_total)
+                result["tool_calls_total"] = int(run_budget.tool_calls_total)
+
+                # Build summaries (same as original)
+                decision_summary = build_decision_summary(result)
+                retry_correction_summary = build_retry_correction_summary(result)
+                run_decision_summary = build_run_decision_summary(
+                    result, llm_calls=llm_calls_total, llm_token_total=llm_token_total
+                )
+                result["decision_summary"] = decision_summary
+                result["retry_correction_summary"] = retry_correction_summary
+                result["run_decision_summary"] = run_decision_summary
+
+                # Yield final result
+                yield {"event": "final", "data": result}
+
+        telemetry.flush(timeout_ms=500)

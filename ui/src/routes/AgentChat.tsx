@@ -1,6 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { runAgent, submitFeedback } from "../api";
+import { Link } from "react-router-dom";
+import { runAgent, runAgentStream, submitFeedback, fetchQueryTargetSettings, ApiError } from "../api";
+import { ExecutionProgress } from "../components/common/ExecutionProgress";
+import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
+import type { RunStatus } from "../types/runLifecycle";
+import { phaseIndex, PHASE_ORDER } from "../types/runLifecycle";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
@@ -9,6 +14,8 @@ import { ChartRenderer } from "../components/charts/ChartRenderer";
 import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
+import { dedupeRows } from "../utils/dedupeRows";
+import { getErrorMapping } from "../utils/errorMapping";
 
 interface Message {
   role: "user" | "assistant";
@@ -25,6 +32,8 @@ interface Message {
   retrySummary?: any;
   validationSummary?: any;
   emptyResultGuidance?: string;
+  errorMetadata?: any;
+  originalRequest?: { question: string; tenant_id: number; thread_id: string };
 }
 
 const LLM_PROVIDERS = [
@@ -61,6 +70,55 @@ function formatSimilarity(value: number): number {
   if (Number.isNaN(value)) return 0;
   if (value > 1) return Math.round(value);
   return Math.round(value * 100);
+}
+
+function getActionsForCategory(category?: string): Array<{ label: string; href: string }> {
+  return getErrorMapping(category).actions;
+}
+
+function buildErrorData(err: unknown): ErrorCardProps {
+  if (err instanceof ApiError) {
+    const meta = err.details as Record<string, any>;
+    const category = meta?.error_category || err.code?.toLowerCase();
+    return {
+      category,
+      message: err.displayMessage,
+      requestId: err.requestId,
+      hint: meta?.hint as string | undefined,
+      retryable: meta?.retryable as boolean | undefined,
+      retryAfterSeconds: meta?.retry_after_seconds as number | undefined,
+      detailsSafe: meta?.details_safe as Record<string, unknown> | undefined,
+      actions: getActionsForCategory(category),
+    };
+  }
+  if (err instanceof Error) {
+    return { message: err.message };
+  }
+  return { message: "An unexpected error occurred" };
+}
+
+function mapStreamResultToMessage(
+  data: any,
+  request: { question: string; tenant_id: number; thread_id: string }
+): Message {
+  return {
+    role: "assistant",
+    text: data.response ?? undefined,
+    sql: data.sql ?? data.current_sql ?? undefined,
+    result: data.result ?? data.query_result,
+    error: data.error ?? undefined,
+    interactionId: data.interaction_id ?? undefined,
+    fromCache: data.from_cache,
+    cacheSimilarity: data.cache_similarity,
+    vizSpec: data.viz_spec,
+    traceId: data.trace_id ?? data.run_id ?? undefined,
+    resultCompleteness: data.result_completeness,
+    retrySummary: data.retry_summary,
+    validationSummary: data.validation_summary,
+    emptyResultGuidance: data.empty_result_guidance ?? undefined,
+    errorMetadata: data.error_metadata,
+    originalRequest: request,
+  };
 }
 
 function ResultsTable({ rows }: { rows: any[] }) {
@@ -151,7 +209,7 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
 }
 
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
-  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token)) {
+  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
     return null;
   }
 
@@ -159,6 +217,38 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
 
   let message = "";
   let type: "warning" | "info" = "info";
+
+  if (completeness.token_expired) {
+    return (
+      <div data-testid="token-expired-warning" className="completeness-banner warning" style={{
+        fontSize: "0.8rem",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        marginTop: "8px",
+        background: "rgba(255, 193, 7, 0.15)",
+        borderLeft: "3px solid #ffc107",
+        color: "#856404",
+      }}>
+        Pagination token expired. Re-run query to see more results.
+      </div>
+    );
+  }
+
+  if (completeness.schema_mismatch) {
+    return (
+      <div data-testid="schema-mismatch-warning" className="completeness-banner warning" style={{
+        fontSize: "0.8rem",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        marginTop: "8px",
+        background: "rgba(220, 53, 69, 0.1)",
+        borderLeft: "3px solid #dc3545",
+        color: "#842029",
+      }}>
+        Column schema changed between pages. Cannot append rows.
+      </div>
+    );
+  }
 
   if (is_truncated) {
     type = "warning";
@@ -193,14 +283,45 @@ export default function AgentChat() {
   const [llmModel, setLlmModel] = useState<string>("gpt-4o");
   const [question, setQuestion] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  const [completedPhases, setCompletedPhases] = useState<string[]>([]);
+  const [correctionAttempt, setCorrectionAttempt] = useState<number>(0);
+  const [error, setError] = useState<ErrorCardProps | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
+  const [loadingMore, setLoadingMore] = useState<number | null>(null);
+  const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
+  const abortRef = useRef<AbortController | null>(null);
   const threadIdRef = useRef<string>(crypto.randomUUID());
   const [searchParams] = useSearchParams();
   const [verboseMode, setVerboseMode] = useState(() =>
     loadVerboseMode(searchParams.toString())
   );
+
+  // Abort any in-flight stream on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  // Check configuration on mount (cached to prevent flicker on re-render)
+  const configCheckedRef = useRef(false);
+  const refreshConfig = useCallback(() => {
+    fetchQueryTargetSettings()
+      .then((settings) => {
+        setConfigStatus(settings.active ? "configured" : "unconfigured");
+      })
+      .catch(() => {
+        setConfigStatus("configured"); // assume configured on error to not block
+      });
+  }, []);
+
+  useEffect(() => {
+    if (configCheckedRef.current) return;
+    configCheckedRef.current = true;
+    refreshConfig();
+  }, [refreshConfig]);
+
+  const isLoading = runStatus === "streaming" || runStatus === "finalizing";
 
   const fallbackModels = FALLBACK_MODELS[llmProvider] || FALLBACK_MODELS.openai;
   const { models: availableModels, isLoading: modelsLoading, error: modelsError } =
@@ -246,6 +367,10 @@ export default function AgentChat() {
     setMessages([]);
     setFeedbackState({});
     setError(null);
+    setRunStatus("idle");
+    setCurrentPhase(null);
+    setCompletedPhases([]);
+    setCorrectionAttempt(0);
     threadIdRef.current = crypto.randomUUID();
   };
 
@@ -255,43 +380,194 @@ export default function AgentChat() {
       return;
     }
 
+    // Abort any previous in-flight stream
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     const prompt = question.trim();
+    const request = {
+      question: prompt,
+      tenant_id: tenantId,
+      thread_id: threadIdRef.current,
+    };
     setQuestion("");
     setError(null);
+    setCurrentPhase(null);
+    setCompletedPhases([]);
+    setCorrectionAttempt(0);
 
     setMessages((prev) => [...prev, { role: "user", text: prompt }]);
 
-    setIsLoading(true);
+    setRunStatus("streaming");
+    let didFail = false;
+    try {
+      // Try streaming first, fall back to blocking
+      let finalResult: any = null;
+      try {
+        const stream = runAgentStream(request);
+        const STREAM_TIMEOUT_MS = 30_000;
+
+        // Iterate with per-event timeout and abort support
+        const iterator = stream[Symbol.asyncIterator]();
+        while (!controller.signal.aborted) {
+          const next = await Promise.race([
+            iterator.next(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("STREAM_TIMEOUT")), STREAM_TIMEOUT_MS)
+            ),
+            new Promise<never>((_, reject) => {
+              controller.signal.addEventListener("abort", () =>
+                reject(new Error("ABORTED")), { once: true });
+            }),
+          ]);
+          if (next.done) break;
+          const evt = next.value;
+
+          if (evt.event === "progress") {
+            const nextPhase = evt.data.phase;
+            // Track correction attempts
+            if (nextPhase === "correct") {
+              setCorrectionAttempt((prev) => prev + 1);
+            }
+            setCurrentPhase((prev) => {
+              // Ignore out-of-order phases: only advance forward
+              // Allow non-canonical phases (correct, clarify) to always show
+              const prevIdx = prev ? phaseIndex(prev) : -1;
+              const nextIdx = phaseIndex(nextPhase);
+              if (nextIdx !== -1 && prevIdx !== -1 && nextIdx <= prevIdx) {
+                return prev; // ignore regression
+              }
+              if (prev && prev !== nextPhase) {
+                setCompletedPhases((cp) => cp.includes(prev) ? cp : [...cp, prev]);
+              }
+              return nextPhase;
+            });
+          } else if (evt.event === "error") {
+            throw new Error(evt.data.error || "Unknown stream error");
+          } else if (evt.event === "result") {
+            finalResult = evt.data;
+            // Lock stepper: mark all phases complete
+            setCurrentPhase(null);
+            setCompletedPhases([...PHASE_ORDER]);
+          }
+        }
+      } catch (streamErr: any) {
+        // Don't fall back if this run was aborted (new run started)
+        if (controller.signal.aborted) return;
+        // If stream endpoint fails (404, network, timeout), fall back to blocking runAgent
+        if (!finalResult) {
+          setRunStatus("finalizing");
+          const result = await runAgent(request) as any;
+          finalResult = result;
+        } else {
+          throw streamErr;
+        }
+      }
+
+      if (finalResult) {
+        setRunStatus("succeeded");
+        setMessages((prev) => [
+          ...prev,
+          mapStreamResultToMessage(finalResult, request),
+        ]);
+      }
+    } catch (err: unknown) {
+      if (controller.signal.aborted) return;
+      didFail = true;
+      setRunStatus("failed");
+      setError(buildErrorData(err));
+    } finally {
+      if (controller.signal.aborted) return;
+      if (!didFail) setRunStatus("idle");
+      setCurrentPhase(null);
+      setCompletedPhases([]);
+    }
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    // Re-submit with the last user message
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+    if (lastUserMsg?.text) {
+      setQuestion(lastUserMsg.text);
+    }
+  };
+
+  const handleLoadMore = async (msgIdx: number) => {
+    const msg = messages[msgIdx];
+    if (!msg?.resultCompleteness?.next_page_token || !msg.originalRequest) return;
+    // Prevent concurrent pagination requests
+    if (loadingMore !== null) return;
+
+    setLoadingMore(msgIdx);
     try {
       const result = await runAgent({
-        question: prompt,
-        tenant_id: tenantId,
-        thread_id: threadIdRef.current
-      }) as (Awaited<ReturnType<typeof runAgent>> & { cache_similarity?: number });
+        ...msg.originalRequest,
+        page_token: msg.resultCompleteness.next_page_token,
+      }) as any;
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: result.response ?? undefined,
-          sql: result.sql ?? undefined,
-          result: result.result,
-          error: result.error ?? undefined,
-          interactionId: result.interaction_id ?? undefined,
-          fromCache: result.from_cache,
-          cacheSimilarity: result.cache_similarity,
-          vizSpec: result.viz_spec,
-          traceId: result.trace_id ?? undefined,
-          resultCompleteness: result.result_completeness,
-          retrySummary: result.retry_summary,
-          validationSummary: result.validation_summary,
-          emptyResultGuidance: result.empty_result_guidance ?? undefined
+      setMessages((prev) => {
+        const updated = [...prev];
+        const existing = updated[msgIdx];
+        if (!existing) return prev;
+
+        const existingRows = Array.isArray(existing.result) ? existing.result : [];
+        const newRows = Array.isArray(result.result) ? result.result : [];
+
+        // Check for column mismatch between pages
+        if (existingRows.length > 0 && newRows.length > 0) {
+          const existingCols = Object.keys(existingRows[0] || {}).sort().join(",");
+          const newCols = Object.keys(newRows[0] || {}).sort().join(",");
+          if (existingCols !== newCols) {
+            // Schema mismatch — don't append, show warning
+            updated[msgIdx] = {
+              ...existing,
+              resultCompleteness: {
+                ...existing.resultCompleteness,
+                next_page_token: undefined,
+                schema_mismatch: true,
+              },
+            };
+            return updated;
+          }
         }
-      ]);
-    } catch (err: any) {
-      setError(err.message || "Failed to run agent.");
+
+        const dedupedNewRows = dedupeRows(existingRows, newRows);
+        updated[msgIdx] = {
+          ...existing,
+          result: [...existingRows, ...dedupedNewRows],
+          resultCompleteness: result.result_completeness,
+        };
+        return updated;
+      });
+    } catch (err: unknown) {
+      // Token expired/invalid — replace button with re-run CTA
+      const errData = buildErrorData(err);
+      const isTokenError =
+        errData.category === "invalid_request" ||
+        (errData.message && /token|expired|invalid/i.test(errData.message));
+
+      if (isTokenError) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const existing = updated[msgIdx];
+          if (!existing) return prev;
+          updated[msgIdx] = {
+            ...existing,
+            resultCompleteness: {
+              ...existing.resultCompleteness,
+              next_page_token: undefined,
+              token_expired: true,
+            },
+          };
+          return updated;
+        });
+      } else {
+        setError(errData);
+      }
     } finally {
-      setIsLoading(false);
+      setLoadingMore(null);
     }
   };
 
@@ -457,6 +733,67 @@ export default function AgentChat() {
 
         {/* Main chat area */}
         <main>
+          {configStatus === "unconfigured" && (
+            <div className="panel" data-testid="onboarding-panel" style={{
+              marginBottom: "24px",
+              padding: "32px",
+              textAlign: "center",
+              background: "rgba(99, 102, 241, 0.05)",
+              border: "1px solid rgba(99, 102, 241, 0.2)",
+              borderRadius: "12px",
+            }}>
+              <h2 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Welcome to Text2SQL</h2>
+              <p style={{ color: "var(--muted)", marginBottom: "20px" }}>
+                Before you can start querying, you need to configure a data source.
+              </p>
+              <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                <Link
+                  to="/admin/settings/query-target"
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: "10px",
+                    background: "var(--accent, #6366f1)",
+                    color: "#fff",
+                    textDecoration: "none",
+                    fontWeight: 600,
+                  }}
+                >
+                  Configure Data Source
+                </Link>
+                <Link
+                  to="/admin/operations"
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: "10px",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface, #fff)",
+                    color: "var(--ink)",
+                    textDecoration: "none",
+                    fontWeight: 500,
+                  }}
+                >
+                  System Operations
+                </Link>
+              </div>
+              <button
+                type="button"
+                data-testid="refresh-config-button"
+                onClick={() => { setConfigStatus("loading"); refreshConfig(); }}
+                style={{
+                  marginTop: "16px",
+                  background: "none",
+                  border: "none",
+                  color: "var(--muted)",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Refresh status
+              </button>
+            </div>
+          )}
+
           <section className="chat">
             {messages.map((msg, idx) => (
               <article
@@ -527,6 +864,27 @@ export default function AgentChat() {
                   )}
 
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
+                  {msg.resultCompleteness?.next_page_token && msg.originalRequest && (
+                    <button
+                      type="button"
+                      data-testid="load-more-button"
+                      onClick={() => handleLoadMore(idx)}
+                      disabled={loadingMore === idx}
+                      style={{
+                        marginTop: "8px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "var(--surface, #fff)",
+                        color: "var(--accent, #6366f1)",
+                        cursor: loadingMore === idx ? "not-allowed" : "pointer",
+                        fontWeight: 500,
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      {loadingMore === idx ? "Loading..." : "Load more rows"}
+                    </button>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
@@ -609,18 +967,27 @@ export default function AgentChat() {
               </article>
             ))}
 
-            {isLoading && <div className="loading">Thinking...</div>}
-            {error && <div className="error-banner">{error}</div>}
+            {isLoading && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+                <ExecutionProgress currentPhase={currentPhase} completedPhases={completedPhases} correctionAttempt={correctionAttempt} />
+              </div>
+            )}
+            {error && (
+              <div style={{ marginBottom: "16px" }}>
+                <ErrorCard {...error} onRetry={handleRetry} />
+              </div>
+            )}
           </section>
 
           <form className="composer" onSubmit={handleSubmit}>
             <input
               type="text"
-              placeholder="Ask a question about your data"
+              placeholder={configStatus === "unconfigured" ? "Configure a data source first" : "Ask a question about your data"}
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
+              disabled={configStatus === "unconfigured"}
             />
-            <button type="submit" disabled={isLoading}>
+            <button type="submit" disabled={isLoading || configStatus === "unconfigured"}>
               {isLoading ? "Running..." : "Run"}
             </button>
           </form>

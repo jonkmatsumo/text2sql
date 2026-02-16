@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from opentelemetry import metrics, trace
+from opentelemetry import metrics
 
 from common.config.env import get_env_int
 from common.lib.otel import get_tracer
@@ -133,7 +133,8 @@ class PolicyLoader:
                         except Exception as e:
                             # If generic init fails (e.g. env vars missing), fall back to defaults
                             logger.warning(
-                                "Could not initialize ControlPlaneDatabase, " "using default policies."
+                                "Could not initialize ControlPlaneDatabase, "
+                                "using default policies."
                             )
                             self._policies = self._get_default_policies()
                             self._last_load_time = time.time()

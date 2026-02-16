@@ -7,8 +7,23 @@ import { resetAvailableModelsCache } from "../hooks/useAvailableModels";
 
 vi.mock("../api", () => ({
   runAgent: vi.fn(),
+  runAgentStream: vi.fn(),
   submitFeedback: vi.fn(),
   fetchAvailableModels: vi.fn(),
+  fetchQueryTargetSettings: vi.fn().mockResolvedValue({ active: { id: "cfg-1" } }),
+  ApiError: class extends Error {
+    status: number;
+    code: string;
+    details: Record<string, unknown>;
+    constructor(message: string, status: number, code = "UNKNOWN", details = {}) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.code = code;
+      this.details = details;
+    }
+    get displayMessage() { return this.message; }
+  },
 }));
 
 describe("AgentChat chart rendering", () => {

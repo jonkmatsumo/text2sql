@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -1948,3 +1949,48 @@ async def submit_feedback(request: FeedbackRequest) -> Any:
             "comment": request.comment,
         },
     )
+
+
+@app.post("/agent/run/stream")
+async def proxy_agent_run_stream(request: Request):
+    """Proxy agent run stream request to the Agent Service."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    agent_service_url = get_env_str("AGENT_SERVICE_URL", "http://localhost:8081")
+    url = f"{agent_service_url}/agent/run/stream"
+
+    # Forward headers? Maybe Authorization.
+    # For now, simplistic proxy.
+
+    async def upstream_generator():
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream("POST", url, json=body) as response:
+                    # Propagate status code if error?
+                    if response.status_code >= 400:
+                        # Read error content and yield as error event
+                        content = await response.read()
+                        err = json.dumps(
+                            {
+                                "error": f"Upstream error: {response.status_code}",
+                                "details": content.decode(),
+                            }
+                        )
+                        yield f"event: error\ndata: {err}\n\n"
+                        return
+
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+        except Exception as e:
+            logger.error("Failed to proxy stream to agent: %s", e)
+            err = json.dumps(
+                {
+                    "error": "Failed to connect to agent service",
+                }
+            )
+            yield f"event: error\ndata: {err}\n\n"
+
+    return StreamingResponse(upstream_generator(), media_type="text/event-stream")
