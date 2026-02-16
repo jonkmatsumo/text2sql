@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { runAgent, runAgentStream, submitFeedback, fetchQueryTargetSettings, ApiError } from "../api";
 import { ExecutionProgress } from "../components/common/ExecutionProgress";
 import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
+import type { RunStatus } from "../types/runLifecycle";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
@@ -258,7 +259,7 @@ export default function AgentChat() {
   const [llmModel, setLlmModel] = useState<string>("gpt-4o");
   const [question, setQuestion] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [currentPhase, setCurrentPhase] = useState<string | null>(null);
   const [completedPhases, setCompletedPhases] = useState<string[]>([]);
   const [error, setError] = useState<ErrorCardProps | null>(null);
@@ -284,6 +285,8 @@ export default function AgentChat() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  const isLoading = runStatus === "streaming" || runStatus === "finalizing";
 
   const fallbackModels = FALLBACK_MODELS[llmProvider] || FALLBACK_MODELS.openai;
   const { models: availableModels, isLoading: modelsLoading, error: modelsError } =
@@ -329,6 +332,7 @@ export default function AgentChat() {
     setMessages([]);
     setFeedbackState({});
     setError(null);
+    setRunStatus("idle");
     setCurrentPhase(null);
     setCompletedPhases([]);
     threadIdRef.current = crypto.randomUUID();
@@ -353,7 +357,8 @@ export default function AgentChat() {
 
     setMessages((prev) => [...prev, { role: "user", text: prompt }]);
 
-    setIsLoading(true);
+    setRunStatus("streaming");
+    let didFail = false;
     try {
       // Try streaming first, fall back to blocking
       let finalResult: any = null;
@@ -376,6 +381,7 @@ export default function AgentChat() {
       } catch (streamErr: any) {
         // If stream endpoint fails (404, network), fall back to blocking runAgent
         if (!finalResult) {
+          setRunStatus("finalizing");
           const result = await runAgent(request) as any;
           finalResult = result;
         } else {
@@ -384,15 +390,18 @@ export default function AgentChat() {
       }
 
       if (finalResult) {
+        setRunStatus("succeeded");
         setMessages((prev) => [
           ...prev,
           mapStreamResultToMessage(finalResult, request),
         ]);
       }
     } catch (err: unknown) {
+      didFail = true;
+      setRunStatus("failed");
       setError(buildErrorData(err));
     } finally {
-      setIsLoading(false);
+      if (!didFail) setRunStatus("idle");
       setCurrentPhase(null);
       setCompletedPhases([]);
     }

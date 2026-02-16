@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { PHASE_ORDER } from '../../types/runLifecycle';
 
 const PHASES: Record<string, string> = {
   'router': 'Routing',
@@ -10,8 +11,6 @@ const PHASES: Record<string, string> = {
   'correct': 'Correcting',
   'clarify': 'Clarifying'
 };
-
-const PHASE_ORDER = ['router', 'plan', 'execute', 'synthesize', 'visualize'];
 
 interface ExecutionProgressProps {
   currentPhase: string | null;
