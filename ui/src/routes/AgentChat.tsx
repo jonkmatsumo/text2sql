@@ -5,6 +5,7 @@ import { runAgent, runAgentStream, submitFeedback, fetchQueryTargetSettings, Api
 import { ExecutionProgress } from "../components/common/ExecutionProgress";
 import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
 import type { RunStatus } from "../types/runLifecycle";
+import { phaseIndex, PHASE_ORDER } from "../types/runLifecycle";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
@@ -366,16 +367,26 @@ export default function AgentChat() {
         const stream = runAgentStream(request);
         for await (const evt of stream) {
           if (evt.event === "progress") {
+            const nextPhase = evt.data.phase;
             setCurrentPhase((prev) => {
-              if (prev && prev !== evt.data.phase) {
+              // Ignore out-of-order phases: only advance forward
+              const prevIdx = prev ? phaseIndex(prev) : -1;
+              const nextIdx = phaseIndex(nextPhase);
+              if (nextIdx !== -1 && prevIdx !== -1 && nextIdx <= prevIdx) {
+                return prev; // ignore regression
+              }
+              if (prev && prev !== nextPhase) {
                 setCompletedPhases((cp) => cp.includes(prev) ? cp : [...cp, prev]);
               }
-              return evt.data.phase;
+              return nextPhase;
             });
           } else if (evt.event === "error") {
             throw new Error(evt.data.error || "Unknown stream error");
           } else if (evt.event === "result") {
             finalResult = evt.data;
+            // Lock stepper: mark all phases complete
+            setCurrentPhase(null);
+            setCompletedPhases([...PHASE_ORDER]);
           }
         }
       } catch (streamErr: any) {

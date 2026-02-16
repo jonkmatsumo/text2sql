@@ -186,6 +186,51 @@ describe("AgentChat streaming", () => {
     expect(screen.getByText("Open Ingestion Wizard")).toBeInTheDocument();
   });
 
+  it("ignores out-of-order phase events (monotonic advance)", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+
+    // Create a stream that emits phases out of order
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+
+    mockedStream.mockReturnValue(
+      (async function* () {
+        yield { event: "progress", data: { phase: "plan" } };
+        yield { event: "progress", data: { phase: "execute" } };
+        // Out-of-order: router comes after execute — should be ignored
+        yield { event: "progress", data: { phase: "router" } };
+        // Hold stream open so we can inspect phase state
+        await blocked;
+        yield { event: "result", data: { response: "Done", result: [] } };
+      })()
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "test monotonic" } });
+    fireEvent.submit(input.closest("form")!);
+
+    // Wait for the execute phase to be active (not regressed to router)
+    await waitFor(() => {
+      expect(screen.getByText("Executing SQL...")).toBeInTheDocument();
+    });
+
+    // Router should NOT be the current phase
+    expect(screen.queryByText("Routing...")).not.toBeInTheDocument();
+
+    // Unblock to finish
+    resolveBlock!();
+
+    await waitFor(() => {
+      expect(screen.getByText("Done")).toBeInTheDocument();
+    });
+  });
+
   it("does not call runAgent fallback when stream already produced a result", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
