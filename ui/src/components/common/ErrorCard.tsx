@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { CopyButton } from "../artifacts/CopyButton";
+import { getErrorMapping, type ErrorSeverity } from "../../utils/errorMapping";
 
 export interface ErrorCardProps {
   category?: string;
@@ -13,35 +14,23 @@ export interface ErrorCardProps {
   actions?: Array<{ label: string; href: string }>;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  auth: "Authentication Error",
-  unauthorized: "Unauthorized",
-  limit_exceeded: "Limit Exceeded",
-  invalid_request: "Invalid Request",
-  unsupported_capability: "Unsupported Capability",
-  timeout: "Timeout",
-  schema_drift: "Schema Mismatch",
-  internal: "Internal Error",
-  connectivity: "Connection Error",
-  syntax: "SQL Syntax Error",
-  deadlock: "Deadlock",
-  serialization: "Serialization Error",
-  throttling: "Rate Limited",
-  resource_exhausted: "Resource Exhausted",
-  budget_exceeded: "Budget Exceeded",
-  transient: "Transient Error",
-  dependency_failure: "Dependency Failure",
-  mutation_blocked: "Mutation Blocked",
-  tool_version_invalid: "Tool Version Invalid",
-  tool_version_unsupported: "Tool Version Unsupported",
-  tool_response_malformed: "Malformed Response",
-  unknown: "Error",
+const SEVERITY_STYLES: Record<ErrorSeverity, { bg: string; border: string; labelColor: string }> = {
+  error: {
+    bg: "rgba(220, 53, 69, 0.06)",
+    border: "rgba(220, 53, 69, 0.2)",
+    labelColor: "var(--error, #dc3545)",
+  },
+  warn: {
+    bg: "rgba(255, 193, 7, 0.08)",
+    border: "rgba(255, 193, 7, 0.3)",
+    labelColor: "#856404",
+  },
+  info: {
+    bg: "rgba(13, 110, 253, 0.06)",
+    border: "rgba(13, 110, 253, 0.2)",
+    labelColor: "#084298",
+  },
 };
-
-function getCategoryLabel(category?: string): string {
-  if (!category) return "Error";
-  return CATEGORY_LABELS[category] || category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export function ErrorCard({
   category,
@@ -75,6 +64,8 @@ export function ErrorCard({
   }, [retryable, retryAfterSeconds]);
 
   const canRetry = retryable && countdown === 0;
+  const mapping = getErrorMapping(category);
+  const severity = SEVERITY_STYLES[mapping.severity];
 
   return (
     <div
@@ -82,8 +73,8 @@ export function ErrorCard({
       style={{
         padding: "16px",
         borderRadius: "10px",
-        background: "rgba(220, 53, 69, 0.06)",
-        border: "1px solid rgba(220, 53, 69, 0.2)",
+        background: severity.bg,
+        border: `1px solid ${severity.border}`,
         fontSize: "0.9rem",
       }}
     >
@@ -96,11 +87,11 @@ export function ErrorCard({
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.05em",
-              color: "var(--error, #dc3545)",
+              color: severity.labelColor,
               marginBottom: "4px",
             }}
           >
-            {getCategoryLabel(category)}
+            {mapping.title}
           </div>
           <div style={{ color: "var(--ink)", fontWeight: 500 }}>{message}</div>
         </div>

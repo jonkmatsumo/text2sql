@@ -15,6 +15,7 @@ import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 import { dedupeRows } from "../utils/dedupeRows";
+import { getErrorMapping } from "../utils/errorMapping";
 
 interface Message {
   role: "user" | "assistant";
@@ -72,18 +73,7 @@ function formatSimilarity(value: number): number {
 }
 
 function getActionsForCategory(category?: string): Array<{ label: string; href: string }> {
-  if (!category) return [];
-  switch (category) {
-    case "schema_drift":
-      return [{ label: "Open Ingestion Wizard", href: "/admin/operations" }];
-    case "auth":
-    case "unauthorized":
-      return [{ label: "Check Permissions", href: "/admin/settings/query-target" }];
-    case "connectivity":
-      return [{ label: "Configure Data Source", href: "/admin/settings/query-target" }];
-    default:
-      return [];
-  }
+  return getErrorMapping(category).actions;
 }
 
 function buildErrorData(err: unknown): ErrorCardProps {
