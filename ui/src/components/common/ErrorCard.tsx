@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { CopyButton } from "../artifacts/CopyButton";
 import { getErrorMapping, type ErrorSeverity } from "../../utils/errorMapping";
 
@@ -185,9 +186,9 @@ export function ErrorCard({
           </>
         )}
         {actions?.map((action) => (
-          <a
+          <Link
             key={action.href}
-            href={action.href}
+            to={action.href}
             data-testid="error-action-link"
             style={{
               padding: "8px 16px",
@@ -201,7 +202,7 @@ export function ErrorCard({
             }}
           >
             {action.label}
-          </a>
+          </Link>
         ))}
       </div>
     </div>
