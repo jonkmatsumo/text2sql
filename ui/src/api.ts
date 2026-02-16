@@ -27,7 +27,8 @@ import {
   SynthGenerateRequest,
   SynthGenerateResponse,
   SynthRun,
-  SynthRunSummary
+  SynthRunSummary,
+  OpsJobResponse
 } from "./types/admin";
 import {
   agentServiceBaseUrl,
@@ -533,6 +534,22 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
+    return response.json();
+  },
+
+  async listJobs(
+    limit: number = 50,
+    jobType?: string,
+    status?: string
+  ): Promise<OpsJobResponse[]> {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (jobType) params.append("job_type", jobType);
+    if (status) params.append("status", status);
+
+    const response = await fetch(`${uiApiBase}/ops/jobs?${params}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list jobs");
     return response.json();
   }
 };
