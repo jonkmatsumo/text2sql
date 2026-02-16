@@ -368,7 +368,21 @@ export default function AgentChat() {
       let finalResult: any = null;
       try {
         const stream = runAgentStream(request);
-        for await (const evt of stream) {
+        const STREAM_TIMEOUT_MS = 30_000;
+
+        // Iterate with per-event timeout
+        const iterator = stream[Symbol.asyncIterator]();
+        let timedOut = false;
+        while (!timedOut) {
+          const next = await Promise.race([
+            iterator.next(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("STREAM_TIMEOUT")), STREAM_TIMEOUT_MS)
+            ),
+          ]);
+          if (next.done) break;
+          const evt = next.value;
+
           if (evt.event === "progress") {
             const nextPhase = evt.data.phase;
             // Track correction attempts
@@ -398,7 +412,7 @@ export default function AgentChat() {
           }
         }
       } catch (streamErr: any) {
-        // If stream endpoint fails (404, network), fall back to blocking runAgent
+        // If stream endpoint fails (404, network, timeout), fall back to blocking runAgent
         if (!finalResult) {
           setRunStatus("finalizing");
           const result = await runAgent(request) as any;

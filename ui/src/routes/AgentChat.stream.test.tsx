@@ -231,6 +231,65 @@ describe("AgentChat streaming", () => {
     });
   });
 
+  it("falls back to runAgent on stream timeout", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    // Stream that hangs on second event — first progress arrives but then
+    // the iterator never resolves again, triggering the 30s timeout.
+    // We patch setTimeout to use a short timeout for this test.
+    const origSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: (...args: any[]) => void, ms?: number, ...args: any[]) => {
+      // Shorten the 30s stream timeout to 50ms for testing
+      const adjusted = ms && ms >= 30_000 ? 50 : ms;
+      return origSetTimeout(fn, adjusted, ...args);
+    }) as typeof setTimeout;
+
+    mockedStream.mockReturnValue({
+      [Symbol.asyncIterator]() {
+        let first = true;
+        return {
+          next() {
+            if (first) {
+              first = false;
+              return Promise.resolve({
+                done: false,
+                value: { event: "progress", data: { phase: "router" } },
+              });
+            }
+            // Hang forever on second iteration
+            return new Promise(() => {});
+          },
+        };
+      },
+    });
+
+    mockedRunAgent.mockResolvedValue({
+      response: "Timeout fallback response",
+      from_cache: false,
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "slow query" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(mockedRunAgent).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Timeout fallback response")).toBeInTheDocument();
+    });
+
+    globalThis.setTimeout = origSetTimeout;
+  });
+
   it("does not call runAgent fallback when stream already produced a result", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
