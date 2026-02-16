@@ -582,10 +582,18 @@ export default function AgentChat() {
 
     setLoadingMore(msgIdx);
     try {
-      const result = await runAgent({
-        ...msg.originalRequest,
-        page_token: msg.resultCompleteness.next_page_token,
-      }) as any;
+      let result;
+      if ('sql' in msg.originalRequest) {
+        result = await executeSQL({
+          ...(msg.originalRequest as ExecuteSQLRequest),
+          page_token: msg.resultCompleteness.next_page_token
+        });
+      } else {
+        result = await runAgent({
+          ...msg.originalRequest,
+          page_token: msg.resultCompleteness.next_page_token,
+        });
+      }
 
       setMessages((prev) => {
         const updated = [...prev];
