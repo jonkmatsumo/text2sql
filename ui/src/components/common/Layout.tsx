@@ -125,12 +125,9 @@ export default function Layout({ children }: LayoutProps) {
                         >
                             <div
                                 data-testid="health-dot"
+                                className={`status-dot ${healthStatus === "healthy" ? "status-dot--pulse" : healthStatus === "error" ? "status-dot--error-pulse" : ""}`}
                                 style={{
-                                    width: "8px",
-                                    height: "8px",
-                                    borderRadius: "50%",
                                     backgroundColor: HEALTH_COLORS[healthStatus],
-                                    transition: "background-color 0.3s ease",
                                 }}
                             />
                             {HEALTH_LABELS[healthStatus]}
