@@ -5,6 +5,8 @@ interface SQLPreviewCardProps {
     onRun: () => void;
     onBack: () => void;
     isExecuting?: boolean;
+    onSqlChange?: (newSql: string) => void;
+    isEditable?: boolean;
 }
 
 export const SQLPreviewCard: React.FC<SQLPreviewCardProps> = ({
@@ -12,19 +14,25 @@ export const SQLPreviewCard: React.FC<SQLPreviewCardProps> = ({
     onRun,
     onBack,
     isExecuting = false,
+    onSqlChange,
+    isEditable = true,
 }) => {
     return (
         <div className="p-4 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 my-4 shadow-sm">
             <h3 className="text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300 flex items-center justify-between">
                 <span>SQL Preview</span>
-                <span className="text-xs font-normal text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
-                    Read-only
+                <span className={`text-xs font-normal px-2 py-0.5 rounded ${isEditable ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" : "bg-gray-100 text-gray-500 dark:bg-gray-800"}`}>
+                    {isEditable ? "Editable" : "Read-only"}
                 </span>
             </h3>
             <div className="relative mb-4 group">
-                <pre className="p-3 bg-white dark:bg-black rounded border border-gray-300 dark:border-gray-700 overflow-x-auto text-sm font-mono text-gray-800 dark:text-gray-200 shadow-inner">
-                    <code>{sql}</code>
-                </pre>
+                <textarea
+                    className="w-full p-3 h-48 bg-white dark:bg-black rounded border border-gray-300 dark:border-gray-700 font-mono text-sm text-gray-800 dark:text-gray-200 shadow-inner focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+                    value={sql}
+                    onChange={(e) => onSqlChange?.(e.target.value)}
+                    readOnly={!isEditable || isExecuting}
+                    spellCheck={false}
+                />
             </div>
             <div className="flex justify-end space-x-3">
                 <button

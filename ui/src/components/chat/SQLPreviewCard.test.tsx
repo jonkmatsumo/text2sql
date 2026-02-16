@@ -5,34 +5,32 @@ import React from "react";
 import "@testing-library/jest-dom";
 
 describe("SQLPreviewCard", () => {
-    it("renders the SQL and buttons", () => {
+    it("renders the SQL in a textarea", () => {
         const onRun = vi.fn();
         const onBack = vi.fn();
         const sql = "SELECT * FROM users";
 
         render(<SQLPreviewCard sql={sql} onRun={onRun} onBack={onBack} />);
 
-        expect(screen.getByText(sql)).toBeInTheDocument();
-        expect(screen.getByText("Run SQL")).toBeInTheDocument();
-        expect(screen.getByText("Back")).toBeInTheDocument();
+        expect(screen.getByDisplayValue(sql)).toBeInTheDocument();
     });
 
-    it("calls handlers on click", () => {
+    it("calls onSqlChange when edited", () => {
         const onRun = vi.fn();
         const onBack = vi.fn();
-        render(<SQLPreviewCard sql="SELECT 1" onRun={onRun} onBack={onBack} />);
+        const onSqlChange = vi.fn();
+        render(<SQLPreviewCard sql="SELECT 1" onRun={onRun} onBack={onBack} onSqlChange={onSqlChange} />);
 
-        fireEvent.click(screen.getByText("Run SQL"));
-        expect(onRun).toHaveBeenCalled();
-
-        fireEvent.click(screen.getByText("Back"));
-        expect(onBack).toHaveBeenCalled();
+        const textarea = screen.getByDisplayValue("SELECT 1");
+        fireEvent.change(textarea, { target: { value: "SELECT 2" } });
+        expect(onSqlChange).toHaveBeenCalledWith("SELECT 2");
     });
 
-    it("disables buttons when executing", () => {
-        render(<SQLPreviewCard sql="SELECT 1" onRun={() => { }} onBack={() => { }} isExecuting={true} />);
-        expect(screen.getByText("Running...")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /running/i })).toBeDisabled();
-        expect(screen.getByRole("button", { name: /back/i })).toBeDisabled();
+    it("disables textarea when executing or not editable", () => {
+        const { rerender } = render(<SQLPreviewCard sql="SELECT 1" onRun={() => { }} onBack={() => { }} isExecuting={true} />);
+        expect(screen.getByDisplayValue("SELECT 1")).toHaveAttribute("readonly");
+
+        rerender(<SQLPreviewCard sql="SELECT 1" onRun={() => { }} onBack={() => { }} isEditable={false} />);
+        expect(screen.getByDisplayValue("SELECT 1")).toHaveAttribute("readonly");
     });
 });
