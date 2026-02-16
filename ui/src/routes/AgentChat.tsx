@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { runAgent, runAgentStream, submitFeedback, fetchQueryTargetSettings, ApiError } from "../api";
@@ -303,19 +303,23 @@ export default function AgentChat() {
     return () => { abortRef.current?.abort(); };
   }, []);
 
-  // Check configuration on mount
-  useEffect(() => {
-    let cancelled = false;
+  // Check configuration on mount (cached to prevent flicker on re-render)
+  const configCheckedRef = useRef(false);
+  const refreshConfig = useCallback(() => {
     fetchQueryTargetSettings()
       .then((settings) => {
-        if (cancelled) return;
         setConfigStatus(settings.active ? "configured" : "unconfigured");
       })
       .catch(() => {
-        if (!cancelled) setConfigStatus("configured"); // assume configured on error to not block
+        setConfigStatus("configured"); // assume configured on error to not block
       });
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (configCheckedRef.current) return;
+    configCheckedRef.current = true;
+    refreshConfig();
+  }, [refreshConfig]);
 
   const isLoading = runStatus === "streaming" || runStatus === "finalizing";
 
@@ -771,6 +775,22 @@ export default function AgentChat() {
                   System Operations
                 </Link>
               </div>
+              <button
+                type="button"
+                data-testid="refresh-config-button"
+                onClick={() => { setConfigStatus("loading"); refreshConfig(); }}
+                style={{
+                  marginTop: "16px",
+                  background: "none",
+                  border: "none",
+                  color: "var(--muted)",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Refresh status
+              </button>
             </div>
           )}
 

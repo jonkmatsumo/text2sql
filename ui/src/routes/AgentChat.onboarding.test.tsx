@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
@@ -100,5 +100,37 @@ describe("AgentChat onboarding", () => {
     });
 
     expect(screen.queryByTestId("onboarding-panel")).not.toBeInTheDocument();
+  });
+
+  it("shows refresh button that re-checks config", async () => {
+    const mockedSettings = fetchQueryTargetSettings as ReturnType<typeof vi.fn>;
+    // First call: unconfigured
+    mockedSettings.mockResolvedValueOnce({ active: null });
+    // Second call (after refresh): configured
+    mockedSettings.mockResolvedValueOnce({
+      active: { id: "cfg-1", provider: "postgres" },
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-panel")).toBeInTheDocument();
+    });
+
+    const refreshBtn = screen.getByTestId("refresh-config-button");
+    expect(refreshBtn).toHaveTextContent("Refresh status");
+
+    fireEvent.click(refreshBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("onboarding-panel")).not.toBeInTheDocument();
+    });
+
+    // Config was fetched twice
+    expect(mockedSettings).toHaveBeenCalledTimes(2);
   });
 });
