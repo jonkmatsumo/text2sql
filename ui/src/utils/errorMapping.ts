@@ -15,32 +15,32 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
   schema_drift: {
     title: "Schema Mismatch",
     severity: "error",
-    actions: [{ label: "Open Ingestion Wizard", href: "/admin/operations" }],
+    actions: [{ label: "Resolve Schema Mismatch", href: "/admin/operations" }],
   },
   schema_missing: {
     title: "Schema Not Found",
     severity: "error",
-    actions: [{ label: "Open Ingestion Wizard", href: "/admin/operations" }],
+    actions: [{ label: "Ingest Missing Table", href: "/admin/operations" }],
   },
   auth: {
     title: "Authentication Error",
     severity: "error",
-    actions: [{ label: "Check Permissions", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
   },
   unauthorized: {
     title: "Unauthorized",
     severity: "error",
-    actions: [{ label: "Check Permissions", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
   },
   permission_denied: {
     title: "Permission Denied",
     severity: "error",
-    actions: [{ label: "Check Permissions", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
   },
   connectivity: {
     title: "Connection Error",
     severity: "error",
-    actions: [{ label: "Configure Data Source", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Check Definition", href: "/admin/settings/query-target" }],
   },
   timeout: {
     title: "Timeout",
@@ -80,17 +80,17 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
   budget_exhausted: {
     title: "Budget Exhausted",
     severity: "warn",
-    actions: [{ label: "View Quotas", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Manage Quotas", href: "/admin/settings/query-target" }],
   },
   budget_exceeded: {
     title: "Budget Exceeded",
     severity: "warn",
-    actions: [{ label: "View Quotas", href: "/admin/settings/query-target" }],
+    actions: [{ label: "Manage Quotas", href: "/admin/settings/query-target" }],
   },
   resource_exhausted: {
     title: "Resource Exhausted",
     severity: "error",
-    actions: [{ label: "System Operations", href: "/admin/operations" }],
+    actions: [{ label: "Check System Health", href: "/admin/operations" }],
   },
   mutation_blocked: {
     title: "Mutation Blocked",
