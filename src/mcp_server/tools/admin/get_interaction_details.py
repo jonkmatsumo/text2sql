@@ -47,11 +47,7 @@ async def handler(interaction_id: str) -> str:
         return tool_error_response(
             message=f"Interaction {interaction_id} not found",
             code="INTERACTION_NOT_FOUND",
-<<<<<<< HEAD
-            category="invalid_request",
-=======
             category=ErrorCategory.INVALID_REQUEST,
->>>>>>> 03e1e11b (feat(obs): add explicit read-only enforcement telemetry across DAL and MCP)
             provider="interaction_store",
             retryable=False,
         )

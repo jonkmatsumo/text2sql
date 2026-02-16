@@ -76,9 +76,5 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
         return tool_error_response(
             message="Failed to submit feedback.",
             code="SUBMIT_FEEDBACK_FAILED",
-<<<<<<< HEAD
-            category="internal",
-=======
             category=ErrorCategory.INTERNAL,
->>>>>>> 03e1e11b (feat(obs): add explicit read-only enforcement telemetry across DAL and MCP)
         )

@@ -972,7 +972,6 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 if result_fallback_mode:
                     span.set_attribute("capability.fallback_mode", str(result_fallback_mode))
 
-<<<<<<< HEAD
                 # Cache successful SQL generation (if not from cache and tenant_id exists)
                 from_cache = state.get("from_cache", False)
                 if not error and original_sql and tenant_id and not from_cache:
@@ -1001,8 +1000,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 )
                 is_limited = bool(state.get("result_is_limited"))
                 query_limit = state.get("result_limit") if is_limited else None
-=======
->>>>>>> a9fd1397 (refactor(agent): unify retry taxonomy on canonical ErrorCategory and add regression tests)
+
                 return {
                     "query_result": query_result,
                     "error": error,
@@ -1010,7 +1008,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_row_limit": result_row_limit,
                     "result_rows_returned": result_rows_returned,
                     "result_columns": result_columns,
-                    "result_partial_reason": result_partial_reason,
+                    "result_partial_reason": result_truncation_reason,
                     "result_is_limited": is_limited,
                     "result_capability_required": result_capability_required,
                     "result_capability_supported": result_capability_supported,
@@ -1026,7 +1024,7 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                     "result_prefetch_enabled": result_prefetch_enabled,
                     "result_prefetch_scheduled": result_prefetch_scheduled,
                     "result_prefetch_reason": result_prefetch_reason,
-<<<<<<< HEAD
+                    "page_token": result_next_page_token,
                     "prefetch_discard_count": prefetch_discard_count,
                     "retry_after_seconds": None,
                     "termination_reason": TerminationReason.SUCCESS,
@@ -1049,9 +1047,6 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                         prefetch_scheduled=bool(result_prefetch_scheduled),
                         prefetch_reason=result_prefetch_reason,
                     ).to_dict(),
-=======
-                    "page_token": result_next_page_token,
->>>>>>> a9fd1397 (refactor(agent): unify retry taxonomy on canonical ErrorCategory and add regression tests)
                     **_latency_payload(),
                 }
 

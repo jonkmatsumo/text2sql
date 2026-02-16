@@ -77,9 +77,7 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
     if not read_only:
         return
     if is_mutating_sql(sql, provider):
-<<<<<<< HEAD
         from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
-        from common.models.error_metadata import ErrorCategory
 
         emit_audit_event(
             AuditEventType.READONLY_VIOLATION,
@@ -92,7 +90,7 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
                 "decision": "reject",
             },
         )
-=======
+
         # Emit telemetry for blocked mutation
         span = trace.get_current_span()
         if span and span.is_recording():
@@ -111,8 +109,6 @@ def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:
                     "statement_type": statement_type,
                 },
             )
-
->>>>>>> 03e1e11b (feat(obs): add explicit read-only enforcement telemetry across DAL and MCP)
         raise PermissionError(
             f"Read-only enforcement blocked non-SELECT statement for provider '{provider}'."
         )
