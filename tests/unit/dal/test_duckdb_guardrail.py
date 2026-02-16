@@ -7,6 +7,7 @@ from dal.duckdb.query_target import DuckDBQueryTargetDatabase
 @pytest.mark.asyncio
 async def test_duckdb_default_readonly(tmp_path):
     """Verify that DuckDB config defaults to read_only=True and blocks writes."""
+    pytest.importorskip("duckdb")
     db_path = str(tmp_path / "test.duckdb")
 
     # 1. Setup: Create DB and add data in RW mode

@@ -312,7 +312,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
             correction_event["outcome"] = "budget_exhausted"
             return {
                 "error": "Token budget exhausted during correction loop.",
-                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
                 "retry_after_seconds": None,
                 "correction_attempts": correction_attempts,
                 "correction_attempts_truncated": correction_attempts_truncated,
@@ -394,7 +394,7 @@ Return ONLY the corrected SQL query. No markdown, no explanations.""",
                 correction_event["outcome"] = "prompt_budget_exhausted"
                 return {
                     "error": "LLM prompt budget exceeded during correction loop.",
-                    "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                    "error_category": ErrorCategory.BUDGET_EXCEEDED.value,
                     "retry_after_seconds": None,
                     "correction_attempts": correction_attempts,
                     "correction_attempts_truncated": correction_attempts_truncated,

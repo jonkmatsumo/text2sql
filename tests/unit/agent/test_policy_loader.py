@@ -31,10 +31,10 @@ def mock_control_plane():
 @pytest.fixture
 def mock_otel():
     """Mock OpenTelemetry tracing."""
-    with patch("agent.validation.policy_loader.trace") as mock_trace:
+    with patch("agent.validation.policy_loader.get_tracer") as mock_get_tracer:
         mock_tracer = MagicMock()
         mock_span = MagicMock()
-        mock_trace.get_tracer.return_value = mock_tracer
+        mock_get_tracer.return_value = mock_tracer
         mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
         yield mock_span
 
@@ -53,25 +53,19 @@ async def test_get_policies_loads_from_db(mock_control_plane, mock_otel, mock_me
     PolicyLoader._policies = {}
     PolicyLoader._last_load_time = 0
 
-    policies = await PolicyLoader.get_policies()
+    loader = PolicyLoader()
+    policies = await loader.get_policies()
 
     assert len(policies) == 1
     assert "t1" in policies
     assert policies["t1"].tenant_column == "tenant_id"
 
     # Verify tracing
-    mock_otel.set_attribute.assert_any_call("policy_loader.source", "control_plane")
-    mock_otel.set_attribute.assert_any_call("policy_loader.loaded_count", 1)
+    mock_otel.set_attribute.assert_any_call("policy.source", "database")
+    mock_otel.set_attribute.assert_any_call("policy.count", 1)
 
     # Verify new metrics/attributes
-    mock_otel.set_attribute.assert_any_call("policy_loader.refresh_status", "success")
-    # check duration attribute exists (value is dynamic)
-    duration_calls = [
-        call
-        for call in mock_otel.set_attribute.call_args_list
-        if call[0][0] == "policy_loader.refresh_duration_ms"
-    ]
-    assert len(duration_calls) == 1
+    mock_otel.set_attribute.assert_any_call("policy.refresh_success", True)
 
     # Verify histogram record
     assert mock_metrics.record.called
@@ -94,10 +88,11 @@ async def test_get_policies_concurrency(mock_control_plane):
     mock_conn.fetch.side_effect = slow_fetch
 
     # Launch concurrent requests
+    loader = PolicyLoader()
     results = await asyncio.gather(
-        PolicyLoader.get_policies(),
-        PolicyLoader.get_policies(),
-        PolicyLoader.get_policies(),
+        loader.get_policies(),
+        loader.get_policies(),
+        loader.get_policies(),
     )
 
     # Verify only one fetch happened

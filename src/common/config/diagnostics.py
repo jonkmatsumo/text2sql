@@ -45,6 +45,7 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
     )
 
     diagnostics = {
+        "diagnostics_schema_version": 1,
         "active_database_provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
         "retry_policy": {
             "mode": _safe_mode("AGENT_RETRY_POLICY", "adaptive"),

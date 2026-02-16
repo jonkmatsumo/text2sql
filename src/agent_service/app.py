@@ -101,6 +101,7 @@ class AgentRunResponse(BaseModel):
 class AgentDiagnosticsResponse(BaseModel):
     """Operator-safe runtime diagnostics."""
 
+    diagnostics_schema_version: int = 1
     active_database_provider: Optional[str] = None
     retry_policy: dict[str, Any]
     schema_cache_ttl_seconds: int
@@ -511,6 +512,12 @@ def get_agent_diagnostics(
 
     payload = build_operator_diagnostics(debug=debug)
     payload["monitor_snapshot"] = agent_monitor.get_snapshot()
+    # Apply limit to monitor snapshot manualy since it's in-memory
+    b_limit = max(0, min(200, int(recent_runs_limit)))
+    if payload["monitor_snapshot"] and "recent_runs" in payload["monitor_snapshot"]:
+        all_runs = payload["monitor_snapshot"]["recent_runs"]
+        payload["monitor_snapshot"]["recent_runs"] = all_runs[:b_limit]
+        payload["monitor_snapshot"]["truncated"] = len(all_runs) > b_limit
     summary_store = get_run_summary_store()
     bounded_limit = max(0, min(200, int(recent_runs_limit)))
     recent_runs = summary_store.list_recent(limit=bounded_limit)

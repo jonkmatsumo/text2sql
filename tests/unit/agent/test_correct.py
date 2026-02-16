@@ -92,7 +92,7 @@ class TestCorrectSqlNode:
 
         mock_chain.invoke.assert_not_called()
         mock_llm.assert_not_called()
-        assert result["error_category"] == "budget_exhausted"
+        assert result["error_category"] == "budget_exceeded"
         assert result["llm_budget_exceeded"] is True
 
     @patch("agent.llm_client.get_llm")
@@ -336,14 +336,20 @@ class TestCorrectSqlNode:
 
         result = correct_sql_node(state)
 
-        assert result["error_category"] == "budget_exhausted"
+        assert result["error_category"] == "budget_exceeded"
         assert result["correction_attempts"][-1]["outcome"] == "budget_exhausted"
 
-    def test_correct_sql_node_tracks_repeated_error_stop(self):
+    @patch("agent.llm_client.get_llm")
+    @patch("agent.nodes.correct.ChatPromptTemplate")
+    def test_correct_sql_node_tracks_repeated_error_stop(self, mock_prompt_class, mock_llm):
         """Repeated-signature exits should preserve correction attempts and outcome."""
         error_msg = "syntax error near from"
+        # The node will normalize "SYNTAX_ERROR" to likely "syntax" or "unknown"
+        # if not in ERROR_TAXONOMY enum
+        # Let's use canonical category to ensure match
+        error_category = "syntax"
         signature = canonical_json_hash(
-            {"category": "SYNTAX_ERROR", "message": error_msg.strip().lower()}
+            {"category": error_category, "message": error_msg.strip().lower()}
         )
         state = AgentState(
             messages=[],
@@ -351,7 +357,7 @@ class TestCorrectSqlNode:
             current_sql="SELECT * FROM films",
             query_result=None,
             error=error_msg,
-            error_category="SYNTAX_ERROR",
+            error_category=error_category,
             retry_count=0,
             error_signatures=[signature],
         )

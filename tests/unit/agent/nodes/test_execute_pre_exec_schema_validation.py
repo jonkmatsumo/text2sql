@@ -114,7 +114,7 @@ async def test_schema_mismatch_blocks_execution_when_flag_on(
     ):
         result = await validate_and_execute_node(state)
 
-    assert result["error_category"] == "schema_mismatch"
+    assert result["error_category"] == "schema_drift"
     assert result["query_result"] is None
     assert result["missing_identifiers"] == ["missing_table"]
     mock_tool.ainvoke.assert_not_called()
@@ -166,7 +166,7 @@ async def test_schema_mismatch_blocks_for_complex_cte_union_query(
     ):
         result = await validate_and_execute_node(state)
 
-    assert result["error_category"] == "schema_mismatch"
+    assert result["error_category"] == "schema_drift"
     assert result["query_result"] is None
     assert "payments" in result["missing_identifiers"]
     mock_tool.ainvoke.assert_not_called()
