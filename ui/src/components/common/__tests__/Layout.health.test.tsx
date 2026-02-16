@@ -73,4 +73,38 @@ describe("Layout health badge", () => {
       expect(screen.getByTestId("health-badge")).toHaveTextContent("Connection Failed");
     });
   });
+
+  it("shows Checking... during initial load", () => {
+    // Mock that never resolves
+    (fetchQueryTargetSettings as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise(() => {})
+    );
+
+    render(
+      <MemoryRouter>
+        <Layout><div>content</div></Layout>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId("health-badge")).toHaveTextContent("Checking...");
+  });
+
+  it("badge links to settings page", async () => {
+    (fetchQueryTargetSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      active: { id: "cfg-1" },
+    });
+
+    render(
+      <MemoryRouter>
+        <Layout><div>content</div></Layout>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("health-badge")).toHaveTextContent("System Online");
+    });
+
+    const badge = screen.getByTestId("health-badge");
+    expect(badge).toHaveAttribute("href", "/admin/settings/query-target");
+  });
 });

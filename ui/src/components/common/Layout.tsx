@@ -111,16 +111,29 @@ export default function Layout({ children }: LayoutProps) {
                 </nav>
 
                 <div style={{ marginTop: "auto", padding: "20px 12px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: "0.85rem" }}>
-                    <div data-testid="health-badge" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <div style={{
-                            width: "8px",
-                            height: "8px",
-                            borderRadius: "50%",
-                            backgroundColor: HEALTH_COLORS[healthStatus],
-                            transition: "background-color 0.3s ease",
-                        }} />
+                    <Link
+                        to="/admin/settings/query-target"
+                        data-testid="health-badge"
+                        style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            textDecoration: "none",
+                            color: "inherit",
+                        }}
+                    >
+                        <div
+                            data-testid="health-dot"
+                            style={{
+                                width: "8px",
+                                height: "8px",
+                                borderRadius: "50%",
+                                backgroundColor: HEALTH_COLORS[healthStatus],
+                                transition: "background-color 0.3s ease",
+                            }}
+                        />
                         {HEALTH_LABELS[healthStatus]}
-                    </div>
+                    </Link>
                 </div>
             </aside>
 
