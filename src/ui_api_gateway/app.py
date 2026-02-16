@@ -1951,6 +1951,47 @@ async def submit_feedback(request: FeedbackRequest) -> Any:
     )
 
 
+@app.post("/agent/generate_sql")
+async def proxy_generate_sql(request: Request):
+    """Proxy generate SQL request to Agent Service."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    agent_service_url = get_env_str("AGENT_SERVICE_URL", "http://localhost:8081")
+    url = f"{agent_service_url}/agent/generate_sql"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=body)
+            # Forward status code and content
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to proxy to agent service: {exc}")
+        raise HTTPException(status_code=502, detail="Failed to connect to agent service")
+
+
+@app.post("/agent/execute_sql")
+async def proxy_execute_sql(request: Request):
+    """Proxy execute SQL request to Agent Service."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    agent_service_url = get_env_str("AGENT_SERVICE_URL", "http://localhost:8081")
+    url = f"{agent_service_url}/agent/execute_sql"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, json=body)
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to proxy to agent service: {exc}")
+        raise HTTPException(status_code=502, detail="Failed to connect to agent service")
+
+
 @app.post("/agent/run/stream")
 async def proxy_agent_run_stream(request: Request):
     """Proxy agent run stream request to the Agent Service."""

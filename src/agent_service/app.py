@@ -167,6 +167,157 @@ def _collect_replay_integrity_mismatches(
     return mismatches
 
 
+class GenerateSQLRequest(BaseModel):
+    """Request payload for SQL generation only."""
+
+    question: str
+    tenant_id: int = Field(..., ge=1)
+    thread_id: Optional[str] = None
+    timeout_seconds: Optional[float] = Field(default=None, gt=0)
+    replay_mode: bool = False
+    replay_bundle: Optional[dict[str, Any]] = None
+
+
+class ExecuteSQLRequest(BaseModel):
+    """Request payload for executing specific SQL."""
+
+    question: str
+    sql: str
+    tenant_id: int = Field(..., ge=1)
+    thread_id: Optional[str] = None
+    timeout_seconds: Optional[float] = Field(default=None, gt=0)
+    page_token: Optional[str] = None
+    page_size: Optional[int] = Field(default=None, gt=0)
+
+
+@app.post("/agent/generate_sql", response_model=AgentRunResponse)
+async def generate_sql(request: GenerateSQLRequest) -> AgentRunResponse:
+    """Generate SQL for a question without executing it."""
+    # Reuse run_agent logic but with generate_only=True
+    # For now, we'll wrap run_agent logic or factor it out.
+    # To avoid massive refactoring, we'll just implement the core call here.
+    return await _run_agent_internal(
+        question=request.question,
+        tenant_id=request.tenant_id,
+        thread_id=request.thread_id,
+        timeout_seconds=request.timeout_seconds,
+        replay_mode=request.replay_mode,
+        replay_bundle=request.replay_bundle,
+        generate_only=True,
+    )
+
+
+@app.post("/agent/execute_sql", response_model=AgentRunResponse)
+async def execute_sql(request: ExecuteSQLRequest) -> AgentRunResponse:
+    """Execute provided SQL for a question."""
+    return await _run_agent_internal(
+        question=request.question,
+        tenant_id=request.tenant_id,
+        thread_id=request.thread_id,
+        timeout_seconds=request.timeout_seconds,
+        page_token=request.page_token,
+        page_size=request.page_size,
+        current_sql=request.sql,
+        from_cache=True,  # Treat provided SQL as "cached" to bypass generation
+    )
+
+
+async def _run_agent_internal(
+    question: str,
+    tenant_id: int,
+    thread_id: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
+    page_token: Optional[str] = None,
+    page_size: Optional[int] = None,
+    replay_mode: bool = False,
+    replay_bundle: Optional[dict[str, Any]] = None,
+    generate_only: bool = False,
+    current_sql: Optional[str] = None,
+    from_cache: bool = False,
+) -> AgentRunResponse:
+    """Run agent internal logic."""
+    thread_id = thread_id or str(uuid.uuid4())
+    limiter = get_agent_run_tenant_limiter()
+    try:
+        async with limiter.acquire(tenant_id) as lease:
+            telemetry.update_current_trace(
+                {
+                    "tenant.active_runs": lease.active_runs,
+                    "tenant.limit": lease.limit,
+                    "tenant.limit_exceeded": False,
+                }
+            )
+            global run_agent_with_tracing
+            if run_agent_with_tracing is None:
+                from agent.graph import run_agent_with_tracing as _run_agent_with_tracing
+
+                run_agent_with_tracing = _run_agent_with_tracing
+
+            timeout_seconds = timeout_seconds or 30.0
+            deadline_ts = time.monotonic() + timeout_seconds
+
+            state = await asyncio.wait_for(
+                run_agent_with_tracing(
+                    question=question,
+                    tenant_id=tenant_id,
+                    thread_id=thread_id,
+                    timeout_seconds=timeout_seconds,
+                    deadline_ts=deadline_ts,
+                    page_token=page_token,
+                    page_size=page_size,
+                    interactive_session=True,
+                    replay_mode=replay_mode,
+                    replay_bundle=replay_bundle,
+                    generate_only=generate_only,
+                    current_sql=current_sql,
+                    from_cache=from_cache,
+                ),
+                timeout=timeout_seconds,
+            )
+
+            # Construct response (simplified sharing with run_agent)
+            response_text = None
+            if state.get("messages"):
+                response_text = state["messages"][-1].content
+            if state.get("clarification_question"):
+                response_text = state["clarification_question"]
+
+            trace_id = telemetry.get_current_trace_id()
+            if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
+                trace_id = None
+
+            return AgentRunResponse(
+                sql=state.get("current_sql"),
+                result=state.get("query_result"),
+                response=response_text,
+                error=redact_sensitive_info(state.get("error")) if state.get("error") else None,
+                from_cache=state.get("from_cache", False),
+                cache_similarity=state.get("cache_similarity"),
+                interaction_id=state.get("interaction_id"),
+                trace_id=trace_id,
+                viz_spec=state.get("viz_spec"),
+                viz_reason=state.get("viz_reason"),
+                provenance=None,  # Populate if needed
+                result_completeness=state.get("result_completeness"),
+                error_metadata=state.get("error_metadata"),
+                retry_summary=state.get("retry_summary"),
+                decision_summary=state.get("decision_summary"),
+                retry_correction_summary=state.get("retry_correction_summary"),
+            )
+    except TenantConcurrencyLimitExceeded:
+        agent_monitor.increment("tenant_limit_exceeded")
+        return AgentRunResponse(
+            error="Tenant concurrency limit exceeded.",
+            error_metadata={"code": "TENANT_CONCURRENCY_LIMIT_EXCEEDED"},
+        )
+    except asyncio.TimeoutError:
+        return AgentRunResponse(error="Request timed out.", trace_id=None)
+    except Exception as exc:
+        from common.sanitization.text import redact_sensitive_info as _redact
+
+        return AgentRunResponse(error=_redact(str(exc)), trace_id=None)
+
+
 @app.post("/agent/run", response_model=AgentRunResponse)
 async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
     """Run the agent and return UI-compatible results."""
