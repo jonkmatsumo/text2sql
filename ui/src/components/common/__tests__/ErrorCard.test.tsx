@@ -83,7 +83,7 @@ describe("ErrorCard", () => {
     expect(links[1]).toHaveTextContent("Check Settings");
   });
 
-  it("renders collapsible details", () => {
+  it("renders collapsible details and shows JSON when opened", () => {
     render(
       <ErrorCard
         message="fail"
@@ -91,7 +91,21 @@ describe("ErrorCard", () => {
       />
     );
 
-    expect(screen.getByText("Technical Details")).toBeInTheDocument();
+    const summary = screen.getByText("Technical Details");
+    expect(summary).toBeInTheDocument();
+
+    // Open the details
+    fireEvent.click(summary);
+    expect(screen.getByText(/"error_code": "42P01"/)).toBeInTheDocument();
+    expect(screen.getByText(/"sql": "SELECT \*"/)).toBeInTheDocument();
+  });
+
+  it("does not render details section when detailsSafe is empty", () => {
+    render(
+      <ErrorCard message="fail" detailsSafe={{}} />
+    );
+
+    expect(screen.queryByText("Technical Details")).not.toBeInTheDocument();
   });
 
   it("maps schema_drift category correctly", () => {

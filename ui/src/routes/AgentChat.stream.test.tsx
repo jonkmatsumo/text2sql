@@ -145,4 +145,73 @@ describe("AgentChat streaming", () => {
     // Should show the error card
     expect(screen.getByText("Error")).toBeInTheDocument();
   });
+
+  it("shows structured ErrorCard with ApiError details", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    mockedStream.mockReturnValue(
+      (async function* () {
+        throw new Error("Stream failed");
+      })()
+    );
+
+    const apiErr = new (ApiError as any)(
+      "Schema tables have changed",
+      400,
+      "schema_drift",
+      { error_category: "schema_drift", hint: "Re-run ingestion" },
+      "req-abc-123"
+    );
+    mockedRunAgent.mockRejectedValue(apiErr);
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "broken query" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-category")).toHaveTextContent("Schema Mismatch");
+    });
+
+    expect(screen.getByText("Schema tables have changed")).toBeInTheDocument();
+    expect(screen.getByTestId("error-hint")).toHaveTextContent("Re-run ingestion");
+    expect(screen.getByText(/req-abc-/)).toBeInTheDocument();
+    // Should show action link for schema_drift
+    expect(screen.getByText("Open Ingestion Wizard")).toBeInTheDocument();
+  });
+
+  it("does not call runAgent fallback when stream already produced a result", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    // Stream produces a result then errors on iteration
+    mockedStream.mockReturnValue(
+      (async function* () {
+        yield { event: "result", data: { response: "Streamed result", sql: "SELECT 1" } };
+      })()
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "stream with result" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Streamed result")).toBeInTheDocument();
+    });
+
+    // runAgent should NOT have been called since stream produced a result
+    expect(mockedRunAgent).not.toHaveBeenCalled();
+  });
 });
