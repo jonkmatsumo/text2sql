@@ -1743,6 +1743,32 @@ async def get_job_status(job_id: UUID) -> Any:
     )
 
 
+@app.get(
+    "/ops/jobs",
+    response_model=List[OpsJobResponse],
+    dependencies=[Depends(check_internal_auth)],
+)
+async def list_ops_jobs(
+    limit: int = Query(50, ge=1, le=100),
+    job_type: Optional[str] = None,
+    status: Optional[OpsJobStatus] = None,
+) -> Any:
+    """List background jobs."""
+    jobs = await _list_jobs(limit=limit, job_type=job_type, status=status)
+    return [
+        OpsJobResponse(
+            id=job["id"],
+            job_type=job["job_type"],
+            status=job["status"],
+            started_at=job["started_at"],
+            finished_at=job.get("finished_at"),
+            error_message=job.get("error_message"),
+            result=job.get("result") or {},
+        )
+        for job in jobs
+    ]
+
+
 @app.get("/interactions", dependencies=[Depends(check_internal_auth)])
 async def list_interactions(
     limit: int = Query(50, ge=1),
@@ -2035,3 +2061,44 @@ async def proxy_agent_run_stream(request: Request):
             yield f"event: error\ndata: {err}\n\n"
 
     return StreamingResponse(upstream_generator(), media_type="text/event-stream")
+
+
+async def _list_jobs(
+    limit: int = 50, job_type: Optional[str] = None, status: Optional[str] = None
+) -> List[dict]:
+    """List jobs using the configured client."""
+    if use_legacy_dal():
+        # Fallback for legacy path
+        query = "SELECT * FROM ops_jobs"
+        conditions = []
+        params = []
+
+        if job_type:
+            params.append(job_type)
+            conditions.append(f"job_type = ${len(params)}")
+
+        if status:
+            params.append(status)
+            conditions.append(f"status = ${len(params)}")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY started_at DESC"
+        params.append(limit)
+        query += f" LIMIT ${len(params)}"
+
+        async with ControlPlaneDatabase.get_connection() as conn:
+            rows = await conn.fetch(query, *params)
+            jobs = []
+            for row in rows:
+                result = row["result"]
+                if isinstance(result, str):
+                    try:
+                        result = json.loads(result)
+                    except Exception:
+                        result = {"raw": result}
+                jobs.append(dict(row) | {"result": result})
+            return jobs
+
+    return await OpsJobsClient.list_jobs(limit=limit, job_type=job_type, status=status)
