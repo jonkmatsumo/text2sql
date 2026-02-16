@@ -172,4 +172,60 @@ describe("AgentChat pagination", () => {
       expect(screen.getByText("Bob")).toBeInTheDocument();
     });
   });
+
+  it("disables Load more button and shows spinner during fetch", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    mockedStream.mockReturnValue(
+      makeStream([
+        { event: "result", data: {
+          response: "Page 1",
+          result: [{ name: "Alice" }],
+          result_completeness: {
+            next_page_token: "page2-token",
+            rows_returned: 1,
+          },
+        }},
+      ])
+    );
+
+    // Make pagination request hang so we can assert disabled state
+    let resolvePagination: (v: any) => void;
+    mockedRunAgent.mockReturnValue(new Promise((r) => { resolvePagination = r; }));
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "paginated query" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("load-more-button")).toBeInTheDocument();
+    });
+
+    // Click load more
+    fireEvent.click(screen.getByTestId("load-more-button"));
+
+    // Button should be disabled and show "Loading..."
+    await waitFor(() => {
+      const btn = screen.getByTestId("load-more-button");
+      expect(btn).toBeDisabled();
+      expect(btn).toHaveTextContent("Loading...");
+    });
+
+    // Resolve pagination
+    resolvePagination!({
+      result: [{ name: "Bob" }],
+      result_completeness: { rows_returned: 1, is_truncated: false },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Bob")).toBeInTheDocument();
+    });
+  });
 });

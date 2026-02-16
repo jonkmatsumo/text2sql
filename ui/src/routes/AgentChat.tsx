@@ -470,6 +470,8 @@ export default function AgentChat() {
   const handleLoadMore = async (msgIdx: number) => {
     const msg = messages[msgIdx];
     if (!msg?.resultCompleteness?.next_page_token || !msg.originalRequest) return;
+    // Prevent concurrent pagination requests
+    if (loadingMore !== null) return;
 
     setLoadingMore(msgIdx);
     try {
