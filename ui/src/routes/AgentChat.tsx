@@ -540,6 +540,8 @@ export default function AgentChat() {
     if (!previewData) return;
 
     setRunStatus("streaming");
+    setCurrentPhase("execute");
+    setCompletedPhases(["router", "plan"]);
 
     try {
       const request: ExecuteSQLRequest = {
@@ -550,18 +552,28 @@ export default function AgentChat() {
       };
 
       // Add user message to UI immediately
-      setMessages(prev => [...prev, { role: "user", text: request.question }]);
+      setMessages(prev => [...prev, {
+        role: "user",
+        text: request.question,
+        originalRequest: request as any
+      }]);
       setPreviewData(null);
 
       const response = await executeSQL(request);
 
-      const message = mapStreamResultToMessage(response, previewData.originalRequest as any);
+      const message = mapStreamResultToMessage(response, request as any);
+      message.originalRequest = request as any; // Ensure correct request type for pagination
+
       setMessages(prev => [...prev, message]);
       setRunStatus("succeeded");
+      setCurrentPhase(null);
+      setCompletedPhases([...PHASE_ORDER]);
 
     } catch (err: any) {
       setError(buildErrorData(err));
       setRunStatus("failed");
+      setCurrentPhase(null);
+      setCompletedPhases([]);
     }
   };
 
