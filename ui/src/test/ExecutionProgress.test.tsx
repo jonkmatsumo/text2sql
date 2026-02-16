@@ -48,4 +48,25 @@ describe("ExecutionProgress", () => {
         );
         expect(screen.getByText("Synthesizing...")).toBeDefined();
     });
+
+    it("shows correction attempt when in correct phase", () => {
+        render(
+            <ExecutionProgress
+                currentPhase="correct"
+                completedPhases={["router", "plan", "execute"]}
+                correctionAttempt={2}
+            />
+        );
+        expect(screen.getByTestId("correction-attempt")).toHaveTextContent("Attempt 2: correcting SQL");
+    });
+
+    it("does not show correction attempt when not in correct phase", () => {
+        render(
+            <ExecutionProgress
+                currentPhase="execute"
+                correctionAttempt={1}
+            />
+        );
+        expect(screen.queryByTestId("correction-attempt")).toBeNull();
+    });
 });

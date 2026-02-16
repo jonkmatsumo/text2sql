@@ -263,6 +263,7 @@ export default function AgentChat() {
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [currentPhase, setCurrentPhase] = useState<string | null>(null);
   const [completedPhases, setCompletedPhases] = useState<string[]>([]);
+  const [correctionAttempt, setCorrectionAttempt] = useState<number>(0);
   const [error, setError] = useState<ErrorCardProps | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
@@ -336,6 +337,7 @@ export default function AgentChat() {
     setRunStatus("idle");
     setCurrentPhase(null);
     setCompletedPhases([]);
+    setCorrectionAttempt(0);
     threadIdRef.current = crypto.randomUUID();
   };
 
@@ -355,6 +357,7 @@ export default function AgentChat() {
     setError(null);
     setCurrentPhase(null);
     setCompletedPhases([]);
+    setCorrectionAttempt(0);
 
     setMessages((prev) => [...prev, { role: "user", text: prompt }]);
 
@@ -368,8 +371,13 @@ export default function AgentChat() {
         for await (const evt of stream) {
           if (evt.event === "progress") {
             const nextPhase = evt.data.phase;
+            // Track correction attempts
+            if (nextPhase === "correct") {
+              setCorrectionAttempt((prev) => prev + 1);
+            }
             setCurrentPhase((prev) => {
               // Ignore out-of-order phases: only advance forward
+              // Allow non-canonical phases (correct, clarify) to always show
               const prevIdx = prev ? phaseIndex(prev) : -1;
               const nextIdx = phaseIndex(nextPhase);
               if (nextIdx !== -1 && prevIdx !== -1 && nextIdx <= prevIdx) {
@@ -842,7 +850,7 @@ export default function AgentChat() {
 
             {isLoading && (
               <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
-                <ExecutionProgress currentPhase={currentPhase} completedPhases={completedPhases} />
+                <ExecutionProgress currentPhase={currentPhase} completedPhases={completedPhases} correctionAttempt={correctionAttempt} />
               </div>
             )}
             {error && (

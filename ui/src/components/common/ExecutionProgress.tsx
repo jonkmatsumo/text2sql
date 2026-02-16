@@ -15,10 +15,11 @@ const PHASES: Record<string, string> = {
 interface ExecutionProgressProps {
   currentPhase: string | null;
   completedPhases?: string[];
+  correctionAttempt?: number;
   className?: string;
 }
 
-export function ExecutionProgress({ currentPhase, completedPhases = [], className }: ExecutionProgressProps) {
+export function ExecutionProgress({ currentPhase, completedPhases = [], correctionAttempt, className }: ExecutionProgressProps) {
   if (!currentPhase) return null;
 
   const label = PHASES[currentPhase] || currentPhase;
@@ -110,6 +111,16 @@ export function ExecutionProgress({ currentPhase, completedPhases = [], classNam
           {label}...
         </span>
       </div>
+
+      {currentPhase === 'correct' && correctionAttempt != null && correctionAttempt > 0 && (
+        <div data-testid="correction-attempt" style={{
+          fontSize: '0.8rem',
+          color: 'var(--muted, #94a3b8)',
+          fontStyle: 'italic',
+        }}>
+          Attempt {correctionAttempt}: correcting SQL
+        </div>
+      )}
 
       <style>{`
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
