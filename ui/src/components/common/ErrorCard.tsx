@@ -141,8 +141,9 @@ export function ErrorCard({
         </details>
       )}
 
-      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginTop: "12px" }}>
         {retryable && onRetry && (
+          <>
           <button
             type="button"
             onClick={onRetry}
@@ -161,6 +162,27 @@ export function ErrorCard({
           >
             {countdown > 0 ? `Retry in ${countdown}s` : "Retry"}
           </button>
+          {countdown > 0 && (
+            <button
+              type="button"
+              onClick={() => { setCountdown(0); onRetry(); }}
+              data-testid="retry-now-button"
+              style={{
+                padding: "8px 16px",
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                color: "var(--accent, #6366f1)",
+                cursor: "pointer",
+                fontWeight: 500,
+                fontSize: "0.85rem",
+                textDecoration: "underline",
+              }}
+            >
+              Retry now
+            </button>
+          )}
+          </>
         )}
         {actions?.map((action) => (
           <a

@@ -118,6 +118,33 @@ describe("ErrorCard", () => {
     expect(screen.getByTestId("error-category")).toHaveTextContent("Connection Error");
   });
 
+  it("shows 'Retry now' button during countdown for manual skip", () => {
+    vi.useFakeTimers();
+    const onRetry = vi.fn();
+
+    render(
+      <ErrorCard
+        message="rate limited"
+        retryable={true}
+        retryAfterSeconds={5}
+        onRetry={onRetry}
+      />
+    );
+
+    // "Retry now" should appear during countdown
+    const retryNow = screen.getByTestId("retry-now-button");
+    expect(retryNow).toHaveTextContent("Retry now");
+
+    // Click "Retry now" skips countdown and fires onRetry
+    fireEvent.click(retryNow);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    // "Retry now" should disappear since countdown is now 0
+    expect(screen.queryByTestId("retry-now-button")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
   it("renders retry button without countdown when retryAfterSeconds is 0", () => {
     const onRetry = vi.fn();
     render(
