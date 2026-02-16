@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
-import { runAgent, runAgentStream, fetchAvailableModels } from "../api";
+import { runAgent, runAgentStream, fetchAvailableModels, ApiError } from "../api";
 import { resetAvailableModelsCache } from "../hooks/useAvailableModels";
 
 vi.mock("../api", () => ({
@@ -171,6 +171,51 @@ describe("AgentChat pagination", () => {
       expect(screen.getByText("Alice")).toBeInTheDocument();
       expect(screen.getByText("Bob")).toBeInTheDocument();
     });
+  });
+
+  it("handles expired pagination token gracefully", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    mockedStream.mockReturnValue(
+      makeStream([
+        { event: "result", data: {
+          response: "Page 1",
+          result: [{ id: 1 }],
+          result_completeness: {
+            next_page_token: "expired-token",
+            rows_returned: 1,
+          },
+        }},
+      ])
+    );
+
+    // Pagination returns an error with "token" in message
+    const tokenErr = new (ApiError as any)("Pagination token expired", 400, "invalid_request", {});
+    mockedRunAgent.mockRejectedValue(tokenErr);
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "token expiry" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("load-more-button")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("load-more-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("token-expired-warning")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Pagination token expired/)).toBeInTheDocument();
+    expect(screen.queryByTestId("load-more-button")).not.toBeInTheDocument();
   });
 
   it("shows warning when page returns different columns", async () => {

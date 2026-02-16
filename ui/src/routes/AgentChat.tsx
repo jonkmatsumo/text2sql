@@ -219,7 +219,7 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
 }
 
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
-  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch)) {
+  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
     return null;
   }
 
@@ -227,6 +227,22 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
 
   let message = "";
   let type: "warning" | "info" = "info";
+
+  if (completeness.token_expired) {
+    return (
+      <div data-testid="token-expired-warning" className="completeness-banner warning" style={{
+        fontSize: "0.8rem",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        marginTop: "8px",
+        background: "rgba(255, 193, 7, 0.15)",
+        borderLeft: "3px solid #ffc107",
+        color: "#856404",
+      }}>
+        Pagination token expired. Re-run query to see more results.
+      </div>
+    );
+  }
 
   if (completeness.schema_mismatch) {
     return (
@@ -532,7 +548,30 @@ export default function AgentChat() {
         return updated;
       });
     } catch (err: unknown) {
-      setError(buildErrorData(err));
+      // Token expired/invalid — replace button with re-run CTA
+      const errData = buildErrorData(err);
+      const isTokenError =
+        errData.category === "invalid_request" ||
+        (errData.message && /token|expired|invalid/i.test(errData.message));
+
+      if (isTokenError) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          const existing = updated[msgIdx];
+          if (!existing) return prev;
+          updated[msgIdx] = {
+            ...existing,
+            resultCompleteness: {
+              ...existing.resultCompleteness,
+              next_page_token: undefined,
+              token_expired: true,
+            },
+          };
+          return updated;
+        });
+      } else {
+        setError(errData);
+      }
     } finally {
       setLoadingMore(null);
     }
