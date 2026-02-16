@@ -279,3 +279,10 @@ class AgentState(TypedDict):
 
     # Explicit termination reason for better observability
     termination_reason: Optional[TerminationReason]
+
+    # =========================================================================
+    # Control Flags
+    # =========================================================================
+
+    # If True, stops execution after SQL validation (Preview Mode)
+    generate_only: Optional[bool]

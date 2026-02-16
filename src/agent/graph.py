@@ -306,6 +306,9 @@ def route_after_validation(state: AgentState) -> str:
     if error_category in {"budget_exceeded", "budget_exhausted"}:
         return "synthesize"
 
+    if state.get("generate_only"):
+        return END
+
     if is_invalid:
         if retry_count < max_retries:
             return "correct"
@@ -990,6 +993,9 @@ async def run_agent_with_tracing(
     interactive_session: bool = False,
     replay_mode: bool = False,
     replay_bundle: Optional[dict[str, Any]] = None,
+    generate_only: bool = False,
+    current_sql: Optional[str] = None,
+    from_cache: bool = False,
 ) -> dict:
     """Run agent workflow with tracing and context propagation."""
     from langchain_core.messages import HumanMessage
@@ -1072,7 +1078,7 @@ async def run_agent_with_tracing(
             "run_id": run_id,
             "policy_snapshot": policy_snapshot,
             "schema_context": "",
-            "current_sql": None,
+            "current_sql": current_sql,
             "query_result": None,
             "error": None,
             "retry_after_seconds": None,
@@ -1084,7 +1090,7 @@ async def run_agent_with_tracing(
             "rejected_cache_context": None,
             "clause_map": None,
             "tenant_id": tenant_id,
-            "from_cache": False,
+            "from_cache": from_cache,
             "telemetry_context": serialized_ctx,
             "raw_user_input": raw_question,
             "schema_snapshot_id": schema_snapshot_id,
