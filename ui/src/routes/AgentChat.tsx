@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { runAgent, submitFeedback } from "../api";
+import { Link } from "react-router-dom";
+import { runAgent, runAgentStream, submitFeedback, fetchQueryTargetSettings, ApiError } from "../api";
+import { ExecutionProgress } from "../components/common/ExecutionProgress";
+import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
 import TraceLink from "../components/common/TraceLink";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
@@ -25,6 +28,8 @@ interface Message {
   retrySummary?: any;
   validationSummary?: any;
   emptyResultGuidance?: string;
+  errorMetadata?: any;
+  originalRequest?: { question: string; tenant_id: number; thread_id: string };
 }
 
 const LLM_PROVIDERS = [
@@ -61,6 +66,66 @@ function formatSimilarity(value: number): number {
   if (Number.isNaN(value)) return 0;
   if (value > 1) return Math.round(value);
   return Math.round(value * 100);
+}
+
+function getActionsForCategory(category?: string): Array<{ label: string; href: string }> {
+  if (!category) return [];
+  switch (category) {
+    case "schema_drift":
+      return [{ label: "Open Ingestion Wizard", href: "/admin/operations" }];
+    case "auth":
+    case "unauthorized":
+      return [{ label: "Check Permissions", href: "/admin/settings/query-target" }];
+    case "connectivity":
+      return [{ label: "Configure Data Source", href: "/admin/settings/query-target" }];
+    default:
+      return [];
+  }
+}
+
+function buildErrorData(err: unknown): ErrorCardProps {
+  if (err instanceof ApiError) {
+    const meta = err.details as Record<string, any>;
+    const category = meta?.error_category || err.code?.toLowerCase();
+    return {
+      category,
+      message: err.displayMessage,
+      requestId: err.requestId,
+      hint: meta?.hint as string | undefined,
+      retryable: meta?.retryable as boolean | undefined,
+      retryAfterSeconds: meta?.retry_after_seconds as number | undefined,
+      detailsSafe: meta?.details_safe as Record<string, unknown> | undefined,
+      actions: getActionsForCategory(category),
+    };
+  }
+  if (err instanceof Error) {
+    return { message: err.message };
+  }
+  return { message: "An unexpected error occurred" };
+}
+
+function mapStreamResultToMessage(
+  data: any,
+  request: { question: string; tenant_id: number; thread_id: string }
+): Message {
+  return {
+    role: "assistant",
+    text: data.response ?? undefined,
+    sql: data.sql ?? data.current_sql ?? undefined,
+    result: data.result ?? data.query_result,
+    error: data.error ?? undefined,
+    interactionId: data.interaction_id ?? undefined,
+    fromCache: data.from_cache,
+    cacheSimilarity: data.cache_similarity,
+    vizSpec: data.viz_spec,
+    traceId: data.trace_id ?? data.run_id ?? undefined,
+    resultCompleteness: data.result_completeness,
+    retrySummary: data.retry_summary,
+    validationSummary: data.validation_summary,
+    emptyResultGuidance: data.empty_result_guidance ?? undefined,
+    errorMetadata: data.error_metadata,
+    originalRequest: request,
+  };
 }
 
 function ResultsTable({ rows }: { rows: any[] }) {
@@ -194,13 +259,31 @@ export default function AgentChat() {
   const [question, setQuestion] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [currentPhase, setCurrentPhase] = useState<string | null>(null);
+  const [completedPhases, setCompletedPhases] = useState<string[]>([]);
+  const [error, setError] = useState<ErrorCardProps | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
+  const [loadingMore, setLoadingMore] = useState<number | null>(null);
+  const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
   const threadIdRef = useRef<string>(crypto.randomUUID());
   const [searchParams] = useSearchParams();
   const [verboseMode, setVerboseMode] = useState(() =>
     loadVerboseMode(searchParams.toString())
   );
+
+  // Check configuration on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetchQueryTargetSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        setConfigStatus(settings.active ? "configured" : "unconfigured");
+      })
+      .catch(() => {
+        if (!cancelled) setConfigStatus("configured"); // assume configured on error to not block
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const fallbackModels = FALLBACK_MODELS[llmProvider] || FALLBACK_MODELS.openai;
   const { models: availableModels, isLoading: modelsLoading, error: modelsError } =
@@ -246,6 +329,8 @@ export default function AgentChat() {
     setMessages([]);
     setFeedbackState({});
     setError(null);
+    setCurrentPhase(null);
+    setCompletedPhases([]);
     threadIdRef.current = crypto.randomUUID();
   };
 
@@ -256,42 +341,102 @@ export default function AgentChat() {
     }
 
     const prompt = question.trim();
+    const request = {
+      question: prompt,
+      tenant_id: tenantId,
+      thread_id: threadIdRef.current,
+    };
     setQuestion("");
     setError(null);
+    setCurrentPhase(null);
+    setCompletedPhases([]);
 
     setMessages((prev) => [...prev, { role: "user", text: prompt }]);
 
     setIsLoading(true);
     try {
-      const result = await runAgent({
-        question: prompt,
-        tenant_id: tenantId,
-        thread_id: threadIdRef.current
-      }) as (Awaited<ReturnType<typeof runAgent>> & { cache_similarity?: number });
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: result.response ?? undefined,
-          sql: result.sql ?? undefined,
-          result: result.result,
-          error: result.error ?? undefined,
-          interactionId: result.interaction_id ?? undefined,
-          fromCache: result.from_cache,
-          cacheSimilarity: result.cache_similarity,
-          vizSpec: result.viz_spec,
-          traceId: result.trace_id ?? undefined,
-          resultCompleteness: result.result_completeness,
-          retrySummary: result.retry_summary,
-          validationSummary: result.validation_summary,
-          emptyResultGuidance: result.empty_result_guidance ?? undefined
+      // Try streaming first, fall back to blocking
+      let finalResult: any = null;
+      try {
+        const stream = runAgentStream(request);
+        for await (const evt of stream) {
+          if (evt.event === "progress") {
+            setCurrentPhase((prev) => {
+              if (prev && prev !== evt.data.phase) {
+                setCompletedPhases((cp) => cp.includes(prev) ? cp : [...cp, prev]);
+              }
+              return evt.data.phase;
+            });
+          } else if (evt.event === "error") {
+            throw new Error(evt.data.error || "Unknown stream error");
+          } else if (evt.event === "result") {
+            finalResult = evt.data;
+          }
         }
-      ]);
-    } catch (err: any) {
-      setError(err.message || "Failed to run agent.");
+      } catch (streamErr: any) {
+        // If stream endpoint fails (404, network), fall back to blocking runAgent
+        if (!finalResult) {
+          const result = await runAgent(request) as any;
+          finalResult = result;
+        } else {
+          throw streamErr;
+        }
+      }
+
+      if (finalResult) {
+        setMessages((prev) => [
+          ...prev,
+          mapStreamResultToMessage(finalResult, request),
+        ]);
+      }
+    } catch (err: unknown) {
+      setError(buildErrorData(err));
     } finally {
       setIsLoading(false);
+      setCurrentPhase(null);
+      setCompletedPhases([]);
+    }
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    // Re-submit with the last user message
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+    if (lastUserMsg?.text) {
+      setQuestion(lastUserMsg.text);
+    }
+  };
+
+  const handleLoadMore = async (msgIdx: number) => {
+    const msg = messages[msgIdx];
+    if (!msg?.resultCompleteness?.next_page_token || !msg.originalRequest) return;
+
+    setLoadingMore(msgIdx);
+    try {
+      const result = await runAgent({
+        ...msg.originalRequest,
+        page_token: msg.resultCompleteness.next_page_token,
+      }) as any;
+
+      setMessages((prev) => {
+        const updated = [...prev];
+        const existing = updated[msgIdx];
+        if (!existing) return prev;
+
+        const existingRows = Array.isArray(existing.result) ? existing.result : [];
+        const newRows = Array.isArray(result.result) ? result.result : [];
+
+        updated[msgIdx] = {
+          ...existing,
+          result: [...existingRows, ...newRows],
+          resultCompleteness: result.result_completeness,
+        };
+        return updated;
+      });
+    } catch (err: unknown) {
+      setError(buildErrorData(err));
+    } finally {
+      setLoadingMore(null);
     }
   };
 
@@ -457,6 +602,51 @@ export default function AgentChat() {
 
         {/* Main chat area */}
         <main>
+          {configStatus === "unconfigured" && (
+            <div className="panel" data-testid="onboarding-panel" style={{
+              marginBottom: "24px",
+              padding: "32px",
+              textAlign: "center",
+              background: "rgba(99, 102, 241, 0.05)",
+              border: "1px solid rgba(99, 102, 241, 0.2)",
+              borderRadius: "12px",
+            }}>
+              <h2 style={{ margin: "0 0 8px", fontSize: "1.3rem" }}>Welcome to Text2SQL</h2>
+              <p style={{ color: "var(--muted)", marginBottom: "20px" }}>
+                Before you can start querying, you need to configure a data source.
+              </p>
+              <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                <Link
+                  to="/admin/settings/query-target"
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: "10px",
+                    background: "var(--accent, #6366f1)",
+                    color: "#fff",
+                    textDecoration: "none",
+                    fontWeight: 600,
+                  }}
+                >
+                  Configure Data Source
+                </Link>
+                <Link
+                  to="/admin/operations"
+                  style={{
+                    padding: "10px 20px",
+                    borderRadius: "10px",
+                    border: "1px solid var(--border)",
+                    background: "var(--surface, #fff)",
+                    color: "var(--ink)",
+                    textDecoration: "none",
+                    fontWeight: 500,
+                  }}
+                >
+                  System Operations
+                </Link>
+              </div>
+            </div>
+          )}
+
           <section className="chat">
             {messages.map((msg, idx) => (
               <article
@@ -527,6 +717,27 @@ export default function AgentChat() {
                   )}
 
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
+                  {msg.resultCompleteness?.next_page_token && msg.originalRequest && (
+                    <button
+                      type="button"
+                      data-testid="load-more-button"
+                      onClick={() => handleLoadMore(idx)}
+                      disabled={loadingMore === idx}
+                      style={{
+                        marginTop: "8px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "var(--surface, #fff)",
+                        color: "var(--accent, #6366f1)",
+                        cursor: loadingMore === idx ? "not-allowed" : "pointer",
+                        fontWeight: 500,
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      {loadingMore === idx ? "Loading..." : "Load more rows"}
+                    </button>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
@@ -609,18 +820,27 @@ export default function AgentChat() {
               </article>
             ))}
 
-            {isLoading && <div className="loading">Thinking...</div>}
-            {error && <div className="error-banner">{error}</div>}
+            {isLoading && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+                <ExecutionProgress currentPhase={currentPhase} completedPhases={completedPhases} />
+              </div>
+            )}
+            {error && (
+              <div style={{ marginBottom: "16px" }}>
+                <ErrorCard {...error} onRetry={handleRetry} />
+              </div>
+            )}
           </section>
 
           <form className="composer" onSubmit={handleSubmit}>
             <input
               type="text"
-              placeholder="Ask a question about your data"
+              placeholder={configStatus === "unconfigured" ? "Configure a data source first" : "Ask a question about your data"}
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
+              disabled={configStatus === "unconfigured"}
             />
-            <button type="submit" disabled={isLoading}>
+            <button type="submit" disabled={isLoading || configStatus === "unconfigured"}>
               {isLoading ? "Running..." : "Run"}
             </button>
           </form>
