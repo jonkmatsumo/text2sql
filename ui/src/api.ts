@@ -12,6 +12,11 @@ import {
   GenerateSQLRequest,
   ExecuteSQLRequest
 } from "./types";
+
+export type {
+  GenerateSQLRequest,
+  ExecuteSQLRequest
+};
 import {
   Interaction,
   ApprovedExample,

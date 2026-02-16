@@ -519,10 +519,12 @@ export default function AgentChat() {
       };
 
       const response = await generateSQL(request);
+      // TODO: Update generated types to include current_sql
+      const currentSql = (response as any).current_sql;
 
-      if (response.current_sql) {
+      if (currentSql) {
         setPreviewData({
-          sql: response.current_sql,
+          sql: currentSql,
           originalRequest: request
         });
         setQuestion("");
