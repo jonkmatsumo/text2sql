@@ -206,6 +206,63 @@ class OpsJobsClient:
                 "result": result or {},
             }
 
+    @classmethod
+    async def list_jobs(
+        cls, limit: int = 50, job_type: Optional[str] = None, status: Optional[str] = None
+    ) -> list[dict]:
+        """List jobs with optional filtering.
+
+        Args:
+            limit: Maximum number of jobs to return.
+            job_type: Filter by job type.
+            status: Filter by job status.
+
+        Returns:
+            List of job records.
+        """
+        query = "SELECT * FROM ops_jobs"
+        conditions = []
+        params = []
+
+        if job_type:
+            params.append(job_type)
+            conditions.append(f"job_type = ${len(params)}")
+
+        if status:
+            params.append(status)
+            conditions.append(f"status = ${len(params)}")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY started_at DESC"
+        params.append(limit)
+        query += f" LIMIT ${len(params)}"
+
+        async with cls.get_connection() as conn:
+            rows = await conn.fetch(query, *params)
+            jobs = []
+            for row in rows:
+                result = row["result"]
+                if isinstance(result, str):
+                    try:
+                        result = json.loads(result)
+                    except Exception:
+                        result = {"raw": result}
+
+                jobs.append(
+                    {
+                        "id": row["id"],
+                        "job_type": row["job_type"],
+                        "status": row["status"],
+                        "started_at": row["started_at"],
+                        "finished_at": row.get("finished_at"),
+                        "error_message": row.get("error_message"),
+                        "result": result or {},
+                    }
+                )
+            return jobs
+
 
 # Feature flag for using legacy DAL path vs new isolated client
 USE_LEGACY_DAL = get_env_bool("GATEWAY_USE_LEGACY_DAL", True)

@@ -78,6 +78,17 @@ async def cache_lookup_node(state: AgentState) -> dict:
         user_query = messages[-1].content if messages else ""
         span.set_inputs({"user_query": user_query})
 
+        # Bypass cache lookup if state already has a candidate (e.g. execute_sql mode)
+        if state.get("from_cache") and state.get("current_sql"):
+            logger.info("Bypassing cache lookup (SQL explicitly provided)")
+            span.set_attribute("cache.bypass", True)
+            span.set_outputs({"hit": True, "sql": state["current_sql"]})
+            return {
+                "cached_sql": state["current_sql"],
+                "from_cache": True,
+                "cache_lookup_failed": False,
+            }
+
         # 1. Lookup Cache via tool
         tools = await get_mcp_tools()
         cache_tool = next((t for t in tools if t.name == "lookup_cache"), None)

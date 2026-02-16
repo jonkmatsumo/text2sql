@@ -8,8 +8,15 @@ import {
   ListTracesParams,
   PaginatedTracesResponse,
   MetricsPreviewResponse,
-  TraceAggregationsResponse
+  TraceAggregationsResponse,
+  GenerateSQLRequest,
+  ExecuteSQLRequest
 } from "./types";
+
+export type {
+  GenerateSQLRequest,
+  ExecuteSQLRequest
+};
 import {
   Interaction,
   ApprovedExample,
@@ -20,7 +27,8 @@ import {
   SynthGenerateRequest,
   SynthGenerateResponse,
   SynthRun,
-  SynthRunSummary
+  SynthRunSummary,
+  OpsJobResponse
 } from "./types/admin";
 import {
   agentServiceBaseUrl,
@@ -176,6 +184,34 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunRespon
 
   if (!response.ok) {
     await throwApiError(response, "Agent service error");
+  }
+
+  return response.json();
+}
+
+export async function generateSQL(request: GenerateSQLRequest): Promise<AgentRunResponse> {
+  const response = await fetch(`${agentBase}/agent/generate_sql`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    await throwApiError(response, "Failed to generate SQL");
+  }
+
+  return response.json();
+}
+
+export async function executeSQL(request: ExecuteSQLRequest): Promise<AgentRunResponse> {
+  const response = await fetch(`${agentBase}/agent/execute_sql`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    await throwApiError(response, "Failed to execute SQL");
   }
 
   return response.json();
@@ -498,6 +534,22 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
+    return response.json();
+  },
+
+  async listJobs(
+    limit: number = 50,
+    jobType?: string,
+    status?: string
+  ): Promise<OpsJobResponse[]> {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (jobType) params.append("job_type", jobType);
+    if (status) params.append("status", status);
+
+    const response = await fetch(`${uiApiBase}/ops/jobs?${params}`, {
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to list jobs");
     return response.json();
   }
 };
