@@ -1069,6 +1069,7 @@ export default function AgentChat() {
                   setQuestion(previewData.originalRequest.question);
                   setPreviewData(null);
                 }}
+                onSqlChange={(newSql) => setPreviewData(prev => prev ? { ...prev, sql: newSql } : null)}
               />
             </div>
           ) : (
