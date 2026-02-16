@@ -12,6 +12,8 @@ import TraceCompare from "./routes/TraceCompare";
 import MetricsPreview from "./routes/MetricsPreview";
 import QueryTargetSettings from "./routes/QueryTargetSettings";
 
+import JobsDashboard from "./routes/JobsDashboard";
+
 export default function App() {
   return (
     <Layout>
@@ -22,6 +24,7 @@ export default function App() {
         <Route path="/admin/review" element={<ReviewCuration />} />
         <Route path="/admin/recommendations" element={<Recommendations />} />
         <Route path="/admin/operations" element={<SystemOperations />} />
+        <Route path="/admin/jobs" element={<JobsDashboard />} />
         <Route path="/admin/traces" element={<TraceExplorer />} />
         <Route path="/admin/traces/search" element={<TraceSearch />} />
         <Route path="/admin/traces/compare" element={<TraceCompare />} />
