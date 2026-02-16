@@ -60,3 +60,22 @@ export interface AgentStreamEvent {
     event: AgentStreamEventType;
     data: any; // Flexible data based on event type
 }
+
+export interface GenerateSQLRequest {
+    question: string;
+    tenant_id: number;
+    thread_id?: string;
+    timeout_seconds?: number;
+    replay_mode?: boolean;
+    replay_bundle?: Record<string, any>;
+}
+
+export interface ExecuteSQLRequest {
+    question: string;
+    sql: string;
+    tenant_id: number;
+    thread_id?: string;
+    timeout_seconds?: number;
+    page_token?: string;
+    page_size?: number;
+}

@@ -8,7 +8,9 @@ import {
   ListTracesParams,
   PaginatedTracesResponse,
   MetricsPreviewResponse,
-  TraceAggregationsResponse
+  TraceAggregationsResponse,
+  GenerateSQLRequest,
+  ExecuteSQLRequest
 } from "./types";
 import {
   Interaction,
@@ -176,6 +178,34 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunRespon
 
   if (!response.ok) {
     await throwApiError(response, "Agent service error");
+  }
+
+  return response.json();
+}
+
+export async function generateSQL(request: GenerateSQLRequest): Promise<AgentRunResponse> {
+  const response = await fetch(`${agentBase}/agent/generate_sql`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    await throwApiError(response, "Failed to generate SQL");
+  }
+
+  return response.json();
+}
+
+export async function executeSQL(request: ExecuteSQLRequest): Promise<AgentRunResponse> {
+  const response = await fetch(`${agentBase}/agent/execute_sql`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    await throwApiError(response, "Failed to execute SQL");
   }
 
   return response.json();
