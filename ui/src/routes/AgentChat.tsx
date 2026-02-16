@@ -218,7 +218,7 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
 }
 
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
-  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token)) {
+  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch)) {
     return null;
   }
 
@@ -226,6 +226,22 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
 
   let message = "";
   let type: "warning" | "info" = "info";
+
+  if (completeness.schema_mismatch) {
+    return (
+      <div data-testid="schema-mismatch-warning" className="completeness-banner warning" style={{
+        fontSize: "0.8rem",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        marginTop: "8px",
+        background: "rgba(220, 53, 69, 0.1)",
+        borderLeft: "3px solid #dc3545",
+        color: "#842029",
+      }}>
+        Column schema changed between pages. Cannot append rows.
+      </div>
+    );
+  }
 
   if (is_truncated) {
     type = "warning";
@@ -487,6 +503,24 @@ export default function AgentChat() {
 
         const existingRows = Array.isArray(existing.result) ? existing.result : [];
         const newRows = Array.isArray(result.result) ? result.result : [];
+
+        // Check for column mismatch between pages
+        if (existingRows.length > 0 && newRows.length > 0) {
+          const existingCols = Object.keys(existingRows[0] || {}).sort().join(",");
+          const newCols = Object.keys(newRows[0] || {}).sort().join(",");
+          if (existingCols !== newCols) {
+            // Schema mismatch — don't append, show warning
+            updated[msgIdx] = {
+              ...existing,
+              resultCompleteness: {
+                ...existing.resultCompleteness,
+                next_page_token: undefined,
+                schema_mismatch: true,
+              },
+            };
+            return updated;
+          }
+        }
 
         updated[msgIdx] = {
           ...existing,
