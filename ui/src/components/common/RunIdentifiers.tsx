@@ -18,7 +18,7 @@ function shortId(value: string): string {
   return value.length > 8 ? `${value.slice(0, 8)}...` : value;
 }
 
-export default function RunIdentifiers({
+function RunIdentifiersComponent({
   traceId,
   interactionId,
   requestId,
@@ -67,3 +67,8 @@ export default function RunIdentifiers({
     </div>
   );
 }
+
+const RunIdentifiers = React.memo(RunIdentifiersComponent);
+RunIdentifiers.displayName = "RunIdentifiers";
+
+export default RunIdentifiers;
