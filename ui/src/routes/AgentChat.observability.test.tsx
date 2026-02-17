@@ -667,4 +667,40 @@ describe("AgentChat observability", () => {
     fireEvent.click(screen.getByTestId("decision-log-toggle"));
     expect(screen.getByTestId("decision-log-search")).toBeInTheDocument();
   });
+
+  it("exposes accessible labels for decision search and phase filters", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "A11y filters",
+            decision_events: [
+              { timestamp: 1700000001, node: "router", decision: "route request", reason: "router step", type: "info" },
+              { timestamp: 1700000002, node: "execute", decision: "run query", reason: "execute step", type: "warn" },
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "decision filter accessibility" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("A11y filters")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
+    expect(screen.getByLabelText("Search decision events")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter decision events by phase")).toBeInTheDocument();
+  });
 });

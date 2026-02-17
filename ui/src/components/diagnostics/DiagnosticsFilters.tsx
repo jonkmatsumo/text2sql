@@ -103,6 +103,7 @@ export function DiagnosticsFilters({
         Section
         <select
           data-testid="diagnostics-section-select"
+          aria-label="Select diagnostics section"
           value={selectedSection}
           onChange={(event) => onSelectedSectionChange(parseDiagnosticsSection(event.target.value))}
           style={{

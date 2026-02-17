@@ -96,6 +96,7 @@ export function DecisionLogPanel({ events }: DecisionLogPanelProps) {
               type="text"
               value={searchQuery}
               data-testid="decision-log-search"
+              aria-label="Search decision events"
               placeholder="Search decisions, node, type"
               onChange={(event) => setSearchQuery(event.target.value)}
               style={{
@@ -109,6 +110,7 @@ export function DecisionLogPanel({ events }: DecisionLogPanelProps) {
             <select
               value={phaseFilter}
               data-testid="decision-log-phase-filter"
+              aria-label="Filter decision events by phase"
               onChange={(event) => setPhaseFilter(event.target.value)}
               style={{
                 padding: "6px 10px",

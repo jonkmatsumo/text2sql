@@ -183,6 +183,7 @@ describe("Diagnostics Route", () => {
         });
 
         expect(screen.getByLabelText(/Verbose \/ Diagnostic View/i)).toBeChecked();
+        expect(screen.getByLabelText("Select diagnostics section")).toBeInTheDocument();
         expect(screen.getByTestId("diagnostics-section-select")).toHaveValue("runtime");
         expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
 
