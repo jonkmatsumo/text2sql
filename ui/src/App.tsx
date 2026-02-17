@@ -11,6 +11,7 @@ import TraceSearch from "./routes/TraceSearch";
 import TraceCompare from "./routes/TraceCompare";
 import MetricsPreview from "./routes/MetricsPreview";
 import QueryTargetSettings from "./routes/QueryTargetSettings";
+import Diagnostics from "./routes/Diagnostics";
 
 import JobsDashboard from "./routes/JobsDashboard";
 
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/admin/traces/compare" element={<TraceCompare />} />
         <Route path="/admin/observability/metrics" element={<MetricsPreview />} />
         <Route path="/admin/settings/query-target" element={<QueryTargetSettings />} />
+        <Route path="/admin/diagnostics" element={<Diagnostics />} />
       </Routes>
     </Layout>
   );

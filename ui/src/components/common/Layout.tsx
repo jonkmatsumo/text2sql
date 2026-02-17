@@ -30,7 +30,8 @@ const navItems = [
     { path: "/admin/operations", label: "System Operations", icon: "⚙️" },
     { path: "/admin/jobs", label: "Unified Jobs", icon: "📋" },
     { path: "/admin/settings/query-target", label: "Query Target Settings", icon: "🧭" },
-    { path: "/admin/traces", label: "Trace Explorer", icon: "🔍" }
+    { path: "/admin/traces", label: "Trace Explorer", icon: "🔍" },
+    { path: "/admin/diagnostics", label: "Diagnostics", icon: "🏥" }
 ];
 
 export default function Layout({ children }: LayoutProps) {
