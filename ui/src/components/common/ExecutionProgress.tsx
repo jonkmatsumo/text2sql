@@ -20,6 +20,7 @@ interface ExecutionProgressProps {
 }
 
 export function ExecutionProgress({ currentPhase, completedPhases = [], correctionAttempt, className }: ExecutionProgressProps) {
+  const [isExpanded, setIsExpanded] = React.useState(false);
   if (!currentPhase) return null;
 
   const label = PHASES[currentPhase] || currentPhase;
@@ -73,20 +74,20 @@ export function ExecutionProgress({ currentPhase, completedPhases = [], correcti
                   flexShrink: 0,
                   ...(isCompleted
                     ? {
-                        background: 'var(--accent, #6366f1)',
-                        color: '#fff',
-                      }
+                      background: 'var(--accent, #6366f1)',
+                      color: '#fff',
+                    }
                     : isCurrent
                       ? {
-                          background: 'transparent',
-                          border: '2px solid var(--accent, #6366f1)',
-                          color: 'var(--accent, #6366f1)',
-                          animation: 'pulse-phase 1.5s ease-in-out infinite',
-                        }
+                        background: 'transparent',
+                        border: '2px solid var(--accent, #6366f1)',
+                        color: 'var(--accent, #6366f1)',
+                        animation: 'pulse-phase 1.5s ease-in-out infinite',
+                      }
                       : {
-                          background: 'var(--border, #e2e8f0)',
-                          color: 'var(--muted, #94a3b8)',
-                        }),
+                        background: 'var(--border, #e2e8f0)',
+                        color: 'var(--muted, #94a3b8)',
+                      }),
                 }}
               >
                 {isCompleted ? '\u2713' : isFuture ? '' : ''}
@@ -97,26 +98,61 @@ export function ExecutionProgress({ currentPhase, completedPhases = [], correcti
       </div>
 
       {/* Current phase label with spinner */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div className="spinner" style={{
-          width: '16px',
-          height: '16px',
-          border: '2px solid var(--border)',
-          borderTopColor: 'var(--accent)',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
-          flexShrink: 0,
-        }} />
-        <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>
-          {label}...
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="spinner" style={{
+            width: '16px',
+            height: '16px',
+            border: '2px solid var(--border)',
+            borderTopColor: 'var(--accent)',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            flexShrink: 0,
+          }} />
+          <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>
+            {label}...
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsExpanded(!isExpanded)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--accent)',
+            fontSize: '0.75rem',
+            cursor: 'pointer',
+            padding: '4px'
+          }}
+        >
+          {isExpanded ? 'Hide Details' : 'View Details'}
+        </button>
       </div>
+
+      {isExpanded && (
+        <div style={{ fontSize: '0.75rem', borderTop: '1px solid var(--border-muted)', paddingTop: '8px', display: 'grid', gap: '6px' }}>
+          {PHASE_ORDER.map((phase) => {
+            const isDone = completedPhases.includes(phase);
+            const isNow = currentPhase === phase;
+            return (
+              <div key={phase} style={{ display: 'flex', justifyContent: 'space-between', opacity: isDone || isNow ? 1 : 0.5 }}>
+                <span style={{ color: isNow ? 'var(--accent)' : 'inherit', fontWeight: isNow ? 600 : 400 }}>
+                  {isNow ? '➤ ' : isDone ? '✓ ' : '○ '} {PHASES[phase] || phase}
+                </span>
+                {isDone && <span style={{ color: 'var(--success)' }}>Completed</span>}
+                {isNow && <span style={{ color: 'var(--accent)' }}>In Progress</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {currentPhase === 'correct' && correctionAttempt != null && correctionAttempt > 0 && (
         <div data-testid="correction-attempt" style={{
           fontSize: '0.8rem',
           color: 'var(--muted, #94a3b8)',
           fontStyle: 'italic',
+          marginTop: isExpanded ? '4px' : '0'
         }}>
           Attempt {correctionAttempt}: correcting SQL
         </div>
