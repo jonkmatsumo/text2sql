@@ -77,10 +77,6 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export async function copyPrettyJson(value: unknown): Promise<boolean> {
-  return copyTextToClipboard(toPrettyJson(value));
-}
-
 export function normalizeDecisionEvents(events: any[]): NormalizedDecisionEvent[] {
   const sorted = events
     .map((event, originalIndex) => ({

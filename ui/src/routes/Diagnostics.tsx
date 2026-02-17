@@ -14,6 +14,13 @@ import {
 
 type DiagnosticsSection = "all" | "runtime" | "config" | "latency" | "raw";
 
+interface DiagnosticsError {
+    code?: string;
+    message?: string;
+    requestId?: string;
+    details?: Record<string, unknown>;
+}
+
 function parseSection(raw: string | null): DiagnosticsSection {
     if (raw === "runtime" || raw === "config" || raw === "latency" || raw === "raw") {
         return raw;
@@ -31,7 +38,7 @@ export default function Diagnostics() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<any>(null);
+    const [error, setError] = useState<DiagnosticsError | null>(null);
     const [isDebug, setIsDebug] = useState(() => searchParams.get("debug") === "1");
     const [filterMode, setFilterMode] = useState<"all" | "anomalies">(
         () => (searchParams.get("filter") === "anomalies" ? "anomalies" : "all")
@@ -53,8 +60,12 @@ export default function Diagnostics() {
             const resp = await getDiagnostics(debug);
             setData(resp);
             setLastUpdatedAt(Date.now());
-        } catch (err: any) {
-            setError(err);
+        } catch (err: unknown) {
+            if (err && typeof err === "object") {
+                setError(err as DiagnosticsError);
+            } else {
+                setError({ message: "Failed to load diagnostics" });
+            }
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
@@ -183,14 +194,14 @@ export default function Diagnostics() {
                         };
     const selectedPanelJson = toPrettyJson(selectedPanelPayload);
     const diagnosticsTraceId =
-        readOptionalString((data as any)?.trace_id) ??
-        readOptionalString((data?.debug as any)?.trace_id);
+        readOptionalString(data?.trace_id) ??
+        readOptionalString(data?.debug?.trace_id);
     const diagnosticsInteractionId =
-        readOptionalString((data as any)?.interaction_id) ??
-        readOptionalString((data?.debug as any)?.interaction_id);
+        readOptionalString(data?.interaction_id) ??
+        readOptionalString(data?.debug?.interaction_id);
     const diagnosticsRequestId =
-        readOptionalString((data as any)?.request_id) ??
-        readOptionalString((data?.debug as any)?.request_id);
+        readOptionalString(data?.request_id) ??
+        readOptionalString(data?.debug?.request_id);
 
     if (loading && !data) {
         return (
