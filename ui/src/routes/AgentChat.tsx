@@ -42,6 +42,7 @@ interface Message {
   resultCompleteness?: any;
   retrySummary?: any;
   validationSummary?: any;
+  decisionEvents?: any[];
   emptyResultGuidance?: string;
   errorMetadata?: any;
   originalRequest?: { question: string; tenant_id: number; thread_id: string };
@@ -126,6 +127,7 @@ function mapStreamResultToMessage(
     resultCompleteness: data.result_completeness,
     retrySummary: data.retry_summary,
     validationSummary: data.validation_summary,
+    decisionEvents: data.decision_events,
     emptyResultGuidance: data.empty_result_guidance ?? undefined,
     errorMetadata: data.error_metadata,
     originalRequest: request,
