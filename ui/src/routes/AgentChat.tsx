@@ -43,6 +43,7 @@ interface Message {
   resultCompleteness?: any;
   retrySummary?: any;
   validationSummary?: any;
+  validationReport?: any;
   decisionEvents?: any[];
   emptyResultGuidance?: string;
   errorMetadata?: any;
@@ -128,6 +129,7 @@ function mapStreamResultToMessage(
     resultCompleteness: data.result_completeness,
     retrySummary: data.retry_summary,
     validationSummary: data.validation_summary,
+    validationReport: data.validation_report,
     decisionEvents: data.decision_events,
     emptyResultGuidance: data.empty_result_guidance ?? undefined,
     errorMetadata: data.error_metadata,
@@ -197,18 +199,92 @@ function ValidationSummaryBadge({ summary }: { summary: any }) {
   );
 }
 
-function SQLValidationDetails({ summary }: { summary: any }) {
-  if (!summary) return null;
-  const { syntax_errors, semantic_warnings, missing_identifiers } = summary;
+function SQLValidationDetails({ summary, report }: { summary: any; report?: any }) {
+  if (!summary && !report) return null;
+  const syntax_errors = summary?.syntax_errors;
+  const semantic_warnings = summary?.semantic_warnings;
+  const missing_identifiers = summary?.missing_identifiers;
 
   const hasIssues = (syntax_errors && syntax_errors.length > 0) ||
     (semantic_warnings && semantic_warnings.length > 0) ||
     (missing_identifiers && missing_identifiers.length > 0);
 
-  if (!hasIssues) return null;
+  const tablesUsed =
+    (Array.isArray(report?.table_lineage) && report.table_lineage.length > 0 && report.table_lineage) ||
+    (Array.isArray(report?.affected_tables) && report.affected_tables.length > 0 && report.affected_tables) ||
+    (Array.isArray(summary?.table_lineage) && summary.table_lineage.length > 0 && summary.table_lineage) ||
+    (Array.isArray(summary?.tables_used) && summary.tables_used.length > 0 && summary.tables_used) ||
+    [];
+
+  const complexityScore = report?.query_complexity_score ?? summary?.query_complexity_score ?? null;
+
+  const hasAggregation =
+    report?.has_aggregation ?? report?.metadata?.has_aggregation ?? summary?.has_aggregation;
+  const hasSubquery =
+    report?.has_subquery ?? report?.metadata?.has_subquery ?? summary?.has_subquery;
+  const hasWindowFunction =
+    report?.has_window_function ??
+    report?.metadata?.has_window_function ??
+    summary?.has_window_function;
+
+  const cartesianWarning = Boolean(
+    report?.detected_cartesian_flag ||
+    report?.metadata?.detected_cartesian_flag ||
+    summary?.detected_cartesian_flag
+  );
+  const rawValidationReport = report ?? summary;
+
+  if (!hasIssues && !cartesianWarning && !tablesUsed.length && complexityScore == null) return null;
 
   return (
     <div className="sql-validation-details" style={{ marginTop: "12px", fontSize: "0.85rem", borderTop: "1px dashed var(--border-muted)", paddingTop: "8px" }}>
+      <div
+        data-testid="validation-key-signals"
+        style={{
+          marginBottom: "10px",
+          padding: "10px",
+          borderRadius: "8px",
+          background: "var(--surface-muted)",
+          border: "1px solid var(--border-muted)",
+          display: "grid",
+          gap: "6px",
+        }}
+      >
+        {tablesUsed.length > 0 && (
+          <div>
+            <strong>Tables used:</strong> {tablesUsed.join(", ")}
+          </div>
+        )}
+        {complexityScore != null && (
+          <div>
+            <strong>Complexity score:</strong> {complexityScore}
+          </div>
+        )}
+        {(typeof hasAggregation === "boolean" || typeof hasSubquery === "boolean" || typeof hasWindowFunction === "boolean") && (
+          <div>
+            <strong>Query features:</strong>{" "}
+            Aggregation: {typeof hasAggregation === "boolean" ? (hasAggregation ? "Yes" : "No") : "—"} ·{" "}
+            Subquery: {typeof hasSubquery === "boolean" ? (hasSubquery ? "Yes" : "No") : "—"} ·{" "}
+            Window: {typeof hasWindowFunction === "boolean" ? (hasWindowFunction ? "Yes" : "No") : "—"}
+          </div>
+        )}
+      </div>
+      {cartesianWarning && (
+        <div
+          data-testid="validation-cartesian-warning"
+          style={{
+            color: "#856404",
+            background: "rgba(255, 193, 7, 0.12)",
+            border: "1px solid rgba(255, 193, 7, 0.3)",
+            borderRadius: "8px",
+            padding: "8px 10px",
+            marginBottom: "8px",
+            fontWeight: 600,
+          }}
+        >
+          Potential cartesian join detected. Confirm join predicates before execution.
+        </div>
+      )}
       {syntax_errors?.map((err: string, i: number) => (
         <div key={`syn-${i}`} style={{ color: "var(--error)", display: "flex", gap: "6px", marginBottom: "4px" }}>
           <span>❌</span> <span>{err}</span>
@@ -224,6 +300,14 @@ function SQLValidationDetails({ summary }: { summary: any }) {
           <span>🔍</span> <span>Missing identifier: <code>{id}</code></span>
         </div>
       ))}
+      {rawValidationReport && (
+        <details style={{ marginTop: "8px" }}>
+          <summary style={{ cursor: "pointer", color: "var(--muted)" }}>Validation report (raw)</summary>
+          <pre data-testid="validation-raw-report" style={{ marginTop: "6px", overflowX: "auto", fontSize: "0.75rem" }}>
+            {JSON.stringify(rawValidationReport, null, 2)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -1124,7 +1208,7 @@ export default function AgentChat() {
                     <details>
                       <summary>Generated SQL</summary>
                       <pre>{msg.sql}</pre>
-                      <SQLValidationDetails summary={msg.validationSummary} />
+                      <SQLValidationDetails summary={msg.validationSummary} report={msg.validationReport} />
                     </details>
                   )}
 

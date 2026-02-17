@@ -166,4 +166,48 @@ describe("AgentChat observability", () => {
 
     expect(screen.queryByRole("button", { name: "Copy decision log" })).not.toBeInTheDocument();
   });
+
+  it("shows cartesian join warning in SQL validation highlights", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Validation complete",
+            sql: "SELECT * FROM a, b",
+            validation_report: {
+              affected_tables: ["a", "b"],
+              query_complexity_score: 14,
+              detected_cartesian_flag: true,
+              has_aggregation: false,
+              has_subquery: false,
+              has_window_function: false,
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "cartesian test" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Validation complete")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Generated SQL"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("validation-cartesian-warning")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Potential cartesian join detected/i)).toBeInTheDocument();
+  });
 });
