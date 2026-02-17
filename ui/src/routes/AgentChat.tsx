@@ -381,6 +381,73 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
+function ValidationCompletenessSummary({
+  summary,
+  report,
+  completeness,
+  onExpand,
+}: {
+  summary?: any;
+  report?: any;
+  completeness?: any;
+  onExpand: () => void;
+}) {
+  if (!summary && !report && !completeness) return null;
+
+  const syntaxCount = Array.isArray(summary?.syntax_errors) ? summary.syntax_errors.length : 0;
+  const missingCount = Array.isArray(summary?.missing_identifiers) ? summary.missing_identifiers.length : 0;
+  const validationFailed = Boolean(summary?.ast_valid === false || syntaxCount > 0 || missingCount > 0);
+
+  const cartesianRisk = Boolean(
+    report?.detected_cartesian_flag ||
+    report?.metadata?.detected_cartesian_flag ||
+    summary?.detected_cartesian_flag
+  );
+
+  let completenessLabel = "complete";
+  if (completeness?.token_expired) completenessLabel = "token expired";
+  else if (completeness?.schema_mismatch) completenessLabel = "schema mismatch";
+  else if (completeness?.is_truncated || completeness?.is_limited) completenessLabel = "truncated";
+  else if (completeness?.next_page_token) completenessLabel = "paginated";
+
+  const pagesFetched =
+    typeof completeness?.pages_fetched === "number"
+      ? completeness.pages_fetched
+      : completeness
+        ? 1
+        : "—";
+
+  return (
+    <button
+      type="button"
+      data-testid="validation-completeness-summary"
+      onClick={onExpand}
+      style={{
+        marginTop: "8px",
+        width: "100%",
+        textAlign: "left",
+        borderRadius: "8px",
+        border: "1px solid var(--border)",
+        background: "var(--surface-muted)",
+        padding: "8px 10px",
+        fontSize: "0.8rem",
+        color: "var(--muted)",
+        cursor: "pointer",
+      }}
+    >
+      <strong style={{ color: validationFailed ? "var(--error)" : "var(--success)" }}>
+        Validation: {validationFailed ? "fail" : "pass"}
+      </strong>
+      {" · "}
+      <span>Cartesian: {cartesianRisk ? "risk" : "none"}</span>
+      {" · "}
+      <span>Completeness: {completenessLabel}</span>
+      {" · "}
+      <span>Pages: {pagesFetched}</span>
+    </button>
+  );
+}
+
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
   const MAX_VISIBLE_EVENTS = 10;
@@ -760,6 +827,7 @@ export default function AgentChat() {
   const [error, setError] = useState<ErrorCardProps | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
+  const [expandedSqlSections, setExpandedSqlSections] = useState<Record<number, boolean>>({});
   const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
   const [isCheckingConfig, setIsCheckingConfig] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -848,6 +916,7 @@ export default function AgentChat() {
     setMessages([]);
     setFeedbackState({});
     setError(null);
+    setExpandedSqlSections({});
     setRunStatus("idle");
     setCurrentPhase(null);
     setCompletedPhases([]);
@@ -1408,7 +1477,13 @@ export default function AgentChat() {
                   {msg.error && <p className="error">Error: {msg.error}</p>}
 
                   {msg.sql && (
-                    <details>
+                    <details
+                      open={Boolean(expandedSqlSections[idx])}
+                      onToggle={(event) => {
+                        const nextOpen = (event.currentTarget as HTMLDetailsElement).open;
+                        setExpandedSqlSections((prev) => ({ ...prev, [idx]: nextOpen }));
+                      }}
+                    >
                       <summary>Generated SQL</summary>
                       <pre>{msg.sql}</pre>
                       <SQLValidationDetails summary={msg.validationSummary} report={msg.validationReport} />
@@ -1440,6 +1515,14 @@ export default function AgentChat() {
                     </div>
                   )}
 
+                  {msg.role === "assistant" && (msg.validationSummary || msg.validationReport || msg.resultCompleteness) && (
+                    <ValidationCompletenessSummary
+                      summary={msg.validationSummary}
+                      report={msg.validationReport}
+                      completeness={msg.resultCompleteness}
+                      onExpand={() => setExpandedSqlSections((prev) => ({ ...prev, [idx]: true }))}
+                    />
+                  )}
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
                   {msg.resultCompleteness?.next_page_token && msg.originalRequest && (
                     <button

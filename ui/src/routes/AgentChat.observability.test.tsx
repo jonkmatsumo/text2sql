@@ -211,6 +211,58 @@ describe("AgentChat observability", () => {
     expect(screen.getByText(/Potential cartesian join detected/i)).toBeInTheDocument();
   });
 
+  it("renders compact validation/completeness summary and expands SQL details", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Footer summary",
+            sql: "SELECT * FROM orders",
+            validation_summary: {
+              ast_valid: false,
+            },
+            validation_report: {
+              detected_cartesian_flag: true,
+            },
+            result_completeness: {
+              is_truncated: true,
+              pages_fetched: 2,
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "summary footer" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Footer summary")).toBeInTheDocument();
+    });
+
+    const summaryRow = screen.getByTestId("validation-completeness-summary");
+    expect(summaryRow).toHaveTextContent("Validation: fail");
+    expect(summaryRow).toHaveTextContent("Cartesian: risk");
+    expect(summaryRow).toHaveTextContent("Completeness: truncated");
+    expect(summaryRow).toHaveTextContent("Pages: 2");
+
+    expect(screen.getByTestId("validation-key-signals")).not.toBeVisible();
+    fireEvent.click(summaryRow);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("validation-key-signals")).toBeInTheDocument();
+    });
+  });
+
   it("renders concise validation failure guidance", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     mockedStream.mockReturnValue(
