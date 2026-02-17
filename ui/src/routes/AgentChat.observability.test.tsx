@@ -361,6 +361,41 @@ describe("AgentChat observability", () => {
     expect(copiedPayload.completeness.pages_fetched).toBe(3);
   });
 
+  it("renders trace and request identifier controls in assistant message footer", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Identifiers ready",
+            trace_id: "0123456789abcdef0123456789abcdef",
+            request_id: "req-42",
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "id parity" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Identifiers ready")).toBeInTheDocument();
+    });
+
+    const viewTrace = screen.getByRole("link", { name: "View Trace" });
+    expect(viewTrace).toHaveAttribute("href", "/traces/0123456789abcdef0123456789abcdef");
+    expect(screen.getByRole("button", { name: "Copy trace id" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy request id" })).toBeInTheDocument();
+  });
+
   it("renders auto-pagination and prefetch metadata when completeness includes it", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     mockedStream.mockReturnValue(

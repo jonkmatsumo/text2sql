@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CopyButton } from "../artifacts/CopyButton";
+import RunIdentifiers from "./RunIdentifiers";
 import { getErrorMapping, type ErrorSeverity } from "../../utils/errorMapping";
 
 export interface ErrorCardProps {
@@ -96,12 +96,7 @@ export function ErrorCard({
           </div>
           <div style={{ color: "var(--ink)", fontWeight: 500 }}>{message}</div>
         </div>
-        {requestId && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.75rem", color: "var(--muted)" }}>
-            <span>ID: {requestId.slice(0, 8)}</span>
-            <CopyButton text={requestId} label="Copy" />
-          </div>
-        )}
+        {requestId && <RunIdentifiers requestId={requestId} />}
       </div>
 
       {hint && (

@@ -207,4 +207,22 @@ describe("Diagnostics Route", () => {
         expect(screen.getByTestId("diagnostics-open-jobs-dashboard")).toHaveAttribute("href", "/admin/jobs");
         expect(screen.getByRole("button", { name: "Copy selected panel" })).toBeInTheDocument();
     });
+
+    it("renders trace and request identifier controls when diagnostics includes ids", async () => {
+        const traceId = "0123456789abcdef0123456789abcdef";
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            trace_id: traceId,
+            request_id: "req-diagnostics-1",
+        });
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-status-strip")).toBeInTheDocument();
+        });
+
+        expect(screen.getByRole("link", { name: "View Trace" })).toHaveAttribute("href", `/traces/${traceId}`);
+        expect(screen.getByRole("button", { name: "Copy trace id" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Copy request id" })).toBeInTheDocument();
+    });
 });

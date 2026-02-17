@@ -16,7 +16,7 @@ import { ExecutionProgress } from "../components/common/ExecutionProgress";
 import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
 import type { RunStatus } from "../types/runLifecycle";
 import { phaseIndex, PHASE_ORDER } from "../types/runLifecycle";
-import TraceLink from "../components/common/TraceLink";
+import RunIdentifiers from "../components/common/RunIdentifiers";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { useAvailableModels } from "../hooks/useAvailableModels";
@@ -37,6 +37,7 @@ interface Message {
   result?: any;
   error?: string;
   interactionId?: string;
+  requestId?: string;
   fromCache?: boolean;
   cacheSimilarity?: number;
   vizSpec?: any;
@@ -123,6 +124,7 @@ function mapStreamResultToMessage(
     result: data.result ?? data.query_result,
     error: data.error ?? undefined,
     interactionId: data.interaction_id ?? undefined,
+    requestId: data.request_id ?? undefined,
     fromCache: data.from_cache,
     cacheSimilarity: data.cache_similarity,
     vizSpec: data.viz_spec,
@@ -1490,30 +1492,6 @@ export default function AgentChat() {
               >
                 <div className="bubble-header">
                   <span>{msg.role === "user" ? "You" : "Assistant"}</span>
-                  {(msg.traceId || msg.interactionId) && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <TraceLink
-                        traceId={msg.traceId}
-                        interactionId={msg.interactionId}
-                        variant="icon"
-                      />
-                      {verboseMode && (
-                        <a
-                          href={
-                            msg.traceId
-                              ? `/traces/${msg.traceId}?verbose=1`
-                              : msg.interactionId
-                                ? `/traces/interaction/${msg.interactionId}?verbose=1`
-                                : undefined
-                          }
-                          className="trace-link__btn"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          Verbose Trace
-                        </a>
-                      )}
-                    </div>
-                  )}
                 </div>
                 <div className="bubble-body">
                   {msg.text && <p>{msg.text}</p>}
@@ -1597,6 +1575,30 @@ export default function AgentChat() {
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
                   </div>
+                  {msg.role === "assistant" && (msg.traceId || msg.interactionId || msg.requestId) && (
+                    <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <RunIdentifiers
+                        traceId={msg.traceId}
+                        interactionId={msg.interactionId}
+                        requestId={msg.requestId}
+                      />
+                      {verboseMode && (msg.traceId || msg.interactionId) && (
+                        <a
+                          href={
+                            msg.traceId
+                              ? `/traces/${msg.traceId}?verbose=1`
+                              : msg.interactionId
+                                ? `/traces/interaction/${msg.interactionId}?verbose=1`
+                                : undefined
+                          }
+                          className="trace-link__btn"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Verbose Trace
+                        </a>
+                      )}
+                    </div>
+                  )}
                   {msg.role === "assistant" && <DecisionLog events={msg.decisionEvents} />}
 
                   {msg.vizSpec && (

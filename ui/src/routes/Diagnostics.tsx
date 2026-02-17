@@ -4,6 +4,7 @@ import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
+import RunIdentifiers from "../components/common/RunIdentifiers";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { formatTimestamp, toPrettyJson } from "../utils/observability";
 import {
@@ -18,6 +19,12 @@ function parseSection(raw: string | null): DiagnosticsSection {
         return raw;
     }
     return "all";
+}
+
+function readOptionalString(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed || undefined;
 }
 
 export default function Diagnostics() {
@@ -175,6 +182,15 @@ export default function Diagnostics() {
                             diagnostics: data,
                         };
     const selectedPanelJson = toPrettyJson(selectedPanelPayload);
+    const diagnosticsTraceId =
+        readOptionalString((data as any)?.trace_id) ??
+        readOptionalString((data?.debug as any)?.trace_id);
+    const diagnosticsInteractionId =
+        readOptionalString((data as any)?.interaction_id) ??
+        readOptionalString((data?.debug as any)?.interaction_id);
+    const diagnosticsRequestId =
+        readOptionalString((data as any)?.request_id) ??
+        readOptionalString((data?.debug as any)?.request_id);
 
     if (loading && !data) {
         return (
@@ -268,6 +284,11 @@ export default function Diagnostics() {
                             </span>
                         </div>
                         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            <RunIdentifiers
+                                traceId={diagnosticsTraceId}
+                                interactionId={diagnosticsInteractionId}
+                                requestId={diagnosticsRequestId}
+                            />
                             <Link
                                 to="/admin/traces/search"
                                 data-testid="diagnostics-open-trace-search"
