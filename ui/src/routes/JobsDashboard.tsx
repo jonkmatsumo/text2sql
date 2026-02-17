@@ -56,8 +56,10 @@ export default function JobsDashboard() {
                 >
                     <option value="">All Types</option>
                     <option value="SCHEMA_HYDRATION">Schema Hydration</option>
+                    <option value="SCHEMA_INGESTION">Schema Ingestion</option>
                     <option value="CACHE_REINDEX">Cache Reindex</option>
                     <option value="PATTERN_ENRICHMENT">Pattern Enrichment</option>
+                    <option value="SYNTH_GENERATE">Synthetic Generation</option>
                     {/* Add other types as needed */}
                 </select>
 

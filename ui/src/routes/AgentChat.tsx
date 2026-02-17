@@ -302,6 +302,7 @@ export default function AgentChat() {
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
   const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
+  const [isCheckingConfig, setIsCheckingConfig] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const threadIdRef = useRef<string>(crypto.randomUUID());
   const [searchParams] = useSearchParams();
@@ -322,21 +323,25 @@ export default function AgentChat() {
 
   // Check configuration on mount (cached to prevent flicker on re-render)
   const configCheckedRef = useRef(false);
-  const refreshConfig = useCallback(() => {
+  const checkConfig = useCallback(() => {
+    setIsCheckingConfig(true);
     fetchQueryTargetSettings()
       .then((settings) => {
         setConfigStatus(settings.active ? "configured" : "unconfigured");
       })
       .catch(() => {
         setConfigStatus("configured"); // assume configured on error to not block
+      })
+      .finally(() => {
+        setIsCheckingConfig(false);
       });
   }, []);
 
   useEffect(() => {
     if (configCheckedRef.current) return;
     configCheckedRef.current = true;
-    refreshConfig();
-  }, [refreshConfig]);
+    checkConfig();
+  }, [checkConfig]);
 
   const isLoading = runStatus === "streaming" || runStatus === "finalizing";
 
@@ -880,18 +885,19 @@ export default function AgentChat() {
               <button
                 type="button"
                 data-testid="refresh-config-button"
-                onClick={() => { setConfigStatus("loading"); refreshConfig(); }}
+                onClick={checkConfig}
+                disabled={isCheckingConfig}
                 style={{
                   marginTop: "16px",
                   background: "none",
                   border: "none",
-                  color: "var(--muted)",
+                  color: isCheckingConfig ? "var(--muted)" : "var(--muted)",
                   fontSize: "0.8rem",
-                  cursor: "pointer",
+                  cursor: isCheckingConfig ? "default" : "pointer",
                   textDecoration: "underline",
                 }}
               >
-                Refresh status
+                {isCheckingConfig ? "Checking..." : "Refresh status"}
               </button>
             </div>
           )}
