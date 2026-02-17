@@ -4,6 +4,7 @@ import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
+import { formatTimestamp, toPrettyJson } from "../utils/observability";
 
 export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
@@ -39,7 +40,7 @@ export default function Diagnostics() {
     const runtimeIndicators = data?.runtime_indicators;
     const retryPolicy = data?.retry_policy;
     const enabledFlags = data?.enabled_flags ?? {};
-    const rawJsonSnapshot = data ? JSON.stringify(data, null, 2) : "";
+    const rawJsonSnapshot = toPrettyJson(data);
 
     if (loading && !data) {
         return (
@@ -81,7 +82,7 @@ export default function Diagnostics() {
                         Real-time runtime health and configuration check.
                     </p>
                     <p data-testid="diagnostics-last-updated" style={{ margin: "6px 0 0 0", color: "var(--muted)", fontSize: "0.8rem" }}>
-                        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : "Not yet"}
+                        Last updated: {formatTimestamp(lastUpdatedAt, { fallback: "Not yet" })}
                     </p>
                 </div>
                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
@@ -149,9 +150,10 @@ export default function Diagnostics() {
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
                                 <span style={{ color: "var(--muted)" }}>Last Schema Refresh</span>
                                 <span style={{ fontSize: "0.85rem" }}>
-                                    {runtimeIndicators?.last_schema_refresh_timestamp
-                                        ? new Date(runtimeIndicators.last_schema_refresh_timestamp * 1000).toLocaleString()
-                                        : "Never"}
+                                    {formatTimestamp(runtimeIndicators?.last_schema_refresh_timestamp, {
+                                        inputInSeconds: true,
+                                        fallback: "Never",
+                                    })}
                                 </span>
                             </div>
                         </div>

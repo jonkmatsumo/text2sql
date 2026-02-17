@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { copyTextToClipboard } from "../../utils/observability";
 
 interface CopyButtonProps {
   text: string;
@@ -9,12 +10,12 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, label }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy!", err);
+    } else {
+      console.error("Failed to copy!");
     }
   };
 

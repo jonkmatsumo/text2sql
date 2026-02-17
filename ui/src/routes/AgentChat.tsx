@@ -28,6 +28,7 @@ import { CopyButton } from "../components/artifacts/CopyButton";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 import { dedupeRows } from "../utils/dedupeRows";
 import { getErrorMapping } from "../utils/errorMapping";
+import { formatTimestamp, normalizeDecisionEvents, toPrettyJson } from "../utils/observability";
 
 interface Message {
   role: "user" | "assistant";
@@ -339,10 +340,10 @@ function SQLValidationDetails({ summary, report }: { summary: any; report?: any 
         <details style={{ marginTop: "8px" }}>
           <summary style={{ cursor: "pointer", color: "var(--muted)" }}>Validation report (raw)</summary>
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
-            <CopyButton text={JSON.stringify(rawValidationReport, null, 2)} label="Copy validation report" />
+            <CopyButton text={toPrettyJson(rawValidationReport)} label="Copy validation report" />
           </div>
           <pre data-testid="validation-raw-report" style={{ marginTop: "6px", overflowX: "auto", fontSize: "0.75rem" }}>
-            {JSON.stringify(rawValidationReport, null, 2)}
+            {toPrettyJson(rawValidationReport)}
           </pre>
         </details>
       )}
@@ -380,60 +381,16 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
-function getDecisionEventTimestampMs(event: any): number | null {
-  const raw = event?.timestamp;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    return raw > 1e12 ? raw : raw * 1000;
-  }
-  if (typeof raw === "string" && raw.trim()) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) {
-      return parsed > 1e12 ? parsed : parsed * 1000;
-    }
-  }
-  return null;
-}
-
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
   const MAX_VISIBLE_EVENTS = 10;
   const [showAllEvents, setShowAllEvents] = useState(false);
-
-  const orderedEvents = events
-    .map((event, originalIndex) => ({ event, originalIndex }))
-    .sort((left, right) => {
-      const leftTs = getDecisionEventTimestampMs(left.event);
-      const rightTs = getDecisionEventTimestampMs(right.event);
-
-      if (leftTs != null && rightTs != null && leftTs !== rightTs) {
-        return leftTs - rightTs;
-      }
-      if (leftTs != null && rightTs == null) return -1;
-      if (leftTs == null && rightTs != null) return 1;
-      return left.originalIndex - right.originalIndex;
-    })
-    .map(({ event }) => event);
-
-  const eventFingerprintCounts = new Map<string, number>();
-  const getEventKey = (event: any, index: number): string => {
-    if (typeof event?.id === "string" && event.id.trim()) return event.id;
-    if (typeof event?.event_id === "string" && event.event_id.trim()) return event.event_id;
-
-    const fingerprint = [
-      String(event?.timestamp ?? ""),
-      String(event?.node ?? ""),
-      String(event?.decision ?? ""),
-      String(event?.reason ?? ""),
-      String(event?.error_category ?? ""),
-      String(event?.retry_count ?? ""),
-    ].join("|");
-    const seen = eventFingerprintCounts.get(fingerprint) ?? 0;
-    eventFingerprintCounts.set(fingerprint, seen + 1);
-    return `${fingerprint}|${seen}|${index}`;
-  };
-  const visibleEvents = showAllEvents ? orderedEvents : orderedEvents.slice(0, MAX_VISIBLE_EVENTS);
-  const hasHiddenEvents = orderedEvents.length > MAX_VISIBLE_EVENTS;
-  const serializedDecisionLog = JSON.stringify(orderedEvents, null, 2);
+  const normalizedEvents = normalizeDecisionEvents(events);
+  const visibleEvents = showAllEvents
+    ? normalizedEvents
+    : normalizedEvents.slice(0, MAX_VISIBLE_EVENTS);
+  const hasHiddenEvents = normalizedEvents.length > MAX_VISIBLE_EVENTS;
+  const serializedDecisionLog = toPrettyJson(normalizedEvents.map((item) => item.event));
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
@@ -441,24 +398,25 @@ function DecisionLog({ events }: { events?: any[] }) {
         <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
           <span>📋</span> Decision Log ({events.length} events)
         </summary>
-        {orderedEvents.length > 0 && (
+        {normalizedEvents.length > 0 && (
           <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
             <CopyButton text={serializedDecisionLog} label="Copy decision log" />
           </div>
         )}
         <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
-          {visibleEvents.map((ev, i) => {
-            const timestampMs = getDecisionEventTimestampMs(ev);
+          {visibleEvents.map((item) => {
+            const ev = item.event;
+            const timestampMs = item.timestampMs;
             const payloadRaw = ev?.payload ?? ev?.details ?? ev?.metadata ?? ev?.context;
             const payloadText = payloadRaw == null
               ? ""
               : typeof payloadRaw === "string"
                 ? payloadRaw
-                : JSON.stringify(payloadRaw, null, 2);
+                : toPrettyJson(payloadRaw);
             const payloadLines = payloadText ? payloadText.split("\n").length : 0;
             const collapsePayloadByDefault = payloadText.length > 200 || payloadLines > 4;
             return (
-            <div key={getEventKey(ev, i)} data-testid="decision-event-item" style={{
+            <div key={item.key} data-testid="decision-event-item" style={{
               fontSize: "0.8rem",
               padding: "10px 12px",
               borderRadius: "8px",
@@ -468,7 +426,7 @@ function DecisionLog({ events }: { events?: any[] }) {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
                 <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
                 <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-                  {timestampMs != null ? new Date(timestampMs).toLocaleTimeString() : "No timestamp"}
+                  {formatTimestamp(timestampMs, { style: "time", fallback: "No timestamp" })}
                 </span>
               </div>
               <div data-testid="decision-event-decision" style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
@@ -509,7 +467,7 @@ function DecisionLog({ events }: { events?: any[] }) {
                 fontWeight: 600,
               }}
             >
-              {showAllEvents ? "Show first 10 events" : `Show all ${orderedEvents.length} events`}
+              {showAllEvents ? "Show first 10 events" : `Show all ${normalizedEvents.length} events`}
             </button>
           )}
         </div>
