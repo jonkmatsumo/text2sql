@@ -183,7 +183,7 @@ describe("AgentChat streaming", () => {
     expect(screen.getByTestId("error-hint")).toHaveTextContent("Re-run ingestion");
     expect(screen.getByText(/req-abc-/)).toBeInTheDocument();
     // Should show action link for schema_drift
-    expect(screen.getByText("Open Ingestion Wizard")).toBeInTheDocument();
+    expect(screen.getByText("Resolve Schema Mismatch")).toBeInTheDocument();
   });
 
   it("ignores out-of-order phase events (monotonic advance)", async () => {
@@ -258,7 +258,7 @@ describe("AgentChat streaming", () => {
               });
             }
             // Hang forever on second iteration
-            return new Promise(() => {});
+            return new Promise(() => { });
           },
         };
       },
@@ -303,7 +303,7 @@ describe("AgentChat streaming", () => {
           next() {
             if (myCallNum === 1) {
               // First stream: hang forever (will be aborted)
-              return new Promise<IteratorResult<any>>(() => {});
+              return new Promise<IteratorResult<any>>(() => { });
             }
             // Second stream: return result then done
             if (!yielded) {
