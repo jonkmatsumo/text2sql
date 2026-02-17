@@ -42,6 +42,7 @@ interface Message {
   resultCompleteness?: any;
   retrySummary?: any;
   validationSummary?: any;
+  decisionEvents?: any[];
   emptyResultGuidance?: string;
   errorMetadata?: any;
   originalRequest?: { question: string; tenant_id: number; thread_id: string };
@@ -126,6 +127,7 @@ function mapStreamResultToMessage(
     resultCompleteness: data.result_completeness,
     retrySummary: data.retry_summary,
     validationSummary: data.validation_summary,
+    decisionEvents: data.decision_events,
     emptyResultGuidance: data.empty_result_guidance ?? undefined,
     errorMetadata: data.error_metadata,
     originalRequest: request,
@@ -170,7 +172,7 @@ function ResultsTable({ rows }: { rows: any[] }) {
 function ValidationSummaryBadge({ summary }: { summary: any }) {
   if (!summary) return null;
 
-  const { ast_valid, schema_drift_suspected, missing_identifiers } = summary;
+  const { ast_valid, schema_drift_suspected, missing_identifiers, syntax_errors } = summary;
 
   return (
     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
@@ -179,12 +181,48 @@ function ValidationSummaryBadge({ summary }: { summary: any }) {
           AST Validation Failed
         </span>
       )}
+      {syntax_errors && syntax_errors.length > 0 && (
+        <span className="pill" style={{ background: "rgba(220, 53, 69, 0.1)", color: "var(--error)", border: "1px solid rgba(220, 53, 69, 0.2)" }}>
+          {syntax_errors.length} Syntax {syntax_errors.length === 1 ? "Error" : "Errors"}
+        </span>
+      )}
       {schema_drift_suspected && (
         <span className="pill" style={{ background: "rgba(255, 193, 7, 0.1)", color: "#856404", border: "1px solid rgba(255, 193, 7, 0.2)" }}>
           Schema Drift Suspected
           {missing_identifiers && missing_identifiers.length > 0 && ` (${missing_identifiers.length} missing)`}
         </span>
       )}
+    </div>
+  );
+}
+
+function SQLValidationDetails({ summary }: { summary: any }) {
+  if (!summary) return null;
+  const { syntax_errors, semantic_warnings, missing_identifiers } = summary;
+
+  const hasIssues = (syntax_errors && syntax_errors.length > 0) ||
+    (semantic_warnings && semantic_warnings.length > 0) ||
+    (missing_identifiers && missing_identifiers.length > 0);
+
+  if (!hasIssues) return null;
+
+  return (
+    <div className="sql-validation-details" style={{ marginTop: "12px", fontSize: "0.85rem", borderTop: "1px dashed var(--border-muted)", paddingTop: "8px" }}>
+      {syntax_errors?.map((err: string, i: number) => (
+        <div key={`syn-${i}`} style={{ color: "var(--error)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>❌</span> <span>{err}</span>
+        </div>
+      ))}
+      {semantic_warnings?.map((warn: string, i: number) => (
+        <div key={`sem-${i}`} style={{ color: "var(--warn, #f59e0b)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>⚠️</span> <span>{warn}</span>
+        </div>
+      ))}
+      {missing_identifiers?.map((id: string, i: number) => (
+        <div key={`miss-${i}`} style={{ color: "var(--muted)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>🔍</span> <span>Missing identifier: <code>{id}</code></span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -219,15 +257,51 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
+function DecisionLog({ events }: { events?: any[] }) {
+  if (!events || events.length === 0) return null;
+
+  return (
+    <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
+      <details style={{ width: "100%" }}>
+        <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+          <span>📋</span> Decision Log ({events.length} events)
+        </summary>
+        <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
+          {events.map((ev, i) => (
+            <div key={i} style={{
+              fontSize: "0.8rem",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              background: "var(--surface-muted)",
+              border: "1px solid var(--border-muted)"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
+                <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
+                  {new Date(ev.timestamp * 1000).toLocaleTimeString()}
+                </span>
+              </div>
+              <div style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
+              <div style={{ color: "var(--muted)", fontStyle: "italic", marginTop: "2px", lineHeight: "1.4" }}>{ev.reason}</div>
+              {ev.retry_count > 0 && (
+                <div style={{ marginTop: "6px", fontSize: "0.75rem", color: "#f59e0b", fontWeight: 600 }}>
+                  Retry #{ev.retry_count} {ev.error_category ? `(${ev.error_category.replace(/_/g, " ")})` : ""}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
   if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
     return null;
   }
 
   const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
-
-  let message = "";
-  let type: "warning" | "info" = "info";
 
   if (completeness.token_expired) {
     return (
@@ -249,41 +323,48 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
     return (
       <div data-testid="schema-mismatch-warning" className="completeness-banner warning" style={{
         fontSize: "0.8rem",
-        padding: "6px 10px",
-        borderRadius: "6px",
-        marginTop: "8px",
+        padding: "8px 12px",
+        borderRadius: "8px",
+        marginTop: "12px",
         background: "rgba(220, 53, 69, 0.1)",
-        borderLeft: "3px solid #dc3545",
+        borderLeft: "4px solid #dc3545",
         color: "#842029",
       }}>
-        Column schema changed between pages. Cannot append rows.
+        <strong>⚠️ Schema Mismatch:</strong> Column schema changed between pages. Cannot append rows.
       </div>
     );
   }
 
+  let message = "";
+  let icon = "ℹ️";
   if (is_truncated) {
-    type = "warning";
-    message = `Results truncated. Showing ${rows_returned} of ${row_limit}+ rows.`;
-    if (partial_reason === "PROVIDER_CAP") {
-      message += " (Backend limit reached)";
-    }
+    message = `Results truncated to ${rows_returned} rows per ${partial_reason || "system limits"}.`;
+    icon = "✂️";
   } else if (is_limited) {
-    message = `Query limited to ${query_limit} rows.`;
+    message = `Showing first ${rows_returned} rows (Limit: ${row_limit || query_limit}).`;
+    icon = "⏹️";
   } else if (completeness.next_page_token) {
-    message = `Showing first ${rows_returned} results. More data available.`;
+    message = `Displaying ${rows_returned} rows. More results are available via pagination.`;
+    icon = "📄";
   }
 
+  if (!message) return null;
+
   return (
-    <div className={`completeness-banner ${type}`} style={{
+    <div className="completeness-banner info" style={{
       fontSize: "0.8rem",
-      padding: "6px 10px",
-      borderRadius: "6px",
-      marginTop: "8px",
-      background: type === "warning" ? "rgba(255, 193, 7, 0.15)" : "rgba(13, 110, 253, 0.1)",
-      borderLeft: `3px solid ${type === "warning" ? "#ffc107" : "#0d6efd"}`,
-      color: type === "warning" ? "#856404" : "#084298"
+      padding: "8px 12px",
+      borderRadius: "8px",
+      marginTop: "12px",
+      background: "var(--surface-muted)",
+      border: "1px solid var(--border-muted)",
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      color: "var(--muted)"
     }}>
-      {message}
+      <span style={{ fontSize: "1rem" }}>{icon}</span>
+      <span>{message}</span>
     </div>
   );
 }
@@ -943,6 +1024,7 @@ export default function AgentChat() {
                     <details>
                       <summary>Generated SQL</summary>
                       <pre>{msg.sql}</pre>
+                      <SQLValidationDetails summary={msg.validationSummary} />
                     </details>
                   )}
 
@@ -997,6 +1079,7 @@ export default function AgentChat() {
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
                   </div>
+                  {msg.role === "assistant" && <DecisionLog events={msg.decisionEvents} />}
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>

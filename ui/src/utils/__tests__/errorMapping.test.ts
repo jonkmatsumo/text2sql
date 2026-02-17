@@ -7,7 +7,7 @@ describe("getErrorMapping", () => {
     expect(mapping.title).toBe("Schema Not Found");
     expect(mapping.severity).toBe("error");
     expect(mapping.actions).toEqual([
-      { label: "Open Ingestion Wizard", href: "/admin/operations" },
+      { label: "Ingest Missing Table", href: "/admin/operations" },
     ]);
   });
 

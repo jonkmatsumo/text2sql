@@ -919,3 +919,30 @@ export async function* runAgentStream(request: AgentRunRequest): AsyncGenerator<
     reader.releaseLock();
   }
 }
+
+/**
+ * Fetch operator-safe runtime diagnostics.
+ */
+export async function getDiagnostics(debug = false): Promise<any> {
+  const url = new URL("/agent/diagnostics", agentBase);
+  if (debug) url.searchParams.set("debug", "true");
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      "Content-Type": "application/json",
+      ...(internalAuthToken ? { "X-Internal-Auth": internalAuthToken } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new ApiError(
+      errorData.error?.message || "Failed to fetch diagnostics",
+      response.status,
+      errorData.error?.code || "DIAGNOSTICS_ERROR",
+      errorData.error?.details || {}
+    );
+  }
+
+  return response.json();
+}
