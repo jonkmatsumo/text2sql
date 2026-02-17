@@ -5,12 +5,17 @@ import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { formatTimestamp, toPrettyJson } from "../utils/observability";
+import {
+    getDiagnosticsAnomalies,
+    getDiagnosticsStatus,
+} from "../utils/diagnosticsStatus";
 
 export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<any>(null);
     const [isDebug, setIsDebug] = useState(false);
+    const [filterMode, setFilterMode] = useState<"all" | "anomalies">("all");
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const isFetchingRef = useRef(false);
 
@@ -41,6 +46,63 @@ export default function Diagnostics() {
     const retryPolicy = data?.retry_policy;
     const enabledFlags = data?.enabled_flags ?? {};
     const rawJsonSnapshot = toPrettyJson(data);
+    const anomalies = getDiagnosticsAnomalies(data);
+    const anomalyIds = new Set(anomalies.map((item) => item.id));
+    const diagnosticsStatus = getDiagnosticsStatus(data);
+    const statusLabel =
+        diagnosticsStatus === "healthy"
+            ? "Healthy"
+            : diagnosticsStatus === "degraded"
+                ? "Degraded"
+                : "Unknown";
+    const statusColor =
+        diagnosticsStatus === "healthy"
+            ? "var(--success)"
+            : diagnosticsStatus === "degraded"
+                ? "#f59e0b"
+                : "var(--muted)";
+
+    const runtimeRows = [
+        {
+            id: "avg_query_complexity",
+            label: "Avg Query Complexity",
+            value: runtimeIndicators?.avg_query_complexity ?? "—",
+            isAnomaly: anomalyIds.has("avg_query_complexity"),
+        },
+        {
+            id: "active_schema_cache_size",
+            label: "Schema Cache Size",
+            value: runtimeIndicators?.active_schema_cache_size != null
+                ? `${runtimeIndicators.active_schema_cache_size} items`
+                : "—",
+            isAnomaly: anomalyIds.has("active_schema_cache_size"),
+        },
+        {
+            id: "recent_truncation_event_count",
+            label: "Truncation Events (Recent)",
+            value: runtimeIndicators?.recent_truncation_event_count ?? "—",
+            isAnomaly: anomalyIds.has("recent_truncation_event_count"),
+        },
+        {
+            id: "last_schema_refresh_timestamp",
+            label: "Last Schema Refresh",
+            value: formatTimestamp(runtimeIndicators?.last_schema_refresh_timestamp, {
+                inputInSeconds: true,
+                fallback: "Never",
+            }),
+            isAnomaly: false,
+        },
+    ];
+    const visibleRuntimeRows =
+        filterMode === "anomalies"
+            ? runtimeRows.filter((item) => item.isAnomaly)
+            : runtimeRows;
+
+    const latencyRows = Object.entries(data?.debug?.latency_breakdown_ms ?? {});
+    const visibleLatencyRows =
+        filterMode === "anomalies"
+            ? latencyRows.filter(([stage]) => anomalyIds.has(`latency:${stage}`))
+            : latencyRows;
 
     if (loading && !data) {
         return (
@@ -107,6 +169,59 @@ export default function Diagnostics() {
 
             {data && (
                 <div style={{ display: "grid", gap: "16px" }}>
+                    <div
+                        data-testid="diagnostics-status-strip"
+                        className="panel"
+                        style={{
+                            padding: "14px 16px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            flexWrap: "wrap",
+                        }}
+                    >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <span
+                                style={{
+                                    width: "10px",
+                                    height: "10px",
+                                    borderRadius: "50%",
+                                    background: statusColor,
+                                }}
+                            />
+                            <strong>System Status: {statusLabel}</strong>
+                            <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                                {anomalies.length} {anomalies.length === 1 ? "anomaly" : "anomalies"} detected
+                            </span>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            <button
+                                type="button"
+                                data-testid="diagnostics-filter-anomalies"
+                                onClick={() => setFilterMode("anomalies")}
+                                className="button-primary"
+                                style={{
+                                    opacity: filterMode === "anomalies" ? 1 : 0.75,
+                                    padding: "6px 12px",
+                                }}
+                            >
+                                Show only anomalies
+                            </button>
+                            <button
+                                type="button"
+                                data-testid="diagnostics-filter-all"
+                                onClick={() => setFilterMode("all")}
+                                className="button-primary"
+                                style={{
+                                    opacity: filterMode === "all" ? 1 : 0.75,
+                                    padding: "6px 12px",
+                                }}
+                            >
+                                Show all
+                            </button>
+                        </div>
+                    </div>
                     {loading && (
                         <div
                             data-testid="diagnostics-refreshing-indicator"
@@ -126,40 +241,38 @@ export default function Diagnostics() {
                     {/* Runtime Indicators */}
                     <div className="panel" style={{ padding: "24px" }}>
                         <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Runtime Indicators</h3>
-                        <div style={{ display: "grid", gap: "16px" }}>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ color: "var(--muted)" }}>Avg Query Complexity</span>
-                                <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>
-                                    {runtimeIndicators?.avg_query_complexity ?? "—"}
-                                </span>
+                        {visibleRuntimeRows.length === 0 ? (
+                            <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                                No runtime anomalies detected.
                             </div>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ color: "var(--muted)" }}>Schema Cache Size</span>
-                                <span style={{ fontWeight: 600 }}>
-                                    {runtimeIndicators?.active_schema_cache_size != null
-                                        ? `${runtimeIndicators.active_schema_cache_size} items`
-                                        : "—"}
-                                </span>
+                        ) : (
+                            <div style={{ display: "grid", gap: "16px" }}>
+                                {visibleRuntimeRows.map((row) => (
+                                    <div
+                                        key={row.id}
+                                        style={{
+                                            display: "flex",
+                                            justifySelf: "stretch",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            padding: row.isAnomaly ? "6px 8px" : undefined,
+                                            borderRadius: row.isAnomaly ? "8px" : undefined,
+                                            background: row.isAnomaly ? "rgba(245, 158, 11, 0.08)" : undefined,
+                                            border: row.isAnomaly ? "1px solid rgba(245, 158, 11, 0.25)" : undefined,
+                                        }}
+                                    >
+                                        <span style={{ color: "var(--muted)" }}>{row.label}</span>
+                                        <span style={{ fontWeight: 600, fontSize: row.id === "avg_query_complexity" ? "1.1rem" : undefined }}>
+                                            {row.value}
+                                        </span>
+                                    </div>
+                                ))}
                             </div>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ color: "var(--muted)" }}>Truncation Events (Recent)</span>
-                                <span style={{ fontWeight: 600, color: (runtimeIndicators?.recent_truncation_event_count ?? 0) > 0 ? "var(--error)" : "inherit" }}>
-                                    {runtimeIndicators?.recent_truncation_event_count ?? "—"}
-                                </span>
-                            </div>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ color: "var(--muted)" }}>Last Schema Refresh</span>
-                                <span style={{ fontSize: "0.85rem" }}>
-                                    {formatTimestamp(runtimeIndicators?.last_schema_refresh_timestamp, {
-                                        inputInSeconds: true,
-                                        fallback: "Never",
-                                    })}
-                                </span>
-                            </div>
-                        </div>
+                        )}
                     </div>
 
                     {/* Configuration & Policy */}
+                    {filterMode === "all" && (
                     <div className="panel" style={{ padding: "24px" }}>
                         <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Configuration & Policy</h3>
                         <div style={{ display: "grid", gap: "12px" }}>
@@ -196,34 +309,47 @@ export default function Diagnostics() {
                             </div>
                         </div>
                     </div>
+                    )}
 
                     {/* Latency Breakdown (Debug only) */}
                     {data.debug?.latency_breakdown_ms && (
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Latency Breakdown</h3>
-                            <div style={{ overflowX: "auto" }}>
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
-                                    <thead>
-                                        <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                                            <th style={{ textAlign: "left", padding: "12px" }}>Stage</th>
-                                            <th style={{ textAlign: "right", padding: "12px" }}>Latency (ms)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {Object.entries(data.debug.latency_breakdown_ms).map(([stage, ms]) => (
-                                            <tr key={stage} style={{ borderBottom: "1px solid var(--border-muted)" }}>
-                                                <td style={{ padding: "12px", textTransform: "capitalize" }}>{stage.replace(/_/g, " ")}</td>
-                                                <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>{ms.toFixed(2)}</td>
+                            {visibleLatencyRows.length === 0 && filterMode === "anomalies" ? (
+                                <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                                    No latency anomalies detected.
+                                </div>
+                            ) : (
+                                <div style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                                <th style={{ textAlign: "left", padding: "12px" }}>Stage</th>
+                                                <th style={{ textAlign: "right", padding: "12px" }}>Latency (ms)</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                        </thead>
+                                        <tbody>
+                                            {visibleLatencyRows.map(([stage, ms]) => (
+                                                <tr
+                                                    key={stage}
+                                                    style={{
+                                                        borderBottom: "1px solid var(--border-muted)",
+                                                        background: anomalyIds.has(`latency:${stage}`) ? "rgba(245, 158, 11, 0.08)" : undefined,
+                                                    }}
+                                                >
+                                                    <td style={{ padding: "12px", textTransform: "capitalize" }}>{stage.replace(/_/g, " ")}</td>
+                                                    <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>{ms.toFixed(2)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                     )}
 
                     {/* Raw Snapshot (Verbose only) */}
-                    {isDebug && (
+                    {isDebug && filterMode === "all" && (
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1", backgroundColor: "var(--surface-muted)" }}>
                             <details data-testid="diagnostics-raw-json-details">
                                 <summary data-testid="diagnostics-raw-json-summary" style={{ cursor: "pointer", fontWeight: 600 }}>

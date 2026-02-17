@@ -133,4 +133,29 @@ describe("Diagnostics Route", () => {
             expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
         });
     });
+
+    it("supports anomaly-only filtering with degraded status highlighting", async () => {
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            runtime_indicators: {
+                ...mockData.runtime_indicators,
+                avg_query_complexity: 11.2,
+                recent_truncation_event_count: 8,
+            },
+        });
+
+        render(<Diagnostics />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-status-strip")).toHaveTextContent("System Status: Degraded");
+        });
+        expect(screen.getByTestId("diagnostics-status-strip")).toHaveTextContent("2 anomalies detected");
+
+        fireEvent.click(screen.getByTestId("diagnostics-filter-anomalies"));
+
+        // Non-anomalous runtime row is hidden in anomaly-only mode
+        expect(screen.queryByText("Schema Cache Size")).not.toBeInTheDocument();
+        // Configuration panel is hidden in anomaly-only mode to reduce noise
+        expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
+    });
 });
