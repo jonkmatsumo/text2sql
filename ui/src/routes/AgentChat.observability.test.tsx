@@ -250,4 +250,51 @@ describe("AgentChat observability", () => {
     });
     expect(screen.getByText(/Validation failed due to SQL syntax issues/i)).toBeInTheDocument();
   });
+
+  it("renders auto-pagination and prefetch metadata when completeness includes it", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Paginated response",
+            result: [{ id: 1 }],
+            result_completeness: {
+              rows_returned: 1,
+              next_page_token: "page-2",
+              auto_paginated: true,
+              pages_fetched: 3,
+              auto_pagination_stopped_reason: "max_pages",
+              prefetch_enabled: true,
+              prefetch_scheduled: false,
+              prefetch_reason: "manual_trigger",
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "pagination metadata" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Paginated response")).toBeInTheDocument();
+    });
+
+    const metadata = screen.getByTestId("completeness-metadata");
+    expect(metadata).toHaveTextContent("auto_paginated: true");
+    expect(metadata).toHaveTextContent("pages_fetched: 3");
+    expect(metadata).toHaveTextContent("stopped_reason: max_pages");
+    expect(metadata).toHaveTextContent("prefetch_enabled: true");
+    expect(metadata).toHaveTextContent("prefetch_scheduled: false");
+    expect(metadata).toHaveTextContent("prefetch_reason: manual_trigger");
+  });
 });

@@ -524,6 +524,26 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
   }
 
   const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
+  const stoppedReason = completeness.stopped_reason ?? completeness.auto_pagination_stopped_reason;
+  const metadataRows: Array<{ label: string; value: string | number }> = [];
+  if (typeof completeness.auto_paginated === "boolean") {
+    metadataRows.push({ label: "auto_paginated", value: String(completeness.auto_paginated) });
+  }
+  if (typeof completeness.pages_fetched === "number") {
+    metadataRows.push({ label: "pages_fetched", value: completeness.pages_fetched });
+  }
+  if (stoppedReason) {
+    metadataRows.push({ label: "stopped_reason", value: String(stoppedReason) });
+  }
+  if (typeof completeness.prefetch_enabled === "boolean") {
+    metadataRows.push({ label: "prefetch_enabled", value: String(completeness.prefetch_enabled) });
+  }
+  if (typeof completeness.prefetch_scheduled === "boolean") {
+    metadataRows.push({ label: "prefetch_scheduled", value: String(completeness.prefetch_scheduled) });
+  }
+  if (completeness.prefetch_reason) {
+    metadataRows.push({ label: "prefetch_reason", value: String(completeness.prefetch_reason) });
+  }
 
   if (completeness.token_expired) {
     return (
@@ -586,7 +606,18 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
       color: "var(--muted)"
     }}>
       <span style={{ fontSize: "1rem" }}>{icon}</span>
-      <span>{message}</span>
+      <div style={{ display: "grid", gap: "4px" }}>
+        <span>{message}</span>
+        {metadataRows.length > 0 && (
+          <div data-testid="completeness-metadata" style={{ display: "flex", gap: "8px", flexWrap: "wrap", fontSize: "0.75rem" }}>
+            {metadataRows.map((item) => (
+              <span key={item.label}>
+                <strong>{item.label}:</strong> {item.value}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
