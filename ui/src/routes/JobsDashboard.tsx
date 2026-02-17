@@ -3,6 +3,8 @@ import { OpsService } from "../api";
 import { OpsJobResponse } from "../types/admin";
 import { JobsTable } from "../components/ops/JobsTable";
 import { useToast } from "../hooks/useToast";
+import { useConfirmation } from "../hooks/useConfirmation";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
 export default function JobsDashboard() {
     const [jobs, setJobs] = useState<OpsJobResponse[]>([]);
@@ -10,6 +12,7 @@ export default function JobsDashboard() {
     const [filterType, setFilterType] = useState<string>("");
     const [filterStatus, setFilterStatus] = useState<string>("");
     const { show: showToast } = useToast();
+    const { confirm, dialogProps } = useConfirmation();
 
     const fetchJobs = useCallback(async () => {
         setIsLoading(true);
@@ -28,6 +31,29 @@ export default function JobsDashboard() {
         const interval = setInterval(fetchJobs, 5000); // Poll every 5s
         return () => clearInterval(interval);
     }, [fetchJobs]);
+
+    const handleCancel = async (jobId: string) => {
+        const confirmed = await confirm({
+            title: "Cancel Job",
+            description: "Are you sure you want to cancel this background job? This action cannot be undone.",
+            confirmText: "Cancel Job",
+            danger: true
+        });
+
+        if (!confirmed) return;
+
+        // Optimistic update
+        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, status: "CANCELLING" as any } : j)));
+
+        try {
+            await OpsService.cancelJob(jobId);
+            showToast("Job cancellation requested", "success");
+            fetchJobs();
+        } catch (err) {
+            showToast("Failed to cancel job", "error");
+            fetchJobs();
+        }
+    };
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -77,8 +103,10 @@ export default function JobsDashboard() {
             </div>
 
             <div className="mt-8 flex flex-col">
-                <JobsTable jobs={jobs} isLoading={isLoading} />
+                <JobsTable jobs={jobs} isLoading={isLoading} onCancel={handleCancel} />
             </div>
+
+            <ConfirmationDialog {...dialogProps} />
         </div>
     );
 }
