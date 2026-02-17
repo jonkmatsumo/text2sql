@@ -74,6 +74,7 @@ describe("Diagnostics Route", () => {
         });
 
         expect(screen.getByText(/Raw Diagnostic Snapshot/i)).toBeInTheDocument();
+        expect(screen.getByTestId("diagnostics-raw-json")).toHaveTextContent("\"diagnostics_schema_version\": 1");
     });
 
     it("shows error card on failure", async () => {

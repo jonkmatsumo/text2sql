@@ -3,6 +3,7 @@ import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
+import { CopyButton } from "../components/artifacts/CopyButton";
 
 export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
@@ -38,6 +39,7 @@ export default function Diagnostics() {
     const runtimeIndicators = data?.runtime_indicators;
     const retryPolicy = data?.retry_policy;
     const enabledFlags = data?.enabled_flags ?? {};
+    const rawJsonSnapshot = data ? JSON.stringify(data, null, 2) : "";
 
     if (loading && !data) {
         return (
@@ -221,10 +223,17 @@ export default function Diagnostics() {
                     {/* Raw Snapshot (Verbose only) */}
                     {isDebug && (
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1", backgroundColor: "var(--surface-muted)" }}>
-                            <h3 style={{ marginTop: 0, marginBottom: "16px", fontSize: "1rem" }}>Raw Diagnostic Snapshot</h3>
-                            <pre style={{ fontSize: "0.75rem", overflowX: "auto", margin: 0 }}>
-                                {JSON.stringify(data, null, 2)}
-                            </pre>
+                            <details data-testid="diagnostics-raw-json-details">
+                                <summary data-testid="diagnostics-raw-json-summary" style={{ cursor: "pointer", fontWeight: 600 }}>
+                                    Raw Diagnostic Snapshot
+                                </summary>
+                                <div style={{ display: "flex", justifyContent: "flex-end", margin: "12px 0" }}>
+                                    <CopyButton text={rawJsonSnapshot} label="Copy JSON" />
+                                </div>
+                                <pre data-testid="diagnostics-raw-json" style={{ fontSize: "0.75rem", overflowX: "auto", margin: 0 }}>
+                                    {rawJsonSnapshot}
+                                </pre>
+                            </details>
                         </div>
                     )}
                 </div>
