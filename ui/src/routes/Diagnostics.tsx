@@ -1,31 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
-import RunIdentifiers from "../components/common/RunIdentifiers";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { formatTimestamp, toPrettyJson } from "../utils/observability";
+import {
+    DiagnosticsFilters,
+    useDiagnosticsViewFilters,
+} from "../components/diagnostics/DiagnosticsFilters";
+import { DiagnosticsStatusStrip } from "../components/diagnostics/DiagnosticsStatusStrip";
 import {
     getDiagnosticsAnomalies,
     getDiagnosticsStatus,
 } from "../utils/diagnosticsStatus";
-
-type DiagnosticsSection = "all" | "runtime" | "config" | "latency" | "raw";
 
 interface DiagnosticsError {
     code?: string;
     message?: string;
     requestId?: string;
     details?: Record<string, unknown>;
-}
-
-function parseSection(raw: string | null): DiagnosticsSection {
-    if (raw === "runtime" || raw === "config" || raw === "latency" || raw === "raw") {
-        return raw;
-    }
-    return "all";
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -35,17 +29,17 @@ function readOptionalString(value: unknown): string | undefined {
 }
 
 export default function Diagnostics() {
-    const [searchParams, setSearchParams] = useSearchParams();
+    const {
+        isDebug,
+        setIsDebug,
+        filterMode,
+        setFilterMode,
+        selectedSection,
+        setSelectedSection,
+    } = useDiagnosticsViewFilters();
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<DiagnosticsError | null>(null);
-    const [isDebug, setIsDebug] = useState(() => searchParams.get("debug") === "1");
-    const [filterMode, setFilterMode] = useState<"all" | "anomalies">(
-        () => (searchParams.get("filter") === "anomalies" ? "anomalies" : "all")
-    );
-    const [selectedSection, setSelectedSection] = useState<DiagnosticsSection>(
-        () => parseSection(searchParams.get("section"))
-    );
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const isFetchingRef = useRef(false);
 
@@ -76,22 +70,6 @@ export default function Diagnostics() {
         fetchDiagnostics(isDebug);
     }, [fetchDiagnostics, isDebug]);
 
-    useEffect(() => {
-        const nextParams = new URLSearchParams(searchParams);
-        if (isDebug) nextParams.set("debug", "1");
-        else nextParams.delete("debug");
-
-        if (filterMode === "anomalies") nextParams.set("filter", "anomalies");
-        else nextParams.delete("filter");
-
-        if (selectedSection !== "all") nextParams.set("section", selectedSection);
-        else nextParams.delete("section");
-
-        if (nextParams.toString() !== searchParams.toString()) {
-            setSearchParams(nextParams, { replace: true });
-        }
-    }, [isDebug, filterMode, searchParams, selectedSection, setSearchParams]);
-
     const runtimeIndicators = data?.runtime_indicators;
     const retryPolicy = data?.retry_policy;
     const enabledFlags = data?.enabled_flags ?? {};
@@ -99,18 +77,6 @@ export default function Diagnostics() {
     const anomalies = getDiagnosticsAnomalies(data);
     const anomalyIds = new Set(anomalies.map((item) => item.id));
     const diagnosticsStatus = getDiagnosticsStatus(data);
-    const statusLabel =
-        diagnosticsStatus === "healthy"
-            ? "Healthy"
-            : diagnosticsStatus === "degraded"
-                ? "Degraded"
-                : "Unknown";
-    const statusColor =
-        diagnosticsStatus === "healthy"
-            ? "var(--success)"
-            : diagnosticsStatus === "degraded"
-                ? "#f59e0b"
-                : "var(--muted)";
 
     const runtimeRows = [
         {
@@ -268,108 +234,23 @@ export default function Diagnostics() {
 
             {data && (
                 <div style={{ display: "grid", gap: "16px" }}>
-                    <div
-                        data-testid="diagnostics-status-strip"
-                        className="panel"
-                        style={{
-                            padding: "14px 16px",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "12px",
-                            flexWrap: "wrap",
-                        }}
+                    <DiagnosticsStatusStrip
+                        status={diagnosticsStatus}
+                        anomalyCount={anomalies.length}
+                        filterMode={filterMode}
+                        onFilterModeChange={setFilterMode}
                     >
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <span
-                                style={{
-                                    width: "10px",
-                                    height: "10px",
-                                    borderRadius: "50%",
-                                    background: statusColor,
-                                }}
-                            />
-                            <strong>System Status: {statusLabel}</strong>
-                            <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-                                {anomalies.length} {anomalies.length === 1 ? "anomaly" : "anomalies"} detected
-                            </span>
-                        </div>
-                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                            <RunIdentifiers
-                                traceId={diagnosticsTraceId}
-                                interactionId={diagnosticsInteractionId}
-                                requestId={diagnosticsRequestId}
-                            />
-                            <Link
-                                to="/admin/traces/search"
-                                data-testid="diagnostics-open-trace-search"
-                                style={{ fontSize: "0.82rem", color: "var(--accent)" }}
-                            >
-                                Open Trace Search
-                            </Link>
-                            <Link
-                                to="/admin/jobs"
-                                data-testid="diagnostics-open-jobs-dashboard"
-                                style={{ fontSize: "0.82rem", color: "var(--accent)" }}
-                            >
-                                Open Jobs Dashboard
-                            </Link>
-                            <CopyButton text={selectedPanelJson} label="Copy selected panel" />
-                            <label
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "6px",
-                                    color: "var(--muted)",
-                                    fontSize: "0.82rem",
-                                    marginRight: "8px",
-                                }}
-                            >
-                                Section
-                                <select
-                                    data-testid="diagnostics-section-select"
-                                    value={selectedSection}
-                                    onChange={(event) => setSelectedSection(parseSection(event.target.value))}
-                                    style={{
-                                        borderRadius: "8px",
-                                        border: "1px solid var(--border)",
-                                        padding: "4px 8px",
-                                        fontSize: "0.82rem",
-                                    }}
-                                >
-                                    <option value="all">All</option>
-                                    <option value="runtime">Runtime</option>
-                                    <option value="config">Config</option>
-                                    <option value="latency">Latency</option>
-                                    <option value="raw">Raw JSON</option>
-                                </select>
-                            </label>
-                            <button
-                                type="button"
-                                data-testid="diagnostics-filter-anomalies"
-                                onClick={() => setFilterMode("anomalies")}
-                                className="button-primary"
-                                style={{
-                                    opacity: filterMode === "anomalies" ? 1 : 0.75,
-                                    padding: "6px 12px",
-                                }}
-                            >
-                                Show only anomalies
-                            </button>
-                            <button
-                                type="button"
-                                data-testid="diagnostics-filter-all"
-                                onClick={() => setFilterMode("all")}
-                                className="button-primary"
-                                style={{
-                                    opacity: filterMode === "all" ? 1 : 0.75,
-                                    padding: "6px 12px",
-                                }}
-                            >
-                                Show all
-                            </button>
-                        </div>
-                    </div>
+                        <DiagnosticsFilters
+                            selectedSection={selectedSection}
+                            onSelectedSectionChange={setSelectedSection}
+                            selectedPanelJson={selectedPanelJson}
+                            identifiers={{
+                                traceId: diagnosticsTraceId,
+                                interactionId: diagnosticsInteractionId,
+                                requestId: diagnosticsRequestId,
+                            }}
+                        />
+                    </DiagnosticsStatusStrip>
                     {loading && (
                         <div
                             data-testid="diagnostics-refreshing-indicator"
