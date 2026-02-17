@@ -519,10 +519,7 @@ function DecisionLog({ events }: { events?: any[] }) {
 }
 
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
-  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
-    return null;
-  }
-
+  if (!completeness) return null;
   const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
   const stoppedReason = completeness.stopped_reason ?? completeness.auto_pagination_stopped_reason;
   const metadataRows: Array<{ label: string; value: string | number }> = [];
@@ -543,6 +540,10 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
   }
   if (completeness.prefetch_reason) {
     metadataRows.push({ label: "prefetch_reason", value: String(completeness.prefetch_reason) });
+  }
+  const hasMetadata = metadataRows.length > 0;
+  if (!is_truncated && !is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired && !hasMetadata) {
+    return null;
   }
 
   if (completeness.token_expired) {
@@ -590,6 +591,9 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
     icon = "📄";
   }
 
+  if (!message && hasMetadata) {
+    message = "Result pagination metadata:";
+  }
   if (!message) return null;
 
   return (
@@ -975,10 +979,19 @@ export default function AgentChat() {
         }
 
         const dedupedNewRows = dedupeRows(existingRows, newRows);
+        const combinedRows = [...existingRows, ...dedupedNewRows];
+        const nextCompleteness = (result as any)?.result_completeness ?? {};
         updated[msgIdx] = {
           ...existing,
-          result: [...existingRows, ...dedupedNewRows],
-          resultCompleteness: result.result_completeness,
+          result: combinedRows,
+          resultCompleteness: {
+            ...existing.resultCompleteness,
+            ...nextCompleteness,
+            rows_returned: combinedRows.length,
+            next_page_token: nextCompleteness.next_page_token,
+            token_expired: nextCompleteness.token_expired ?? false,
+            schema_mismatch: nextCompleteness.schema_mismatch ?? false,
+          },
         };
         return updated;
       });
