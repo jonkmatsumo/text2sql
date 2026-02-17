@@ -83,4 +83,56 @@ describe("AgentChat observability", () => {
       .map((node) => node.textContent);
     expect(orderedDecisions).toEqual(["first", "second", "third"]);
   });
+
+  it("shows first 10 decision events with show-all toggle", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const manyEvents = Array.from({ length: 12 }, (_, index) => ({
+      timestamp: 1700000000 + index,
+      node: "execute",
+      decision: `event-${index + 1}`,
+      reason: `reason-${index + 1}`,
+    }));
+
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Many events",
+            decision_events: manyEvents,
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "show many events" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Many events")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Decision Log \(12 events\)/));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("decision-event-item")).toHaveLength(10);
+    });
+
+    const toggle = screen.getByTestId("decision-log-show-all");
+    expect(toggle).toHaveTextContent("Show all 12 events");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("decision-event-item")).toHaveLength(12);
+    });
+    expect(screen.getByTestId("decision-log-show-all")).toHaveTextContent("Show first 10 events");
+  });
 });

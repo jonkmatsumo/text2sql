@@ -273,6 +273,8 @@ function getDecisionEventTimestampMs(event: any): number | null {
 
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
+  const MAX_VISIBLE_EVENTS = 10;
+  const [showAllEvents, setShowAllEvents] = useState(false);
 
   const orderedEvents = events
     .map((event, originalIndex) => ({ event, originalIndex }))
@@ -306,6 +308,8 @@ function DecisionLog({ events }: { events?: any[] }) {
     eventFingerprintCounts.set(fingerprint, seen + 1);
     return `${fingerprint}|${seen}|${index}`;
   };
+  const visibleEvents = showAllEvents ? orderedEvents : orderedEvents.slice(0, MAX_VISIBLE_EVENTS);
+  const hasHiddenEvents = orderedEvents.length > MAX_VISIBLE_EVENTS;
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
@@ -314,8 +318,16 @@ function DecisionLog({ events }: { events?: any[] }) {
           <span>📋</span> Decision Log ({events.length} events)
         </summary>
         <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
-          {orderedEvents.map((ev, i) => {
+          {visibleEvents.map((ev, i) => {
             const timestampMs = getDecisionEventTimestampMs(ev);
+            const payloadRaw = ev?.payload ?? ev?.details ?? ev?.metadata ?? ev?.context;
+            const payloadText = payloadRaw == null
+              ? ""
+              : typeof payloadRaw === "string"
+                ? payloadRaw
+                : JSON.stringify(payloadRaw, null, 2);
+            const payloadLines = payloadText ? payloadText.split("\n").length : 0;
+            const collapsePayloadByDefault = payloadText.length > 200 || payloadLines > 4;
             return (
             <div key={getEventKey(ev, i)} data-testid="decision-event-item" style={{
               fontSize: "0.8rem",
@@ -337,9 +349,40 @@ function DecisionLog({ events }: { events?: any[] }) {
                   Retry #{ev.retry_count} {ev.error_category ? `(${ev.error_category.replace(/_/g, " ")})` : ""}
                 </div>
               )}
+              {payloadText && (
+                <details open={!collapsePayloadByDefault} style={{ marginTop: "8px" }}>
+                  <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: "0.75rem" }}>
+                    {collapsePayloadByDefault ? "Payload (collapsed)" : "Payload"}
+                  </summary>
+                  <pre data-testid="decision-event-payload" style={{ marginTop: "6px", fontSize: "0.72rem", overflowX: "auto" }}>
+                    {payloadText}
+                  </pre>
+                </details>
+              )}
             </div>
             );
           })}
+          {hasHiddenEvents && (
+            <button
+              type="button"
+              data-testid="decision-log-show-all"
+              onClick={() => setShowAllEvents((prev) => !prev)}
+              style={{
+                justifySelf: "start",
+                marginTop: "4px",
+                padding: "6px 10px",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+                background: "var(--surface)",
+                color: "var(--accent)",
+                cursor: "pointer",
+                fontSize: "0.78rem",
+                fontWeight: 600,
+              }}
+            >
+              {showAllEvents ? "Show first 10 events" : `Show all ${orderedEvents.length} events`}
+            </button>
+          )}
         </div>
       </details>
     </div>
