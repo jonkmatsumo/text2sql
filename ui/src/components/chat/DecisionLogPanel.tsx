@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CopyButton } from "../artifacts/CopyButton";
 import { formatTimestamp, normalizeDecisionEvents, toPrettyJson } from "../../utils/observability";
 import {
@@ -16,20 +16,38 @@ export interface DecisionLogPanelProps {
 }
 
 export function DecisionLogPanel({ events }: DecisionLogPanelProps) {
-  if (!events || events.length === 0) return null;
-
   const [showDetails, setShowDetails] = useState(false);
   const [showAllEvents, setShowAllEvents] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState("all");
 
-  const normalizedEvents = normalizeDecisionEvents(events);
-  const availablePhases = getDecisionPhases(normalizedEvents);
-  const filteredEvents = filterDecisionEvents(normalizedEvents, searchQuery, phaseFilter);
-  const visibleEvents = showAllEvents ? filteredEvents : filteredEvents.slice(0, MAX_VISIBLE_EVENTS);
+  const normalizedEvents = useMemo(
+    () => (events && events.length > 0 ? normalizeDecisionEvents(events) : []),
+    [events]
+  );
+  const availablePhases = useMemo(
+    () => getDecisionPhases(normalizedEvents),
+    [normalizedEvents]
+  );
+  const filteredEvents = useMemo(
+    () => filterDecisionEvents(normalizedEvents, searchQuery, phaseFilter),
+    [normalizedEvents, searchQuery, phaseFilter]
+  );
+  const visibleEvents = useMemo(
+    () => (showAllEvents ? filteredEvents : filteredEvents.slice(0, MAX_VISIBLE_EVENTS)),
+    [filteredEvents, showAllEvents]
+  );
   const hasHiddenEvents = filteredEvents.length > MAX_VISIBLE_EVENTS;
-  const serializedDecisionLog = toPrettyJson(normalizedEvents.map((item) => item.event));
-  const warningCount = countWarningAndErrorEvents(normalizedEvents);
+  const serializedDecisionLog = useMemo(
+    () => toPrettyJson(normalizedEvents.map((item) => item.event)),
+    [normalizedEvents]
+  );
+  const warningCount = useMemo(
+    () => countWarningAndErrorEvents(normalizedEvents),
+    [normalizedEvents]
+  );
+
+  if (normalizedEvents.length === 0) return null;
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>

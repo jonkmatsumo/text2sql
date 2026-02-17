@@ -492,6 +492,97 @@ describe("AgentChat observability", () => {
     });
   });
 
+  it("keeps filtered ordering stable when toggling show-all in large decision logs", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const manyEvents = [
+      ...Array.from({ length: 12 }, (_, index) => ({
+        timestamp: 1700000000 + index,
+        node: "execute",
+        decision: `execute-${index + 1}`,
+        reason: `execute reason ${index + 1}`,
+      })),
+      ...Array.from({ length: 8 }, (_, index) => ({
+        timestamp: 1700000100 + index,
+        node: "router",
+        decision: `router-${index + 1}`,
+        reason: `router reason ${index + 1}`,
+      })),
+    ];
+
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Many filtered events",
+            decision_events: manyEvents,
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "large decision filtering" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Many filtered events")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
+    fireEvent.change(screen.getByTestId("decision-log-phase-filter"), { target: { value: "execute" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("decision-log-show-all")).toHaveTextContent("Show all 12 events");
+    });
+
+    const firstWindowDecisions = screen
+      .getAllByTestId("decision-event-decision")
+      .map((node) => node.textContent);
+    expect(firstWindowDecisions).toEqual([
+      "execute-1",
+      "execute-2",
+      "execute-3",
+      "execute-4",
+      "execute-5",
+      "execute-6",
+      "execute-7",
+      "execute-8",
+      "execute-9",
+      "execute-10",
+    ]);
+
+    fireEvent.click(screen.getByTestId("decision-log-show-all"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("decision-event-item")).toHaveLength(12);
+    });
+
+    const expandedDecisions = screen
+      .getAllByTestId("decision-event-decision")
+      .map((node) => node.textContent);
+    expect(expandedDecisions).toEqual([
+      "execute-1",
+      "execute-2",
+      "execute-3",
+      "execute-4",
+      "execute-5",
+      "execute-6",
+      "execute-7",
+      "execute-8",
+      "execute-9",
+      "execute-10",
+      "execute-11",
+      "execute-12",
+    ]);
+  });
+
   it("applies severity styling from event metadata when available", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     mockedStream.mockReturnValue(
