@@ -257,8 +257,55 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
+function getDecisionEventTimestampMs(event: any): number | null {
+  const raw = event?.timestamp;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw > 1e12 ? raw : raw * 1000;
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return parsed > 1e12 ? parsed : parsed * 1000;
+    }
+  }
+  return null;
+}
+
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
+
+  const orderedEvents = events
+    .map((event, originalIndex) => ({ event, originalIndex }))
+    .sort((left, right) => {
+      const leftTs = getDecisionEventTimestampMs(left.event);
+      const rightTs = getDecisionEventTimestampMs(right.event);
+
+      if (leftTs != null && rightTs != null && leftTs !== rightTs) {
+        return leftTs - rightTs;
+      }
+      if (leftTs != null && rightTs == null) return -1;
+      if (leftTs == null && rightTs != null) return 1;
+      return left.originalIndex - right.originalIndex;
+    })
+    .map(({ event }) => event);
+
+  const eventFingerprintCounts = new Map<string, number>();
+  const getEventKey = (event: any, index: number): string => {
+    if (typeof event?.id === "string" && event.id.trim()) return event.id;
+    if (typeof event?.event_id === "string" && event.event_id.trim()) return event.event_id;
+
+    const fingerprint = [
+      String(event?.timestamp ?? ""),
+      String(event?.node ?? ""),
+      String(event?.decision ?? ""),
+      String(event?.reason ?? ""),
+      String(event?.error_category ?? ""),
+      String(event?.retry_count ?? ""),
+    ].join("|");
+    const seen = eventFingerprintCounts.get(fingerprint) ?? 0;
+    eventFingerprintCounts.set(fingerprint, seen + 1);
+    return `${fingerprint}|${seen}|${index}`;
+  };
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
@@ -267,8 +314,10 @@ function DecisionLog({ events }: { events?: any[] }) {
           <span>📋</span> Decision Log ({events.length} events)
         </summary>
         <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
-          {events.map((ev, i) => (
-            <div key={i} style={{
+          {orderedEvents.map((ev, i) => {
+            const timestampMs = getDecisionEventTimestampMs(ev);
+            return (
+            <div key={getEventKey(ev, i)} data-testid="decision-event-item" style={{
               fontSize: "0.8rem",
               padding: "10px 12px",
               borderRadius: "8px",
@@ -278,10 +327,10 @@ function DecisionLog({ events }: { events?: any[] }) {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
                 <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
                 <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-                  {new Date(ev.timestamp * 1000).toLocaleTimeString()}
+                  {timestampMs != null ? new Date(timestampMs).toLocaleTimeString() : "No timestamp"}
                 </span>
               </div>
-              <div style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
+              <div data-testid="decision-event-decision" style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
               <div style={{ color: "var(--muted)", fontStyle: "italic", marginTop: "2px", lineHeight: "1.4" }}>{ev.reason}</div>
               {ev.retry_count > 0 && (
                 <div style={{ marginTop: "6px", fontSize: "0.75rem", color: "#f59e0b", fontWeight: 600 }}>
@@ -289,7 +338,8 @@ function DecisionLog({ events }: { events?: any[] }) {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </details>
     </div>
