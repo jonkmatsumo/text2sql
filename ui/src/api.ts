@@ -537,6 +537,15 @@ export const OpsService = {
     return response.json();
   },
 
+  async cancelJob(jobId: string): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}/cancel`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to cancel job");
+    return response.json();
+  },
+
   async listJobs(
     limit: number = 50,
     jobType?: string,

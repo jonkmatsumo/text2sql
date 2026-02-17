@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from "vitest";
-import { generateSQL, executeSQL } from "../api";
+import { generateSQL, executeSQL, OpsService } from "../api";
 import { GenerateSQLRequest, ExecuteSQLRequest } from "../types";
 
 // Mock global fetch
@@ -79,6 +79,38 @@ describe("API Client", () => {
                 })
             );
             expect(result).toEqual(mockResponse);
+        });
+    });
+
+    describe("OpsService", () => {
+
+        it("cancelJob should call the correct endpoint", async () => {
+            const mockResponse = { success: true };
+            (global.fetch as Mock).mockResolvedValue({
+                ok: true,
+                json: async () => mockResponse,
+            });
+
+            const jobId = "test-job-id";
+            const result = await OpsService.cancelJob(jobId);
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                expect.stringContaining(`/ops/jobs/${jobId}/cancel`),
+                expect.objectContaining({
+                    method: "POST",
+                })
+            );
+            expect(result).toEqual(mockResponse);
+        });
+
+        it("cancelJob should throw error on failure", async () => {
+            (global.fetch as Mock).mockResolvedValue({
+                ok: false,
+                status: 400,
+                json: async () => ({ error: { message: "Cannot cancel" } }),
+            });
+
+            await expect(OpsService.cancelJob("id")).rejects.toThrow("Cannot cancel");
         });
     });
 });
