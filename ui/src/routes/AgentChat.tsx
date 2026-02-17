@@ -384,6 +384,7 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
   const MAX_VISIBLE_EVENTS = 10;
+  const [showDetails, setShowDetails] = useState(false);
   const [showAllEvents, setShowAllEvents] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [phaseFilter, setPhaseFilter] = useState("all");
@@ -467,13 +468,48 @@ function DecisionLog({ events }: { events?: any[] }) {
       labelColor: "var(--muted)",
     };
   };
+  const warningCount = normalizedEvents.filter((item) => {
+    const tone = severityTone(item.event);
+    return tone === "warn" || tone === "error";
+  }).length;
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
-      <details style={{ width: "100%" }}>
-        <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
-          <span>📋</span> Decision Log ({events.length} events)
-        </summary>
+      <div
+        data-testid="decision-log-summary"
+        style={{
+          fontSize: "0.82rem",
+          color: "var(--muted)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          flexWrap: "wrap",
+        }}
+      >
+        <span>
+          Decision log: {normalizedEvents.length} events ({warningCount} warning{warningCount === 1 ? "" : "s"})
+        </span>
+        <button
+          type="button"
+          data-testid="decision-log-toggle"
+          onClick={() => setShowDetails((prev) => !prev)}
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: "8px",
+            padding: "4px 10px",
+            background: "var(--surface)",
+            color: "var(--accent)",
+            cursor: "pointer",
+            fontSize: "0.78rem",
+            fontWeight: 600,
+          }}
+        >
+          {showDetails ? "Hide details" : "Show details"}
+        </button>
+      </div>
+      {showDetails && (
+      <div style={{ marginTop: "8px" }}>
         {normalizedEvents.length > 0 && (
           <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
             <CopyButton text={serializedDecisionLog} label="Copy decision log" />
@@ -597,7 +633,8 @@ function DecisionLog({ events }: { events?: any[] }) {
             </button>
           )}
         </div>
-      </details>
+      </div>
+      )}
     </div>
   );
 }

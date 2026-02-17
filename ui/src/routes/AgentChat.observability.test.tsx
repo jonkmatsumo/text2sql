@@ -76,7 +76,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Done")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
     expect(screen.getByRole("button", { name: "Copy decision log" })).toBeInTheDocument();
 
     const orderedDecisions = screen
@@ -120,7 +120,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Many events")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/Decision Log \(12 events\)/));
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
 
     await waitFor(() => {
       expect(screen.getAllByTestId("decision-event-item")).toHaveLength(10);
@@ -330,7 +330,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Filtered events")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
 
     fireEvent.change(screen.getByTestId("decision-log-search"), { target: { value: "retry" } });
     await waitFor(() => {
@@ -379,7 +379,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Severity events")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
 
     const cards = screen.getAllByTestId("decision-event-item");
     const severityByDecision = new Map(
@@ -391,5 +391,44 @@ describe("AgentChat observability", () => {
     expect(severityByDecision.get("failed run")).toBe("error");
     expect(severityByDecision.get("retry run")).toBe("warn");
     expect(severityByDecision.get("planned path")).toBe("neutral");
+  });
+
+  it("shows compact decision summary and keeps details hidden by default", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Summary events",
+            decision_events: [
+              { timestamp: 1700000001, node: "execute", decision: "warned", reason: "timeout", type: "warn" },
+              { timestamp: 1700000002, node: "execute", decision: "errored", reason: "failed", level: "error" },
+              { timestamp: 1700000003, node: "plan", decision: "neutral", reason: "normal" },
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "decision summary" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Summary events")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("decision-log-summary")).toHaveTextContent("Decision log: 3 events (2 warnings)");
+    expect(screen.queryByTestId("decision-log-search")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
+    expect(screen.getByTestId("decision-log-search")).toBeInTheDocument();
   });
 });
