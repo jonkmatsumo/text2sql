@@ -233,8 +233,27 @@ function SQLValidationDetails({ summary, report }: { summary: any; report?: any 
     summary?.detected_cartesian_flag
   );
   const rawValidationReport = report ?? summary;
+  const hasValidationFailure = Boolean(
+    summary?.ast_valid === false ||
+    (Array.isArray(syntax_errors) && syntax_errors.length > 0) ||
+    (Array.isArray(missing_identifiers) && missing_identifiers.length > 0)
+  );
+  let failureGuidance = "";
+  if (hasValidationFailure) {
+    if (summary?.schema_drift_suspected) {
+      failureGuidance = "Validation failed due to schema mismatch. Refresh schema metadata, then retry.";
+    } else if (Array.isArray(syntax_errors) && syntax_errors.length > 0) {
+      failureGuidance = "Validation failed due to SQL syntax issues. Fix syntax errors before executing.";
+    } else if (Array.isArray(missing_identifiers) && missing_identifiers.length > 0) {
+      failureGuidance = "Validation failed due to unresolved identifiers. Verify table and column names.";
+    } else {
+      failureGuidance = "Validation failed. Review the report and adjust the SQL before retrying.";
+    }
+  }
 
-  if (!hasIssues && !cartesianWarning && !tablesUsed.length && complexityScore == null) return null;
+  if (!hasIssues && !cartesianWarning && !tablesUsed.length && complexityScore == null && !hasValidationFailure) {
+    return null;
+  }
 
   return (
     <div className="sql-validation-details" style={{ marginTop: "12px", fontSize: "0.85rem", borderTop: "1px dashed var(--border-muted)", paddingTop: "8px" }}>
@@ -285,6 +304,22 @@ function SQLValidationDetails({ summary, report }: { summary: any; report?: any 
           Potential cartesian join detected. Confirm join predicates before execution.
         </div>
       )}
+      {hasValidationFailure && (
+        <div
+          data-testid="validation-failure-guidance"
+          style={{
+            marginBottom: "8px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            background: "rgba(220, 53, 69, 0.08)",
+            border: "1px solid rgba(220, 53, 69, 0.25)",
+            color: "var(--error)",
+            fontWeight: 600,
+          }}
+        >
+          {failureGuidance}
+        </div>
+      )}
       {syntax_errors?.map((err: string, i: number) => (
         <div key={`syn-${i}`} style={{ color: "var(--error)", display: "flex", gap: "6px", marginBottom: "4px" }}>
           <span>❌</span> <span>{err}</span>
@@ -303,6 +338,9 @@ function SQLValidationDetails({ summary, report }: { summary: any; report?: any 
       {rawValidationReport && (
         <details style={{ marginTop: "8px" }}>
           <summary style={{ cursor: "pointer", color: "var(--muted)" }}>Validation report (raw)</summary>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+            <CopyButton text={JSON.stringify(rawValidationReport, null, 2)} label="Copy validation report" />
+          </div>
           <pre data-testid="validation-raw-report" style={{ marginTop: "6px", overflowX: "auto", fontSize: "0.75rem" }}>
             {JSON.stringify(rawValidationReport, null, 2)}
           </pre>

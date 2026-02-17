@@ -210,4 +210,44 @@ describe("AgentChat observability", () => {
     });
     expect(screen.getByText(/Potential cartesian join detected/i)).toBeInTheDocument();
   });
+
+  it("renders concise validation failure guidance", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Validation failed",
+            sql: "SELEC bad FROM orders",
+            validation_summary: {
+              ast_valid: false,
+              syntax_errors: ["Unexpected keyword near 'SELEC'"],
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "bad sql validation" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Validation failed")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Generated SQL"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("validation-failure-guidance")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Validation failed due to SQL syntax issues/i)).toBeInTheDocument();
+  });
 });
