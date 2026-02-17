@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CopyButton } from "../artifacts/CopyButton";
 import RunIdentifiers from "../common/RunIdentifiers";
+import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../../constants/operatorUi";
 
 export type DiagnosticsFilterMode = "all" | "anomalies";
 export type DiagnosticsSection = "all" | "runtime" | "config" | "latency" | "raw";
@@ -103,7 +104,7 @@ export function DiagnosticsFilters({
         Section
         <select
           data-testid="diagnostics-section-select"
-          aria-label="Select diagnostics section"
+          aria-label={DIAGNOSTICS_SECTION_ARIA_LABEL}
           value={selectedSection}
           onChange={(event) => onSelectedSectionChange(parseDiagnosticsSection(event.target.value))}
           style={{

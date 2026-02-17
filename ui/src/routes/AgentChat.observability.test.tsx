@@ -4,6 +4,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
 import { runAgentStream, fetchAvailableModels } from "../api";
 import { resetAvailableModelsCache } from "../hooks/useAvailableModels";
+import {
+  COPY_SQL_METADATA_LABEL,
+  DECISION_LOG_PHASE_ARIA_LABEL,
+  DECISION_LOG_SEARCH_ARIA_LABEL,
+} from "../constants/operatorUi";
 
 vi.mock("../api", () => ({
   runAgent: vi.fn(),
@@ -344,7 +349,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Bundle ready")).toBeInTheDocument();
     });
 
-    const copyButton = screen.getByRole("button", { name: "Copy SQL + metadata" });
+    const copyButton = screen.getByRole("button", { name: COPY_SQL_METADATA_LABEL });
     expect(copyButton).toBeInTheDocument();
     fireEvent.click(copyButton);
 
@@ -397,7 +402,7 @@ describe("AgentChat observability", () => {
       expect(screen.getByText("Bundle without trace")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy SQL + metadata" }));
+    fireEvent.click(screen.getByRole("button", { name: COPY_SQL_METADATA_LABEL }));
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledTimes(1);
@@ -789,8 +794,8 @@ describe("AgentChat observability", () => {
     });
 
     fireEvent.click(screen.getByTestId("decision-log-toggle"));
-    expect(screen.getByLabelText("Search decision events")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter decision events by phase")).toBeInTheDocument();
+    expect(screen.getByLabelText(DECISION_LOG_SEARCH_ARIA_LABEL)).toBeInTheDocument();
+    expect(screen.getByLabelText(DECISION_LOG_PHASE_ARIA_LABEL)).toBeInTheDocument();
   });
 
   it("renders decision events with unknown shapes and missing timestamps safely", async () => {

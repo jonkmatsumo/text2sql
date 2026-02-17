@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
 import { getDiagnostics } from "../api";
+import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
@@ -197,7 +198,7 @@ describe("Diagnostics Route", () => {
         });
 
         expect(screen.getByLabelText(/Verbose \/ Diagnostic View/i)).toBeChecked();
-        expect(screen.getByLabelText("Select diagnostics section")).toBeInTheDocument();
+        expect(screen.getByLabelText(DIAGNOSTICS_SECTION_ARIA_LABEL)).toBeInTheDocument();
         expect(screen.getByTestId("diagnostics-section-select")).toHaveValue("runtime");
         expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
 

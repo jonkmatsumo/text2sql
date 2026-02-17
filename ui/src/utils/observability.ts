@@ -146,7 +146,7 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
   return payload;
 }
 
-export function normalizeDecisionEvent(
+function normalizeDecisionEvent(
   rawEvent: unknown,
   originalIndex: number
 ): { event: Record<string, unknown>; timestampMs: number | null } {

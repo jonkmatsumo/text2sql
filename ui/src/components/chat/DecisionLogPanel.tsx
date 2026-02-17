@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import { CopyButton } from "../artifacts/CopyButton";
 import { formatTimestamp, normalizeDecisionEvents, toPrettyJson } from "../../utils/observability";
 import {
+  DECISION_LOG_PHASE_ARIA_LABEL,
+  DECISION_LOG_SEARCH_ARIA_LABEL,
+} from "../../constants/operatorUi";
+import {
   countWarningAndErrorEvents,
   filterDecisionEvents,
   getDecisionPhases,
@@ -96,7 +100,7 @@ export function DecisionLogPanel({ events }: DecisionLogPanelProps) {
               type="text"
               value={searchQuery}
               data-testid="decision-log-search"
-              aria-label="Search decision events"
+              aria-label={DECISION_LOG_SEARCH_ARIA_LABEL}
               placeholder="Search decisions, node, type"
               onChange={(event) => setSearchQuery(event.target.value)}
               style={{
@@ -110,7 +114,7 @@ export function DecisionLogPanel({ events }: DecisionLogPanelProps) {
             <select
               value={phaseFilter}
               data-testid="decision-log-phase-filter"
-              aria-label="Filter decision events by phase"
+              aria-label={DECISION_LOG_PHASE_ARIA_LABEL}
               onChange={(event) => setPhaseFilter(event.target.value)}
               style={{
                 padding: "6px 10px",
