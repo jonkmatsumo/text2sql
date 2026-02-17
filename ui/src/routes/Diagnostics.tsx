@@ -28,6 +28,31 @@ function readOptionalString(value: unknown): string | undefined {
     return trimmed || undefined;
 }
 
+function normalizeNonNegativeNumber(value: unknown): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return null;
+    }
+    return value < 0 ? 0 : value;
+}
+
+function formatMetricNumber(value: unknown, digits: number = 2): string {
+    const normalized = normalizeNonNegativeNumber(value);
+    if (normalized == null) return "—";
+    return normalized.toFixed(digits).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+}
+
+function formatCountWithUnit(value: unknown, unit: string): string {
+    const normalized = normalizeNonNegativeNumber(value);
+    if (normalized == null) return "—";
+    return `${Math.round(normalized)} ${unit}`;
+}
+
+function formatMilliseconds(value: unknown): string {
+    const normalized = normalizeNonNegativeNumber(value);
+    if (normalized == null) return "—";
+    return normalized.toFixed(2);
+}
+
 export default function Diagnostics() {
     const {
         isDebug,
@@ -82,21 +107,19 @@ export default function Diagnostics() {
         {
             id: "avg_query_complexity",
             label: "Avg Query Complexity",
-            value: runtimeIndicators?.avg_query_complexity ?? "—",
+            value: formatMetricNumber(runtimeIndicators?.avg_query_complexity),
             isAnomaly: anomalyIds.has("avg_query_complexity"),
         },
         {
             id: "active_schema_cache_size",
             label: "Schema Cache Size",
-            value: runtimeIndicators?.active_schema_cache_size != null
-                ? `${runtimeIndicators.active_schema_cache_size} items`
-                : "—",
+            value: formatCountWithUnit(runtimeIndicators?.active_schema_cache_size, "items"),
             isAnomaly: anomalyIds.has("active_schema_cache_size"),
         },
         {
             id: "recent_truncation_event_count",
             label: "Truncation Events (Recent)",
-            value: runtimeIndicators?.recent_truncation_event_count ?? "—",
+            value: formatMetricNumber(runtimeIndicators?.recent_truncation_event_count, 0),
             isAnomaly: anomalyIds.has("recent_truncation_event_count"),
         },
         {
@@ -114,10 +137,13 @@ export default function Diagnostics() {
             ? runtimeRows.filter((item) => item.isAnomaly)
             : runtimeRows;
 
-    const latencyRows = Object.entries(data?.debug?.latency_breakdown_ms ?? {});
+    const latencyRows = Object.entries(data?.debug?.latency_breakdown_ms ?? {}).map(([stage, ms]) => ({
+        stage,
+        value: normalizeNonNegativeNumber(ms),
+    }));
     const visibleLatencyRows =
         filterMode === "anomalies"
-            ? latencyRows.filter(([stage]) => anomalyIds.has(`latency:${stage}`))
+            ? latencyRows.filter((item) => anomalyIds.has(`latency:${item.stage}`))
             : latencyRows;
     const showRuntimePanel = selectedSection === "all" || selectedSection === "runtime";
     const showConfigPanel =
@@ -168,6 +194,8 @@ export default function Diagnostics() {
     const diagnosticsRequestId =
         readOptionalString(data?.request_id) ??
         readOptionalString(data?.debug?.request_id);
+    const schemaCacheTtlSeconds = normalizeNonNegativeNumber(data?.schema_cache_ttl_seconds);
+    const schemaCacheTtlDisplay = schemaCacheTtlSeconds == null ? "—" : `${schemaCacheTtlSeconds}s`;
 
     if (loading && !data) {
         return (
@@ -319,7 +347,7 @@ export default function Diagnostics() {
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
                                 <span style={{ color: "var(--muted)" }}>Schema Cache TTL</span>
-                                <span>{data.schema_cache_ttl_seconds}s</span>
+                                <span>{schemaCacheTtlDisplay}</span>
                             </div>
                         </div>
 
@@ -360,16 +388,18 @@ export default function Diagnostics() {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {visibleLatencyRows.map(([stage, ms]) => (
+                                            {visibleLatencyRows.map((item) => (
                                                 <tr
-                                                    key={stage}
+                                                    key={item.stage}
                                                     style={{
                                                         borderBottom: "1px solid var(--border-muted)",
-                                                        background: anomalyIds.has(`latency:${stage}`) ? "rgba(245, 158, 11, 0.08)" : undefined,
+                                                        background: anomalyIds.has(`latency:${item.stage}`) ? "rgba(245, 158, 11, 0.08)" : undefined,
                                                     }}
                                                 >
-                                                    <td style={{ padding: "12px", textTransform: "capitalize" }}>{stage.replace(/_/g, " ")}</td>
-                                                    <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>{ms.toFixed(2)}</td>
+                                                    <td style={{ padding: "12px", textTransform: "capitalize" }}>{item.stage.replace(/_/g, " ")}</td>
+                                                    <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>
+                                                        {formatMilliseconds(item.value)}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>

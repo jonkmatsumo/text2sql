@@ -16,6 +16,13 @@ export const DIAGNOSTICS_THRESHOLDS = {
   stageLatencyMsWarn: 2000,
 } as const;
 
+function normalizeMetric(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value < 0 ? 0 : value;
+}
+
 export function getDiagnosticsAnomalies(
   data: DiagnosticsResponse | null | undefined
 ): DiagnosticsAnomaly[] {
@@ -25,38 +32,32 @@ export function getDiagnosticsAnomalies(
   const runtime = data.runtime_indicators;
 
   if (runtime) {
-    if (
-      typeof runtime.avg_query_complexity === "number" &&
-      runtime.avg_query_complexity > DIAGNOSTICS_THRESHOLDS.avgQueryComplexityWarn
-    ) {
+    const avgQueryComplexity = normalizeMetric(runtime.avg_query_complexity);
+    if (avgQueryComplexity != null && avgQueryComplexity > DIAGNOSTICS_THRESHOLDS.avgQueryComplexityWarn) {
       anomalies.push({
         id: "avg_query_complexity",
         label: "Avg Query Complexity",
-        value: runtime.avg_query_complexity,
+        value: avgQueryComplexity,
         threshold: DIAGNOSTICS_THRESHOLDS.avgQueryComplexityWarn,
       });
     }
 
-    if (
-      typeof runtime.active_schema_cache_size === "number" &&
-      runtime.active_schema_cache_size > DIAGNOSTICS_THRESHOLDS.schemaCacheSizeWarn
-    ) {
+    const schemaCacheSize = normalizeMetric(runtime.active_schema_cache_size);
+    if (schemaCacheSize != null && schemaCacheSize > DIAGNOSTICS_THRESHOLDS.schemaCacheSizeWarn) {
       anomalies.push({
         id: "active_schema_cache_size",
         label: "Schema Cache Size",
-        value: runtime.active_schema_cache_size,
+        value: schemaCacheSize,
         threshold: DIAGNOSTICS_THRESHOLDS.schemaCacheSizeWarn,
       });
     }
 
-    if (
-      typeof runtime.recent_truncation_event_count === "number" &&
-      runtime.recent_truncation_event_count > DIAGNOSTICS_THRESHOLDS.truncationEventsWarn
-    ) {
+    const truncationEvents = normalizeMetric(runtime.recent_truncation_event_count);
+    if (truncationEvents != null && truncationEvents > DIAGNOSTICS_THRESHOLDS.truncationEventsWarn) {
       anomalies.push({
         id: "recent_truncation_event_count",
         label: "Truncation Events (Recent)",
-        value: runtime.recent_truncation_event_count,
+        value: truncationEvents,
         threshold: DIAGNOSTICS_THRESHOLDS.truncationEventsWarn,
       });
     }
@@ -64,14 +65,12 @@ export function getDiagnosticsAnomalies(
 
   if (data.debug?.latency_breakdown_ms) {
     for (const [stage, rawMs] of Object.entries(data.debug.latency_breakdown_ms)) {
-      if (
-        typeof rawMs === "number" &&
-        rawMs > DIAGNOSTICS_THRESHOLDS.stageLatencyMsWarn
-      ) {
+      const latencyMs = normalizeMetric(rawMs);
+      if (latencyMs != null && latencyMs > DIAGNOSTICS_THRESHOLDS.stageLatencyMsWarn) {
         anomalies.push({
           id: `latency:${stage}`,
           label: `Latency (${stage})`,
-          value: rawMs,
+          value: latencyMs,
           threshold: DIAGNOSTICS_THRESHOLDS.stageLatencyMsWarn,
         });
       }

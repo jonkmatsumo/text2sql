@@ -73,4 +73,39 @@ describe("diagnosticsStatus", () => {
       "recent_truncation_event_count",
     ]);
   });
+
+  it("ignores missing latency fields and invalid latency values", () => {
+    const diagnostics = {
+      ...baseDiagnostics,
+      debug: {
+        latency_breakdown_ms: {
+          execute: Number.NaN,
+          router: -42,
+        },
+      },
+    };
+
+    expect(getDiagnosticsAnomalies(diagnostics as any)).toEqual([]);
+    expect(getDiagnosticsStatus(diagnostics as any)).toBe("healthy");
+  });
+
+  it("clamps negative runtime metrics and skips NaN values", () => {
+    const diagnostics = {
+      ...baseDiagnostics,
+      runtime_indicators: {
+        ...baseDiagnostics.runtime_indicators,
+        avg_query_complexity: Number.NaN,
+        active_schema_cache_size: -100,
+        recent_truncation_event_count: -2,
+      },
+    };
+
+    expect(getDiagnosticsAnomalies(diagnostics as any)).toEqual([]);
+    expect(getDiagnosticsStatus(diagnostics as any)).toBe("healthy");
+  });
+
+  it("handles empty diagnostics payload safely", () => {
+    expect(getDiagnosticsAnomalies({} as any)).toEqual([]);
+    expect(getDiagnosticsStatus({} as any)).toBe("unknown");
+  });
 });

@@ -209,6 +209,35 @@ describe("Diagnostics Route", () => {
         expect(screen.getByRole("button", { name: "Copy selected panel" })).toBeInTheDocument();
     });
 
+    it("renders safe placeholders for invalid numeric diagnostics values", async () => {
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            schema_cache_ttl_seconds: Number.NaN,
+            runtime_indicators: {
+                ...mockData.runtime_indicators,
+                avg_query_complexity: Number.NaN,
+                active_schema_cache_size: Number.NaN,
+                recent_truncation_event_count: Number.NaN,
+            },
+            debug: {
+                latency_breakdown_ms: {
+                    execute: Number.NaN,
+                    router: -15,
+                },
+            },
+        });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-status-strip")).toBeInTheDocument();
+        });
+
+        expect(screen.queryByText("NaN")).not.toBeInTheDocument();
+        expect(screen.queryByText("undefineds")).not.toBeInTheDocument();
+        expect(screen.getByText("0.00")).toBeInTheDocument();
+    });
+
     it("renders trace and request identifier controls when diagnostics includes ids", async () => {
         const traceId = "0123456789abcdef0123456789abcdef";
         (getDiagnostics as any).mockResolvedValue({
