@@ -194,4 +194,17 @@ describe("Diagnostics Route", () => {
             expect(screen.getByTestId("location-search")).toHaveTextContent("?section=config");
         });
     });
+
+    it("shows diagnostics deep links and copy selected panel action", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-open-trace-search")).toBeInTheDocument();
+        });
+
+        expect(screen.getByTestId("diagnostics-open-trace-search")).toHaveAttribute("href", "/admin/traces/search");
+        expect(screen.getByTestId("diagnostics-open-jobs-dashboard")).toHaveAttribute("href", "/admin/jobs");
+        expect(screen.getByRole("button", { name: "Copy selected panel" })).toBeInTheDocument();
+    });
 });

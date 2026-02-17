@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
@@ -146,6 +146,35 @@ export default function Diagnostics() {
         isDebug &&
         filterMode === "all" &&
         (selectedSection === "all" || selectedSection === "raw");
+    const selectedPanelPayload =
+        selectedSection === "runtime"
+            ? {
+                section: "runtime",
+                runtime_indicators: data?.runtime_indicators ?? null,
+                anomalies,
+            }
+            : selectedSection === "config"
+                ? {
+                    section: "config",
+                    active_database_provider: data?.active_database_provider ?? null,
+                    retry_policy: data?.retry_policy ?? null,
+                    schema_cache_ttl_seconds: data?.schema_cache_ttl_seconds ?? null,
+                    enabled_flags: data?.enabled_flags ?? {},
+                }
+                : selectedSection === "latency"
+                    ? {
+                        section: "latency",
+                        latency_breakdown_ms: data?.debug?.latency_breakdown_ms ?? {},
+                    }
+                    : selectedSection === "raw"
+                        ? { section: "raw", diagnostics: data }
+                        : {
+                            section: "all",
+                            status: diagnosticsStatus,
+                            anomalies,
+                            diagnostics: data,
+                        };
+    const selectedPanelJson = toPrettyJson(selectedPanelPayload);
 
     if (loading && !data) {
         return (
@@ -239,6 +268,21 @@ export default function Diagnostics() {
                             </span>
                         </div>
                         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            <Link
+                                to="/admin/traces/search"
+                                data-testid="diagnostics-open-trace-search"
+                                style={{ fontSize: "0.82rem", color: "var(--accent)" }}
+                            >
+                                Open Trace Search
+                            </Link>
+                            <Link
+                                to="/admin/jobs"
+                                data-testid="diagnostics-open-jobs-dashboard"
+                                style={{ fontSize: "0.82rem", color: "var(--accent)" }}
+                            >
+                                Open Jobs Dashboard
+                            </Link>
+                            <CopyButton text={selectedPanelJson} label="Copy selected panel" />
                             <label
                                 style={{
                                     display: "flex",
