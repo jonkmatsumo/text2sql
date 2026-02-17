@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
@@ -10,12 +11,27 @@ import {
     getDiagnosticsStatus,
 } from "../utils/diagnosticsStatus";
 
+type DiagnosticsSection = "all" | "runtime" | "config" | "latency" | "raw";
+
+function parseSection(raw: string | null): DiagnosticsSection {
+    if (raw === "runtime" || raw === "config" || raw === "latency" || raw === "raw") {
+        return raw;
+    }
+    return "all";
+}
+
 export default function Diagnostics() {
+    const [searchParams, setSearchParams] = useSearchParams();
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<any>(null);
-    const [isDebug, setIsDebug] = useState(false);
-    const [filterMode, setFilterMode] = useState<"all" | "anomalies">("all");
+    const [isDebug, setIsDebug] = useState(() => searchParams.get("debug") === "1");
+    const [filterMode, setFilterMode] = useState<"all" | "anomalies">(
+        () => (searchParams.get("filter") === "anomalies" ? "anomalies" : "all")
+    );
+    const [selectedSection, setSelectedSection] = useState<DiagnosticsSection>(
+        () => parseSection(searchParams.get("section"))
+    );
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const isFetchingRef = useRef(false);
 
@@ -41,6 +57,22 @@ export default function Diagnostics() {
     useEffect(() => {
         fetchDiagnostics(isDebug);
     }, [fetchDiagnostics, isDebug]);
+
+    useEffect(() => {
+        const nextParams = new URLSearchParams(searchParams);
+        if (isDebug) nextParams.set("debug", "1");
+        else nextParams.delete("debug");
+
+        if (filterMode === "anomalies") nextParams.set("filter", "anomalies");
+        else nextParams.delete("filter");
+
+        if (selectedSection !== "all") nextParams.set("section", selectedSection);
+        else nextParams.delete("section");
+
+        if (nextParams.toString() !== searchParams.toString()) {
+            setSearchParams(nextParams, { replace: true });
+        }
+    }, [isDebug, filterMode, searchParams, selectedSection, setSearchParams]);
 
     const runtimeIndicators = data?.runtime_indicators;
     const retryPolicy = data?.retry_policy;
@@ -103,6 +135,17 @@ export default function Diagnostics() {
         filterMode === "anomalies"
             ? latencyRows.filter(([stage]) => anomalyIds.has(`latency:${stage}`))
             : latencyRows;
+    const showRuntimePanel = selectedSection === "all" || selectedSection === "runtime";
+    const showConfigPanel =
+        filterMode === "all" &&
+        (selectedSection === "all" || selectedSection === "config");
+    const showLatencyPanel =
+        Boolean(data?.debug?.latency_breakdown_ms) &&
+        (selectedSection === "all" || selectedSection === "latency");
+    const showRawPanel =
+        isDebug &&
+        filterMode === "all" &&
+        (selectedSection === "all" || selectedSection === "raw");
 
     if (loading && !data) {
         return (
@@ -196,6 +239,35 @@ export default function Diagnostics() {
                             </span>
                         </div>
                         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            <label
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    color: "var(--muted)",
+                                    fontSize: "0.82rem",
+                                    marginRight: "8px",
+                                }}
+                            >
+                                Section
+                                <select
+                                    data-testid="diagnostics-section-select"
+                                    value={selectedSection}
+                                    onChange={(event) => setSelectedSection(parseSection(event.target.value))}
+                                    style={{
+                                        borderRadius: "8px",
+                                        border: "1px solid var(--border)",
+                                        padding: "4px 8px",
+                                        fontSize: "0.82rem",
+                                    }}
+                                >
+                                    <option value="all">All</option>
+                                    <option value="runtime">Runtime</option>
+                                    <option value="config">Config</option>
+                                    <option value="latency">Latency</option>
+                                    <option value="raw">Raw JSON</option>
+                                </select>
+                            </label>
                             <button
                                 type="button"
                                 data-testid="diagnostics-filter-anomalies"
@@ -239,6 +311,7 @@ export default function Diagnostics() {
                     )}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "24px" }}>
                     {/* Runtime Indicators */}
+                    {showRuntimePanel && (
                     <div className="panel" style={{ padding: "24px" }}>
                         <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Runtime Indicators</h3>
                         {visibleRuntimeRows.length === 0 ? (
@@ -270,9 +343,10 @@ export default function Diagnostics() {
                             </div>
                         )}
                     </div>
+                    )}
 
                     {/* Configuration & Policy */}
-                    {filterMode === "all" && (
+                    {showConfigPanel && (
                     <div className="panel" style={{ padding: "24px" }}>
                         <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Configuration & Policy</h3>
                         <div style={{ display: "grid", gap: "12px" }}>
@@ -312,7 +386,7 @@ export default function Diagnostics() {
                     )}
 
                     {/* Latency Breakdown (Debug only) */}
-                    {data.debug?.latency_breakdown_ms && (
+                    {showLatencyPanel && (
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Latency Breakdown</h3>
                             {visibleLatencyRows.length === 0 && filterMode === "anomalies" ? (
@@ -349,7 +423,7 @@ export default function Diagnostics() {
                     )}
 
                     {/* Raw Snapshot (Verbose only) */}
-                    {isDebug && filterMode === "all" && (
+                    {showRawPanel && (
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1", backgroundColor: "var(--surface-muted)" }}>
                             <details data-testid="diagnostics-raw-json-details">
                                 <summary data-testid="diagnostics-raw-json-summary" style={{ cursor: "pointer", fontWeight: 600 }}>

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
 import { getDiagnostics } from "../api";
 
@@ -24,6 +25,20 @@ const mockData = {
     }
 };
 
+function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-search">{location.search}</div>;
+}
+
+function renderDiagnostics(initialPath: string = "/diagnostics") {
+    return render(
+        <MemoryRouter initialEntries={[initialPath]}>
+            <Diagnostics />
+            <LocationProbe />
+        </MemoryRouter>
+    );
+}
+
 describe("Diagnostics Route", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -31,13 +46,13 @@ describe("Diagnostics Route", () => {
 
     it("renders loading state initially", async () => {
         (getDiagnostics as any).mockReturnValue(new Promise(() => { })); // Hang
-        render(<Diagnostics />);
+        renderDiagnostics();
         expect(screen.getByText(/Loading system diagnostics/i)).toBeInTheDocument();
     });
 
     it("renders rich metrics panels when data is loaded", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByText("42 items")).toBeInTheDocument();
@@ -57,7 +72,7 @@ describe("Diagnostics Route", () => {
         };
         (getDiagnostics as any).mockResolvedValue(dataWithDebug);
 
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByText(/llm call/i)).toBeInTheDocument();
@@ -84,7 +99,7 @@ describe("Diagnostics Route", () => {
             requestId: "req-123"
         });
 
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByText("Not authorized")).toBeInTheDocument();
@@ -98,7 +113,7 @@ describe("Diagnostics Route", () => {
             code: "diagnostics_error",
         });
 
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByText("Failed to load diagnostics")).toBeInTheDocument();
@@ -114,7 +129,7 @@ describe("Diagnostics Route", () => {
                 resolveRefresh = resolve;
             }));
 
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByText("42 items")).toBeInTheDocument();
@@ -144,7 +159,7 @@ describe("Diagnostics Route", () => {
             },
         });
 
-        render(<Diagnostics />);
+        renderDiagnostics();
 
         await waitFor(() => {
             expect(screen.getByTestId("diagnostics-status-strip")).toHaveTextContent("System Status: Degraded");
@@ -157,5 +172,26 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Schema Cache Size")).not.toBeInTheDocument();
         // Configuration panel is hidden in anomaly-only mode to reduce noise
         expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
+    });
+
+    it("round-trips diagnostics view state through query params", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        renderDiagnostics("/diagnostics?filter=anomalies&debug=1&section=runtime");
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-status-strip")).toBeInTheDocument();
+        });
+
+        expect(screen.getByLabelText(/Verbose \/ Diagnostic View/i)).toBeChecked();
+        expect(screen.getByTestId("diagnostics-section-select")).toHaveValue("runtime");
+        expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId("diagnostics-filter-all"));
+        fireEvent.click(screen.getByLabelText(/Verbose \/ Diagnostic View/i));
+        fireEvent.change(screen.getByTestId("diagnostics-section-select"), { target: { value: "config" } });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("location-search")).toHaveTextContent("?section=config");
+        });
     });
 });
