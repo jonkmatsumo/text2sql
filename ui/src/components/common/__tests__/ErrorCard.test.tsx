@@ -30,8 +30,8 @@ describe("ErrorCard", () => {
 
   it("shows copy button for requestId", () => {
     renderWithRouter(<ErrorCard message="fail" requestId="abc-123-def-456" />);
-    expect(screen.getByText(/abc-123-/)).toBeInTheDocument();
-    expect(screen.getByText("Copy")).toBeInTheDocument();
+    expect(screen.getByText(/request: abc-123-/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy request id" })).toBeInTheDocument();
   });
 
   it("renders hint in callout", () => {

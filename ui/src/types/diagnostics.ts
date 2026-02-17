@@ -24,9 +24,19 @@ export interface EnabledFlags {
     disable_llm_retries: boolean;
 }
 
+export interface DiagnosticsDebug {
+    latency_breakdown_ms: Record<string, number>;
+    trace_id?: string;
+    interaction_id?: string;
+    request_id?: string;
+}
+
 export interface DiagnosticsResponse {
     diagnostics_schema_version: number;
     active_database_provider?: string;
+    trace_id?: string;
+    interaction_id?: string;
+    request_id?: string;
     retry_policy: RetryPolicy;
     schema_cache_ttl_seconds: number;
     runtime_indicators: RuntimeIndicators;
@@ -34,8 +44,6 @@ export interface DiagnosticsResponse {
     monitor_snapshot?: Record<string, any>;
     run_summary_store?: Record<string, any>;
     audit_events?: Array<Record<string, any>>;
-    debug?: {
-        latency_breakdown_ms: Record<string, number>;
-    };
+    debug?: DiagnosticsDebug;
     self_test?: Record<string, any>;
 }

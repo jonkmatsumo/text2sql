@@ -321,4 +321,68 @@ describe("AgentChat pagination", () => {
       expect(screen.getByText("Bob")).toBeInTheDocument();
     });
   });
+
+  it("updates completeness metadata and clears load-more state after pagination", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const mockedRunAgent = runAgent as ReturnType<typeof vi.fn>;
+
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Page 1",
+            result: [{ name: "Alice" }],
+            result_completeness: {
+              next_page_token: "page2-token",
+              rows_returned: 1,
+            },
+          },
+        },
+      ])
+    );
+
+    mockedRunAgent.mockResolvedValue({
+      result: [{ name: "Bob" }],
+      result_completeness: {
+        auto_paginated: true,
+        pages_fetched: 2,
+        auto_pagination_stopped_reason: "no_next_page",
+        prefetch_enabled: true,
+        prefetch_scheduled: false,
+        prefetch_reason: "manual_trigger",
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "pagination transitions" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("load-more-button")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("load-more-button"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Bob")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("load-more-button")).not.toBeInTheDocument();
+    const metadata = screen.getByTestId("completeness-metadata");
+    expect(metadata).toHaveTextContent("auto_paginated: true");
+    expect(metadata).toHaveTextContent("pages_fetched: 2");
+    expect(metadata).toHaveTextContent("stopped_reason: no_next_page");
+    expect(metadata).toHaveTextContent("prefetch_enabled: true");
+    expect(metadata).toHaveTextContent("prefetch_scheduled: false");
+    expect(metadata).toHaveTextContent("prefetch_reason: manual_trigger");
+    expect(screen.queryByTestId("token-expired-warning")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("schema-mismatch-warning")).not.toBeInTheDocument();
+  });
 });

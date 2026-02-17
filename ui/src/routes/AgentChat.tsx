@@ -16,17 +16,21 @@ import { ExecutionProgress } from "../components/common/ExecutionProgress";
 import { ErrorCard, ErrorCardProps } from "../components/common/ErrorCard";
 import type { RunStatus } from "../types/runLifecycle";
 import { phaseIndex, PHASE_ORDER } from "../types/runLifecycle";
-import TraceLink from "../components/common/TraceLink";
+import RunIdentifiers from "../components/common/RunIdentifiers";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { useAvailableModels } from "../hooks/useAvailableModels";
 import { ChartRenderer } from "../components/charts/ChartRenderer";
 import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
+import { CopyBundleButton } from "../components/chat/CopyBundleButton";
 import { SQLPreviewCard } from "../components/chat/SQLPreviewCard";
+import { DecisionLogPanel } from "../components/chat/DecisionLogPanel";
+import { CopyButton } from "../components/artifacts/CopyButton";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 import { dedupeRows } from "../utils/dedupeRows";
 import { getErrorMapping } from "../utils/errorMapping";
+import { toPrettyJson } from "../utils/observability";
 
 interface Message {
   role: "user" | "assistant";
@@ -35,6 +39,7 @@ interface Message {
   result?: any;
   error?: string;
   interactionId?: string;
+  requestId?: string;
   fromCache?: boolean;
   cacheSimilarity?: number;
   vizSpec?: any;
@@ -42,6 +47,7 @@ interface Message {
   resultCompleteness?: any;
   retrySummary?: any;
   validationSummary?: any;
+  validationReport?: any;
   decisionEvents?: any[];
   emptyResultGuidance?: string;
   errorMetadata?: any;
@@ -120,6 +126,7 @@ function mapStreamResultToMessage(
     result: data.result ?? data.query_result,
     error: data.error ?? undefined,
     interactionId: data.interaction_id ?? undefined,
+    requestId: data.request_id ?? undefined,
     fromCache: data.from_cache,
     cacheSimilarity: data.cache_similarity,
     vizSpec: data.viz_spec,
@@ -127,6 +134,7 @@ function mapStreamResultToMessage(
     resultCompleteness: data.result_completeness,
     retrySummary: data.retry_summary,
     validationSummary: data.validation_summary,
+    validationReport: data.validation_report,
     decisionEvents: data.decision_events,
     emptyResultGuidance: data.empty_result_guidance ?? undefined,
     errorMetadata: data.error_metadata,
@@ -196,18 +204,127 @@ function ValidationSummaryBadge({ summary }: { summary: any }) {
   );
 }
 
-function SQLValidationDetails({ summary }: { summary: any }) {
-  if (!summary) return null;
-  const { syntax_errors, semantic_warnings, missing_identifiers } = summary;
+function SQLValidationDetails({ summary, report }: { summary: any; report?: any }) {
+  if (!summary && !report) return null;
+  const syntax_errors = summary?.syntax_errors;
+  const semantic_warnings = summary?.semantic_warnings;
+  const missing_identifiers = summary?.missing_identifiers;
 
   const hasIssues = (syntax_errors && syntax_errors.length > 0) ||
     (semantic_warnings && semantic_warnings.length > 0) ||
     (missing_identifiers && missing_identifiers.length > 0);
 
-  if (!hasIssues) return null;
+  const tablesUsed =
+    (Array.isArray(report?.table_lineage) && report.table_lineage.length > 0 && report.table_lineage) ||
+    (Array.isArray(report?.affected_tables) && report.affected_tables.length > 0 && report.affected_tables) ||
+    (Array.isArray(summary?.table_lineage) && summary.table_lineage.length > 0 && summary.table_lineage) ||
+    (Array.isArray(summary?.tables_used) && summary.tables_used.length > 0 && summary.tables_used) ||
+    [];
+
+  const complexityScore = report?.query_complexity_score ?? summary?.query_complexity_score ?? null;
+
+  const hasAggregation =
+    report?.has_aggregation ?? report?.metadata?.has_aggregation ?? summary?.has_aggregation;
+  const hasSubquery =
+    report?.has_subquery ?? report?.metadata?.has_subquery ?? summary?.has_subquery;
+  const hasWindowFunction =
+    report?.has_window_function ??
+    report?.metadata?.has_window_function ??
+    summary?.has_window_function;
+
+  const cartesianWarning = Boolean(
+    report?.detected_cartesian_flag ||
+    report?.metadata?.detected_cartesian_flag ||
+    summary?.detected_cartesian_flag
+  );
+  const rawValidationReport = report ?? summary;
+  const hasValidationFailure = Boolean(
+    summary?.ast_valid === false ||
+    (Array.isArray(syntax_errors) && syntax_errors.length > 0) ||
+    (Array.isArray(missing_identifiers) && missing_identifiers.length > 0)
+  );
+  let failureGuidance = "";
+  if (hasValidationFailure) {
+    if (summary?.schema_drift_suspected) {
+      failureGuidance = "Validation failed due to schema mismatch. Refresh schema metadata, then retry.";
+    } else if (Array.isArray(syntax_errors) && syntax_errors.length > 0) {
+      failureGuidance = "Validation failed due to SQL syntax issues. Fix syntax errors before executing.";
+    } else if (Array.isArray(missing_identifiers) && missing_identifiers.length > 0) {
+      failureGuidance = "Validation failed due to unresolved identifiers. Verify table and column names.";
+    } else {
+      failureGuidance = "Validation failed. Review the report and adjust the SQL before retrying.";
+    }
+  }
+
+  if (!hasIssues && !cartesianWarning && !tablesUsed.length && complexityScore == null && !hasValidationFailure) {
+    return null;
+  }
 
   return (
     <div className="sql-validation-details" style={{ marginTop: "12px", fontSize: "0.85rem", borderTop: "1px dashed var(--border-muted)", paddingTop: "8px" }}>
+      <div
+        data-testid="validation-key-signals"
+        style={{
+          marginBottom: "10px",
+          padding: "10px",
+          borderRadius: "8px",
+          background: "var(--surface-muted)",
+          border: "1px solid var(--border-muted)",
+          display: "grid",
+          gap: "6px",
+        }}
+      >
+        {tablesUsed.length > 0 && (
+          <div>
+            <strong>Tables used:</strong> {tablesUsed.join(", ")}
+          </div>
+        )}
+        {complexityScore != null && (
+          <div>
+            <strong>Complexity score:</strong> {complexityScore}
+          </div>
+        )}
+        {(typeof hasAggregation === "boolean" || typeof hasSubquery === "boolean" || typeof hasWindowFunction === "boolean") && (
+          <div>
+            <strong>Query features:</strong>{" "}
+            Aggregation: {typeof hasAggregation === "boolean" ? (hasAggregation ? "Yes" : "No") : "—"} ·{" "}
+            Subquery: {typeof hasSubquery === "boolean" ? (hasSubquery ? "Yes" : "No") : "—"} ·{" "}
+            Window: {typeof hasWindowFunction === "boolean" ? (hasWindowFunction ? "Yes" : "No") : "—"}
+          </div>
+        )}
+      </div>
+      {cartesianWarning && (
+        <div
+          data-testid="validation-cartesian-warning"
+          style={{
+            color: "#856404",
+            background: "rgba(255, 193, 7, 0.12)",
+            border: "1px solid rgba(255, 193, 7, 0.3)",
+            borderRadius: "8px",
+            padding: "8px 10px",
+            marginBottom: "8px",
+            fontWeight: 600,
+          }}
+        >
+          Potential cartesian join detected. Confirm join predicates before execution.
+        </div>
+      )}
+      {hasValidationFailure && (
+        <div
+          data-testid="validation-failure-guidance"
+          style={{
+            marginBottom: "8px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            background: "rgba(220, 53, 69, 0.08)",
+            border: "1px solid rgba(220, 53, 69, 0.25)",
+            color: "var(--error)",
+            fontWeight: 600,
+          }}
+        >
+          {failureGuidance}
+        </div>
+      )}
       {syntax_errors?.map((err: string, i: number) => (
         <div key={`syn-${i}`} style={{ color: "var(--error)", display: "flex", gap: "6px", marginBottom: "4px" }}>
           <span>❌</span> <span>{err}</span>
@@ -223,6 +340,17 @@ function SQLValidationDetails({ summary }: { summary: any }) {
           <span>🔍</span> <span>Missing identifier: <code>{id}</code></span>
         </div>
       ))}
+      {rawValidationReport && (
+        <details style={{ marginTop: "8px" }}>
+          <summary style={{ cursor: "pointer", color: "var(--muted)" }}>Validation report (raw)</summary>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "6px" }}>
+            <CopyButton text={toPrettyJson(rawValidationReport)} label="Copy validation report" />
+          </div>
+          <pre data-testid="validation-raw-report" style={{ marginTop: "6px", overflowX: "auto", fontSize: "0.75rem" }}>
+            {toPrettyJson(rawValidationReport)}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -257,51 +385,100 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
-function DecisionLog({ events }: { events?: any[] }) {
-  if (!events || events.length === 0) return null;
+function ValidationCompletenessSummary({
+  summary,
+  report,
+  completeness,
+  onExpand,
+}: {
+  summary?: any;
+  report?: any;
+  completeness?: any;
+  onExpand: () => void;
+}) {
+  if (!summary && !report && !completeness) return null;
+
+  const syntaxCount = Array.isArray(summary?.syntax_errors) ? summary.syntax_errors.length : 0;
+  const missingCount = Array.isArray(summary?.missing_identifiers) ? summary.missing_identifiers.length : 0;
+  const validationFailed = Boolean(summary?.ast_valid === false || syntaxCount > 0 || missingCount > 0);
+
+  const cartesianRisk = Boolean(
+    report?.detected_cartesian_flag ||
+    report?.metadata?.detected_cartesian_flag ||
+    summary?.detected_cartesian_flag
+  );
+
+  let completenessLabel = "complete";
+  if (completeness?.token_expired) completenessLabel = "token expired";
+  else if (completeness?.schema_mismatch) completenessLabel = "schema mismatch";
+  else if (completeness?.is_truncated || completeness?.is_limited) completenessLabel = "truncated";
+  else if (completeness?.next_page_token) completenessLabel = "paginated";
+
+  const pagesFetched =
+    typeof completeness?.pages_fetched === "number"
+      ? completeness.pages_fetched
+      : completeness
+        ? 1
+        : "—";
 
   return (
-    <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
-      <details style={{ width: "100%" }}>
-        <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
-          <span>📋</span> Decision Log ({events.length} events)
-        </summary>
-        <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
-          {events.map((ev, i) => (
-            <div key={i} style={{
-              fontSize: "0.8rem",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              background: "var(--surface-muted)",
-              border: "1px solid var(--border-muted)"
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
-                <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
-                  {new Date(ev.timestamp * 1000).toLocaleTimeString()}
-                </span>
-              </div>
-              <div style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
-              <div style={{ color: "var(--muted)", fontStyle: "italic", marginTop: "2px", lineHeight: "1.4" }}>{ev.reason}</div>
-              {ev.retry_count > 0 && (
-                <div style={{ marginTop: "6px", fontSize: "0.75rem", color: "#f59e0b", fontWeight: 600 }}>
-                  Retry #{ev.retry_count} {ev.error_category ? `(${ev.error_category.replace(/_/g, " ")})` : ""}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </details>
-    </div>
+    <button
+      type="button"
+      data-testid="validation-completeness-summary"
+      onClick={onExpand}
+      style={{
+        marginTop: "8px",
+        width: "100%",
+        textAlign: "left",
+        borderRadius: "8px",
+        border: "1px solid var(--border)",
+        background: "var(--surface-muted)",
+        padding: "8px 10px",
+        fontSize: "0.8rem",
+        color: "var(--muted)",
+        cursor: "pointer",
+      }}
+    >
+      <strong style={{ color: validationFailed ? "var(--error)" : "var(--success)" }}>
+        Validation: {validationFailed ? "fail" : "pass"}
+      </strong>
+      {" · "}
+      <span>Cartesian: {cartesianRisk ? "risk" : "none"}</span>
+      {" · "}
+      <span>Completeness: {completenessLabel}</span>
+      {" · "}
+      <span>Pages: {pagesFetched}</span>
+    </button>
   );
 }
 
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
-  if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
+  if (!completeness) return null;
+  const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
+  const stoppedReason = completeness.stopped_reason ?? completeness.auto_pagination_stopped_reason;
+  const metadataRows: Array<{ label: string; value: string | number }> = [];
+  if (typeof completeness.auto_paginated === "boolean") {
+    metadataRows.push({ label: "auto_paginated", value: String(completeness.auto_paginated) });
+  }
+  if (typeof completeness.pages_fetched === "number") {
+    metadataRows.push({ label: "pages_fetched", value: completeness.pages_fetched });
+  }
+  if (stoppedReason) {
+    metadataRows.push({ label: "stopped_reason", value: String(stoppedReason) });
+  }
+  if (typeof completeness.prefetch_enabled === "boolean") {
+    metadataRows.push({ label: "prefetch_enabled", value: String(completeness.prefetch_enabled) });
+  }
+  if (typeof completeness.prefetch_scheduled === "boolean") {
+    metadataRows.push({ label: "prefetch_scheduled", value: String(completeness.prefetch_scheduled) });
+  }
+  if (completeness.prefetch_reason) {
+    metadataRows.push({ label: "prefetch_reason", value: String(completeness.prefetch_reason) });
+  }
+  const hasMetadata = metadataRows.length > 0;
+  if (!is_truncated && !is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired && !hasMetadata) {
     return null;
   }
-
-  const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
 
   if (completeness.token_expired) {
     return (
@@ -348,6 +525,9 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
     icon = "📄";
   }
 
+  if (!message && hasMetadata) {
+    message = "Result pagination metadata:";
+  }
   if (!message) return null;
 
   return (
@@ -364,7 +544,18 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
       color: "var(--muted)"
     }}>
       <span style={{ fontSize: "1rem" }}>{icon}</span>
-      <span>{message}</span>
+      <div style={{ display: "grid", gap: "4px" }}>
+        <span>{message}</span>
+        {metadataRows.length > 0 && (
+          <div data-testid="completeness-metadata" style={{ display: "flex", gap: "8px", flexWrap: "wrap", fontSize: "0.75rem" }}>
+            {metadataRows.map((item) => (
+              <span key={item.label}>
+                <strong>{item.label}:</strong> {item.value}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -382,6 +573,7 @@ export default function AgentChat() {
   const [error, setError] = useState<ErrorCardProps | null>(null);
   const [feedbackState, setFeedbackState] = useState<Record<string, string>>({});
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
+  const [expandedSqlSections, setExpandedSqlSections] = useState<Record<number, boolean>>({});
   const [configStatus, setConfigStatus] = useState<"loading" | "configured" | "unconfigured">("loading");
   const [isCheckingConfig, setIsCheckingConfig] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -470,6 +662,7 @@ export default function AgentChat() {
     setMessages([]);
     setFeedbackState({});
     setError(null);
+    setExpandedSqlSections({});
     setRunStatus("idle");
     setCurrentPhase(null);
     setCompletedPhases([]);
@@ -722,10 +915,19 @@ export default function AgentChat() {
         }
 
         const dedupedNewRows = dedupeRows(existingRows, newRows);
+        const combinedRows = [...existingRows, ...dedupedNewRows];
+        const nextCompleteness = (result as any)?.result_completeness ?? {};
         updated[msgIdx] = {
           ...existing,
-          result: [...existingRows, ...dedupedNewRows],
-          resultCompleteness: result.result_completeness,
+          result: combinedRows,
+          resultCompleteness: {
+            ...existing.resultCompleteness,
+            ...nextCompleteness,
+            rows_returned: combinedRows.length,
+            next_page_token: nextCompleteness.next_page_token,
+            token_expired: nextCompleteness.token_expired ?? false,
+            schema_mismatch: nextCompleteness.schema_mismatch ?? false,
+          },
         };
         return updated;
       });
@@ -991,40 +1193,22 @@ export default function AgentChat() {
               >
                 <div className="bubble-header">
                   <span>{msg.role === "user" ? "You" : "Assistant"}</span>
-                  {(msg.traceId || msg.interactionId) && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <TraceLink
-                        traceId={msg.traceId}
-                        interactionId={msg.interactionId}
-                        variant="icon"
-                      />
-                      {verboseMode && (
-                        <a
-                          href={
-                            msg.traceId
-                              ? `/traces/${msg.traceId}?verbose=1`
-                              : msg.interactionId
-                                ? `/traces/interaction/${msg.interactionId}?verbose=1`
-                                : undefined
-                          }
-                          className="trace-link__btn"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          Verbose Trace
-                        </a>
-                      )}
-                    </div>
-                  )}
                 </div>
                 <div className="bubble-body">
                   {msg.text && <p>{msg.text}</p>}
                   {msg.error && <p className="error">Error: {msg.error}</p>}
 
                   {msg.sql && (
-                    <details>
+                    <details
+                      open={Boolean(expandedSqlSections[idx])}
+                      onToggle={(event) => {
+                        const nextOpen = (event.currentTarget as HTMLDetailsElement).open;
+                        setExpandedSqlSections((prev) => ({ ...prev, [idx]: nextOpen }));
+                      }}
+                    >
                       <summary>Generated SQL</summary>
                       <pre>{msg.sql}</pre>
-                      <SQLValidationDetails summary={msg.validationSummary} />
+                      <SQLValidationDetails summary={msg.validationSummary} report={msg.validationReport} />
                     </details>
                   )}
 
@@ -1053,6 +1237,19 @@ export default function AgentChat() {
                     </div>
                   )}
 
+                  {msg.role === "assistant" && (msg.validationSummary || msg.validationReport || msg.resultCompleteness) && (
+                    <ValidationCompletenessSummary
+                      summary={msg.validationSummary}
+                      report={msg.validationReport}
+                      completeness={msg.resultCompleteness}
+                      onExpand={() => setExpandedSqlSections((prev) => ({ ...prev, [idx]: true }))}
+                    />
+                  )}
+                  {msg.role === "assistant" && msg.sql && (
+                    <div style={{ marginTop: "8px", display: "flex", justifyContent: "flex-end" }}>
+                      <CopyBundleButton message={msg} />
+                    </div>
+                  )}
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
                   {msg.resultCompleteness?.next_page_token && msg.originalRequest && (
                     <button
@@ -1079,7 +1276,31 @@ export default function AgentChat() {
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
                   </div>
-                  {msg.role === "assistant" && <DecisionLog events={msg.decisionEvents} />}
+                  {msg.role === "assistant" && (msg.traceId || msg.interactionId || msg.requestId) && (
+                    <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <RunIdentifiers
+                        traceId={msg.traceId}
+                        interactionId={msg.interactionId}
+                        requestId={msg.requestId}
+                      />
+                      {verboseMode && (msg.traceId || msg.interactionId) && (
+                        <a
+                          href={
+                            msg.traceId
+                              ? `/traces/${msg.traceId}?verbose=1`
+                              : msg.interactionId
+                                ? `/traces/interaction/${msg.interactionId}?verbose=1`
+                                : undefined
+                          }
+                          className="trace-link__btn"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Verbose Trace
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {msg.role === "assistant" && <DecisionLogPanel events={msg.decisionEvents} />}
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>

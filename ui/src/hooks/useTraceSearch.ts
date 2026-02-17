@@ -315,7 +315,7 @@ export function useTraceSearch() {
       };
       // Simple mapping
       if (filters.traceId) params.trace_id = filters.traceId;
-      if (filters.service) params.service_name = filters.service;
+      if (filters.service) params.service = filters.service;
       if (filters.startTimeGte) params.start_time_gte = filters.startTimeGte;
       if (filters.startTimeLte) params.start_time_lte = filters.startTimeLte;
       if (facets.durationMinMs != null) params.duration_min_ms = facets.durationMinMs;
@@ -336,7 +336,7 @@ export function useTraceSearch() {
         setServerFacets(facetPayload);
       }
       const totalCount =
-        (data as any).total_count ?? (data as any).totalCount ?? null;
+        (data as any).total ?? (data as any).total_count ?? (data as any).totalCount ?? null;
       if (typeof totalCount === "number") {
         setServerTotalCount(totalCount);
       }

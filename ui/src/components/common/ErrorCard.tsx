@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CopyButton } from "../artifacts/CopyButton";
+import RunIdentifiers from "./RunIdentifiers";
 import { getErrorMapping, type ErrorSeverity } from "../../utils/errorMapping";
 
 export interface ErrorCardProps {
@@ -33,7 +33,7 @@ const SEVERITY_STYLES: Record<ErrorSeverity, { bg: string; border: string; label
   },
 };
 
-export function ErrorCard({
+function ErrorCardComponent({
   category,
   message,
   requestId,
@@ -65,8 +65,13 @@ export function ErrorCard({
   }, [retryable, retryAfterSeconds]);
 
   const canRetry = retryable && countdown === 0;
-  const mapping = getErrorMapping(category);
-  const severity = SEVERITY_STYLES[mapping.severity];
+  const mapping = useMemo(() => getErrorMapping(category), [category]);
+  const severity = useMemo(() => SEVERITY_STYLES[mapping.severity], [mapping.severity]);
+  const hasDetails = Boolean(detailsSafe && Object.keys(detailsSafe).length > 0);
+  const handleRetryNow = useCallback(() => {
+    setCountdown(0);
+    onRetry?.();
+  }, [onRetry]);
 
   return (
     <div
@@ -96,12 +101,7 @@ export function ErrorCard({
           </div>
           <div style={{ color: "var(--ink)", fontWeight: 500 }}>{message}</div>
         </div>
-        {requestId && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.75rem", color: "var(--muted)" }}>
-            <span>ID: {requestId.slice(0, 8)}</span>
-            <CopyButton text={requestId} label="Copy" />
-          </div>
-        )}
+        {requestId && <RunIdentifiers requestId={requestId} />}
       </div>
 
       {hint && (
@@ -121,7 +121,7 @@ export function ErrorCard({
         </div>
       )}
 
-      {detailsSafe && Object.keys(detailsSafe).length > 0 && (
+      {hasDetails && (
         <details style={{ marginTop: "12px" }}>
           <summary style={{ cursor: "pointer", fontSize: "0.8rem", color: "var(--muted)" }}>
             Technical Details
@@ -166,7 +166,7 @@ export function ErrorCard({
           {countdown > 0 && (
             <button
               type="button"
-              onClick={() => { setCountdown(0); onRetry(); }}
+              onClick={handleRetryNow}
               data-testid="retry-now-button"
               style={{
                 padding: "8px 16px",
@@ -208,3 +208,6 @@ export function ErrorCard({
     </div>
   );
 }
+
+export const ErrorCard = React.memo(ErrorCardComponent);
+ErrorCard.displayName = "ErrorCard";
