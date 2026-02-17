@@ -6,7 +6,7 @@ interface FormatTimestampOptions {
   fallback?: string;
 }
 
-interface NormalizedDecisionEvent {
+export interface NormalizedDecisionEvent {
   event: any;
   timestampMs: number | null;
   key: string;
