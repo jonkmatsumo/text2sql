@@ -172,7 +172,7 @@ function ResultsTable({ rows }: { rows: any[] }) {
 function ValidationSummaryBadge({ summary }: { summary: any }) {
   if (!summary) return null;
 
-  const { ast_valid, schema_drift_suspected, missing_identifiers } = summary;
+  const { ast_valid, schema_drift_suspected, missing_identifiers, syntax_errors } = summary;
 
   return (
     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
@@ -181,12 +181,48 @@ function ValidationSummaryBadge({ summary }: { summary: any }) {
           AST Validation Failed
         </span>
       )}
+      {syntax_errors && syntax_errors.length > 0 && (
+        <span className="pill" style={{ background: "rgba(220, 53, 69, 0.1)", color: "var(--error)", border: "1px solid rgba(220, 53, 69, 0.2)" }}>
+          {syntax_errors.length} Syntax {syntax_errors.length === 1 ? "Error" : "Errors"}
+        </span>
+      )}
       {schema_drift_suspected && (
         <span className="pill" style={{ background: "rgba(255, 193, 7, 0.1)", color: "#856404", border: "1px solid rgba(255, 193, 7, 0.2)" }}>
           Schema Drift Suspected
           {missing_identifiers && missing_identifiers.length > 0 && ` (${missing_identifiers.length} missing)`}
         </span>
       )}
+    </div>
+  );
+}
+
+function SQLValidationDetails({ summary }: { summary: any }) {
+  if (!summary) return null;
+  const { syntax_errors, semantic_warnings, missing_identifiers } = summary;
+
+  const hasIssues = (syntax_errors && syntax_errors.length > 0) ||
+    (semantic_warnings && semantic_warnings.length > 0) ||
+    (missing_identifiers && missing_identifiers.length > 0);
+
+  if (!hasIssues) return null;
+
+  return (
+    <div className="sql-validation-details" style={{ marginTop: "12px", fontSize: "0.85rem", borderTop: "1px dashed var(--border-muted)", paddingTop: "8px" }}>
+      {syntax_errors?.map((err: string, i: number) => (
+        <div key={`syn-${i}`} style={{ color: "var(--error)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>❌</span> <span>{err}</span>
+        </div>
+      ))}
+      {semantic_warnings?.map((warn: string, i: number) => (
+        <div key={`sem-${i}`} style={{ color: "var(--warn, #f59e0b)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>⚠️</span> <span>{warn}</span>
+        </div>
+      ))}
+      {missing_identifiers?.map((id: string, i: number) => (
+        <div key={`miss-${i}`} style={{ color: "var(--muted)", display: "flex", gap: "6px", marginBottom: "4px" }}>
+          <span>🔍</span> <span>Missing identifier: <code>{id}</code></span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -984,6 +1020,7 @@ export default function AgentChat() {
                     <details>
                       <summary>Generated SQL</summary>
                       <pre>{msg.sql}</pre>
+                      <SQLValidationDetails summary={msg.validationSummary} />
                     </details>
                   )}
 
