@@ -47,6 +47,7 @@ describe("Diagnostics Route", () => {
         expect(screen.getByText(/bigquery/i)).toBeInTheDocument();
         expect(screen.getByText("2.5")).toBeInTheDocument();
         expect(screen.getByText(/schema binding validation: true/i)).toBeInTheDocument();
+        expect(screen.getByTestId("diagnostics-last-updated")).toHaveTextContent(/Last updated:/i);
     });
 
     it("shows debug panels only when isDebug is true", async () => {
@@ -102,5 +103,33 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Failed to load diagnostics")).toBeInTheDocument();
         });
         expect(screen.getByTestId("error-category")).toHaveTextContent("Diagnostics Error");
+    });
+
+    it("invokes diagnostics refresh only once per click while loading", async () => {
+        let resolveRefresh: ((value: typeof mockData) => void) | undefined;
+        (getDiagnostics as any)
+            .mockResolvedValueOnce(mockData)
+            .mockImplementationOnce(() => new Promise((resolve) => {
+                resolveRefresh = resolve;
+            }));
+
+        render(<Diagnostics />);
+
+        await waitFor(() => {
+            expect(screen.getByText("42 items")).toBeInTheDocument();
+        });
+
+        const refreshButton = screen.getByRole("button", { name: "Refresh" });
+        fireEvent.click(refreshButton);
+        fireEvent.click(refreshButton);
+
+        expect(getDiagnostics).toHaveBeenCalledTimes(2); // initial load + one refresh
+
+        if (resolveRefresh) {
+            resolveRefresh(mockData);
+        }
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+        });
     });
 });

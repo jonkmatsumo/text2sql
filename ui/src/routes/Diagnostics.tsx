@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
@@ -9,17 +9,25 @@ export default function Diagnostics() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<any>(null);
     const [isDebug, setIsDebug] = useState(false);
+    const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+    const isFetchingRef = useRef(false);
 
     const fetchDiagnostics = useCallback(async (debug = false) => {
+        if (isFetchingRef.current) {
+            return;
+        }
+        isFetchingRef.current = true;
         setLoading(true);
         setError(null);
         try {
             const resp = await getDiagnostics(debug);
             setData(resp);
+            setLastUpdatedAt(Date.now());
         } catch (err: any) {
             setError(err);
         } finally {
             setLoading(false);
+            isFetchingRef.current = false;
         }
     }, []);
 
@@ -69,6 +77,9 @@ export default function Diagnostics() {
                     <h1 style={{ margin: 0, fontSize: "1.75rem" }}>System Diagnostics</h1>
                     <p style={{ margin: "4px 0 0 0", color: "var(--muted)", fontSize: "0.9rem" }}>
                         Real-time runtime health and configuration check.
+                    </p>
+                    <p data-testid="diagnostics-last-updated" style={{ margin: "6px 0 0 0", color: "var(--muted)", fontSize: "0.8rem" }}>
+                        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : "Not yet"}
                     </p>
                 </div>
                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
