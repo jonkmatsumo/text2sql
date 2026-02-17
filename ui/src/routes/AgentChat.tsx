@@ -24,6 +24,7 @@ import { ChartRenderer } from "../components/charts/ChartRenderer";
 import { ErrorState } from "../components/common/ErrorState";
 import { ChartSchema } from "../types/charts";
 import { SQLPreviewCard } from "../components/chat/SQLPreviewCard";
+import { CopyButton } from "../components/artifacts/CopyButton";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 import { dedupeRows } from "../utils/dedupeRows";
 import { getErrorMapping } from "../utils/errorMapping";
@@ -310,6 +311,7 @@ function DecisionLog({ events }: { events?: any[] }) {
   };
   const visibleEvents = showAllEvents ? orderedEvents : orderedEvents.slice(0, MAX_VISIBLE_EVENTS);
   const hasHiddenEvents = orderedEvents.length > MAX_VISIBLE_EVENTS;
+  const serializedDecisionLog = JSON.stringify(orderedEvents, null, 2);
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
@@ -317,6 +319,11 @@ function DecisionLog({ events }: { events?: any[] }) {
         <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
           <span>📋</span> Decision Log ({events.length} events)
         </summary>
+        {orderedEvents.length > 0 && (
+          <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
+            <CopyButton text={serializedDecisionLog} label="Copy decision log" />
+          </div>
+        )}
         <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
           {visibleEvents.map((ev, i) => {
             const timestampMs = getDecisionEventTimestampMs(ev);

@@ -77,6 +77,7 @@ describe("AgentChat observability", () => {
     });
 
     fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+    expect(screen.getByRole("button", { name: "Copy decision log" })).toBeInTheDocument();
 
     const orderedDecisions = screen
       .getAllByTestId("decision-event-decision")
@@ -134,5 +135,35 @@ describe("AgentChat observability", () => {
       expect(screen.getAllByTestId("decision-event-item")).toHaveLength(12);
     });
     expect(screen.getByTestId("decision-log-show-all")).toHaveTextContent("Show first 10 events");
+  });
+
+  it("hides decision-log copy button when there are no decision events", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "No decisions",
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "no decision events" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("No decisions")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: "Copy decision log" })).not.toBeInTheDocument();
   });
 });
