@@ -303,9 +303,6 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
 
   const { is_truncated, is_limited, partial_reason, rows_returned, row_limit, query_limit } = completeness;
 
-  let message = "";
-  let type: "warning" | "info" = "info";
-
   if (completeness.token_expired) {
     return (
       <div data-testid="token-expired-warning" className="completeness-banner warning" style={{
@@ -326,41 +323,48 @@ function ResultCompletenessBanner({ completeness }: { completeness: any }) {
     return (
       <div data-testid="schema-mismatch-warning" className="completeness-banner warning" style={{
         fontSize: "0.8rem",
-        padding: "6px 10px",
-        borderRadius: "6px",
-        marginTop: "8px",
+        padding: "8px 12px",
+        borderRadius: "8px",
+        marginTop: "12px",
         background: "rgba(220, 53, 69, 0.1)",
-        borderLeft: "3px solid #dc3545",
+        borderLeft: "4px solid #dc3545",
         color: "#842029",
       }}>
-        Column schema changed between pages. Cannot append rows.
+        <strong>⚠️ Schema Mismatch:</strong> Column schema changed between pages. Cannot append rows.
       </div>
     );
   }
 
+  let message = "";
+  let icon = "ℹ️";
   if (is_truncated) {
-    type = "warning";
-    message = `Results truncated. Showing ${rows_returned} of ${row_limit}+ rows.`;
-    if (partial_reason === "PROVIDER_CAP") {
-      message += " (Backend limit reached)";
-    }
+    message = `Results truncated to ${rows_returned} rows per ${partial_reason || "system limits"}.`;
+    icon = "✂️";
   } else if (is_limited) {
-    message = `Query limited to ${query_limit} rows.`;
+    message = `Showing first ${rows_returned} rows (Limit: ${row_limit || query_limit}).`;
+    icon = "⏹️";
   } else if (completeness.next_page_token) {
-    message = `Showing first ${rows_returned} results. More data available.`;
+    message = `Displaying ${rows_returned} rows. More results are available via pagination.`;
+    icon = "📄";
   }
 
+  if (!message) return null;
+
   return (
-    <div className={`completeness-banner ${type}`} style={{
+    <div className="completeness-banner info" style={{
       fontSize: "0.8rem",
-      padding: "6px 10px",
-      borderRadius: "6px",
-      marginTop: "8px",
-      background: type === "warning" ? "rgba(255, 193, 7, 0.15)" : "rgba(13, 110, 253, 0.1)",
-      borderLeft: `3px solid ${type === "warning" ? "#ffc107" : "#0d6efd"}`,
-      color: type === "warning" ? "#856404" : "#084298"
+      padding: "8px 12px",
+      borderRadius: "8px",
+      marginTop: "12px",
+      background: "var(--surface-muted)",
+      border: "1px solid var(--border-muted)",
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      color: "var(--muted)"
     }}>
-      {message}
+      <span style={{ fontSize: "1rem" }}>{icon}</span>
+      <span>{message}</span>
     </div>
   );
 }
