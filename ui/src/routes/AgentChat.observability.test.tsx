@@ -361,6 +361,53 @@ describe("AgentChat observability", () => {
     expect(copiedPayload.completeness.pages_fetched).toBe(3);
   });
 
+  it("omits trace_id from copy bundle payload when trace id is unavailable", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Bundle without trace",
+            sql: "SELECT 1",
+            validation_summary: {
+              ast_valid: true,
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "bundle no trace" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bundle without trace")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy SQL + metadata" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
+
+    const copiedPayload = JSON.parse(String(writeText.mock.calls[0][0]));
+    expect(copiedPayload.sql).toBe("SELECT 1");
+    expect(copiedPayload).not.toHaveProperty("trace_id");
+  });
+
   it("renders trace and request identifier controls in assistant message footer", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     mockedStream.mockReturnValue(
@@ -489,6 +536,48 @@ describe("AgentChat observability", () => {
     await waitFor(() => {
       const executeOnly = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
       expect(executeOnly).toEqual(["retry query", "query failed"]);
+    });
+  });
+
+  it("combines event-type search with phase filtering", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Type plus phase filters",
+            decision_events: [
+              { timestamp: 1700000001, node: "router", decision: "route request", reason: "router", type: "info" },
+              { timestamp: 1700000002, node: "execute", decision: "retry query", reason: "execute", type: "warn" },
+              { timestamp: 1700000003, node: "execute", decision: "query failed", reason: "execute", type: "error" },
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "type and phase filtering" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Type plus phase filters")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
+    fireEvent.change(screen.getByTestId("decision-log-search"), { target: { value: "error" } });
+    fireEvent.change(screen.getByTestId("decision-log-phase-filter"), { target: { value: "execute" } });
+
+    await waitFor(() => {
+      const filtered = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
+      expect(filtered).toEqual(["query failed"]);
     });
   });
 

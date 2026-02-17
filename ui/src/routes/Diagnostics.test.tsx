@@ -1,4 +1,5 @@
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
@@ -33,6 +34,19 @@ function LocationProbe() {
 function renderDiagnostics(initialPath: string = "/diagnostics") {
     return render(
         <MemoryRouter initialEntries={[initialPath]}>
+            <Diagnostics />
+            <LocationProbe />
+        </MemoryRouter>
+    );
+}
+
+function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
+    const [tick, setTick] = useState(0);
+    return (
+        <MemoryRouter initialEntries={[initialPath]}>
+            <button type="button" data-testid="diagnostics-force-rerender" onClick={() => setTick((v) => v + 1)}>
+                rerender-{tick}
+            </button>
             <Diagnostics />
             <LocationProbe />
         </MemoryRouter>
@@ -196,6 +210,28 @@ describe("Diagnostics Route", () => {
         });
     });
 
+    it("persists diagnostics query params across component rerenders", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        render(<DiagnosticsRerenderHarness initialPath="/diagnostics?filter=anomalies&debug=1&section=runtime" />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-status-strip")).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId("diagnostics-filter-all"));
+        fireEvent.click(screen.getByLabelText(/Verbose \/ Diagnostic View/i));
+        fireEvent.change(screen.getByTestId("diagnostics-section-select"), { target: { value: "config" } });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("location-search")).toHaveTextContent("?section=config");
+        });
+
+        fireEvent.click(screen.getByTestId("diagnostics-force-rerender"));
+
+        expect(screen.getByTestId("location-search")).toHaveTextContent("?section=config");
+        expect(screen.getByTestId("diagnostics-section-select")).toHaveValue("config");
+    });
+
     it("shows diagnostics deep links and copy selected panel action", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         renderDiagnostics();
@@ -207,6 +243,35 @@ describe("Diagnostics Route", () => {
         expect(screen.getByTestId("diagnostics-open-trace-search")).toHaveAttribute("href", "/admin/traces/search");
         expect(screen.getByTestId("diagnostics-open-jobs-dashboard")).toHaveAttribute("href", "/admin/jobs");
         expect(screen.getByRole("button", { name: "Copy selected panel" })).toBeInTheDocument();
+    });
+
+    it("copies raw diagnostics JSON with expected keys", async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(window.navigator, "clipboard", {
+            value: { writeText },
+            configurable: true,
+        });
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            debug: { latency_breakdown_ms: { execute: 120 } },
+        });
+        renderDiagnostics("/diagnostics?debug=1&section=raw");
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-raw-json-summary")).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId("diagnostics-raw-json-summary"));
+        fireEvent.click(screen.getByRole("button", { name: "Copy JSON" }));
+
+        await waitFor(() => {
+            expect(writeText).toHaveBeenCalledTimes(1);
+        });
+
+        const copiedPayload = JSON.parse(String(writeText.mock.calls[0][0]));
+        expect(copiedPayload).toHaveProperty("diagnostics_schema_version");
+        expect(copiedPayload).toHaveProperty("runtime_indicators");
+        expect(copiedPayload).toHaveProperty("enabled_flags");
     });
 
     it("renders safe placeholders for invalid numeric diagnostics values", async () => {

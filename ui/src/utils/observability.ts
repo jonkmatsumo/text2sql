@@ -125,9 +125,8 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
         ? 1
         : null;
 
-  return {
+  const payload: Record<string, unknown> = {
     sql: message.sql ?? null,
-    trace_id: message.traceId ?? null,
     validation: {
       status: validationFailed ? "fail" : "pass",
       cartesian_risk: cartesianRisk,
@@ -140,13 +139,18 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
       completeness_summary: completeness ?? null,
     },
   };
+  const traceId = typeof message.traceId === "string" ? message.traceId.trim() : "";
+  if (traceId) {
+    payload.trace_id = traceId;
+  }
+  return payload;
 }
 
 export function normalizeDecisionEvent(
   rawEvent: unknown,
   originalIndex: number
 ): { event: Record<string, unknown>; timestampMs: number | null } {
-  const source =
+  const source: Record<string, unknown> =
     rawEvent && typeof rawEvent === "object" && !Array.isArray(rawEvent)
       ? { ...(rawEvent as Record<string, unknown>) }
       : typeof rawEvent === "string" && rawEvent.trim()

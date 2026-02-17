@@ -33,9 +33,9 @@ describe("buildCopyBundlePayload", () => {
       sql: "SELECT 1",
     });
 
+    expect(payload).not.toHaveProperty("trace_id");
     expect(payload).toEqual({
       sql: "SELECT 1",
-      trace_id: null,
       validation: {
         status: "pass",
         cartesian_risk: false,
