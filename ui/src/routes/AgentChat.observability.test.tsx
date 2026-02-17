@@ -303,6 +303,64 @@ describe("AgentChat observability", () => {
     expect(screen.getByText(/Validation failed due to SQL syntax issues/i)).toBeInTheDocument();
   });
 
+  it("renders copy SQL + metadata action and copies expected bundle payload", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Bundle ready",
+            sql: "SELECT * FROM orders",
+            trace_id: "trace-bundle-1",
+            validation_summary: {
+              ast_valid: true,
+            },
+            result_completeness: {
+              pages_fetched: 3,
+              next_page_token: "token-2",
+            },
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "bundle copy test" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bundle ready")).toBeInTheDocument();
+    });
+
+    const copyButton = screen.getByRole("button", { name: "Copy SQL + metadata" });
+    expect(copyButton).toBeInTheDocument();
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+    });
+
+    const copiedPayload = JSON.parse(String(writeText.mock.calls[0][0]));
+    expect(copiedPayload.sql).toBe("SELECT * FROM orders");
+    expect(copiedPayload.trace_id).toBe("trace-bundle-1");
+    expect(copiedPayload.validation.status).toBe("pass");
+    expect(copiedPayload.validation.validation_summary.ast_valid).toBe(true);
+    expect(copiedPayload.completeness.status).toBe("paginated");
+    expect(copiedPayload.completeness.pages_fetched).toBe(3);
+  });
+
   it("renders auto-pagination and prefetch metadata when completeness includes it", async () => {
     const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
     mockedStream.mockReturnValue(

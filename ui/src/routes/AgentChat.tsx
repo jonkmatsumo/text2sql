@@ -448,6 +448,49 @@ function ValidationCompletenessSummary({
   );
 }
 
+function buildSqlMetadataBundle(message: Message): string {
+  const summary = message.validationSummary;
+  const report = message.validationReport;
+  const completeness = message.resultCompleteness;
+  const syntaxCount = Array.isArray(summary?.syntax_errors) ? summary.syntax_errors.length : 0;
+  const missingCount = Array.isArray(summary?.missing_identifiers) ? summary.missing_identifiers.length : 0;
+  const validationFailed = Boolean(summary?.ast_valid === false || syntaxCount > 0 || missingCount > 0);
+  const cartesianRisk = Boolean(
+    report?.detected_cartesian_flag ||
+    report?.metadata?.detected_cartesian_flag ||
+    summary?.detected_cartesian_flag
+  );
+
+  let completenessStatus = "complete";
+  if (completeness?.token_expired) completenessStatus = "token expired";
+  else if (completeness?.schema_mismatch) completenessStatus = "schema mismatch";
+  else if (completeness?.is_truncated || completeness?.is_limited) completenessStatus = "truncated";
+  else if (completeness?.next_page_token) completenessStatus = "paginated";
+
+  const pagesFetched =
+    typeof completeness?.pages_fetched === "number"
+      ? completeness.pages_fetched
+      : completeness
+        ? 1
+        : null;
+
+  return toPrettyJson({
+    sql: message.sql ?? null,
+    trace_id: message.traceId ?? null,
+    validation: {
+      status: validationFailed ? "fail" : "pass",
+      cartesian_risk: cartesianRisk,
+      validation_summary: summary ?? null,
+      validation_report: report ?? null,
+    },
+    completeness: {
+      status: completenessStatus,
+      pages_fetched: pagesFetched,
+      completeness_summary: completeness ?? null,
+    },
+  });
+}
+
 function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
   const MAX_VISIBLE_EVENTS = 10;
@@ -1522,6 +1565,11 @@ export default function AgentChat() {
                       completeness={msg.resultCompleteness}
                       onExpand={() => setExpandedSqlSections((prev) => ({ ...prev, [idx]: true }))}
                     />
+                  )}
+                  {msg.role === "assistant" && msg.sql && (
+                    <div style={{ marginTop: "8px", display: "flex", justifyContent: "flex-end" }}>
+                      <CopyButton text={buildSqlMetadataBundle(msg)} label="Copy SQL + metadata" />
+                    </div>
                   )}
                   <ResultCompletenessBanner completeness={msg.resultCompleteness} />
                   {msg.resultCompleteness?.next_page_token && msg.originalRequest && (
