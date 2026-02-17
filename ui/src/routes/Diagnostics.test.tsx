@@ -90,4 +90,17 @@ describe("Diagnostics Route", () => {
         // getErrorMapping titleizes "forbidden" to "Forbidden"
         expect(screen.getByTestId("error-category")).toHaveTextContent("Forbidden");
     });
+
+    it("renders fallback error message when error payload is incomplete", async () => {
+        (getDiagnostics as any).mockRejectedValue({
+            code: "diagnostics_error",
+        });
+
+        render(<Diagnostics />);
+
+        await waitFor(() => {
+            expect(screen.getByText("Failed to load diagnostics")).toBeInTheDocument();
+        });
+        expect(screen.getByTestId("error-category")).toHaveTextContent("Diagnostics Error");
+    });
 });

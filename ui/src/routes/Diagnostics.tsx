@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getDiagnostics } from "../api";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
+import { LoadingState } from "../components/common/LoadingState";
 
 export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
@@ -26,11 +27,15 @@ export default function Diagnostics() {
         fetchDiagnostics(isDebug);
     }, [fetchDiagnostics, isDebug]);
 
+    const runtimeIndicators = data?.runtime_indicators;
+    const retryPolicy = data?.retry_policy;
+    const enabledFlags = data?.enabled_flags ?? {};
+
     if (loading && !data) {
         return (
-            <div className="panel animate-pulse">
-                <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
-                    Loading system diagnostics...
+            <div className="panel">
+                <div data-testid="diagnostics-loading-indicator" style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>
+                    <LoadingState message="Loading system diagnostics..." />
                 </div>
             </div>
         );
@@ -48,7 +53,7 @@ export default function Diagnostics() {
 
                 <ErrorCard
                     category={error.code}
-                    message={error.message || "Failed to load diagnostics"}
+                    message={error?.message || "Failed to load diagnostics"}
                     requestId={error.requestId}
                     detailsSafe={error.details}
                     onRetry={() => fetchDiagnostics(isDebug)}
@@ -87,30 +92,52 @@ export default function Diagnostics() {
             </header>
 
             {data && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "24px" }}>
+                <div style={{ display: "grid", gap: "16px" }}>
+                    {loading && (
+                        <div
+                            data-testid="diagnostics-refreshing-indicator"
+                            style={{
+                                padding: "10px 12px",
+                                borderRadius: "8px",
+                                background: "var(--surface-muted)",
+                                border: "1px solid var(--border-muted)",
+                                color: "var(--muted)",
+                                fontSize: "0.85rem",
+                            }}
+                        >
+                            Refreshing diagnostics...
+                        </div>
+                    )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "24px" }}>
                     {/* Runtime Indicators */}
                     <div className="panel" style={{ padding: "24px" }}>
                         <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Runtime Indicators</h3>
                         <div style={{ display: "grid", gap: "16px" }}>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
                                 <span style={{ color: "var(--muted)" }}>Avg Query Complexity</span>
-                                <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{data.runtime_indicators.avg_query_complexity}</span>
+                                <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>
+                                    {runtimeIndicators?.avg_query_complexity ?? "—"}
+                                </span>
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
                                 <span style={{ color: "var(--muted)" }}>Schema Cache Size</span>
-                                <span style={{ fontWeight: 600 }}>{data.runtime_indicators.active_schema_cache_size} items</span>
+                                <span style={{ fontWeight: 600 }}>
+                                    {runtimeIndicators?.active_schema_cache_size != null
+                                        ? `${runtimeIndicators.active_schema_cache_size} items`
+                                        : "—"}
+                                </span>
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
                                 <span style={{ color: "var(--muted)" }}>Truncation Events (Recent)</span>
-                                <span style={{ fontWeight: 600, color: data.runtime_indicators.recent_truncation_event_count > 0 ? "var(--error)" : "inherit" }}>
-                                    {data.runtime_indicators.recent_truncation_event_count}
+                                <span style={{ fontWeight: 600, color: (runtimeIndicators?.recent_truncation_event_count ?? 0) > 0 ? "var(--error)" : "inherit" }}>
+                                    {runtimeIndicators?.recent_truncation_event_count ?? "—"}
                                 </span>
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", alignItems: "center" }}>
                                 <span style={{ color: "var(--muted)" }}>Last Schema Refresh</span>
                                 <span style={{ fontSize: "0.85rem" }}>
-                                    {data.runtime_indicators.last_schema_refresh_timestamp
-                                        ? new Date(data.runtime_indicators.last_schema_refresh_timestamp * 1000).toLocaleString()
+                                    {runtimeIndicators?.last_schema_refresh_timestamp
+                                        ? new Date(runtimeIndicators.last_schema_refresh_timestamp * 1000).toLocaleString()
                                         : "Never"}
                                 </span>
                             </div>
@@ -127,7 +154,9 @@ export default function Diagnostics() {
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
                                 <span style={{ color: "var(--muted)" }}>Retry Policy</span>
-                                <span>{data.retry_policy.mode} (max {data.retry_policy.max_retries})</span>
+                                <span>
+                                    {retryPolicy?.mode ? `${retryPolicy.mode} (max ${retryPolicy.max_retries ?? 0})` : "—"}
+                                </span>
                             </div>
                             <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
                                 <span style={{ color: "var(--muted)" }}>Schema Cache TTL</span>
@@ -138,7 +167,7 @@ export default function Diagnostics() {
                         <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
                             <h4 style={{ margin: "12px 0", fontSize: "0.9rem", color: "var(--muted)" }}>Feature Flags</h4>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "0.8rem" }}>
-                                {Object.entries(data.enabled_flags).map(([key, val]) => (
+                                {Object.entries(enabledFlags).map(([key, val]) => (
                                     <div key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                         <span style={{
                                             width: "8px",
@@ -187,6 +216,7 @@ export default function Diagnostics() {
                             </pre>
                         </div>
                     )}
+                </div>
                 </div>
             )}
         </div>
