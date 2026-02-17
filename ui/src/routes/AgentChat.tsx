@@ -385,11 +385,45 @@ function DecisionLog({ events }: { events?: any[] }) {
   if (!events || events.length === 0) return null;
   const MAX_VISIBLE_EVENTS = 10;
   const [showAllEvents, setShowAllEvents] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [phaseFilter, setPhaseFilter] = useState("all");
   const normalizedEvents = normalizeDecisionEvents(events);
+  const availablePhases = Array.from(
+    new Set(
+      normalizedEvents
+        .map((item) => String(item.event?.node ?? item.event?.phase ?? "").trim())
+        .filter(Boolean)
+    )
+  ).sort();
+
+  const filteredEvents = normalizedEvents.filter((item) => {
+    const event = item.event ?? {};
+    const eventPhase = String(event.node ?? event.phase ?? "").trim().toLowerCase();
+    if (phaseFilter !== "all" && eventPhase !== phaseFilter.toLowerCase()) {
+      return false;
+    }
+
+    if (!searchQuery.trim()) return true;
+    const haystack = [
+      event.decision,
+      event.reason,
+      event.message,
+      event.node,
+      event.phase,
+      event.type,
+      event.event_type,
+      event.action,
+    ]
+      .filter((value) => value != null)
+      .map((value) => String(value).toLowerCase())
+      .join(" ");
+    return haystack.includes(searchQuery.trim().toLowerCase());
+  });
+
   const visibleEvents = showAllEvents
-    ? normalizedEvents
-    : normalizedEvents.slice(0, MAX_VISIBLE_EVENTS);
-  const hasHiddenEvents = normalizedEvents.length > MAX_VISIBLE_EVENTS;
+    ? filteredEvents
+    : filteredEvents.slice(0, MAX_VISIBLE_EVENTS);
+  const hasHiddenEvents = filteredEvents.length > MAX_VISIBLE_EVENTS;
   const serializedDecisionLog = toPrettyJson(normalizedEvents.map((item) => item.event));
 
   return (
@@ -403,10 +437,53 @@ function DecisionLog({ events }: { events?: any[] }) {
             <CopyButton text={serializedDecisionLog} label="Copy decision log" />
           </div>
         )}
+        <div style={{ marginTop: "10px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            value={searchQuery}
+            data-testid="decision-log-search"
+            placeholder="Search decisions, node, type"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            style={{
+              minWidth: "220px",
+              padding: "6px 10px",
+              borderRadius: "8px",
+              border: "1px solid var(--border)",
+              fontSize: "0.8rem",
+            }}
+          />
+          <select
+            value={phaseFilter}
+            data-testid="decision-log-phase-filter"
+            onChange={(event) => setPhaseFilter(event.target.value)}
+            style={{
+              padding: "6px 10px",
+              borderRadius: "8px",
+              border: "1px solid var(--border)",
+              fontSize: "0.8rem",
+            }}
+          >
+            <option value="all">All phases</option>
+            {availablePhases.map((phase) => (
+              <option key={phase} value={phase}>
+                {phase}
+              </option>
+            ))}
+          </select>
+          <span style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+            {filteredEvents.length} match{filteredEvents.length === 1 ? "" : "es"}
+          </span>
+        </div>
         <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
+          {filteredEvents.length === 0 && (
+            <div data-testid="decision-log-empty-filter" style={{ color: "var(--muted)", fontSize: "0.8rem" }}>
+              No decision events match the current filters.
+            </div>
+          )}
           {visibleEvents.map((item) => {
             const ev = item.event;
             const timestampMs = item.timestampMs;
+            const eventType = String(ev?.type ?? ev?.event_type ?? ev?.action ?? "").trim();
             const payloadRaw = ev?.payload ?? ev?.details ?? ev?.metadata ?? ev?.context;
             const payloadText = payloadRaw == null
               ? ""
@@ -429,6 +506,11 @@ function DecisionLog({ events }: { events?: any[] }) {
                   {formatTimestamp(timestampMs, { style: "time", fallback: "No timestamp" })}
                 </span>
               </div>
+              {eventType && (
+                <div style={{ marginBottom: "4px", color: "var(--muted)", fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {eventType}
+                </div>
+              )}
               <div data-testid="decision-event-decision" style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
               <div style={{ color: "var(--muted)", fontStyle: "italic", marginTop: "2px", lineHeight: "1.4" }}>{ev.reason}</div>
               {ev.retry_count > 0 && (
@@ -467,7 +549,7 @@ function DecisionLog({ events }: { events?: any[] }) {
                 fontWeight: 600,
               }}
             >
-              {showAllEvents ? "Show first 10 events" : `Show all ${normalizedEvents.length} events`}
+              {showAllEvents ? "Show first 10 events" : `Show all ${filteredEvents.length} events`}
             </button>
           )}
         </div>

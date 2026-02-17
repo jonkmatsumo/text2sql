@@ -297,4 +297,53 @@ describe("AgentChat observability", () => {
     expect(metadata).toHaveTextContent("prefetch_scheduled: false");
     expect(metadata).toHaveTextContent("prefetch_reason: manual_trigger");
   });
+
+  it("filters decision events by search text and phase while preserving order", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Filtered events",
+            decision_events: [
+              { timestamp: 1700000001, node: "router", decision: "route request", reason: "router step", type: "info" },
+              { timestamp: 1700000002, node: "execute", decision: "retry query", reason: "network timeout", type: "warn" },
+              { timestamp: 1700000003, node: "execute", decision: "query failed", reason: "permission denied", type: "error" },
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "filter decisions" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Filtered events")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+
+    fireEvent.change(screen.getByTestId("decision-log-search"), { target: { value: "retry" } });
+    await waitFor(() => {
+      const filtered = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
+      expect(filtered).toEqual(["retry query"]);
+    });
+
+    fireEvent.change(screen.getByTestId("decision-log-search"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("decision-log-phase-filter"), { target: { value: "execute" } });
+
+    await waitFor(() => {
+      const executeOnly = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
+      expect(executeOnly).toEqual(["retry query", "query failed"]);
+    });
+  });
 });
