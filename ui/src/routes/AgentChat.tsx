@@ -425,6 +425,48 @@ function DecisionLog({ events }: { events?: any[] }) {
     : filteredEvents.slice(0, MAX_VISIBLE_EVENTS);
   const hasHiddenEvents = filteredEvents.length > MAX_VISIBLE_EVENTS;
   const serializedDecisionLog = toPrettyJson(normalizedEvents.map((item) => item.event));
+  const severityTone = (event: any): "neutral" | "info" | "warn" | "error" => {
+    const raw = String(
+      event?.severity ?? event?.level ?? event?.type ?? event?.event_type ?? ""
+    )
+      .trim()
+      .toLowerCase();
+    if (!raw) return "neutral";
+    if (raw.includes("error") || raw.includes("fail")) return "error";
+    if (raw.includes("warn") || raw.includes("retry") || raw.includes("timeout")) return "warn";
+    if (raw.includes("info") || raw.includes("debug")) return "info";
+    return "neutral";
+  };
+  const severityStyle = (
+    tone: "neutral" | "info" | "warn" | "error"
+  ): { background: string; borderColor: string; labelColor: string } => {
+    if (tone === "error") {
+      return {
+        background: "rgba(220, 53, 69, 0.08)",
+        borderColor: "rgba(220, 53, 69, 0.28)",
+        labelColor: "var(--error)",
+      };
+    }
+    if (tone === "warn") {
+      return {
+        background: "rgba(245, 158, 11, 0.08)",
+        borderColor: "rgba(245, 158, 11, 0.3)",
+        labelColor: "#b45309",
+      };
+    }
+    if (tone === "info") {
+      return {
+        background: "rgba(59, 130, 246, 0.07)",
+        borderColor: "rgba(59, 130, 246, 0.26)",
+        labelColor: "#1d4ed8",
+      };
+    }
+    return {
+      background: "var(--surface-muted)",
+      borderColor: "var(--border-muted)",
+      labelColor: "var(--muted)",
+    };
+  };
 
   return (
     <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
@@ -484,6 +526,8 @@ function DecisionLog({ events }: { events?: any[] }) {
             const ev = item.event;
             const timestampMs = item.timestampMs;
             const eventType = String(ev?.type ?? ev?.event_type ?? ev?.action ?? "").trim();
+            const tone = severityTone(ev);
+            const toneStyle = severityStyle(tone);
             const payloadRaw = ev?.payload ?? ev?.details ?? ev?.metadata ?? ev?.context;
             const payloadText = payloadRaw == null
               ? ""
@@ -493,12 +537,12 @@ function DecisionLog({ events }: { events?: any[] }) {
             const payloadLines = payloadText ? payloadText.split("\n").length : 0;
             const collapsePayloadByDefault = payloadText.length > 200 || payloadLines > 4;
             return (
-            <div key={item.key} data-testid="decision-event-item" style={{
+            <div key={item.key} data-testid="decision-event-item" data-severity={tone} style={{
               fontSize: "0.8rem",
               padding: "10px 12px",
               borderRadius: "8px",
-              background: "var(--surface-muted)",
-              border: "1px solid var(--border-muted)"
+              background: toneStyle.background,
+              border: `1px solid ${toneStyle.borderColor}`,
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
                 <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
@@ -506,9 +550,9 @@ function DecisionLog({ events }: { events?: any[] }) {
                   {formatTimestamp(timestampMs, { style: "time", fallback: "No timestamp" })}
                 </span>
               </div>
-              {eventType && (
+              {(eventType || tone !== "neutral") && (
                 <div style={{ marginBottom: "4px", color: "var(--muted)", fontSize: "0.74rem", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  {eventType}
+                  {eventType || "event"} · <span data-testid="decision-event-severity" style={{ color: toneStyle.labelColor }}>{tone}</span>
                 </div>
               )}
               <div data-testid="decision-event-decision" style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>

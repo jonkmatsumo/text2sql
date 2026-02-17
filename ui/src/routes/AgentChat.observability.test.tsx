@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AgentChat from "./AgentChat";
@@ -345,5 +345,51 @@ describe("AgentChat observability", () => {
       const executeOnly = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
       expect(executeOnly).toEqual(["retry query", "query failed"]);
     });
+  });
+
+  it("applies severity styling from event metadata when available", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Severity events",
+            decision_events: [
+              { timestamp: 1700000001, node: "execute", decision: "failed run", reason: "fatal", level: "error" },
+              { timestamp: 1700000002, node: "execute", decision: "retry run", reason: "timeout", type: "warn" },
+              { timestamp: 1700000003, node: "plan", decision: "planned path", reason: "normal" },
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "severity decisions" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Severity events")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Decision Log \(3 events\)/));
+
+    const cards = screen.getAllByTestId("decision-event-item");
+    const severityByDecision = new Map(
+      cards.map((card) => [
+        within(card).getByTestId("decision-event-decision").textContent,
+        card.getAttribute("data-severity"),
+      ])
+    );
+    expect(severityByDecision.get("failed run")).toBe("error");
+    expect(severityByDecision.get("retry run")).toBe("warn");
+    expect(severityByDecision.get("planned path")).toBe("neutral");
   });
 });
