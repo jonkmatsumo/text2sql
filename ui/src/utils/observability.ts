@@ -20,6 +20,20 @@ export interface CopyBundleMessageInput {
   resultCompleteness?: any;
 }
 
+function readFirstNonEmptyString(values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function normalizeRetryCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.trunc(value));
+}
+
 function toTimestampMs(
   value: TimestampInput,
   inputInSeconds: boolean = false
@@ -128,13 +142,74 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
   };
 }
 
-export function normalizeDecisionEvents(events: any[]): NormalizedDecisionEvent[] {
+export function normalizeDecisionEvent(
+  rawEvent: unknown,
+  originalIndex: number
+): { event: Record<string, unknown>; timestampMs: number | null } {
+  const source =
+    rawEvent && typeof rawEvent === "object" && !Array.isArray(rawEvent)
+      ? { ...(rawEvent as Record<string, unknown>) }
+      : typeof rawEvent === "string" && rawEvent.trim()
+        ? { message: rawEvent.trim() }
+        : { raw_event: rawEvent };
+
+  const timestampCandidate = [
+    source.timestamp,
+    source.ts,
+    source.time,
+    source.created_at,
+    source.occurred_at,
+  ].find((value) => value != null) as TimestampInput;
+  const timestampMs = toTimestampMs(timestampCandidate);
+
+  const node = readFirstNonEmptyString([source.node, source.phase]) ?? "Agent";
+  const phase = readFirstNonEmptyString([source.phase, source.node]);
+  const decision =
+    readFirstNonEmptyString([
+      source.decision,
+      source.message,
+      source.action,
+      source.event_type,
+      source.type,
+      source.level,
+    ]) ?? "(no decision recorded)";
+  const reason = readFirstNonEmptyString([
+    source.reason,
+    source.detail,
+    source.description,
+    source.message,
+  ]) ?? "";
+  const type = readFirstNonEmptyString([source.type, source.event_type, source.action]);
+
+  return {
+    event: {
+      ...source,
+      node,
+      phase: phase ?? source.phase,
+      decision,
+      reason,
+      type,
+      event_type: source.event_type ?? type,
+      retry_count: normalizeRetryCount(source.retry_count),
+    },
+    timestampMs,
+  };
+}
+
+export function normalizeDecisionEvents(
+  events: unknown[] | null | undefined
+): NormalizedDecisionEvent[] {
+  if (!Array.isArray(events) || events.length === 0) return [];
+
   const sorted = events
-    .map((event, originalIndex) => ({
-      event,
-      originalIndex,
-      timestampMs: toTimestampMs(event?.timestamp),
-    }))
+    .map((rawEvent, originalIndex) => {
+      const normalized = normalizeDecisionEvent(rawEvent, originalIndex);
+      return {
+        event: normalized.event,
+        originalIndex,
+        timestampMs: normalized.timestampMs,
+      };
+    })
     .sort((left, right) => {
       if (left.timestampMs != null && right.timestampMs != null && left.timestampMs !== right.timestampMs) {
         return left.timestampMs - right.timestampMs;

@@ -703,4 +703,49 @@ describe("AgentChat observability", () => {
     expect(screen.getByLabelText("Search decision events")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter decision events by phase")).toBeInTheDocument();
   });
+
+  it("renders decision events with unknown shapes and missing timestamps safely", async () => {
+    const mockedStream = runAgentStream as ReturnType<typeof vi.fn>;
+    mockedStream.mockReturnValue(
+      makeStream([
+        {
+          event: "result",
+          data: {
+            response: "Unknown decisions",
+            decision_events: [
+              { node: "router", decision: "route request", reason: "router" },
+              { payload: { foo: "bar" } },
+              "raw decision note",
+            ],
+          },
+        },
+      ])
+    );
+
+    render(
+      <MemoryRouter>
+        <AgentChat />
+      </MemoryRouter>
+    );
+
+    const input = screen.getByPlaceholderText(/ask a question/i);
+    fireEvent.change(input, { target: { value: "unknown decision shapes" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown decisions")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("decision-log-toggle"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("decision-event-item")).toHaveLength(3);
+    });
+
+    const decisions = screen.getAllByTestId("decision-event-decision").map((node) => node.textContent);
+    expect(decisions).toContain("route request");
+    expect(decisions).toContain("(no decision recorded)");
+    expect(decisions).toContain("raw decision note");
+    expect(screen.getAllByText("No timestamp").length).toBeGreaterThan(0);
+  });
 });
