@@ -221,6 +221,45 @@ function RetrySummaryBadge({ summary }: { summary: any }) {
   );
 }
 
+function DecisionLog({ events }: { events?: any[] }) {
+  if (!events || events.length === 0) return null;
+
+  return (
+    <div className="decision-log" style={{ marginTop: "16px", borderTop: "1px solid var(--border-muted)", paddingTop: "12px", width: "100%" }}>
+      <details style={{ width: "100%" }}>
+        <summary style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}>
+          <span>📋</span> Decision Log ({events.length} events)
+        </summary>
+        <div style={{ marginTop: "12px", display: "grid", gap: "10px" }}>
+          {events.map((ev, i) => (
+            <div key={i} style={{
+              fontSize: "0.8rem",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              background: "var(--surface-muted)",
+              border: "1px solid var(--border-muted)"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                <strong style={{ color: "var(--accent)" }}>{ev.node || "Agent"}</strong>
+                <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
+                  {new Date(ev.timestamp * 1000).toLocaleTimeString()}
+                </span>
+              </div>
+              <div style={{ fontWeight: 500, color: "var(--ink)" }}>{ev.decision}</div>
+              <div style={{ color: "var(--muted)", fontStyle: "italic", marginTop: "2px", lineHeight: "1.4" }}>{ev.reason}</div>
+              {ev.retry_count > 0 && (
+                <div style={{ marginTop: "6px", fontSize: "0.75rem", color: "#f59e0b", fontWeight: 600 }}>
+                  Retry #{ev.retry_count} {ev.error_category ? `(${ev.error_category.replace(/_/g, " ")})` : ""}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function ResultCompletenessBanner({ completeness }: { completeness: any }) {
   if (!completeness || (!completeness.is_truncated && !completeness.is_limited && !completeness.next_page_token && !completeness.schema_mismatch && !completeness.token_expired)) {
     return null;
@@ -999,6 +1038,7 @@ export default function AgentChat() {
                     <RetrySummaryBadge summary={msg.retrySummary} />
                     <ValidationSummaryBadge summary={msg.validationSummary} />
                   </div>
+                  {msg.role === "assistant" && <DecisionLog events={msg.decisionEvents} />}
 
                   {msg.vizSpec && (
                     <div style={{ marginTop: "16px" }}>
