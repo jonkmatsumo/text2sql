@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import RunHistory from "./RunHistory";
@@ -35,36 +35,54 @@ describe("RunHistory search scope messaging", () => {
         vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: vi.fn() } as any);
     });
 
-    it("renders the page-scoped search disclaimer near the search input", async () => {
+    it("hides the page-scoped search disclaimer when query is empty", async () => {
         renderRunHistory();
 
         await waitFor(() => {
             expect(OpsService.listRuns).toHaveBeenCalledTimes(1);
         });
 
-        expect(screen.getByTestId("runhistory-search-scope-note")).toHaveTextContent(
-            "Search currently filters the loaded page only. Use pagination to search older runs."
-        );
+        expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
     });
 
     it("mentions page-scoped search in empty state when query yields no loaded-page match", async () => {
         renderRunHistory("/admin/runs?q=missing");
 
         await waitFor(() => {
-            expect(screen.getByText("No runs matched your search on this loaded page.")).toBeInTheDocument();
+            expect(screen.getByText("No matches on this page. Try Next to search older runs.")).toBeInTheDocument();
         });
 
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
-            "Search currently filters the loaded page only. Use pagination to search older runs."
+            "Search filters the current page. Use Next/Prev to search older runs."
         );
+    });
+
+    it("shows the page-scoped disclaimer while the search input is focused", async () => {
+        renderRunHistory();
+        const searchInput = await screen.findByLabelText("Search runs by query or ID");
+
+        fireEvent.focus(searchInput);
+        expect(screen.getByTestId("runhistory-search-scope-note")).toHaveTextContent(
+            "Search filters the current page. Use Next/Prev to search older runs."
+        );
+
+        fireEvent.blur(searchInput);
+        await waitFor(() => {
+            expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
+        });
     });
 
     it("does not clear all filters when Escape is pressed in the search input", async () => {
         renderRunHistory("/admin/runs?q=missing&status=FAILED");
 
         const searchInput = await screen.findByLabelText("Search runs by query or ID");
-        searchInput.focus();
-        fireEvent.keyDown(window, { key: "Escape" });
+        await act(async () => {
+            searchInput.focus();
+        });
+        expect(searchInput).toHaveFocus();
+        await act(async () => {
+            fireEvent.keyDown(window, { key: "Escape" });
+        });
 
         expect(searchInput).toHaveValue("missing");
         expect(searchInput).not.toHaveFocus();
@@ -75,8 +93,12 @@ describe("RunHistory search scope messaging", () => {
         renderRunHistory("/admin/runs?q=missing&status=FAILED");
 
         const searchInput = await screen.findByLabelText("Search runs by query or ID");
-        searchInput.blur();
-        fireEvent.keyDown(window, { key: "Escape" });
+        await act(async () => {
+            fireEvent.blur(searchInput);
+        });
+        await act(async () => {
+            fireEvent.keyDown(window, { key: "Escape" });
+        });
 
         await waitFor(() => {
             expect(searchInput).toHaveValue("");

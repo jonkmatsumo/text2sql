@@ -25,7 +25,7 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
     { value: "None", label: "No Feedback" },
 ];
 
-const PAGE_SCOPED_SEARCH_NOTE = "Search currently filters the loaded page only. Use pagination to search older runs.";
+const PAGE_SCOPED_SEARCH_NOTE = "Search filters the current page. Use Next/Prev to search older runs.";
 
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -33,6 +33,7 @@ export default function RunHistory() {
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
 
     const copyLink = useCallback(() => {
         navigator.clipboard.writeText(window.location.href).then(() => {
@@ -128,6 +129,7 @@ export default function RunHistory() {
         ),
         [runs, searchQuery]
     );
+    const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -167,12 +169,16 @@ export default function RunHistory() {
                         placeholder="Keyword search..."
                         value={searchQuery}
                         onChange={(e) => updateFilters({ q: e.target.value })}
+                        onFocus={() => setIsSearchFocused(true)}
+                        onBlur={() => setIsSearchFocused(false)}
                         aria-label="Search runs by query or ID"
                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                     />
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-search-scope-note">
-                        {PAGE_SCOPED_SEARCH_NOTE}
-                    </p>
+                    {showPageScopedSearchNote && (
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-search-scope-note">
+                            {PAGE_SCOPED_SEARCH_NOTE}
+                        </p>
+                    )}
                 </div>
                 <FilterSelect
                     label="Status"
@@ -214,7 +220,7 @@ export default function RunHistory() {
                                         <p className="text-gray-500 italic">
                                             {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
                                                 ? (searchQuery !== ""
-                                                    ? "No runs matched your search on this loaded page."
+                                                    ? "No matches on this page. Try Next to search older runs."
                                                     : "No historical runs found matching these filters.")
                                                 : "No runs recorded yet."}
                                         </p>
