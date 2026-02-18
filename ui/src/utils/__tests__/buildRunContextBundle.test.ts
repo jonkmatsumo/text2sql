@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import { buildRunContextBundle } from "../buildRunContextBundle";
 
 describe("buildRunContextBundle", () => {
+    it("includes bundle version header", () => {
+        const result = buildRunContextBundle({ runId: "abc-123" });
+        expect(result).toContain("Bundle-Version: 1");
+    });
+
     it("includes run ID when provided", () => {
         const result = buildRunContextBundle({ runId: "abc-123" });
         expect(result).toContain("Run ID:           abc-123");

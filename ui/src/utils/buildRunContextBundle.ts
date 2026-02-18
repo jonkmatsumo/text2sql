@@ -1,5 +1,3 @@
-import { toPrettyJson } from "./observability";
-
 export interface RunContextInput {
     runId?: string;
     traceId?: string;
@@ -15,9 +13,12 @@ export interface RunContextInput {
 /**
  * Builds a human-readable, copy-pasteable context bundle for a run.
  * Useful for sharing with support, filing bugs, or attaching to incident reports.
+ *
+ * This text bundle intentionally differs from `buildCopyBundlePayload`, which emits
+ * a structured JSON payload for AgentChat export and downstream parsing.
  */
 export function buildRunContextBundle(input: RunContextInput): string {
-    const lines: string[] = ["=== Run Context Bundle ==="];
+    const lines: string[] = ["=== Run Context Bundle ===", "Bundle-Version: 1"];
 
     if (input.runId) lines.push(`Run ID:           ${input.runId}`);
     if (input.traceId) lines.push(`Trace ID:         ${input.traceId}`);
