@@ -93,10 +93,12 @@ export default function Diagnostics() {
             isFetchingRef.current = false;
         }
 
-        // Fetch degraded runs separately but concurrently
+        // Fetch degraded runs concurrently (failed + negatively rated)
         try {
-            const failed = await OpsService.listRuns(5, 0, "FAILED");
-            const negative = await OpsService.listRuns(5, 0, "All", "DOWN");
+            const [failed, negative] = await Promise.all([
+                OpsService.listRuns(5, 0, "FAILED"),
+                OpsService.listRuns(5, 0, "All", "DOWN"),
+            ]);
             // Combine and dedupe by ID
             const combined = [...failed, ...negative].reduce((acc: Interaction[], curr) => {
                 if (!acc.find(item => item.id === curr.id)) {

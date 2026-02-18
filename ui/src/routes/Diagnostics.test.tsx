@@ -3,11 +3,14 @@ import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
-import { getDiagnostics } from "../api";
+import { getDiagnostics, OpsService } from "../api";
 import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
+    OpsService: {
+        listRuns: vi.fn(),
+    },
 }));
 
 const mockData = {
@@ -57,6 +60,7 @@ function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
 describe("Diagnostics Route", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        (OpsService.listRuns as any).mockResolvedValue([]);
     });
 
     it("renders loading state initially", async () => {
@@ -78,6 +82,32 @@ describe("Diagnostics Route", () => {
         expect(screen.getByText("2.5")).toBeInTheDocument();
         expect(screen.getByText(/schema binding validation: true/i)).toBeInTheDocument();
         expect(screen.getByTestId("diagnostics-last-updated")).toHaveTextContent(/Last updated:/i);
+    });
+
+    it("requests degraded runs concurrently", async () => {
+        let resolveFailed: ((value: any[]) => void) | undefined;
+        const failedPromise = new Promise<any[]>((resolve) => {
+            resolveFailed = resolve;
+        });
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockImplementationOnce(() => failedPromise)
+            .mockImplementationOnce(() => Promise.resolve([]));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
+        });
+
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([5, 0, "FAILED"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([5, 0, "All", "DOWN"]);
+
+        if (resolveFailed) {
+            await act(async () => {
+                resolveFailed!([]);
+            });
+        }
     });
 
     it("shows debug panels only when isDebug is true", async () => {
