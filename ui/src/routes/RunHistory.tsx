@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { OpsService } from "../api";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { useToast } from "../hooks/useToast";
@@ -49,9 +49,12 @@ export default function RunHistory() {
         fetchRuns();
     }, [fetchRuns]);
 
-    const filteredRuns = runs.filter(run =>
-        run.user_nlq_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        run.id.toLowerCase().includes(searchQuery.toLowerCase())
+    const filteredRuns = useMemo(() =>
+        runs.filter(run =>
+            run.user_nlq_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            run.id.toLowerCase().includes(searchQuery.toLowerCase())
+        ),
+        [runs, searchQuery]
     );
 
     return (
@@ -71,6 +74,7 @@ export default function RunHistory() {
                         placeholder="Keyword search..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
+                        aria-label="Search runs by query or ID"
                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                 </div>
@@ -89,7 +93,7 @@ export default function RunHistory() {
             </div>
 
             <div className="bg-white dark:bg-gray-900 shadow overflow-hidden sm:rounded-lg border border-gray-200 dark:border-gray-800">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800" aria-label="Run history table">
                     <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
                         <tr>
                             <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Run ID</th>
@@ -139,6 +143,7 @@ export default function RunHistory() {
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                         <Link
                                             to={`/admin/runs/${run.id}`}
+                                            aria-label={`View details for run ${run.id}`}
                                             className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                         >
                                             Details
@@ -161,16 +166,18 @@ export default function RunHistory() {
                 <button
                     onClick={() => setOffset(Math.max(0, offset - limit))}
                     disabled={offset === 0 || isLoading}
+                    aria-label="Previous page"
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Previous
                 </button>
-                <div className="text-sm text-gray-700 dark:text-gray-300">
+                <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
                     Showing results {offset + 1} - {offset + runs.length}
                 </div>
                 <button
                     onClick={() => setOffset(offset + limit)}
                     disabled={runs.length < limit || isLoading}
+                    aria-label="Next page"
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Next
