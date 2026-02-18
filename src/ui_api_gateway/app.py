@@ -222,6 +222,7 @@ class OpsJobStatus(str, Enum):
 
     PENDING = "PENDING"
     RUNNING = "RUNNING"
+    CANCELLED = "CANCELLED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -855,6 +856,22 @@ async def _update_job_status_failed(job_id: UUID, error_message: str) -> None:
             )
     else:
         await OpsJobsClient.update_status(job_id, "FAILED", error_message=error_message)
+
+
+async def _update_job_status_cancelled(job_id: UUID) -> None:
+    """Update job status to CANCELLED using configured client."""
+    if use_legacy_dal():
+        async with ControlPlaneDatabase.get_direct_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE ops_jobs
+                SET status = 'CANCELLED', finished_at = NOW()
+                WHERE id = $1
+                """,
+                job_id,
+            )
+    else:
+        await OpsJobsClient.update_status(job_id, "CANCELLED")
 
 
 async def _update_job_progress(job_id: UUID, progress: Dict[str, Any]) -> None:
@@ -1741,6 +1758,24 @@ async def get_job_status(job_id: UUID) -> Any:
         error_message=job.get("error_message"),
         result=job.get("result") or {},
     )
+
+
+@app.post(
+    "/ops/jobs/{job_id}/cancel",
+    response_model=OpsJobResponse,
+    dependencies=[Depends(check_internal_auth)],
+)
+async def cancel_job(job_id: UUID) -> Any:
+    """Cancel a background job."""
+    job = await _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] not in [OpsJobStatus.PENDING, OpsJobStatus.RUNNING]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job in {job['status']} state")
+
+    await _update_job_status_cancelled(job_id)
+    return await get_job_status(job_id)
 
 
 @app.get(

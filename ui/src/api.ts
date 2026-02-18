@@ -537,6 +537,15 @@ export const OpsService = {
     return response.json();
   },
 
+  async cancelJob(jobId: string): Promise<any> {
+    const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}/cancel`, {
+      method: "POST",
+      headers: getAuthHeaders()
+    });
+    if (!response.ok) await throwApiError(response, "Failed to cancel job");
+    return response.json();
+  },
+
   async listJobs(
     limit: number = 50,
     jobType?: string,
@@ -551,7 +560,26 @@ export const OpsService = {
     });
     if (!response.ok) await throwApiError(response, "Failed to list jobs");
     return response.json();
-  }
+  },
+
+  async listRuns(
+    limit: number = 50,
+    offset: number = 0,
+    status: string = "All",
+    thumb: string = "All"
+  ): Promise<any[]> {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString(),
+      status,
+      thumb,
+    });
+    const response = await fetch(`${uiApiBase}/interactions?${params}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) await throwApiError(response, "Failed to load runs");
+    return response.json();
+  },
 };
 
 // --- Ingestion Wizard Types & Service ---
@@ -923,9 +951,10 @@ export async function* runAgentStream(request: AgentRunRequest): AsyncGenerator<
 /**
  * Fetch operator-safe runtime diagnostics.
  */
-export async function getDiagnostics(debug = false): Promise<any> {
+export async function getDiagnostics(debug = false, runId?: string): Promise<any> {
   const url = new URL("/agent/diagnostics", agentBase);
   if (debug) url.searchParams.set("debug", "true");
+  if (runId) url.searchParams.set("audit_run_id", runId);
 
   const response = await fetch(url.toString(), {
     headers: {

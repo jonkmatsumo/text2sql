@@ -1,15 +1,19 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { OpsService } from "../api";
-import { OpsJobResponse } from "../types/admin";
+import { OpsJobResponse, OpsJobStatus } from "../types/admin";
 import { JobsTable } from "../components/ops/JobsTable";
 import { useToast } from "../hooks/useToast";
+import { useConfirmation } from "../hooks/useConfirmation";
+import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
 export default function JobsDashboard() {
     const [jobs, setJobs] = useState<OpsJobResponse[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(new Set());
     const [filterType, setFilterType] = useState<string>("");
     const [filterStatus, setFilterStatus] = useState<string>("");
     const { show: showToast } = useToast();
+    const { confirm, dialogProps } = useConfirmation();
 
     const fetchJobs = useCallback(async () => {
         setIsLoading(true);
@@ -28,6 +32,94 @@ export default function JobsDashboard() {
         const interval = setInterval(fetchJobs, 5000); // Poll every 5s
         return () => clearInterval(interval);
     }, [fetchJobs]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const isInputFocused = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT";
+
+            if (e.key === "r" && !isInputFocused) {
+                e.preventDefault();
+                fetchJobs();
+            } else if (e.key === "Escape") {
+                setFilterType("");
+                setFilterStatus("");
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [fetchJobs]);
+
+    const pollJobUntilTerminal = useCallback(async (jobId: string, maxAttempts = 10) => {
+        let attempts = 0;
+        const interval = setInterval(async () => {
+            attempts++;
+            try {
+                const job = await OpsService.getJobStatus(jobId);
+                if (job.status === "CANCELLED" || job.status === "FAILED" || job.status === "COMPLETED") {
+                    clearInterval(interval);
+                    showToast(`Job ${jobId.slice(0, 8)} reaches terminal state: ${job.status}`, "success");
+                    fetchJobs();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    fetchJobs();
+                }
+            } catch (err) {
+                clearInterval(interval);
+            }
+        }, 2000);
+    }, [fetchJobs, showToast]);
+
+    const handleCancel = async (jobId: string) => {
+        if (cancellingJobIds.has(jobId)) return;
+
+        const job = jobs.find(j => j.id === jobId);
+        if (!job || job.status === "CANCELLING") return;
+
+        setCancellingJobIds((prev: Set<string>) => {
+            const next = new Set(prev);
+            next.add(jobId);
+            return next;
+        });
+
+        const confirmed = await confirm({
+            title: "Cancel Job",
+            description: "Are you sure you want to cancel this background job? This action cannot be undone.",
+            confirmText: "Cancel Job",
+            danger: true
+        });
+
+        if (!confirmed) {
+            setCancellingJobIds((prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(jobId);
+                return next;
+            });
+            return;
+        }
+
+        // Optimistic update
+        setJobs((prev: OpsJobResponse[]) => prev.map(j => (j.id === jobId ? { ...j, status: "CANCELLING" as OpsJobStatus } : j)));
+
+        try {
+            await OpsService.cancelJob(jobId);
+            showToast("Job cancellation requested", "success");
+            pollJobUntilTerminal(jobId);
+        } catch (err: any) {
+            let message = err.message || "Failed to cancel job";
+            if (err.code === "JOB_ALREADY_TERMINAL" || err.status === 409) {
+                message = "Job is already completed and cannot be canceled.";
+            }
+            showToast(message, "error");
+            fetchJobs(); // Force refresh to show current status
+        } finally {
+            setCancellingJobIds((prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(jobId);
+                return next;
+            });
+        }
+    };
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -77,8 +169,10 @@ export default function JobsDashboard() {
             </div>
 
             <div className="mt-8 flex flex-col">
-                <JobsTable jobs={jobs} isLoading={isLoading} />
+                <JobsTable jobs={jobs} isLoading={isLoading} onCancel={handleCancel} cancellingJobIds={cancellingJobIds} />
             </div>
+
+            <ConfirmationDialog {...dialogProps} />
         </div>
     );
 }

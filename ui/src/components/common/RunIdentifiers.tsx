@@ -1,6 +1,7 @@
 import React from "react";
 import { CopyButton } from "../artifacts/CopyButton";
 import TraceLink from "./TraceLink";
+import { Link } from "react-router-dom";
 
 export interface RunIdentifiersProps {
   traceId?: string;
@@ -63,6 +64,21 @@ function RunIdentifiersComponent({
           <span>request: {shortId(normalizedRequestId)}</span>
           <CopyButton text={normalizedRequestId} label="Copy request id" />
         </div>
+      )}
+      {(normalizedTraceId || normalizedInteractionId || normalizedRequestId) && (
+        <Link
+          to={`/admin/runs/${normalizedTraceId || normalizedInteractionId || normalizedRequestId}`}
+          style={{
+            marginLeft: "auto",
+            color: "var(--accent)",
+            textDecoration: "none",
+            fontWeight: 500,
+            fontSize: "0.75rem",
+          }}
+          className="hover:underline"
+        >
+          View Details &rarr;
+        </Link>
       )}
     </div>
   );

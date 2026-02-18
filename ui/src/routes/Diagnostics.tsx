@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getDiagnostics } from "../api";
+import { getDiagnostics, OpsService } from "../api";
+import { Link } from "react-router-dom";
+import { Interaction } from "../types/admin";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
@@ -65,6 +67,7 @@ export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<DiagnosticsError | null>(null);
+    const [degradedRuns, setDegradedRuns] = useState<Interaction[]>([]);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const isFetchingRef = useRef(false);
 
@@ -88,6 +91,29 @@ export default function Diagnostics() {
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
+        }
+
+        // Fetch degraded runs separately but concurrently
+        try {
+            const failed = await OpsService.listRuns(5, 0, "FAILED");
+            const negative = await OpsService.listRuns(5, 0, "All", "DOWN");
+            // Combine and dedupe by ID
+            const combined = [...failed, ...negative].reduce((acc: Interaction[], curr) => {
+                if (!acc.find(item => item.id === curr.id)) {
+                    // Defensive normalization for partial payloads
+                    const normalized = {
+                        ...curr,
+                        user_nlq_text: curr.user_nlq_text || "Unknown",
+                        execution_status: curr.execution_status || "UNKNOWN",
+                        created_at: curr.created_at || new Date().toISOString()
+                    };
+                    acc.push(normalized);
+                }
+                return acc;
+            }, []);
+            setDegradedRuns(combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5));
+        } catch (err) {
+            console.error("Failed to load degraded runs", err);
         }
     }, []);
 
@@ -295,137 +321,180 @@ export default function Diagnostics() {
                         </div>
                     )}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "24px" }}>
-                    {/* Runtime Indicators */}
-                    {showRuntimePanel && (
-                    <div className="panel" style={{ padding: "24px" }}>
-                        <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Runtime Indicators</h3>
-                        {visibleRuntimeRows.length === 0 ? (
-                            <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-                                No runtime anomalies detected.
-                            </div>
-                        ) : (
-                            <div style={{ display: "grid", gap: "16px" }}>
-                                {visibleRuntimeRows.map((row) => (
-                                    <div
-                                        key={row.id}
-                                        style={{
-                                            display: "flex",
-                                            justifySelf: "stretch",
-                                            justifyContent: "space-between",
-                                            alignItems: "center",
-                                            padding: row.isAnomaly ? "6px 8px" : undefined,
-                                            borderRadius: row.isAnomaly ? "8px" : undefined,
-                                            background: row.isAnomaly ? "rgba(245, 158, 11, 0.08)" : undefined,
-                                            border: row.isAnomaly ? "1px solid rgba(245, 158, 11, 0.25)" : undefined,
-                                        }}
-                                    >
-                                        <span style={{ color: "var(--muted)" }}>{row.label}</span>
-                                        <span style={{ fontWeight: 600, fontSize: row.id === "avg_query_complexity" ? "1.1rem" : undefined }}>
-                                            {row.value}
-                                        </span>
+                        {/* Runtime Indicators */}
+                        {showRuntimePanel && (
+                            <div className="panel" style={{ padding: "24px" }}>
+                                <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Runtime Indicators</h3>
+                                {visibleRuntimeRows.length === 0 ? (
+                                    <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                                        No runtime anomalies detected.
                                     </div>
-                                ))}
+                                ) : (
+                                    <div style={{ display: "grid", gap: "16px" }}>
+                                        {visibleRuntimeRows.map((row) => (
+                                            <div
+                                                key={row.id}
+                                                style={{
+                                                    display: "flex",
+                                                    justifySelf: "stretch",
+                                                    justifyContent: "space-between",
+                                                    alignItems: "center",
+                                                    padding: row.isAnomaly ? "6px 8px" : undefined,
+                                                    borderRadius: row.isAnomaly ? "8px" : undefined,
+                                                    background: row.isAnomaly ? "rgba(245, 158, 11, 0.08)" : undefined,
+                                                    border: row.isAnomaly ? "1px solid rgba(245, 158, 11, 0.25)" : undefined,
+                                                }}
+                                            >
+                                                <span style={{ color: "var(--muted)" }}>{row.label}</span>
+                                                <span style={{ fontWeight: 600, fontSize: row.id === "avg_query_complexity" ? "1.1rem" : undefined }}>
+                                                    {row.value}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
-                    </div>
-                    )}
 
-                    {/* Configuration & Policy */}
-                    {showConfigPanel && (
-                    <div className="panel" style={{ padding: "24px" }}>
-                        <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Configuration & Policy</h3>
-                        <div style={{ display: "grid", gap: "12px" }}>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--muted)" }}>Database Provider</span>
-                                <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{data.active_database_provider || "Unknown"}</span>
-                            </div>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--muted)" }}>Retry Policy</span>
-                                <span>
-                                    {retryPolicy?.mode ? `${retryPolicy.mode} (max ${retryPolicy.max_retries ?? 0})` : "—"}
-                                </span>
-                            </div>
-                            <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
-                                <span style={{ color: "var(--muted)" }}>Schema Cache TTL</span>
-                                <span>{schemaCacheTtlDisplay}</span>
-                            </div>
-                        </div>
-
-                        <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
-                            <h4 style={{ margin: "12px 0", fontSize: "0.9rem", color: "var(--muted)" }}>Feature Flags</h4>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "0.8rem" }}>
-                                {Object.entries(enabledFlags).map(([key, val]) => (
-                                    <div key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                        <span style={{
-                                            width: "8px",
-                                            height: "8px",
-                                            borderRadius: "50%",
-                                            backgroundColor: val === true ? "var(--success)" : val === false ? "var(--muted)" : "var(--accent)"
-                                        }} />
-                                        <span style={{ wordBreak: "break-all" }}>{key.replace(/_/g, " ")}: {String(val)}</span>
+                        {/* Configuration & Policy */}
+                        {showConfigPanel && (
+                            <div className="panel" style={{ padding: "24px" }}>
+                                <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Configuration & Policy</h3>
+                                <div style={{ display: "grid", gap: "12px" }}>
+                                    <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
+                                        <span style={{ color: "var(--muted)" }}>Database Provider</span>
+                                        <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{data.active_database_provider || "Unknown"}</span>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                    )}
-
-                    {/* Latency Breakdown (Debug only) */}
-                    {showLatencyPanel && (
-                        <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
-                            <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Latency Breakdown</h3>
-                            {visibleLatencyRows.length === 0 && filterMode === "anomalies" ? (
-                                <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
-                                    No latency anomalies detected.
+                                    <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
+                                        <span style={{ color: "var(--muted)" }}>Retry Policy</span>
+                                        <span>
+                                            {retryPolicy?.mode ? `${retryPolicy.mode} (max ${retryPolicy.max_retries ?? 0})` : "—"}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between" }}>
+                                        <span style={{ color: "var(--muted)" }}>Schema Cache TTL</span>
+                                        <span>{schemaCacheTtlDisplay}</span>
+                                    </div>
                                 </div>
-                            ) : (
-                                <div style={{ overflowX: "auto" }}>
-                                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
-                                        <thead>
-                                            <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                                                <th style={{ textAlign: "left", padding: "12px" }}>Stage</th>
-                                                <th style={{ textAlign: "right", padding: "12px" }}>Latency (ms)</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {visibleLatencyRows.map((item) => (
-                                                <tr
-                                                    key={item.stage}
-                                                    style={{
-                                                        borderBottom: "1px solid var(--border-muted)",
-                                                        background: anomalyIds.has(`latency:${item.stage}`) ? "rgba(245, 158, 11, 0.08)" : undefined,
-                                                    }}
-                                                >
-                                                    <td style={{ padding: "12px", textTransform: "capitalize" }}>{item.stage.replace(/_/g, " ")}</td>
-                                                    <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>
-                                                        {formatMilliseconds(item.value)}
-                                                    </td>
+
+                                <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid var(--border)" }}>
+                                    <h4 style={{ margin: "12px 0", fontSize: "0.9rem", color: "var(--muted)" }}>Feature Flags</h4>
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "0.8rem" }}>
+                                        {Object.entries(enabledFlags).map(([key, val]) => (
+                                            <div key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                <span style={{
+                                                    width: "8px",
+                                                    height: "8px",
+                                                    borderRadius: "50%",
+                                                    backgroundColor: val === true ? "var(--success)" : val === false ? "var(--muted)" : "var(--accent)"
+                                                }} />
+                                                <span style={{ wordBreak: "break-all" }}>{key.replace(/_/g, " ")}: {String(val)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Latency Breakdown (Debug only) */}
+                        {showLatencyPanel && (
+                            <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
+                                <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>Latency Breakdown</h3>
+                                {visibleLatencyRows.length === 0 && filterMode === "anomalies" ? (
+                                    <div style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                                        No latency anomalies detected.
+                                    </div>
+                                ) : (
+                                    <div style={{ overflowX: "auto" }}>
+                                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                                    <th style={{ textAlign: "left", padding: "12px" }}>Stage</th>
+                                                    <th style={{ textAlign: "right", padding: "12px" }}>Latency (ms)</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody>
+                                                {visibleLatencyRows.map((item) => (
+                                                    <tr
+                                                        key={item.stage}
+                                                        style={{
+                                                            borderBottom: "1px solid var(--border-muted)",
+                                                            background: anomalyIds.has(`latency:${item.stage}`) ? "rgba(245, 158, 11, 0.08)" : undefined,
+                                                        }}
+                                                    >
+                                                        <td style={{ padding: "12px", textTransform: "capitalize" }}>{item.stage.replace(/_/g, " ")}</td>
+                                                        <td style={{ padding: "12px", textAlign: "right", fontWeight: 600 }}>
+                                                            {formatMilliseconds(item.value)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Recent Degraded Runs Panel */}
+                        <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
+                            <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ color: "var(--error)" }}>⚠️</span> Recent Degraded Runs
+                            </h3>
+                            {degradedRuns.length === 0 ? (
+                                <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic" }}>
+                                    No recent failed or negatively rated runs detected.
+                                </p>
+                            ) : (
+                                <div style={{ display: "grid", gap: "12px" }}>
+                                    {degradedRuns.map((run) => (
+                                        <div key={run.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                                    <span className={`pill text-xs font-bold ${run.execution_status === 'FAILED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`} style={{ padding: "2px 8px", borderRadius: "12px" }}>
+                                                        {run.execution_status === 'FAILED' ? 'FAILED' : 'LOW_RATING'}
+                                                    </span>
+                                                    <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? 'Unknown'}</span>
+                                                    <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {run.created_at ? new Date(run.created_at).toLocaleString() : 'Date missing'}</span>
+                                                </div>
+                                                <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                    {run.user_nlq_text || '(No query text available)'}
+                                                </p>
+                                            </div>
+                                            <Link
+                                                to={`/admin/runs/${run.id}`}
+                                                className="button-link"
+                                                style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
+                                            >
+                                                Inspect
+                                            </Link>
+                                        </div>
+                                    ))}
+                                    <div style={{ marginTop: "8px", textAlign: "right" }}>
+                                        <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
+                                            View Full History &rarr;
+                                        </Link>
+                                    </div>
                                 </div>
                             )}
                         </div>
-                    )}
 
-                    {/* Raw Snapshot (Verbose only) */}
-                    {showRawPanel && (
-                        <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1", backgroundColor: "var(--surface-muted)" }}>
-                            <details data-testid="diagnostics-raw-json-details">
-                                <summary data-testid="diagnostics-raw-json-summary" style={{ cursor: "pointer", fontWeight: 600 }}>
-                                    Raw Diagnostic Snapshot
-                                </summary>
-                                <div style={{ display: "flex", justifyContent: "flex-end", margin: "12px 0" }}>
-                                    <CopyButton text={rawJsonSnapshot} label="Copy JSON" />
-                                </div>
-                                <pre data-testid="diagnostics-raw-json" style={{ fontSize: "0.75rem", overflowX: "auto", margin: 0 }}>
-                                    {rawJsonSnapshot}
-                                </pre>
-                            </details>
-                        </div>
-                    )}
-                </div>
+                        {/* Raw Snapshot (Verbose only) */}
+                        {showRawPanel && (
+                            <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1", backgroundColor: "var(--surface-muted)" }}>
+                                <details data-testid="diagnostics-raw-json-details">
+                                    <summary data-testid="diagnostics-raw-json-summary" style={{ cursor: "pointer", fontWeight: 600 }}>
+                                        Raw Diagnostic Snapshot
+                                    </summary>
+                                    <div style={{ display: "flex", justifyContent: "flex-end", margin: "12px 0" }}>
+                                        <CopyButton text={rawJsonSnapshot} label="Copy JSON" />
+                                    </div>
+                                    <pre data-testid="diagnostics-raw-json" style={{ fontSize: "0.75rem", overflowX: "auto", margin: 0 }}>
+                                        {rawJsonSnapshot}
+                                    </pre>
+                                </details>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

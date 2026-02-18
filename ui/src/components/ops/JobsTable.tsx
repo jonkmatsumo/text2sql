@@ -4,17 +4,21 @@ import { OpsJobResponse, OpsJobStatus } from "../../types/admin";
 interface JobsTableProps {
     jobs: OpsJobResponse[];
     onRefresh?: () => void;
+    onCancel?: (jobId: string) => void;
     isLoading?: boolean;
+    cancellingJobIds?: Set<string>;
 }
 
 const statusColors: Record<string, string> = {
     PENDING: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
     RUNNING: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+    CANCELLING: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+    CANCELLED: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300",
     COMPLETED: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
     FAILED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
 };
 
-export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, isLoading }) => {
+export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, onCancel, isLoading, cancellingJobIds = new Set() }) => {
     return (
         <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
             <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-700">
@@ -81,7 +85,15 @@ export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, isLoading
                                     )}
                                 </td>
                                 <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                                    {/* Placeholder for future actions like view details */}
+                                    {job.status === "RUNNING" && onCancel && (
+                                        <button
+                                            onClick={() => onCancel(job.id)}
+                                            disabled={cancellingJobIds.has(job.id)}
+                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {cancellingJobIds.has(job.id) ? "Cancelling..." : "Cancel"}
+                                        </button>
+                                    )}
                                 </td>
                             </tr>
                         ))

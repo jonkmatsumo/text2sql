@@ -459,6 +459,12 @@ export default function SystemOperations() {
                             >
                                 Open Trace Explorer
                             </Link>
+                            <Link
+                                to="/admin/runs"
+                                style={{ display: "inline-block", backgroundColor: "var(--surface-muted)", color: "var(--ink)", textDecoration: "none", padding: "12px 24px", borderRadius: "10px", marginTop: "12px", marginLeft: "12px", border: "1px solid var(--border)", fontWeight: 600 }}
+                            >
+                                Run History
+                            </Link>
 
                             <div style={{ marginTop: "20px" }}>
                                 <p className="subtitle" style={{ marginBottom: "8px" }}>Quick lookup by trace ID:</p>
