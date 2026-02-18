@@ -84,6 +84,18 @@ describe("RunHistory URL canonicalization", () => {
         expect(result.get("status")).toBe("FAILED");
     });
 
+    it("resets offset when search query changes", () => {
+        const result = canonicalizeParams({ offset: "50" }, { q: "new search" });
+        expect(result.has("offset")).toBe(false);
+        expect(result.get("q")).toBe("new search");
+    });
+
+    it("preserves alphabetical ordering in URLSearchParams", () => {
+        const result = canonicalizeParams({}, { z: "last", a: "first", m: "middle" });
+        const keys = Array.from(result.keys());
+        expect(keys).toEqual(["a", "m", "z"]);
+    });
+
     it("produces stable output for same inputs", () => {
         const r1 = canonicalizeParams({}, { status: "FAILED", q: "test" });
         const r2 = canonicalizeParams({}, { q: "test", status: "FAILED" });

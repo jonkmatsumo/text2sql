@@ -133,12 +133,12 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.queryByText(/Showing results/i)).not.toBeInTheDocument();
     });
 
-    it("enables Next when loaded results match the shared page size constant", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce(buildRuns(RUN_HISTORY_PAGE_SIZE));
-        renderRunHistory();
+    it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce(buildRuns(5)); // fewer than limit
+        renderRunHistory("/admin/runs?q=test");
 
-        await waitFor(() => {
-            expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
-        });
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).toBeDisabled();
+        expect(nextButton).toHaveAttribute("title", "Search filters the current page. Use Next/Prev to search older runs.");
     });
 });

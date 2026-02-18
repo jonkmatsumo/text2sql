@@ -300,6 +300,7 @@ export default function RunHistory() {
                     onClick={() => updateFilters({ offset: offset + limit })}
                     disabled={runs.length < limit || isLoading}
                     aria-label="Next page"
+                    title={searchQuery && runs.length < limit ? PAGE_SCOPED_SEARCH_NOTE : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Next
