@@ -30,6 +30,14 @@ export default function RunHistory() {
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [linkCopied, setLinkCopied] = useState(false);
+
+    const copyLink = useCallback(() => {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+        });
+    }, []);
 
     // Derived state from URL
     const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
@@ -120,14 +128,24 @@ export default function RunHistory() {
                         Browse and inspect historical agent execution runs.
                     </p>
                 </div>
-                <button
-                    onClick={() => setShortcutsOpen(true)}
-                    aria-label="Show keyboard shortcuts"
-                    title="Keyboard shortcuts (?)"
-                    className="mt-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg font-mono border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm"
-                >
-                    ?
-                </button>
+                <div className="mt-1 flex items-center gap-2">
+                    <button
+                        onClick={copyLink}
+                        aria-label="Copy link to current view"
+                        title="Copy link to current view"
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 rounded px-2.5 py-0.5 text-xs font-medium transition-colors"
+                    >
+                        {linkCopied ? "✓ Copied!" : "Copy link"}
+                    </button>
+                    <button
+                        onClick={() => setShortcutsOpen(true)}
+                        aria-label="Show keyboard shortcuts"
+                        title="Keyboard shortcuts (?)"
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-mono border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm"
+                    >
+                        ?
+                    </button>
+                </div>
             </header>
 
             <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
