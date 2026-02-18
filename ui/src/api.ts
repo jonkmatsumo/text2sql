@@ -37,6 +37,7 @@ import {
   otelWorkerBaseUrl,
   internalAuthToken
 } from "./config";
+import { RUN_HISTORY_PAGE_SIZE } from "./constants/operatorUi";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
@@ -564,7 +565,7 @@ export const OpsService = {
   },
 
   async listRuns(
-    limit: number = 50,
+    limit: number = RUN_HISTORY_PAGE_SIZE,
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"

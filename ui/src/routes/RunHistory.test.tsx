@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import RunHistory from "./RunHistory";
 import { OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
 
 const mockRuns = [
     {
@@ -19,6 +20,21 @@ const mockRuns = [
         model_version: "gpt-5",
     },
 ];
+
+function buildRuns(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+        id: `run-${index + 1}`,
+        user_nlq_text: `Query ${index + 1}`,
+        generated_sql: "SELECT 1",
+        generated_sql_preview: "SELECT 1",
+        response_payload: "{}",
+        execution_status: "SUCCESS",
+        thumb: "UP",
+        trace_id: `trace-${index + 1}`,
+        created_at: "2026-02-10T00:00:00Z",
+        model_version: "gpt-5",
+    }));
+}
 
 function renderRunHistory(initialPath = "/admin/runs") {
     return render(
@@ -115,5 +131,14 @@ describe("RunHistory search scope messaging", () => {
         });
 
         expect(screen.queryByText(/Showing results/i)).not.toBeInTheDocument();
+    });
+
+    it("enables Next when loaded results match the shared page size constant", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce(buildRuns(RUN_HISTORY_PAGE_SIZE));
+        renderRunHistory();
+
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
+        });
     });
 });

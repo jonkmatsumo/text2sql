@@ -8,6 +8,7 @@ import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -48,7 +49,7 @@ export default function RunHistory() {
     const searchQuery = searchParams.get("q") || "";
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
-    const limit = 50;
+    const limit = RUN_HISTORY_PAGE_SIZE;
     const { show: showToast } = useToast();
     const searchInputRef = React.useRef<HTMLInputElement>(null);
 
