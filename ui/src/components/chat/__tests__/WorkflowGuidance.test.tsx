@@ -18,9 +18,24 @@ describe("WorkflowGuidance", () => {
         expect(container.firstChild).toBeNull();
     });
 
-    it("renders nothing for categories without guidance (e.g. timeout)", () => {
-        const { container } = renderWithRouter(<WorkflowGuidance category="timeout" />);
-        expect(container.firstChild).toBeNull();
+    it("renders timeout guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="timeout" />);
+        expect(screen.getByText("Timeout")).toBeInTheDocument();
+        expect(screen.getByText(/took too long to complete/i)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Check Connectivity" })).toBeInTheDocument();
+    });
+
+    it("renders auth guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="auth" />);
+        expect(screen.getByText("Authentication Error")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Update Target Settings" })).toBeInTheDocument();
+    });
+
+    it("renders transient error guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="transient" />);
+        expect(screen.getByText("Transient Error")).toBeInTheDocument();
+        expect(screen.getByText(/temporary error occurred/i)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Retry Operation" })).toBeInTheDocument();
     });
 
     it("renders schema_missing guidance with correct title and description", () => {

@@ -40,16 +40,28 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Authentication Error",
     severity: "error",
     actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
+    description: "The system encountered a credential or permission issue. Verify your configuration and access levels.",
+    guidanceActions: [
+      { label: "Update Target Settings", href: "/admin/settings/query-target", primary: true },
+    ],
   },
   unauthorized: {
     title: "Unauthorized",
     severity: "error",
     actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
+    description: "You do not have permission to access the target database. Please check your user credentials.",
+    guidanceActions: [
+      { label: "Check Permissions", href: "/admin/settings/query-target", primary: true },
+    ],
   },
   permission_denied: {
     title: "Permission Denied",
     severity: "error",
     actions: [{ label: "Update Permissions", href: "/admin/settings/query-target" }],
+    description: "Access was denied by the target database. This often indicates insufficient database-level privileges.",
+    guidanceActions: [
+      { label: "Review User Roles", href: "/admin/settings/query-target", primary: true },
+    ],
   },
   connectivity: {
     title: "Connection Error",
@@ -65,6 +77,11 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Timeout",
     severity: "warn",
     actions: [],
+    description: "The request took too long to complete. Try a simpler query or check if the database is under heavy load.",
+    guidanceActions: [
+      { label: "Check Connectivity", href: "/admin/diagnostics", primary: true },
+      { label: "View System Health", href: "/admin/operations" },
+    ],
   },
   limit_exceeded: {
     title: "Limit Exceeded",
@@ -118,6 +135,11 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Resource Exhausted",
     severity: "error",
     actions: [{ label: "Check System Health", href: "/admin/operations" }],
+    description: "The system or target database has run out of resources (CPU, Memory, or Connections).",
+    guidanceActions: [
+      { label: "Go to Operations", href: "/admin/operations", primary: true },
+      { label: "Review Diagnostics", href: "/admin/diagnostics" },
+    ],
   },
   mutation_blocked: {
     title: "Mutation Blocked",
@@ -128,6 +150,10 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Transient Error",
     severity: "warn",
     actions: [],
+    description: "A temporary error occurred in the system. Often, retrying the operation will resolve this.",
+    guidanceActions: [
+      { label: "Retry Operation", href: "#", primary: true },
+    ],
   },
   internal: {
     title: "Internal Error",
