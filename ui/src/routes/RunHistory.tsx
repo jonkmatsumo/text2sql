@@ -25,6 +25,8 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
     { value: "None", label: "No Feedback" },
 ];
 
+const PAGE_SCOPED_SEARCH_NOTE = "Search currently filters the loaded page only. Use pagination to search older runs.";
+
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
@@ -160,6 +162,9 @@ export default function RunHistory() {
                         aria-label="Search runs by query or ID"
                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                     />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-search-scope-note">
+                        {PAGE_SCOPED_SEARCH_NOTE}
+                    </p>
                 </div>
                 <FilterSelect
                     label="Status"
@@ -200,9 +205,16 @@ export default function RunHistory() {
                                     <div className="flex flex-col items-center justify-center space-y-3">
                                         <p className="text-gray-500 italic">
                                             {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
-                                                ? "No historical runs found matching these filters."
+                                                ? (searchQuery !== ""
+                                                    ? "No runs matched your search on this loaded page."
+                                                    : "No historical runs found matching these filters.")
                                                 : "No runs recorded yet."}
                                         </p>
+                                        {searchQuery !== "" && (
+                                            <p className="text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-empty-search-scope-note">
+                                                {PAGE_SCOPED_SEARCH_NOTE}
+                                            </p>
+                                        )}
                                         {(statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== "") && (
                                             <button
                                                 onClick={clearFilters}
