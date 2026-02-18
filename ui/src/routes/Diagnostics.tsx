@@ -448,6 +448,9 @@ export default function Diagnostics() {
                             <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>
                                 Recent Run Signals
                             </h3>
+                            <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
+                                Showing latest 5 per category.
+                            </p>
                             <div style={{ display: "grid", gap: "20px" }}>
                                 <section data-testid="diagnostics-failures-section">
                                     <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>Recent failures</h4>
@@ -465,8 +468,10 @@ export default function Diagnostics() {
                                                                 FAILED
                                                             </span>
                                                             <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
-                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {new Date(run.created_at).toLocaleString()}</span>
                                                         </div>
+                                                        <p style={{ margin: "0 0 4px 0", fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
+                                                            {new Date(run.created_at).toLocaleString()}
+                                                        </p>
                                                         <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                                             {run.user_nlq_text || "(No query text available)"}
                                                         </p>
@@ -500,8 +505,10 @@ export default function Diagnostics() {
                                                                 LOW_RATING
                                                             </span>
                                                             <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
-                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {new Date(run.created_at).toLocaleString()}</span>
                                                         </div>
+                                                        <p style={{ margin: "0 0 4px 0", fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
+                                                            {new Date(run.created_at).toLocaleString()}
+                                                        </p>
                                                         <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                                             {run.user_nlq_text || "(No query text available)"}
                                                         </p>

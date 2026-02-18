@@ -176,12 +176,14 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failures")).toBeInTheDocument();
             expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
         });
+        expect(screen.getByText("Showing latest 5 per category.")).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
 
         expect(within(failuresSection).getByText("Failure query")).toBeInTheDocument();
         expect(within(lowRatingsSection).getByText("Low rating query")).toBeInTheDocument();
+        expect(within(failuresSection).getByText(new Date("2026-01-03T00:00:00Z").toLocaleString())).toBeInTheDocument();
         expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
     });
 
