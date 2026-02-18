@@ -163,6 +163,31 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
     });
 
+    it("shows 'unknown time' label for runs with missing created_at when included via recency window", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([
+                {
+                    id: "no-ts-run",
+                    user_nlq_text: "Query with no timestamp",
+                    execution_status: "SUCCESS",
+                    thumb: "DOWN",
+                    created_at: "2026-01-01T00:00:00Z",
+                },
+            ]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Query with no timestamp")).toBeInTheDocument();
+        });
+
+        // Relative time badge should render without crashing
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+        expect(within(lowRatingsSection).getByText("Query with no timestamp")).toBeInTheDocument();
+    });
+
     it("renders failures and low ratings in separate sections", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
@@ -191,7 +216,7 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failures")).toBeInTheDocument();
             expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
         });
-        expect(screen.getByText("Showing latest 5 per category.")).toBeInTheDocument();
+        expect(screen.getByText("Showing latest 5 failures and 5 low-rated runs.")).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");

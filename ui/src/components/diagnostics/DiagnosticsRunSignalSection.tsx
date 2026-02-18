@@ -63,13 +63,13 @@ export const DiagnosticsRunSignalSection: React.FC<DiagnosticsRunSignalSectionPr
                                             borderRadius: "4px",
                                             border: "1px solid var(--border)",
                                         }}
-                                        title={new Date(run.created_at).toLocaleString()}
+                                        title={run.created_at ? new Date(run.created_at).toLocaleString() : "Timestamp unavailable"}
                                     >
-                                        {formatRelativeTime(run.created_at)}
+                                        {run.created_at ? formatRelativeTime(run.created_at) : "unknown time"}
                                     </span>
                                 </div>
                                 <p style={{ margin: "0 0 4px 0", fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
-                                    {new Date(run.created_at).toLocaleString()}
+                                    {run.created_at ? new Date(run.created_at).toLocaleString() : "—"}
                                 </p>
                                 <p
                                     style={{

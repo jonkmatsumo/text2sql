@@ -449,7 +449,7 @@ export default function Diagnostics() {
                                 )}
                             </h3>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest 5 per category.
+                                Showing latest 5 failures and 5 low-rated runs.
                             </p>
                             <div style={{ display: "grid", gap: "20px" }}>
                                 <DiagnosticsRunSignalSection
