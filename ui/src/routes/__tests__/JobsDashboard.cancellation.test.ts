@@ -169,3 +169,31 @@ describe("Cancellation failure paths", () => {
         expect(showToast).toHaveBeenCalledWith("Internal server error", "error");
     });
 });
+describe("Polling terminality", () => {
+    it("identifies all TERMINAL_STATUSES as stop conditions", () => {
+        const statuses: OpsJobStatus[] = ["CANCELLED", "COMPLETED", "FAILED"];
+        for (const status of statuses) {
+            expect(TERMINAL_STATUSES.has(status)).toBe(true);
+        }
+    });
+
+    it("does not identify CANCELLING or RUNNING as terminal", () => {
+        expect(TERMINAL_STATUSES.has("CANCELLING")).toBe(false);
+        expect(TERMINAL_STATUSES.has("RUNNING")).toBe(false);
+        expect(TERMINAL_STATUSES.has("PENDING")).toBe(false);
+    });
+
+    /**
+     * Simulates the loop condition in pollJobUntilTerminal:
+     * if (TERMINAL_STATUSES.has(job.status)) { clear() }
+     */
+    it("stops polling exactly when status enters TERMINAL_STATUSES", () => {
+        const shouldStop = (status: OpsJobStatus) => TERMINAL_STATUSES.has(status);
+
+        expect(shouldStop("RUNNING")).toBe(false);
+        expect(shouldStop("CANCELLING")).toBe(false);
+        expect(shouldStop("CANCELLED")).toBe(true);
+        expect(shouldStop("COMPLETED")).toBe(true);
+        expect(shouldStop("FAILED")).toBe(true);
+    });
+});
