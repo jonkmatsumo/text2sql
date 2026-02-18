@@ -10,7 +10,10 @@ interface ModalProps {
 export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+            }
         };
         if (isOpen) window.addEventListener("keydown", handleEsc);
         return () => window.removeEventListener("keydown", handleEsc);
@@ -20,6 +23,9 @@ export default function Modal({ isOpen, onClose, title, children }: ModalProps) 
 
     return (
         <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
             style={{
                 position: "fixed",
                 top: 0,
@@ -51,7 +57,7 @@ export default function Modal({ isOpen, onClose, title, children }: ModalProps) 
                 onClick={(e) => e.stopPropagation()}
             >
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px" }}>
-                    <h2 style={{ margin: 0, fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h2>
+                    <h2 id="modal-title" style={{ margin: 0, fontFamily: "'Space Grotesk', sans-serif" }}>{title}</h2>
                     <button
                         onClick={onClose}
                         style={{
