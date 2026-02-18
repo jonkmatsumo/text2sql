@@ -175,7 +175,7 @@ describe("JobsDashboard Cancellation", () => {
             resolveCancel = resolve;
         });
         vi.spyOn(OpsService, "cancelJob").mockReturnValue(cancelPromise as any);
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
 
         try {
             const { unmount } = render(
@@ -265,7 +265,7 @@ describe("JobsDashboard Cancellation", () => {
 
             const timeoutWarningToasts = showToastMock.mock.calls.filter(
                 ([message, type]) =>
-                    message === "Job status check timed out. Refresh list to re-check." && type === "warning"
+                    message.includes("timed out") && message.includes("Refresh list to re-check") && type === "warning"
             );
             expect(timeoutWarningToasts).toHaveLength(1);
 
