@@ -47,3 +47,29 @@ export interface DiagnosticsResponse {
     debug?: DiagnosticsDebug;
     self_test?: Record<string, any>;
 }
+
+export interface RunContextDiagnostics {
+    user_nlq_text?: string;
+    execution_status?: string;
+    created_at?: string;
+    [key: string]: unknown;
+}
+
+export interface ValidationDiagnostics {
+    ast_valid?: boolean;
+    syntax_errors?: string[];
+    [key: string]: unknown;
+}
+
+export interface CompletenessDiagnostics {
+    is_truncated?: boolean;
+    [key: string]: unknown;
+}
+
+export interface RunDiagnosticsResponse extends DiagnosticsResponse {
+    run_context?: RunContextDiagnostics;
+    validation?: ValidationDiagnostics;
+    completeness?: CompletenessDiagnostics;
+    generated_sql?: string;
+    audit_events?: Array<Record<string, unknown>>;
+}
