@@ -30,6 +30,7 @@ import {
   SynthRunSummary,
   OpsJobResponse
 } from "./types/admin";
+import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
   agentServiceBaseUrl,
   uiApiBaseUrl,
@@ -951,7 +952,12 @@ export async function* runAgentStream(request: AgentRunRequest): AsyncGenerator<
 /**
  * Fetch operator-safe runtime diagnostics.
  */
-export async function getDiagnostics(debug = false, runId?: string): Promise<any> {
+export function getDiagnostics(debug?: boolean): Promise<DiagnosticsResponse>;
+export function getDiagnostics(debug: boolean, runId: string): Promise<RunDiagnosticsResponse>;
+export async function getDiagnostics(
+  debug = false,
+  runId?: string
+): Promise<DiagnosticsResponse | RunDiagnosticsResponse> {
   const url = new URL("/agent/diagnostics", agentBase);
   if (debug) url.searchParams.set("debug", "true");
   if (runId) url.searchParams.set("audit_run_id", runId);

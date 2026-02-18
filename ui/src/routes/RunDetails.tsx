@@ -6,13 +6,14 @@ import { LoadingState } from "../components/common/LoadingState";
 import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
 import { buildRunContextBundle } from "../utils/buildRunContextBundle";
 import RunIdentifiers from "../components/common/RunIdentifiers";
+import type { RunDiagnosticsResponse } from "../types/diagnostics";
 
 export default function RunDetails() {
     const { runId } = useParams<{ runId: string }>();
     const navigate = useNavigate();
     const { show: showToast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
-    const [diagnostics, setDiagnostics] = useState<any>(null);
+    const [diagnostics, setDiagnostics] = useState<RunDiagnosticsResponse | null>(null);
     const [contextCopied, setContextCopied] = useState(false);
 
     const fetchDetails = useCallback(async () => {
@@ -123,7 +124,7 @@ export default function RunDetails() {
                             ) : (
                                 <div className="flow-root">
                                     <ul className="-mb-8">
-                                        {normalizedEvents.map((item: any, idx: number) => (
+                                        {normalizedEvents.map((item, idx: number) => (
                                             <li key={item.key}>
                                                 <div className="relative pb-8">
                                                     {idx !== normalizedEvents.length - 1 ? (
