@@ -10,7 +10,7 @@ export interface RuntimeIndicators {
     recent_truncation_event_count: number;
 }
 
-export interface EnabledFlags {
+export interface EnabledFlags extends Record<string, boolean | string> {
     schema_binding_validation: boolean;
     schema_binding_soft_mode: boolean;
     column_allowlist_mode: string;

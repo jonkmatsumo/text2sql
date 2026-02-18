@@ -84,6 +84,21 @@ describe("Diagnostics Route", () => {
         expect(screen.getByTestId("diagnostics-last-updated")).toHaveTextContent(/Last updated:/i);
     });
 
+    it("renders unknown enabled_flags keys without failing", async () => {
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            enabled_flags: {
+                ...mockData.enabled_flags,
+                experimental_backend_switch: true,
+            },
+        });
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText(/experimental backend switch: true/i)).toBeInTheDocument();
+        });
+    });
+
     it("requests degraded runs concurrently", async () => {
         let resolveFailed: ((value: any[]) => void) | undefined;
         const failedPromise = new Promise<any[]>((resolve) => {
