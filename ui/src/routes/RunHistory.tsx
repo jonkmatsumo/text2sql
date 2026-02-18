@@ -79,9 +79,31 @@ export default function RunHistory() {
         fetchRuns();
     }, [fetchRuns]);
 
+    const searchInputRef = React.useRef<HTMLInputElement>(null);
+
     const clearFilters = useCallback(() => {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Only trigger if no input is focused, unless it's Esc
+            const isInputFocused = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
+
+            if (e.key === "r" && !isInputFocused) {
+                e.preventDefault();
+                fetchRuns();
+            } else if (e.key === "/" && !isInputFocused) {
+                e.preventDefault();
+                searchInputRef.current?.focus();
+            } else if (e.key === "Escape") {
+                clearFilters();
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [fetchRuns, clearFilters]);
 
     const filteredRuns = useMemo(() =>
         runs.filter(run =>
@@ -104,6 +126,7 @@ export default function RunHistory() {
                 <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 font-semibold">Search Queries or IDs</label>
                     <input
+                        ref={searchInputRef}
                         type="text"
                         placeholder="Keyword search..."
                         value={searchQuery}
