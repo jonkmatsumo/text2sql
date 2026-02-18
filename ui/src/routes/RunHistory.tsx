@@ -43,18 +43,28 @@ export default function RunHistory() {
 
     const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
         setSearchParams(prev => {
-            const next = new URLSearchParams(prev);
+            // Start from current params
+            const merged: Record<string, string> = {};
+            prev.forEach((v, k) => { merged[k] = v; });
+
+            // Apply updates
             Object.entries(updates).forEach(([key, value]) => {
-                if (value === undefined || value === "" || value === "All") {
-                    next.delete(key);
+                if (value === undefined || value === "" || value === "All" || value === 0) {
+                    delete merged[key];
                 } else {
-                    next.set(key, String(value));
+                    merged[key] = String(value);
                 }
             });
+
+            // Reset offset on filter change unless explicitly updating offset
             if (!Object.prototype.hasOwnProperty.call(updates, "offset")) {
-                next.delete("offset");
+                delete merged["offset"];
             }
-            return next;
+
+            // Write in deterministic alphabetical order
+            const canonical = new URLSearchParams();
+            Object.keys(merged).sort().forEach(k => canonical.set(k, merged[k]));
+            return canonical;
         }, { replace: true });
     }, [setSearchParams]);
 
