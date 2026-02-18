@@ -7,6 +7,7 @@ import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils
 import { buildRunContextBundle } from "../utils/buildRunContextBundle";
 import RunIdentifiers from "../components/common/RunIdentifiers";
 import type { RunDiagnosticsResponse } from "../types/diagnostics";
+import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
 
 export default function RunDetails() {
     const { runId } = useParams<{ runId: string }>();
@@ -195,8 +196,7 @@ export default function RunDetails() {
                             </div>
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase">Status</label>
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${runData?.execution_status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                    }`}>
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${STATUS_TONE_CLASSES[getInteractionStatusTone(runData?.execution_status)]}`}>
                                     {runData?.execution_status || "UNKNOWN"}
                                 </span>
                             </div>

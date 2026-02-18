@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { OpsService } from "../api";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
+import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
+import { OpsService } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
@@ -251,10 +252,7 @@ export default function RunHistory() {
                                         {run.user_nlq_text}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${run.execution_status === 'SUCCESS' || run.execution_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                                            run.execution_status === 'FAILED' || run.execution_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                                                'bg-gray-100 text-gray-800'
-                                            }`}>
+                                        <span className={`px - 2 inline - flex text - xs leading - 5 font - semibold rounded - full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]} `}>
                                             {run.execution_status}
                                         </span>
                                     </td>
@@ -266,7 +264,7 @@ export default function RunHistory() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                         <Link
-                                            to={`/admin/runs/${run.id}`}
+                                            to={`/ admin / runs / ${run.id} `}
                                             aria-label={`View details for run ${run.id}`}
                                             className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                         >
@@ -296,7 +294,7 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length}`}
+                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length} `}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
