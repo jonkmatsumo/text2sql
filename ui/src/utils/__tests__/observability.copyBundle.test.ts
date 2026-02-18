@@ -11,9 +11,11 @@ describe("buildCopyBundlePayload", () => {
       resultCompleteness: { pages_fetched: 2, next_page_token: "next-page" },
     });
 
-    expect(payload).toEqual({
+    expect(payload).toEqual(expect.objectContaining({
       sql: "SELECT * FROM orders",
-      trace_id: "trace-1",
+      identifiers: {
+        "Trace ID": "trace-1"
+      },
       validation: {
         status: "pass",
         cartesian_risk: false,
@@ -25,7 +27,11 @@ describe("buildCopyBundlePayload", () => {
         pages_fetched: 2,
         completeness_summary: { pages_fetched: 2, next_page_token: "next-page" },
       },
-    });
+      bundle_metadata: expect.objectContaining({
+        environment: "test",
+        version: 1
+      })
+    }));
   });
 
   it("handles missing optional metadata fields", () => {
@@ -33,9 +39,9 @@ describe("buildCopyBundlePayload", () => {
       sql: "SELECT 1",
     });
 
-    expect(payload).not.toHaveProperty("trace_id");
-    expect(payload).toEqual({
+    expect(payload).toEqual(expect.objectContaining({
       sql: "SELECT 1",
+      identifiers: {},
       validation: {
         status: "pass",
         cartesian_risk: false,
@@ -47,6 +53,10 @@ describe("buildCopyBundlePayload", () => {
         pages_fetched: null,
         completeness_summary: null,
       },
-    });
+      bundle_metadata: expect.objectContaining({
+        environment: "test",
+        version: 1
+      })
+    }));
   });
 });

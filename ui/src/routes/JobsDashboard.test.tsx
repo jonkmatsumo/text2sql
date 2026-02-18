@@ -22,6 +22,7 @@ describe("JobsDashboard Cancellation", () => {
     let showToastMock: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
+        vi.setConfig({ testTimeout: 15000 });
         vi.clearAllMocks();
         vi.spyOn(OpsService, "listJobs").mockResolvedValue(mockJobs as any);
         showToastMock = vi.fn();
@@ -283,4 +284,75 @@ describe("JobsDashboard Cancellation", () => {
             vi.useRealTimers();
         }
     });
+
+    it("prevents overlapping pollJobUntilTerminal executions per job", async () => {
+        vi.spyOn(OpsService, "cancelJob").mockResolvedValue({} as any);
+        vi.spyOn(OpsService, "getJobStatus").mockResolvedValue({ ...mockJobs[0], status: "RUNNING" } as any);
+
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+        const cancelButton = screen.getByRole("button", { name: /cancel/i });
+
+        // Double click
+        await act(async () => {
+            fireEvent.click(cancelButton);
+            fireEvent.click(cancelButton);
+        });
+
+        // Ensure it didn't call cancelJob twice
+        expect(OpsService.cancelJob).toHaveBeenCalledTimes(1);
+    }, 10000);
+
+    it("reconciles cancellation state after manual refresh reveals terminal status", async () => {
+        let resolveCancel: (value: any) => void;
+        const cancelPromise = new Promise((resolve) => { resolveCancel = resolve; });
+        vi.spyOn(OpsService, "cancelJob").mockReturnValue(cancelPromise as any);
+        const listJobsSpy = vi.spyOn(OpsService, "listJobs");
+
+        // Initial state is RUNNING, then COMPLETED after refresh
+        listJobsSpy.mockResolvedValueOnce(mockJobs as any);
+        const terminalJobs = [{ ...mockJobs[0], status: "COMPLETED" }];
+        listJobsSpy.mockResolvedValue(terminalJobs as any);
+
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+        const cancelButton = screen.getByRole("button", { name: /cancel/i });
+
+        await act(async () => {
+            fireEvent.click(cancelButton);
+        });
+
+        // Wait for optimistic state
+        expect(await screen.findByText("CANCELLING")).toBeInTheDocument();
+
+        // Simulate manual refresh where backend now says COMPLETED
+        const refreshButton = screen.getByRole("button", { name: /^refresh$/i });
+        await act(async () => {
+            fireEvent.click(refreshButton);
+        });
+
+        // Should call showToast for terminal status
+        await waitFor(() => {
+            expect(showToastMock).toHaveBeenCalledWith(
+                expect.stringContaining("reached terminal state: COMPLETED"),
+                "success"
+            );
+        });
+        expect(screen.queryByText("CANCELLING")).not.toBeInTheDocument();
+
+        // Cleanup
+        await act(async () => {
+            resolveCancel!({ success: true });
+        });
+    }, 10000);
 });

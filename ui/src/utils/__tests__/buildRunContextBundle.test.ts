@@ -9,17 +9,17 @@ describe("buildRunContextBundle", () => {
 
     it("includes run ID when provided", () => {
         const result = buildRunContextBundle({ runId: "abc-123" });
-        expect(result).toContain("Run ID:           abc-123");
+        expect(result).toContain("Run ID          : abc-123");
     });
 
     it("includes trace ID when provided", () => {
         const result = buildRunContextBundle({ traceId: "trace-xyz" });
-        expect(result).toContain("Trace ID:         trace-xyz");
+        expect(result).toContain("Trace ID        : trace-xyz");
     });
 
     it("includes request ID when provided", () => {
         const result = buildRunContextBundle({ requestId: "req-456" });
-        expect(result).toContain("Request ID:       req-456");
+        expect(result).toContain("Request ID      : req-456");
     });
 
     it("includes execution status", () => {
@@ -28,8 +28,8 @@ describe("buildRunContextBundle", () => {
     });
 
     it("includes completeness flag as yes/no", () => {
-        expect(buildRunContextBundle({ isComplete: true })).toContain("Complete:         yes");
-        expect(buildRunContextBundle({ isComplete: false })).toContain("Complete:         no");
+        expect(buildRunContextBundle({ isComplete: true })).toContain("Complete        : yes");
+        expect(buildRunContextBundle({ isComplete: false })).toContain("Complete        : no");
     });
 
     it("includes user query section", () => {
@@ -64,7 +64,7 @@ describe("buildRunContextBundle", () => {
     it("handles fully partial payload (no fields)", () => {
         const result = buildRunContextBundle({});
         expect(result).toContain("=== Run Context Bundle ===");
-        expect(result).toContain("Generated at:");
+        expect(result).toContain("Generated at    :");
         expect(result).not.toContain("Run ID:");
         expect(result).not.toContain("Trace ID:");
     });
@@ -72,7 +72,7 @@ describe("buildRunContextBundle", () => {
     it("includes generation timestamp", () => {
         const before = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
         const result = buildRunContextBundle({ runId: "test" });
-        expect(result).toContain("Generated at:");
+        expect(result).toContain("Generated at    :");
         expect(result).toContain(before);
     });
 
