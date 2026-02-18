@@ -4,7 +4,6 @@ import { getErrorMapping } from "../../utils/errorMapping";
 
 export interface WorkflowGuidanceProps {
     category?: string;
-    details?: Record<string, any>;
 }
 
 /**
