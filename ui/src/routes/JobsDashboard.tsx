@@ -20,14 +20,33 @@ export default function JobsDashboard() {
     const { show: showToast } = useToast();
     const { confirm, dialogProps } = useConfirmation();
 
+    const isMountedRef = React.useRef(true);
+    const cancelPollIntervalRef = React.useRef<number | null>(null);
+
     // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
     React.useEffect(() => { cancellingJobIdsRef.current = cancellingJobIds; }, [cancellingJobIds]);
 
+    const clearCancelPollInterval = useCallback(() => {
+        if (cancelPollIntervalRef.current !== null) {
+            window.clearInterval(cancelPollIntervalRef.current);
+            cancelPollIntervalRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            isMountedRef.current = false;
+            clearCancelPollInterval();
+        };
+    }, [clearCancelPollInterval]);
+
     const fetchJobs = useCallback(async () => {
+        if (!isMountedRef.current) return;
         setIsLoading(true);
         try {
             const data = await OpsService.listJobs(50, filterType || undefined, filterStatus || undefined);
+            if (!isMountedRef.current) return;
             setJobs(data);
 
             // Reconcile: if a job we thought was CANCELLING is now terminal, notify and clean up
@@ -42,6 +61,7 @@ export default function JobsDashboard() {
                 }
                 if (resolved.length > 0) {
                     setCancellingJobIds(prev => {
+                        if (!isMountedRef.current) return prev;
                         const next = new Set(prev);
                         resolved.forEach(id => next.delete(id));
                         return next;
@@ -51,7 +71,9 @@ export default function JobsDashboard() {
         } catch (err) {
             showToast("Failed to load jobs", "error");
         } finally {
-            setIsLoading(false);
+            if (isMountedRef.current) {
+                setIsLoading(false);
+            }
         }
     }, [filterType, filterStatus, showToast]);
 
@@ -69,25 +91,30 @@ export default function JobsDashboard() {
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
-    const pollJobUntilTerminal = useCallback(async (jobId: string, maxAttempts = 10) => {
+    const pollJobUntilTerminal = useCallback((jobId: string, maxAttempts = 10) => {
+        clearCancelPollInterval();
         let attempts = 0;
-        const interval = setInterval(async () => {
+        cancelPollIntervalRef.current = window.setInterval(async () => {
+            if (!isMountedRef.current) {
+                clearCancelPollInterval();
+                return;
+            }
             attempts++;
             try {
                 const job = await OpsService.getJobStatus(jobId);
                 if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
-                    clearInterval(interval);
+                    clearCancelPollInterval();
                     showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
-                    fetchJobs();
+                    void fetchJobs();
                 } else if (attempts >= maxAttempts) {
-                    clearInterval(interval);
-                    fetchJobs();
+                    clearCancelPollInterval();
+                    void fetchJobs();
                 }
             } catch (err) {
-                clearInterval(interval);
+                clearCancelPollInterval();
             }
         }, 2000);
-    }, [fetchJobs, showToast]);
+    }, [clearCancelPollInterval, fetchJobs, showToast]);
 
     const handleCancel = async (jobId: string) => {
         if (cancellingJobIds.has(jobId)) return;
@@ -95,6 +122,7 @@ export default function JobsDashboard() {
         const job = jobs.find(j => j.id === jobId);
         if (!job || job.status === "CANCELLING") return;
 
+        clearCancelPollInterval();
         setCancellingJobIds((prev: Set<string>) => {
             const next = new Set(prev);
             next.add(jobId);
@@ -109,11 +137,13 @@ export default function JobsDashboard() {
         });
 
         if (!confirmed) {
-            setCancellingJobIds((prev: Set<string>) => {
-                const next = new Set(prev);
-                next.delete(jobId);
-                return next;
-            });
+            if (isMountedRef.current) {
+                setCancellingJobIds((prev: Set<string>) => {
+                    const next = new Set(prev);
+                    next.delete(jobId);
+                    return next;
+                });
+            }
             return;
         }
 
@@ -122,6 +152,7 @@ export default function JobsDashboard() {
 
         try {
             await OpsService.cancelJob(jobId);
+            if (!isMountedRef.current) return;
             showToast("Job cancellation requested", "success");
             pollJobUntilTerminal(jobId);
         } catch (err: any) {
@@ -130,13 +161,15 @@ export default function JobsDashboard() {
                 message = "Job is already completed and cannot be canceled.";
             }
             showToast(message, "error");
-            fetchJobs();
+            void fetchJobs();
         } finally {
-            setCancellingJobIds((prev: Set<string>) => {
-                const next = new Set(prev);
-                next.delete(jobId);
-                return next;
-            });
+            if (isMountedRef.current) {
+                setCancellingJobIds((prev: Set<string>) => {
+                    const next = new Set(prev);
+                    next.delete(jobId);
+                    return next;
+                });
+            }
         }
     };
 

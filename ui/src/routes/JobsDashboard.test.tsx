@@ -123,4 +123,70 @@ describe("JobsDashboard Cancellation", () => {
             vi.useRealTimers();
         }
     });
+
+    it("does not trigger unmounted state update warnings during in-flight cancel", async () => {
+        let resolveCancel: (value: any) => void;
+        const cancelPromise = new Promise((resolve) => {
+            resolveCancel = resolve;
+        });
+        vi.spyOn(OpsService, "cancelJob").mockReturnValue(cancelPromise as any);
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        try {
+            const { unmount } = render(
+                <MemoryRouter>
+                    <JobsDashboard />
+                </MemoryRouter>
+            );
+
+            await screen.findByText("SCHEMA_HYDRATION");
+            fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+            unmount();
+
+            await act(async () => {
+                resolveCancel!({ success: true });
+                await Promise.resolve();
+            });
+
+            const hadUnmountWarning = consoleErrorSpy.mock.calls.some((call) =>
+                call.join(" ").includes("state update on an unmounted component")
+            );
+            expect(hadUnmountWarning).toBe(false);
+        } finally {
+            consoleErrorSpy.mockRestore();
+        }
+    });
+
+    it("clears the cancel polling interval on component teardown", async () => {
+        vi.spyOn(OpsService, "cancelJob").mockResolvedValue({ success: true } as any);
+        vi.spyOn(OpsService, "getJobStatus").mockResolvedValue({ ...mockJobs[0], status: "RUNNING" } as any);
+        const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+
+        try {
+            const { unmount } = render(
+                <MemoryRouter>
+                    <JobsDashboard />
+                </MemoryRouter>
+            );
+
+            await screen.findByText("SCHEMA_HYDRATION");
+            vi.useFakeTimers();
+            fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+            await act(async () => {
+                await Promise.resolve();
+            });
+
+            await act(async () => {
+                vi.advanceTimersByTime(2000);
+                await Promise.resolve();
+            });
+
+            unmount();
+            expect(clearIntervalSpy).toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+            clearIntervalSpy.mockRestore();
+        }
+    });
 });
