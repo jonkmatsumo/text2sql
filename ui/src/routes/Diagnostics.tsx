@@ -447,6 +447,11 @@ export default function Diagnostics() {
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>
                                 Recent Run Signals
+                                {filterMode === "anomalies" && (
+                                    <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
+                                        (Global status — non-anomaly derived)
+                                    </span>
+                                )}
                             </h3>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
                                 Showing latest 5 per category.
