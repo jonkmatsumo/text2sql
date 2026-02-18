@@ -3,7 +3,9 @@ import { useSearchParams, Link } from "react-router-dom";
 import { OpsService } from "../api";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { useToast } from "../hooks/useToast";
+import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
+import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
 
@@ -25,9 +27,9 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
 
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
-
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
     // Derived state from URL
     const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
@@ -37,6 +39,7 @@ export default function RunHistory() {
 
     const limit = 50;
     const { show: showToast } = useToast();
+    const searchInputRef = React.useRef<HTMLInputElement>(null);
 
     const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
         setSearchParams(prev => {
@@ -48,8 +51,7 @@ export default function RunHistory() {
                     next.set(key, String(value));
                 }
             });
-            // Reset offset on filter change if not specifically updating offset
-            if (!updates.hasOwnProperty("offset")) {
+            if (!Object.prototype.hasOwnProperty.call(updates, "offset")) {
                 next.delete("offset");
             }
             return next;
@@ -60,8 +62,7 @@ export default function RunHistory() {
         setIsLoading(true);
         try {
             const data = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
-            // Ensure unique IDs to handle shifting items during pagination or API anomalies
-            const seenIds = new Set();
+            const seenIds = new Set<string>();
             const uniqueData = data.filter(run => {
                 if (seenIds.has(run.id)) return false;
                 seenIds.add(run.id);
@@ -79,31 +80,18 @@ export default function RunHistory() {
         fetchRuns();
     }, [fetchRuns]);
 
-    const searchInputRef = React.useRef<HTMLInputElement>(null);
-
     const clearFilters = useCallback(() => {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
 
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Only trigger if no input is focused, unless it's Esc
-            const isInputFocused = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA";
+    const SHORTCUTS = useMemo(() => [
+        { key: "r", label: "Refresh list", handler: fetchRuns },
+        { key: "/", label: "Focus search", handler: () => searchInputRef.current?.focus() },
+        { key: "Escape", label: "Clear filters", handler: clearFilters, allowInInput: true },
+        { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
+    ], [fetchRuns, clearFilters]);
 
-            if (e.key === "r" && !isInputFocused) {
-                e.preventDefault();
-                fetchRuns();
-            } else if (e.key === "/" && !isInputFocused) {
-                e.preventDefault();
-                searchInputRef.current?.focus();
-            } else if (e.key === "Escape") {
-                clearFilters();
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [fetchRuns, clearFilters]);
+    useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
     const filteredRuns = useMemo(() =>
         runs.filter(run =>
@@ -115,11 +103,21 @@ export default function RunHistory() {
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <header className="mb-8">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Run History</h1>
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                    Browse and inspect historical agent execution runs.
-                </p>
+            <header className="mb-8 flex items-start justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Run History</h1>
+                    <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                        Browse and inspect historical agent execution runs.
+                    </p>
+                </div>
+                <button
+                    onClick={() => setShortcutsOpen(true)}
+                    aria-label="Show keyboard shortcuts"
+                    title="Keyboard shortcuts (?)"
+                    className="mt-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg font-mono border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm"
+                >
+                    ?
+                </button>
             </header>
 
             <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
@@ -243,7 +241,7 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    Showing results {offset + 1} - {offset + runs.length}
+                    Showing results {offset + 1} – {offset + runs.length}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
@@ -254,6 +252,12 @@ export default function RunHistory() {
                     Next
                 </button>
             </div>
+
+            <KeyboardShortcutsModal
+                isOpen={shortcutsOpen}
+                onClose={() => setShortcutsOpen(false)}
+                shortcuts={SHORTCUTS}
+            />
         </div>
     );
 }

@@ -1,9 +1,11 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { OpsService } from "../api";
 import { OpsJobResponse, OpsJobStatus } from "../types/admin";
 import { JobsTable } from "../components/ops/JobsTable";
+import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import { useToast } from "../hooks/useToast";
 import { useConfirmation } from "../hooks/useConfirmation";
+import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
 export default function JobsDashboard() {
@@ -12,6 +14,7 @@ export default function JobsDashboard() {
     const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(new Set());
     const [filterType, setFilterType] = useState<string>("");
     const [filterStatus, setFilterStatus] = useState<string>("");
+    const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const { show: showToast } = useToast();
     const { confirm, dialogProps } = useConfirmation();
 
@@ -29,26 +32,17 @@ export default function JobsDashboard() {
 
     useEffect(() => {
         fetchJobs();
-        const interval = setInterval(fetchJobs, 5000); // Poll every 5s
+        const interval = setInterval(fetchJobs, 5000);
         return () => clearInterval(interval);
     }, [fetchJobs]);
 
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            const isInputFocused = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT";
+    const SHORTCUTS = useMemo(() => [
+        { key: "r", label: "Refresh list", handler: fetchJobs },
+        { key: "Escape", label: "Clear filters", handler: () => { setFilterType(""); setFilterStatus(""); }, allowInInput: true },
+        { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
+    ], [fetchJobs]);
 
-            if (e.key === "r" && !isInputFocused) {
-                e.preventDefault();
-                fetchJobs();
-            } else if (e.key === "Escape") {
-                setFilterType("");
-                setFilterStatus("");
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [fetchJobs]);
+    useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
     const pollJobUntilTerminal = useCallback(async (jobId: string, maxAttempts = 10) => {
         let attempts = 0;
@@ -58,7 +52,7 @@ export default function JobsDashboard() {
                 const job = await OpsService.getJobStatus(jobId);
                 if (job.status === "CANCELLED" || job.status === "FAILED" || job.status === "COMPLETED") {
                     clearInterval(interval);
-                    showToast(`Job ${jobId.slice(0, 8)} reaches terminal state: ${job.status}`, "success");
+                    showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
                     fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearInterval(interval);
@@ -111,7 +105,7 @@ export default function JobsDashboard() {
                 message = "Job is already completed and cannot be canceled.";
             }
             showToast(message, "error");
-            fetchJobs(); // Force refresh to show current status
+            fetchJobs();
         } finally {
             setCancellingJobIds((prev: Set<string>) => {
                 const next = new Set(prev);
@@ -130,7 +124,15 @@ export default function JobsDashboard() {
                         A list of all operational jobs including ingestion, hydration, and synthetic data generation.
                     </p>
                 </div>
-                <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+                <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none flex items-center gap-3">
+                    <button
+                        onClick={() => setShortcutsOpen(true)}
+                        aria-label="Show keyboard shortcuts"
+                        title="Keyboard shortcuts (?)"
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm font-mono"
+                    >
+                        ?
+                    </button>
                     <button
                         onClick={fetchJobs}
                         className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:w-auto"
@@ -152,7 +154,6 @@ export default function JobsDashboard() {
                     <option value="CACHE_REINDEX">Cache Reindex</option>
                     <option value="PATTERN_ENRICHMENT">Pattern Enrichment</option>
                     <option value="SYNTH_GENERATE">Synthetic Generation</option>
-                    {/* Add other types as needed */}
                 </select>
 
                 <select
@@ -173,6 +174,11 @@ export default function JobsDashboard() {
             </div>
 
             <ConfirmationDialog {...dialogProps} />
+            <KeyboardShortcutsModal
+                isOpen={shortcutsOpen}
+                onClose={() => setShortcutsOpen(false)}
+                shortcuts={SHORTCUTS}
+            />
         </div>
     );
 }
