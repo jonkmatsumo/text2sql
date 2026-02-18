@@ -1,6 +1,6 @@
 import { components as UIComponents } from "../gen/ui_types";
 
-export type InteractionStatus = "PENDING" | "APPROVED" | "REJECTED" | "UNKNOWN";
+export type InteractionStatus = "PENDING" | "APPROVED" | "REJECTED" | "UNKNOWN" | "SUCCESS" | "FAILED";
 export type FeedbackThumb = "UP" | "DOWN" | "None" | "All";
 
 export interface Interaction {

@@ -15,6 +15,7 @@ import Diagnostics from "./routes/Diagnostics";
 
 import JobsDashboard from "./routes/JobsDashboard";
 import RunDetails from "./routes/RunDetails";
+import RunHistory from "./routes/RunHistory";
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/admin/observability/metrics" element={<MetricsPreview />} />
         <Route path="/admin/settings/query-target" element={<QueryTargetSettings />} />
         <Route path="/admin/diagnostics" element={<Diagnostics />} />
+        <Route path="/admin/runs" element={<RunHistory />} />
         <Route path="/admin/runs/:runId" element={<RunDetails />} />
       </Routes>
     </Layout>

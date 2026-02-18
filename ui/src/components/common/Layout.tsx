@@ -28,6 +28,7 @@ const navItems = [
     { path: "/admin/review", label: "Review & Curation", icon: "📝" },
     { path: "/admin/recommendations", label: "Recommendations", icon: "✨" },
     { path: "/admin/operations", label: "System Operations", icon: "⚙️" },
+    { path: "/admin/runs", label: "Run History", icon: "🕒" },
     { path: "/admin/jobs", label: "Unified Jobs", icon: "📋" },
     { path: "/admin/settings/query-target", label: "Query Target Settings", icon: "🧭" },
     { path: "/admin/traces", label: "Trace Explorer", icon: "🔍" },
