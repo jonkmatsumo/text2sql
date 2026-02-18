@@ -16,6 +16,7 @@ import { DiagnosticsRunSignalSection } from "../components/diagnostics/Diagnosti
 import {
     getDiagnosticsAnomalies,
     getDiagnosticsStatus,
+    normalizeNonNegativeMetric,
 } from "../utils/diagnosticsStatus";
 
 interface DiagnosticsError {
@@ -31,27 +32,20 @@ function readOptionalString(value: unknown): string | undefined {
     return trimmed || undefined;
 }
 
-function normalizeNonNegativeNumber(value: unknown): number | null {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return null;
-    }
-    return value < 0 ? 0 : value;
-}
-
 function formatMetricNumber(value: unknown, digits: number = 2): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return normalized.toFixed(digits).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
 function formatCountWithUnit(value: unknown, unit: string): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return `${Math.round(normalized)} ${unit}`;
 }
 
 function formatMilliseconds(value: unknown): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return normalized.toFixed(2);
 }
@@ -174,7 +168,7 @@ export default function Diagnostics() {
 
     const latencyRows = Object.entries(data?.debug?.latency_breakdown_ms ?? {}).map(([stage, ms]) => ({
         stage,
-        value: normalizeNonNegativeNumber(ms),
+        value: normalizeNonNegativeMetric(ms),
     }));
     const visibleLatencyRows =
         filterMode === "anomalies"
@@ -229,7 +223,7 @@ export default function Diagnostics() {
     const diagnosticsRequestId =
         readOptionalString(data?.request_id) ??
         readOptionalString(data?.debug?.request_id);
-    const schemaCacheTtlSeconds = normalizeNonNegativeNumber(data?.schema_cache_ttl_seconds);
+    const schemaCacheTtlSeconds = normalizeNonNegativeMetric(data?.schema_cache_ttl_seconds);
     const schemaCacheTtlDisplay = schemaCacheTtlSeconds == null ? "—" : `${schemaCacheTtlSeconds}s`;
 
     if (loading && !data) {

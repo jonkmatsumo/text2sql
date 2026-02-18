@@ -16,7 +16,13 @@ export const DIAGNOSTICS_THRESHOLDS = {
   stageLatencyMsWarn: 2000,
 } as const;
 
-function normalizeMetric(value: unknown): number | null {
+/**
+ * Normalizes a metric value:
+ * - Reject non-finite (NaN, Infinity)
+ * - Clamp negatives to 0
+ * - Return null for unusable values (not numbers)
+ */
+export function normalizeNonNegativeMetric(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
   }
@@ -32,7 +38,7 @@ export function getDiagnosticsAnomalies(
   const runtime = data.runtime_indicators;
 
   if (runtime) {
-    const avgQueryComplexity = normalizeMetric(runtime.avg_query_complexity);
+    const avgQueryComplexity = normalizeNonNegativeMetric(runtime.avg_query_complexity);
     if (avgQueryComplexity != null && avgQueryComplexity > DIAGNOSTICS_THRESHOLDS.avgQueryComplexityWarn) {
       anomalies.push({
         id: "avg_query_complexity",
@@ -42,7 +48,7 @@ export function getDiagnosticsAnomalies(
       });
     }
 
-    const schemaCacheSize = normalizeMetric(runtime.active_schema_cache_size);
+    const schemaCacheSize = normalizeNonNegativeMetric(runtime.active_schema_cache_size);
     if (schemaCacheSize != null && schemaCacheSize > DIAGNOSTICS_THRESHOLDS.schemaCacheSizeWarn) {
       anomalies.push({
         id: "active_schema_cache_size",
@@ -52,7 +58,7 @@ export function getDiagnosticsAnomalies(
       });
     }
 
-    const truncationEvents = normalizeMetric(runtime.recent_truncation_event_count);
+    const truncationEvents = normalizeNonNegativeMetric(runtime.recent_truncation_event_count);
     if (truncationEvents != null && truncationEvents > DIAGNOSTICS_THRESHOLDS.truncationEventsWarn) {
       anomalies.push({
         id: "recent_truncation_event_count",
@@ -65,7 +71,7 @@ export function getDiagnosticsAnomalies(
 
   if (data.debug?.latency_breakdown_ms) {
     for (const [stage, rawMs] of Object.entries(data.debug.latency_breakdown_ms)) {
-      const latencyMs = normalizeMetric(rawMs);
+      const latencyMs = normalizeNonNegativeMetric(rawMs);
       if (latencyMs != null && latencyMs > DIAGNOSTICS_THRESHOLDS.stageLatencyMsWarn) {
         anomalies.push({
           id: `latency:${stage}`,
