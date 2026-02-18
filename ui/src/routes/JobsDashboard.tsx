@@ -23,8 +23,8 @@ export default function JobsDashboard() {
 
     const isMountedRef = React.useRef(true);
     const cancelPollIntervalRef = React.useRef<number | null>(null);
-    const confirmingCancelJobIdsRef = React.useRef<Set<string>>(new Set());
-    const timeoutNotifiedJobIdsRef = React.useRef<Set<string>>(new Set());
+    const confirmingCancelJobIdsRef = React.useRef(new Set<string>());
+    const lastTimeoutToastAtRef = React.useRef(new Map<string, number>());
 
     // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
@@ -79,7 +79,7 @@ export default function JobsDashboard() {
                 for (const job of data) {
                     if (next.has(job.id) && TERMINAL_STATUSES.has(job.status)) {
                         next.delete(job.id);
-                        timeoutNotifiedJobIdsRef.current.delete(job.id);
+                        lastTimeoutToastAtRef.current.delete(job.id);
                         changed = true;
                     }
                 }
@@ -108,7 +108,7 @@ export default function JobsDashboard() {
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
-    const pollJobUntilTerminal = useCallback((jobId: string, maxAttempts = 10) => {
+    const pollJobUntilTerminal = useCallback((jobId: string, jobType: string, maxAttempts = 10) => {
         clearCancelPollInterval();
         let attempts = 0;
         cancelPollIntervalRef.current = window.setInterval(async () => {
@@ -121,7 +121,7 @@ export default function JobsDashboard() {
                 const job = await OpsService.getJobStatus(jobId);
                 if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
                     clearCancelPollInterval();
-                    timeoutNotifiedJobIdsRef.current.delete(jobId);
+                    lastTimeoutToastAtRef.current.delete(jobId);
                     setCancelPollTimeoutJobIds((prev) => {
                         if (!prev.has(jobId)) return prev;
                         const next = new Set(prev);
@@ -132,9 +132,11 @@ export default function JobsDashboard() {
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearCancelPollInterval();
-                    if (!timeoutNotifiedJobIdsRef.current.has(jobId)) {
-                        timeoutNotifiedJobIdsRef.current.add(jobId);
-                        showToast("Job status check timed out. Refresh list to re-check.", "warning");
+                    const now = Date.now();
+                    const lastToast = lastTimeoutToastAtRef.current.get(jobId);
+                    if (!lastToast || now - lastToast > 30000) {
+                        lastTimeoutToastAtRef.current.set(jobId, now);
+                        showToast(`Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`, "warning");
                     }
                     setCancelPollTimeoutJobIds((prev) => {
                         if (prev.has(jobId)) return prev;
@@ -157,7 +159,7 @@ export default function JobsDashboard() {
         if (!job || job.status === "CANCELLING") return;
 
         clearCancelPollInterval();
-        timeoutNotifiedJobIdsRef.current.delete(jobId);
+        lastTimeoutToastAtRef.current.delete(jobId);
         setCancelPollTimeoutJobIds((prev) => {
             if (!prev.has(jobId)) return prev;
             const next = new Set(prev);
@@ -194,7 +196,7 @@ export default function JobsDashboard() {
             await OpsService.cancelJob(jobId);
             if (!isMountedRef.current) return;
             showToast("Job cancellation requested", "success");
-            pollJobUntilTerminal(jobId);
+            pollJobUntilTerminal(jobId, job.job_type);
         } catch (err: any) {
             let message = err.message || "Failed to cancel job";
             if (err.code === "JOB_ALREADY_TERMINAL" || err.status === 409) {
@@ -214,7 +216,7 @@ export default function JobsDashboard() {
     };
 
     const handleTimeoutRefresh = useCallback(() => {
-        timeoutNotifiedJobIdsRef.current.clear();
+        lastTimeoutToastAtRef.current.clear();
         setCancelPollTimeoutJobIds(new Set());
         void fetchJobs();
     }, [fetchJobs]);

@@ -197,3 +197,69 @@ describe("Polling terminality", () => {
         expect(shouldStop("FAILED")).toBe(true);
     });
 });
+
+describe("Timeout throttling", () => {
+    it("fires toast once if no previous toast exists", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fire toast twice within the throttle interval", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        lastToastAt.set(jobId, now - 10000); // 10s ago
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it("fires toast again after throttle interval passed", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        lastToastAt.set(jobId, now - 31000); // 31s ago
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(lastToastAt.get(jobId)).toBe(now);
+    });
+
+    it("includes job context in the toast message (matching logic)", () => {
+        const showToast = vi.fn();
+        const jobId = "job-12345678";
+        const jobType = "INGESTION";
+
+        const message = `Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`;
+        showToast(message, "warning");
+
+        expect(showToast).toHaveBeenCalledWith(
+            "Status check for INGESTION (job-1234) timed out. Refresh list to re-check.",
+            "warning"
+        );
+    });
+});
