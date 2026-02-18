@@ -22,6 +22,7 @@ export default function JobsDashboard() {
 
     const isMountedRef = React.useRef(true);
     const cancelPollIntervalRef = React.useRef<number | null>(null);
+    const confirmingCancelJobIdsRef = React.useRef<Set<string>>(new Set());
 
     // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
@@ -117,35 +118,34 @@ export default function JobsDashboard() {
     }, [clearCancelPollInterval, fetchJobs, showToast]);
 
     const handleCancel = async (jobId: string) => {
-        if (cancellingJobIds.has(jobId)) return;
+        if (cancellingJobIds.has(jobId) || confirmingCancelJobIdsRef.current.has(jobId)) return;
 
         const job = jobs.find(j => j.id === jobId);
         if (!job || job.status === "CANCELLING") return;
 
         clearCancelPollInterval();
+        confirmingCancelJobIdsRef.current.add(jobId);
+        let confirmed = false;
+        try {
+            confirmed = await confirm({
+                title: "Cancel Job",
+                description: "Are you sure you want to cancel this background job? This action cannot be undone.",
+                confirmText: "Cancel Job",
+                danger: true
+            });
+        } finally {
+            confirmingCancelJobIdsRef.current.delete(jobId);
+        }
+
+        if (!confirmed || !isMountedRef.current) {
+            return;
+        }
+
         setCancellingJobIds((prev: Set<string>) => {
             const next = new Set(prev);
             next.add(jobId);
             return next;
         });
-
-        const confirmed = await confirm({
-            title: "Cancel Job",
-            description: "Are you sure you want to cancel this background job? This action cannot be undone.",
-            confirmText: "Cancel Job",
-            danger: true
-        });
-
-        if (!confirmed) {
-            if (isMountedRef.current) {
-                setCancellingJobIds((prev: Set<string>) => {
-                    const next = new Set(prev);
-                    next.delete(jobId);
-                    return next;
-                });
-            }
-            return;
-        }
 
         // Optimistic update
         setJobs((prev: OpsJobResponse[]) => prev.map(j => (j.id === jobId ? { ...j, status: "CANCELLING" as OpsJobStatus } : j)));

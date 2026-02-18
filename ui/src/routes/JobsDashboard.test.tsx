@@ -84,6 +84,48 @@ describe("JobsDashboard Cancellation", () => {
         });
     });
 
+    it("keeps cancel state unchanged until confirmation is accepted", async () => {
+        let resolveConfirm: (value: boolean) => void;
+        const confirmPromise = new Promise<boolean>((resolve) => {
+            resolveConfirm = resolve;
+        });
+        const confirmMock = vi.fn().mockReturnValue(confirmPromise);
+        vi.spyOn(useConfirmationHook, "useConfirmation").mockReturnValue({
+            confirm: confirmMock,
+            dialogProps: { isOpen: false, onConfirm: vi.fn(), onClose: vi.fn() }
+        } as any);
+
+        let resolveCancel: (value: any) => void;
+        const cancelPromise = new Promise((resolve) => {
+            resolveCancel = resolve;
+        });
+        vi.spyOn(OpsService, "cancelJob").mockReturnValue(cancelPromise as any);
+
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+        expect(confirmMock).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+        expect(screen.queryByText("CANCELLING")).not.toBeInTheDocument();
+
+        await act(async () => {
+            resolveConfirm!(true);
+            await Promise.resolve();
+        });
+
+        expect(await screen.findByText("CANCELLING")).toBeInTheDocument();
+
+        await act(async () => {
+            resolveCancel!({ success: true });
+        });
+    });
+
     it("stops cancel-status polling once the job reaches a terminal state", async () => {
         const getJobStatusMock = vi
             .spyOn(OpsService, "getJobStatus")
