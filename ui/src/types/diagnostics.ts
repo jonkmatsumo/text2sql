@@ -37,9 +37,9 @@ export interface DiagnosticsResponse {
     trace_id?: string;
     interaction_id?: string;
     request_id?: string;
-    retry_policy: RetryPolicy;
-    schema_cache_ttl_seconds: number;
-    runtime_indicators: RuntimeIndicators;
+    retry_policy?: RetryPolicy;
+    schema_cache_ttl_seconds?: number;
+    runtime_indicators?: RuntimeIndicators;
     enabled_flags: EnabledFlags;
     monitor_snapshot?: Record<string, any>;
     run_summary_store?: Record<string, any>;
