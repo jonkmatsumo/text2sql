@@ -29,3 +29,9 @@ export function getInteractionStatusTone(status?: string): StatusTone {
             return "neutral";
     }
 }
+
+export const STATUS_TONE_CLASSES: Record<StatusTone, string> = {
+    success: "bg-green-100 text-green-800",
+    danger: "bg-red-100 text-red-800",
+    neutral: "bg-gray-100 text-gray-800",
+};
