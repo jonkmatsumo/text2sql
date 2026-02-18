@@ -78,6 +78,34 @@ export function formatTimestamp(
   return date.toLocaleString();
 }
 
+/**
+ * Returns a human-friendly relative time string (e.g., "5m ago", "1h ago").
+ * Falls back to absolute time if older than 24 hours.
+ */
+export function formatRelativeTime(
+  value: TimestampInput,
+  options: { inputInSeconds?: boolean; fallback?: string } = {}
+): string {
+  const ms = toTimestampMs(value, options.inputInSeconds);
+  if (ms == null) return options.fallback ?? "—";
+
+  const now = Date.now();
+  const diffMs = now - ms;
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 0) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+
+  // Fallback to absolute for older
+  return new Date(ms).toLocaleDateString();
+}
+
 export function toPrettyJson(value: unknown): string {
   if (value === undefined) return "";
   try {

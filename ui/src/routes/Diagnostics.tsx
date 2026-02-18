@@ -12,6 +12,7 @@ import {
     useDiagnosticsViewFilters,
 } from "../components/diagnostics/DiagnosticsFilters";
 import { DiagnosticsStatusStrip } from "../components/diagnostics/DiagnosticsStatusStrip";
+import { DiagnosticsRunSignalSection } from "../components/diagnostics/DiagnosticsRunSignalSection";
 import {
     getDiagnosticsAnomalies,
     getDiagnosticsStatus,
@@ -457,79 +458,23 @@ export default function Diagnostics() {
                                 Showing latest 5 per category.
                             </p>
                             <div style={{ display: "grid", gap: "20px" }}>
-                                <section data-testid="diagnostics-failures-section">
-                                    <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>Recent failures</h4>
-                                    {recentFailures.length === 0 ? (
-                                        <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}>
-                                            No recent failures found.
-                                        </p>
-                                    ) : (
-                                        <div style={{ display: "grid", gap: "12px" }}>
-                                            {recentFailures.map((run) => (
-                                                <div key={`failure-${run.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                                                            <span className="pill text-xs font-bold bg-red-100 text-red-800" style={{ padding: "2px 8px", borderRadius: "12px" }}>
-                                                                FAILED
-                                                            </span>
-                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
-                                                        </div>
-                                                        <p style={{ margin: "0 0 4px 0", fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
-                                                            {new Date(run.created_at).toLocaleString()}
-                                                        </p>
-                                                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                            {run.user_nlq_text || "(No query text available)"}
-                                                        </p>
-                                                    </div>
-                                                    <Link
-                                                        to={`/admin/runs/${run.id}`}
-                                                        className="button-link"
-                                                        style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
-                                                    >
-                                                        Inspect
-                                                    </Link>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </section>
+                                <DiagnosticsRunSignalSection
+                                    title="Recent failures"
+                                    runs={recentFailures}
+                                    pillLabel="FAILED"
+                                    pillClass="bg-red-100 text-red-800"
+                                    emptyMessage="No recent failures found."
+                                    testId="diagnostics-failures-section"
+                                />
 
-                                <section data-testid="diagnostics-low-ratings-section">
-                                    <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>Recent low ratings</h4>
-                                    {recentLowRatings.length === 0 ? (
-                                        <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}>
-                                            No recent low ratings found.
-                                        </p>
-                                    ) : (
-                                        <div style={{ display: "grid", gap: "12px" }}>
-                                            {recentLowRatings.map((run) => (
-                                                <div key={`low-rating-${run.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                                                            <span className="pill text-xs font-bold bg-amber-100 text-amber-800" style={{ padding: "2px 8px", borderRadius: "12px" }}>
-                                                                LOW_RATING
-                                                            </span>
-                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
-                                                        </div>
-                                                        <p style={{ margin: "0 0 4px 0", fontSize: "0.8rem", fontWeight: 600, color: "var(--ink)" }}>
-                                                            {new Date(run.created_at).toLocaleString()}
-                                                        </p>
-                                                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                            {run.user_nlq_text || "(No query text available)"}
-                                                        </p>
-                                                    </div>
-                                                    <Link
-                                                        to={`/admin/runs/${run.id}`}
-                                                        className="button-link"
-                                                        style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
-                                                    >
-                                                        Inspect
-                                                    </Link>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </section>
+                                <DiagnosticsRunSignalSection
+                                    title="Recent low ratings"
+                                    runs={recentLowRatings}
+                                    pillLabel="LOW_RATING"
+                                    pillClass="bg-amber-100 text-amber-800"
+                                    emptyMessage="No recent low ratings found."
+                                    testId="diagnostics-low-ratings-section"
+                                />
 
                                 <div style={{ marginTop: "4px", textAlign: "right" }}>
                                     <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
