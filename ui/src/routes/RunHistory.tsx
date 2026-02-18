@@ -1,33 +1,58 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { OpsService } from "../api";
-import { Interaction } from "../types/admin";
+import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
 import { Link } from "react-router-dom";
 import TraceLink from "../components/common/TraceLink";
+import FilterSelect from "../components/common/FilterSelect";
+
+const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
+    { value: "All", label: "All Statuses" },
+    { value: "SUCCESS", label: "Success" },
+    { value: "FAILED", label: "Failed" },
+    { value: "PENDING", label: "Pending" },
+    { value: "APPROVED", label: "Approved" },
+    { value: "REJECTED", label: "Rejected" },
+];
+
+const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
+    { value: "All", label: "All Feedback" },
+    { value: "UP", label: "Positive (UP)" },
+    { value: "DOWN", label: "Negative (DOWN)" },
+    { value: "None", label: "No Feedback" },
+];
 
 export default function RunHistory() {
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [offset, setOffset] = useState(0);
+    const [statusFilter, setStatusFilter] = useState<InteractionStatus | "All">("All");
+    const [thumbFilter, setThumbFilter] = useState<FeedbackThumb>("All");
+    const [searchQuery, setSearchQuery] = useState("");
     const limit = 50;
     const { show: showToast } = useToast();
 
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
         try {
-            const data = await OpsService.listRuns(limit, offset);
+            const data = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
             setRuns(data);
         } catch (err) {
             showToast("Failed to fetch run history", "error");
         } finally {
             setIsLoading(false);
         }
-    }, [offset, showToast]);
+    }, [offset, statusFilter, thumbFilter, showToast]);
 
     useEffect(() => {
         fetchRuns();
     }, [fetchRuns]);
+
+    const filteredRuns = runs.filter(run =>
+        run.user_nlq_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        run.id.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -38,32 +63,58 @@ export default function RunHistory() {
                 </p>
             </header>
 
+            <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
+                <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 font-semibold">Search Queries or IDs</label>
+                    <input
+                        type="text"
+                        placeholder="Keyword search..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                </div>
+                <FilterSelect
+                    label="Status"
+                    value={statusFilter}
+                    options={STATUS_OPTIONS}
+                    onChange={(val) => { setStatusFilter(val as InteractionStatus | "All"); setOffset(0); }}
+                />
+                <FilterSelect
+                    label="Feedback"
+                    value={thumbFilter}
+                    options={THUMB_OPTIONS}
+                    onChange={(val) => { setThumbFilter(val as FeedbackThumb); setOffset(0); }}
+                />
+            </div>
+
             <div className="bg-white dark:bg-gray-900 shadow overflow-hidden sm:rounded-lg border border-gray-200 dark:border-gray-800">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
-                    <thead className="bg-gray-50 dark:bg-gray-800">
+                    <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Run ID</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Run ID</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Query</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Feedback</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-800">
                         {isLoading ? (
                             <tr>
-                                <td colSpan={5} className="px-6 py-12 text-center">
+                                <td colSpan={6} className="px-6 py-12 text-center">
                                     <LoadingState message="Loading runs..." />
                                 </td>
                             </tr>
-                        ) : runs.length === 0 ? (
+                        ) : filteredRuns.length === 0 ? (
                             <tr>
-                                <td colSpan={5} className="px-6 py-12 text-center text-gray-500 italic">
-                                    No historical runs found.
+                                <td colSpan={6} className="px-6 py-12 text-center text-gray-500 italic">
+                                    No historical runs found matching filters.
                                 </td>
                             </tr>
                         ) : (
-                            runs.map((run) => (
+                            filteredRuns.map((run) => (
                                 <tr key={run.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
                                         {run.id.slice(0, 8)}...
@@ -72,12 +123,15 @@ export default function RunHistory() {
                                         {run.user_nlq_text}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${run.execution_status === 'SUCCESS' ? 'bg-green-100 text-green-800' :
-                                                run.execution_status === 'FAILED' ? 'bg-red-100 text-red-800' :
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${run.execution_status === 'SUCCESS' || run.execution_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                                                run.execution_status === 'FAILED' || run.execution_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
                                                     'bg-gray-100 text-gray-800'
                                             }`}>
                                             {run.execution_status}
                                         </span>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {run.thumb === 'UP' ? '👍' : run.thumb === 'DOWN' ? '👎' : '—'}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                         {run.created_at ? new Date(run.created_at).toLocaleString() : '—'}
