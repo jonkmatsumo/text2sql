@@ -8,6 +8,8 @@ import { useConfirmation } from "../hooks/useConfirmation";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 
+export const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
+
 export default function JobsDashboard() {
     const [jobs, setJobs] = useState<OpsJobResponse[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -22,8 +24,6 @@ export default function JobsDashboard() {
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
     React.useEffect(() => { cancellingJobIdsRef.current = cancellingJobIds; }, [cancellingJobIds]);
 
-    const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
-
     const fetchJobs = useCallback(async () => {
         setIsLoading(true);
         try {
@@ -35,7 +35,7 @@ export default function JobsDashboard() {
             if (currentCancelling.size > 0) {
                 const resolved: string[] = [];
                 for (const job of data) {
-                    if (currentCancelling.has(job.id) && TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
+                    if (currentCancelling.has(job.id) && TERMINAL_STATUSES.has(job.status)) {
                         resolved.push(job.id);
                         showToast(`Job ${job.id.slice(0, 8)} reached terminal state: ${job.status}`, "success");
                     }
@@ -75,7 +75,7 @@ export default function JobsDashboard() {
             attempts++;
             try {
                 const job = await OpsService.getJobStatus(jobId);
-                if (job.status === "CANCELLED" || job.status === "FAILED" || job.status === "COMPLETED") {
+                if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
                     clearInterval(interval);
                     showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
                     fetchJobs();

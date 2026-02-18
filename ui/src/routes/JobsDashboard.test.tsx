@@ -83,4 +83,44 @@ describe("JobsDashboard Cancellation", () => {
             expect(confirmMock).toHaveBeenCalledTimes(1);
         });
     });
+
+    it("stops cancel-status polling once the job reaches a terminal state", async () => {
+        const getJobStatusMock = vi
+            .spyOn(OpsService, "getJobStatus")
+            .mockResolvedValue({ ...mockJobs[0], status: "FAILED" } as any);
+        vi.spyOn(OpsService, "cancelJob").mockResolvedValue({ success: true } as any);
+
+        try {
+            render(
+                <MemoryRouter>
+                    <JobsDashboard />
+                </MemoryRouter>
+            );
+
+            await screen.findByText("SCHEMA_HYDRATION");
+            vi.useFakeTimers();
+            fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+            await act(async () => {
+                await Promise.resolve();
+            });
+            expect(OpsService.cancelJob).toHaveBeenCalledWith("job-1");
+
+            await act(async () => {
+                vi.advanceTimersByTime(2000);
+                await Promise.resolve();
+            });
+
+            expect(getJobStatusMock).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                vi.advanceTimersByTime(8000);
+                await Promise.resolve();
+            });
+
+            expect(getJobStatusMock).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

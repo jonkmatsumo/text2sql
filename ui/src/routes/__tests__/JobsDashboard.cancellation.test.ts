@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { TERMINAL_STATUSES } from "../JobsDashboard";
 
 /**
  * Unit tests for cancellation state reconciliation logic.
@@ -11,8 +12,6 @@ interface Job {
     id: string;
     status: OpsJobStatus;
 }
-
-const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
 /**
  * Mirrors the reconciliation logic from fetchJobs.
