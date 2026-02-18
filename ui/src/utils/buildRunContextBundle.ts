@@ -2,12 +2,26 @@ export interface RunContextInput {
     runId?: string;
     traceId?: string;
     requestId?: string;
+    interactionId?: string;
     userQuery?: string;
     generatedSql?: string;
     validationStatus?: string;
     validationErrors?: string[];
     executionStatus?: string;
     isComplete?: boolean;
+    environment?: string;
+}
+
+/**
+ * Shared identifier block builder for consistency across different bundle types (text/JSON).
+ */
+export function buildIdentifierBlock(input: RunContextInput): Record<string, string> {
+    const block: Record<string, string> = {};
+    if (input.runId) block["Run ID"] = input.runId;
+    if (input.traceId) block["Trace ID"] = input.traceId;
+    if (input.interactionId) block["Interaction ID"] = input.interactionId;
+    if (input.requestId) block["Request ID"] = input.requestId;
+    return block;
 }
 
 /**
@@ -20,11 +34,17 @@ export interface RunContextInput {
 export function buildRunContextBundle(input: RunContextInput): string {
     const lines: string[] = ["=== Run Context Bundle ===", "Bundle-Version: 1"];
 
-    if (input.runId) lines.push(`Run ID:           ${input.runId}`);
-    if (input.traceId) lines.push(`Trace ID:         ${input.traceId}`);
-    if (input.requestId) lines.push(`Request ID:       ${input.requestId}`);
-    if (input.executionStatus) lines.push(`Execution Status: ${input.executionStatus}`);
-    if (input.isComplete !== undefined) lines.push(`Complete:         ${input.isComplete ? "yes" : "no"}`);
+    const identifiers = buildIdentifierBlock(input);
+    Object.entries(identifiers).forEach(([key, value]) => {
+        lines.push(`${key.padEnd(16)}: ${value}`);
+    });
+
+    if (input.executionStatus) lines.push(`${"Execution Status".padEnd(16)}: ${input.executionStatus}`);
+    if (input.isComplete !== undefined) lines.push(`${"Complete".padEnd(16)}: ${input.isComplete ? "yes" : "no"}`);
+
+    const env = input.environment || (import.meta as any).env?.MODE || "development";
+    lines.push(`${"Environment".padEnd(16)}: ${env}`);
+    lines.push(`${"Generated at".padEnd(16)}: ${new Date().toISOString()}`);
 
     if (input.userQuery) {
         lines.push("");
@@ -49,7 +69,6 @@ export function buildRunContextBundle(input: RunContextInput): string {
     }
 
     lines.push("");
-    lines.push(`Generated at: ${new Date().toISOString()}`);
     lines.push("=========================");
 
     return lines.join("\n");

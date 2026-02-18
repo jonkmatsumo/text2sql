@@ -22,7 +22,7 @@ export default function JobsDashboard() {
     const { confirm, dialogProps } = useConfirmation();
 
     const isMountedRef = React.useRef(true);
-    const cancelPollIntervalRef = React.useRef<number | null>(null);
+    const activePollersRef = React.useRef<Map<string, number>>(new Map());
     const confirmingCancelJobIdsRef = React.useRef(new Set<string>());
     const lastTimeoutToastAtRef = React.useRef(new Map<string, number>());
 
@@ -30,10 +30,16 @@ export default function JobsDashboard() {
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
     React.useEffect(() => { cancellingJobIdsRef.current = cancellingJobIds; }, [cancellingJobIds]);
 
-    const clearCancelPollInterval = useCallback(() => {
-        if (cancelPollIntervalRef.current !== null) {
-            window.clearInterval(cancelPollIntervalRef.current);
-            cancelPollIntervalRef.current = null;
+    const clearCancelPollInterval = useCallback((jobId?: string) => {
+        if (jobId) {
+            const interval = activePollersRef.current.get(jobId);
+            if (interval !== undefined) {
+                window.clearInterval(interval);
+                activePollersRef.current.delete(jobId);
+            }
+        } else {
+            activePollersRef.current.forEach((interval) => window.clearInterval(interval));
+            activePollersRef.current.clear();
         }
     }, []);
 
@@ -67,6 +73,7 @@ export default function JobsDashboard() {
                         if (!isMountedRef.current) return prev;
                         const next = new Set(prev);
                         resolved.forEach(id => next.delete(id));
+                        cancellingJobIdsRef.current = next;
                         return next;
                     });
                 }
@@ -109,18 +116,21 @@ export default function JobsDashboard() {
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
     const pollJobUntilTerminal = useCallback((jobId: string, jobType: string, maxAttempts = 10) => {
-        clearCancelPollInterval();
+        if (activePollersRef.current.has(jobId)) {
+            return; // Already polling this job
+        }
+
         let attempts = 0;
-        cancelPollIntervalRef.current = window.setInterval(async () => {
+        const interval = window.setInterval(async () => {
             if (!isMountedRef.current) {
-                clearCancelPollInterval();
+                clearCancelPollInterval(jobId);
                 return;
             }
             attempts++;
             try {
                 const job = await OpsService.getJobStatus(jobId);
                 if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
-                    clearCancelPollInterval();
+                    clearCancelPollInterval(jobId);
                     lastTimeoutToastAtRef.current.delete(jobId);
                     setCancelPollTimeoutJobIds((prev) => {
                         if (!prev.has(jobId)) return prev;
@@ -131,7 +141,7 @@ export default function JobsDashboard() {
                     showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
-                    clearCancelPollInterval();
+                    clearCancelPollInterval(jobId);
                     const now = Date.now();
                     const lastToast = lastTimeoutToastAtRef.current.get(jobId);
                     if (!lastToast || now - lastToast > 30000) {
@@ -147,9 +157,12 @@ export default function JobsDashboard() {
                     void fetchJobs();
                 }
             } catch (err) {
-                clearCancelPollInterval();
+                clearCancelPollInterval(jobId);
+                console.error(`Error polling job ${jobId}:`, err);
             }
         }, 2000);
+
+        activePollersRef.current.set(jobId, interval);
     }, [clearCancelPollInterval, fetchJobs, showToast]);
 
     const handleCancel = async (jobId: string) => {
@@ -158,7 +171,7 @@ export default function JobsDashboard() {
         const job = jobs.find(j => j.id === jobId);
         if (!job || job.status === "CANCELLING") return;
 
-        clearCancelPollInterval();
+        clearCancelPollInterval(jobId);
         lastTimeoutToastAtRef.current.delete(jobId);
         setCancelPollTimeoutJobIds((prev) => {
             if (!prev.has(jobId)) return prev;
@@ -186,6 +199,7 @@ export default function JobsDashboard() {
         setCancellingJobIds((prev: Set<string>) => {
             const next = new Set(prev);
             next.add(jobId);
+            cancellingJobIdsRef.current = next;
             return next;
         });
 

@@ -12,9 +12,11 @@ export interface NormalizedDecisionEvent {
   key: string;
 }
 
-export interface CopyBundleMessageInput {
-  sql?: string;
-  traceId?: string;
+import { buildIdentifierBlock, RunContextInput } from "./buildRunContextBundle";
+
+export interface CopyBundleMessageInput extends RunContextInput {
+  sql?: string | null;
+  result?: any;
   validationSummary?: any;
   validationReport?: any;
   resultCompleteness?: any;
@@ -153,8 +155,11 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
         ? 1
         : null;
 
+  const identifiers = buildIdentifierBlock(message);
+
   const payload: Record<string, unknown> = {
     sql: message.sql ?? null,
+    identifiers,
     validation: {
       status: validationFailed ? "fail" : "pass",
       cartesian_risk: cartesianRisk,
@@ -166,11 +171,13 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
       pages_fetched: pagesFetched,
       completeness_summary: completeness ?? null,
     },
+    bundle_metadata: {
+      generated_at: new Date().toISOString(),
+      environment: message.environment || (import.meta as any).env?.MODE || "development",
+      version: 1
+    }
   };
-  const traceId = typeof message.traceId === "string" ? message.traceId.trim() : "";
-  if (traceId) {
-    payload.trace_id = traceId;
-  }
+
   return payload;
 }
 
