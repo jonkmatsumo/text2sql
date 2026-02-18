@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { getDiagnostics } from "../api";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { getDiagnostics, OpsService } from "../api";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
-import { toPrettyJson } from "../utils/observability";
+import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
+import RunIdentifiers from "../components/common/RunIdentifiers";
 
 export default function RunDetails() {
     const { runId } = useParams<{ runId: string }>();
@@ -30,6 +31,11 @@ export default function RunDetails() {
         fetchDetails();
     }, [fetchDetails]);
 
+    const normalizedEvents = useMemo(() =>
+        normalizeDecisionEvents(diagnostics?.audit_events),
+        [diagnostics?.audit_events]
+    );
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -38,53 +44,149 @@ export default function RunDetails() {
         );
     }
 
+    const runData = diagnostics?.run_context || {};
+    const validation = diagnostics?.validation || {};
+    const completeness = diagnostics?.completeness || {};
+
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <div className="mb-6 flex justify-between items-center">
-                <button
-                    onClick={() => navigate(-1)}
-                    className="text-sm font-medium text-indigo-600 hover:text-indigo-500 underline"
-                >
-                    &larr; Back to Dashboard
-                </button>
-                <div className="text-sm text-gray-500">
-                    Run ID: <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded border border-gray-200 dark:border-gray-700">{runId}</code>
+            <div className="mb-6 flex justify-between items-end">
+                <div>
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-500 underline mb-2 block"
+                    >
+                        &larr; Back
+                    </button>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Run Details</h1>
                 </div>
+                <RunIdentifiers
+                    traceId={diagnostics?.trace_id}
+                    interactionId={runId}
+                    requestId={diagnostics?.request_id}
+                />
             </div>
 
-            <div className="space-y-6">
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-                    <div className="px-6 py-5 border-b border-gray-200 dark:border-gray-800">
-                        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                            Execution Summary
-                        </h1>
-                    </div>
-                    <div className="p-6">
-                        {diagnostics?.audit_events?.length > 0 ? (
-                            <div className="space-y-4">
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                    Found {diagnostics.audit_events.length} audit events for this run.
-                                </p>
-                                <div className="bg-gray-50 dark:bg-black rounded p-4 font-mono text-xs overflow-auto max-h-96 border border-gray-200 dark:border-gray-800">
-                                    <pre className="text-gray-800 dark:text-gray-300">{toPrettyJson(diagnostics.audit_events)}</pre>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-6">
+                    {/* Decision Log */}
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+                            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Decision Log</h2>
+                        </div>
+                        <div className="p-6">
+                            {normalizedEvents.length > 0 ? (
+                                <div className="flow-root">
+                                    <ul className="-mb-8">
+                                        {normalizedEvents.map((item: any, idx: number) => (
+                                            <li key={item.key}>
+                                                <div className="relative pb-8">
+                                                    {idx !== normalizedEvents.length - 1 ? (
+                                                        <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200 dark:bg-gray-800" aria-hidden="true" />
+                                                    ) : null}
+                                                    <div className="relative flex space-x-3">
+                                                        <div>
+                                                            <span className="h-8 w-8 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center ring-8 ring-white dark:ring-gray-900">
+                                                                <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tighter">
+                                                                    {item.event.node?.slice(0, 2)}
+                                                                </span>
+                                                            </span>
+                                                        </div>
+                                                        <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
+                                                            <div>
+                                                                <p className="text-sm text-gray-900 dark:text-gray-100 font-medium">
+                                                                    {item.event.decision}
+                                                                </p>
+                                                                {item.event.reason && (
+                                                                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 italic">
+                                                                        {item.event.reason}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div className="text-right text-xs whitespace-nowrap text-gray-500">
+                                                                {formatTimestamp(item.timestampMs, { style: "time" })}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
+                            ) : (
+                                <p className="text-sm text-gray-500 italic">No detailed audit events recorded for this execution.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Full Raw Snapshot */}
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
+                            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                                Raw Diagnostics Payload
+                            </h2>
+                        </div>
+                        <div className="p-6">
+                            <div className="bg-gray-50 dark:bg-black rounded p-4 font-mono text-xs overflow-auto max-h-96 border border-gray-200 dark:border-gray-800">
+                                <pre className="text-gray-800 dark:text-gray-300">{toPrettyJson(diagnostics)}</pre>
                             </div>
-                        ) : (
-                            <p className="text-sm text-gray-500 italic">No audit events found for this run or runId mismatch.</p>
-                        )}
+                        </div>
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-                    <div className="px-6 py-5 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                            System Diagnostics Snapshot
-                        </h2>
-                        <span className="text-xs text-gray-400">Snapshot retrieved with run context</span>
+                <div className="space-y-6">
+                    {/* Metadata Card */}
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+                            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">Run Info</h2>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase">Input Query</label>
+                                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{runData?.user_nlq_text || "—"}</p>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase">Status</label>
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${runData?.execution_status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                    }`}>
+                                    {runData?.execution_status || "UNKNOWN"}
+                                </span>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase">Created At</label>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{formatTimestamp(runData?.created_at)}</p>
+                            </div>
+                            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                                <Link
+                                    to={`/admin/jobs?runId=${runId}`}
+                                    className="text-xs text-indigo-600 hover:text-indigo-500 font-medium flex items-center"
+                                >
+                                    View Background Jobs &rarr;
+                                </Link>
+                            </div>
+                        </div>
                     </div>
-                    <div className="p-6">
-                        <div className="bg-gray-50 dark:bg-black rounded p-4 font-mono text-xs overflow-auto max-h-screen border border-gray-200 dark:border-gray-800">
-                            <pre className="text-gray-800 dark:text-gray-300">{toPrettyJson(diagnostics)}</pre>
+
+                    {/* Validation Card */}
+                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+                            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">Validation</h2>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <span className="text-sm text-gray-500">AST Valid</span>
+                                <span className={`text-sm font-mono ${validation?.ast_valid ? 'text-green-600' : 'text-red-600'}`}>
+                                    {validation?.ast_valid ? 'YES' : 'NO'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-sm text-gray-500">Syntax Errors</span>
+                                <span className="text-sm font-mono">{validation?.syntax_errors?.length || 0}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-sm text-gray-500">Completeness</span>
+                                <span className="text-sm font-mono">{completeness?.is_truncated ? 'Truncated' : 'Full'}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
