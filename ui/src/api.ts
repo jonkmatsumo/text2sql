@@ -28,14 +28,17 @@ import {
   SynthGenerateResponse,
   SynthRun,
   SynthRunSummary,
-  OpsJobResponse
+  OpsJobResponse,
+  JobStatusResponse,
 } from "./types/admin";
+import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
   agentServiceBaseUrl,
   uiApiBaseUrl,
   otelWorkerBaseUrl,
   internalAuthToken
 } from "./config";
+import { RUN_HISTORY_PAGE_SIZE } from "./constants/operatorUi";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
@@ -529,7 +532,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async getJobStatus(jobId: string): Promise<any> {
+  async getJobStatus(jobId: string): Promise<JobStatusResponse> {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}`, {
       headers: getAuthHeaders()
     });
@@ -563,11 +566,11 @@ export const OpsService = {
   },
 
   async listRuns(
-    limit: number = 50,
+    limit: number = RUN_HISTORY_PAGE_SIZE,
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"
-  ): Promise<any[]> {
+  ): Promise<Interaction[]> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),
@@ -951,7 +954,12 @@ export async function* runAgentStream(request: AgentRunRequest): AsyncGenerator<
 /**
  * Fetch operator-safe runtime diagnostics.
  */
-export async function getDiagnostics(debug = false, runId?: string): Promise<any> {
+export function getDiagnostics(debug?: boolean): Promise<DiagnosticsResponse>;
+export function getDiagnostics(debug: boolean, runId: string): Promise<RunDiagnosticsResponse>;
+export async function getDiagnostics(
+  debug = false,
+  runId?: string
+): Promise<DiagnosticsResponse | RunDiagnosticsResponse> {
   const url = new URL("/agent/diagnostics", agentBase);
   if (debug) url.searchParams.set("debug", "true");
   if (runId) url.searchParams.set("audit_run_id", runId);

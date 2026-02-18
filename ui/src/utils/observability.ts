@@ -12,9 +12,11 @@ export interface NormalizedDecisionEvent {
   key: string;
 }
 
-export interface CopyBundleMessageInput {
-  sql?: string;
-  traceId?: string;
+import { buildIdentifierBlock, RunContextInput } from "./buildRunContextBundle";
+
+export interface CopyBundleMessageInput extends RunContextInput {
+  sql?: string | null;
+  result?: any;
   validationSummary?: any;
   validationReport?: any;
   resultCompleteness?: any;
@@ -78,6 +80,34 @@ export function formatTimestamp(
   return date.toLocaleString();
 }
 
+/**
+ * Returns a human-friendly relative time string (e.g., "5m ago", "1h ago").
+ * Falls back to absolute time if older than 24 hours.
+ */
+export function formatRelativeTime(
+  value: TimestampInput,
+  options: { inputInSeconds?: boolean; fallback?: string } = {}
+): string {
+  const ms = toTimestampMs(value, options.inputInSeconds);
+  if (ms == null) return options.fallback ?? "—";
+
+  const now = Date.now();
+  const diffMs = now - ms;
+  const diffSec = Math.floor(diffMs / 1000);
+
+  if (diffSec < 0) return "just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+
+  // Fallback to absolute for older
+  return new Date(ms).toLocaleDateString();
+}
+
 export function toPrettyJson(value: unknown): string {
   if (value === undefined) return "";
   try {
@@ -125,8 +155,11 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
         ? 1
         : null;
 
+  const identifiers = buildIdentifierBlock(message);
+
   const payload: Record<string, unknown> = {
     sql: message.sql ?? null,
+    identifiers,
     validation: {
       status: validationFailed ? "fail" : "pass",
       cartesian_risk: cartesianRisk,
@@ -138,11 +171,13 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
       pages_fetched: pagesFetched,
       completeness_summary: completeness ?? null,
     },
+    bundle_metadata: {
+      generated_at: new Date().toISOString(),
+      environment: message.environment || (import.meta as any).env?.MODE || "development",
+      version: 1
+    }
   };
-  const traceId = typeof message.traceId === "string" ? message.traceId.trim() : "";
-  if (traceId) {
-    payload.trace_id = traceId;
-  }
+
   return payload;
 }
 

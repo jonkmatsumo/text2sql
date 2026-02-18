@@ -42,6 +42,14 @@ export function useOperatorShortcuts({ shortcuts, disabled = false }: UseOperato
         if (disabled) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.defaultPrevented) return;
+
+            // Simple guard: if focus is inside a modal or a menu, don't trigger global shortcuts
+            const target = e.target as HTMLElement;
+            if (target?.closest?.('[role="dialog"], [role="menu"]')) {
+                return;
+            }
+
             const inInput = isInputFocused();
 
             for (const shortcut of shortcuts) {

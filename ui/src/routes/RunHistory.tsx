@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { OpsService } from "../api";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
+import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
+import { OpsService } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -25,12 +27,15 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
     { value: "None", label: "No Feedback" },
 ];
 
+const PAGE_SCOPED_SEARCH_NOTE = "Search filters the current page. Use Next/Prev to search older runs.";
+
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
 
     const copyLink = useCallback(() => {
         navigator.clipboard.writeText(window.location.href).then(() => {
@@ -45,7 +50,7 @@ export default function RunHistory() {
     const searchQuery = searchParams.get("q") || "";
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
-    const limit = 50;
+    const limit = RUN_HISTORY_PAGE_SIZE;
     const { show: showToast } = useToast();
     const searchInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -102,12 +107,20 @@ export default function RunHistory() {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
 
+    const handleEscapeShortcut = useCallback(() => {
+        if (document.activeElement === searchInputRef.current) {
+            searchInputRef.current?.blur();
+            return;
+        }
+        clearFilters();
+    }, [clearFilters]);
+
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchRuns },
         { key: "/", label: "Focus search", handler: () => searchInputRef.current?.focus() },
-        { key: "Escape", label: "Clear filters", handler: clearFilters, allowInInput: true },
+        { key: "Escape", label: "Clear filters", handler: handleEscapeShortcut, allowInInput: true },
         { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
-    ], [fetchRuns, clearFilters]);
+    ], [fetchRuns, handleEscapeShortcut]);
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
@@ -118,6 +131,7 @@ export default function RunHistory() {
         ),
         [runs, searchQuery]
     );
+    const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -157,9 +171,16 @@ export default function RunHistory() {
                         placeholder="Keyword search..."
                         value={searchQuery}
                         onChange={(e) => updateFilters({ q: e.target.value })}
+                        onFocus={() => setIsSearchFocused(true)}
+                        onBlur={() => setIsSearchFocused(false)}
                         aria-label="Search runs by query or ID"
                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                     />
+                    {showPageScopedSearchNote && (
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-search-scope-note">
+                            {PAGE_SCOPED_SEARCH_NOTE}
+                        </p>
+                    )}
                 </div>
                 <FilterSelect
                     label="Status"
@@ -200,9 +221,16 @@ export default function RunHistory() {
                                     <div className="flex flex-col items-center justify-center space-y-3">
                                         <p className="text-gray-500 italic">
                                             {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
-                                                ? "No historical runs found matching these filters."
+                                                ? (searchQuery !== ""
+                                                    ? "No matches on this page. Try Next to search older runs."
+                                                    : "No historical runs found matching these filters.")
                                                 : "No runs recorded yet."}
                                         </p>
+                                        {searchQuery !== "" && (
+                                            <p className="text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-empty-search-scope-note">
+                                                {PAGE_SCOPED_SEARCH_NOTE}
+                                            </p>
+                                        )}
                                         {(statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== "") && (
                                             <button
                                                 onClick={clearFilters}
@@ -224,10 +252,7 @@ export default function RunHistory() {
                                         {run.user_nlq_text}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${run.execution_status === 'SUCCESS' || run.execution_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                                            run.execution_status === 'FAILED' || run.execution_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                                                'bg-gray-100 text-gray-800'
-                                            }`}>
+                                        <span className={`px - 2 inline - flex text - xs leading - 5 font - semibold rounded - full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]} `}>
                                             {run.execution_status}
                                         </span>
                                     </td>
@@ -239,7 +264,7 @@ export default function RunHistory() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                         <Link
-                                            to={`/admin/runs/${run.id}`}
+                                            to={`/ admin / runs / ${run.id} `}
                                             aria-label={`View details for run ${run.id}`}
                                             className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                         >
@@ -269,12 +294,13 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    Showing results {offset + 1} – {offset + runs.length}
+                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length} `}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
                     disabled={runs.length < limit || isLoading}
                     aria-label="Next page"
+                    title={searchQuery && runs.length < limit ? PAGE_SCOPED_SEARCH_NOTE : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Next

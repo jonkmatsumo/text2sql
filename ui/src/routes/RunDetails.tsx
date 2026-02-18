@@ -6,13 +6,15 @@ import { LoadingState } from "../components/common/LoadingState";
 import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
 import { buildRunContextBundle } from "../utils/buildRunContextBundle";
 import RunIdentifiers from "../components/common/RunIdentifiers";
+import type { RunDiagnosticsResponse } from "../types/diagnostics";
+import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
 
 export default function RunDetails() {
     const { runId } = useParams<{ runId: string }>();
     const navigate = useNavigate();
     const { show: showToast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
-    const [diagnostics, setDiagnostics] = useState<any>(null);
+    const [diagnostics, setDiagnostics] = useState<RunDiagnosticsResponse | null>(null);
     const [contextCopied, setContextCopied] = useState(false);
 
     const fetchDetails = useCallback(async () => {
@@ -58,6 +60,9 @@ export default function RunDetails() {
         navigator.clipboard.writeText(bundle).then(() => {
             setContextCopied(true);
             setTimeout(() => setContextCopied(false), 2000);
+        }).catch((err) => {
+            showToast("Failed to copy to clipboard", "error");
+            console.error("Clipboard copy failed:", err);
         });
     }, [runId, diagnostics]);
 
@@ -79,12 +84,12 @@ export default function RunDetails() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="mb-6 flex justify-between items-end">
                 <div>
-                    <button
-                        onClick={() => navigate(-1)}
+                    <Link
+                        to="/admin/runs"
                         className="text-sm font-medium text-indigo-600 hover:text-indigo-500 underline mb-2 block"
                     >
-                        &larr; Back
-                    </button>
+                        &larr; Back to Run History
+                    </Link>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Run Details</h1>
                 </div>
                 <div className="flex items-center gap-3">
@@ -123,7 +128,7 @@ export default function RunDetails() {
                             ) : (
                                 <div className="flow-root">
                                     <ul className="-mb-8">
-                                        {normalizedEvents.map((item: any, idx: number) => (
+                                        {normalizedEvents.map((item, idx: number) => (
                                             <li key={item.key}>
                                                 <div className="relative pb-8">
                                                     {idx !== normalizedEvents.length - 1 ? (
@@ -194,8 +199,7 @@ export default function RunDetails() {
                             </div>
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase">Status</label>
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${runData?.execution_status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                    }`}>
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${STATUS_TONE_CLASSES[getInteractionStatusTone(runData?.execution_status)]}`}>
                                     {runData?.execution_status || "UNKNOWN"}
                                 </span>
                             </div>

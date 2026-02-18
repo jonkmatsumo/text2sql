@@ -1,13 +1,16 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
-import { getDiagnostics } from "../api";
+import { getDiagnostics, OpsService } from "../api";
 import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
+    OpsService: {
+        listRuns: vi.fn(),
+    },
 }));
 
 const mockData = {
@@ -57,6 +60,7 @@ function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
 describe("Diagnostics Route", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        (OpsService.listRuns as any).mockResolvedValue([]);
     });
 
     it("renders loading state initially", async () => {
@@ -78,6 +82,124 @@ describe("Diagnostics Route", () => {
         expect(screen.getByText("2.5")).toBeInTheDocument();
         expect(screen.getByText(/schema binding validation: true/i)).toBeInTheDocument();
         expect(screen.getByTestId("diagnostics-last-updated")).toHaveTextContent(/Last updated:/i);
+    });
+
+    it("renders unknown enabled_flags keys without failing", async () => {
+        (getDiagnostics as any).mockResolvedValue({
+            ...mockData,
+            enabled_flags: {
+                ...mockData.enabled_flags,
+                experimental_backend_switch: true,
+            },
+        });
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText(/experimental backend switch: true/i)).toBeInTheDocument();
+        });
+    });
+
+    it("requests degraded runs concurrently", async () => {
+        let resolveFailed: ((value: any[]) => void) | undefined;
+        const failedPromise = new Promise<any[]>((resolve) => {
+            resolveFailed = resolve;
+        });
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockImplementationOnce(() => failedPromise)
+            .mockImplementationOnce(() => Promise.resolve([]));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
+        });
+
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([5, 0, "FAILED"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([5, 0, "All", "DOWN"]);
+
+        if (resolveFailed) {
+            await act(async () => {
+                resolveFailed!([]);
+            });
+        }
+    });
+
+    it("keeps degraded runs with missing created_at from surfacing as most recent", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([
+                {
+                    id: "missing-date",
+                    user_nlq_text: "Run without timestamp",
+                    execution_status: "FAILED",
+                    thumb: "DOWN",
+                },
+                {
+                    id: "older-run",
+                    user_nlq_text: "Older degraded run",
+                    execution_status: "FAILED",
+                    thumb: "DOWN",
+                    created_at: "2026-01-01T00:00:00Z",
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: "newer-run",
+                    user_nlq_text: "Newest degraded run",
+                    execution_status: "SUCCESS",
+                    thumb: "DOWN",
+                    created_at: "2026-01-02T00:00:00Z",
+                },
+            ]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Newest degraded run")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("Older degraded run")).toBeInTheDocument();
+        expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
+    });
+
+    it("renders failures and low ratings in separate sections", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([
+                {
+                    id: "failed-1",
+                    user_nlq_text: "Failure query",
+                    execution_status: "FAILED",
+                    thumb: "None",
+                    created_at: "2026-01-03T00:00:00Z",
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: "low-1",
+                    user_nlq_text: "Low rating query",
+                    execution_status: "SUCCESS",
+                    thumb: "DOWN",
+                    created_at: "2026-01-02T00:00:00Z",
+                },
+            ]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Recent failures")).toBeInTheDocument();
+            expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
+        });
+        expect(screen.getByText("Showing latest 5 per category.")).toBeInTheDocument();
+
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+
+        expect(within(failuresSection).getByText("Failure query")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Low rating query")).toBeInTheDocument();
+        expect(within(failuresSection).getByText(new Date("2026-01-03T00:00:00Z").toLocaleString())).toBeInTheDocument();
+        expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {

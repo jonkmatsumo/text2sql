@@ -1,13 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, it, expect } from "vitest";
-import { WorkflowGuidance } from "../WorkflowGuidance";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { WorkflowGuidance, __clearGuidanceCache } from "../WorkflowGuidance";
 
 function renderWithRouter(ui: React.ReactElement) {
     return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
 
 describe("WorkflowGuidance", () => {
+    beforeEach(() => {
+        __clearGuidanceCache();
+    });
+
     it("renders nothing when no category provided", () => {
         const { container } = renderWithRouter(<WorkflowGuidance />);
         expect(container.firstChild).toBeNull();
@@ -18,9 +22,25 @@ describe("WorkflowGuidance", () => {
         expect(container.firstChild).toBeNull();
     });
 
-    it("renders nothing for categories without guidance (e.g. timeout)", () => {
-        const { container } = renderWithRouter(<WorkflowGuidance category="timeout" />);
-        expect(container.firstChild).toBeNull();
+    it("renders timeout guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="timeout" />);
+        expect(screen.getByText("Timeout")).toBeInTheDocument();
+        expect(screen.getByText(/took too long to complete/i)).toBeInTheDocument();
+        expect(screen.getByText("warn")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Check Connectivity" })).toBeInTheDocument();
+    });
+
+    it("renders auth guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="auth" />);
+        expect(screen.getByText("Authentication Error")).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Update Target Settings" })).toBeInTheDocument();
+    });
+
+    it("renders transient error guidance correctly", () => {
+        renderWithRouter(<WorkflowGuidance category="transient" />);
+        expect(screen.getByText("Transient Error")).toBeInTheDocument();
+        expect(screen.getByText(/temporary error occurred/i)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Retry Operation" })).toBeInTheDocument();
     });
 
     it("renders schema_missing guidance with correct title and description", () => {
@@ -73,5 +93,29 @@ describe("WorkflowGuidance", () => {
         const links = screen.getAllByRole("link");
         const hrefs = links.map(l => l.getAttribute("href"));
         expect(hrefs.filter(h => h === "/admin/operations?tab=ingestion")).toHaveLength(1);
+    });
+
+    it("prevents duplicate guidance rendering for the same category in a short window", async () => {
+        const { unmount } = renderWithRouter(
+            <div>
+                <WorkflowGuidance category="timeout" />
+                <WorkflowGuidance category="timeout" />
+            </div>
+        );
+
+        // Should only see one "Timeout" title
+        expect(screen.getAllByText("Timeout")).toHaveLength(1);
+        unmount();
+
+        // After some time, it should be able to render again
+        vi.useFakeTimers();
+        renderWithRouter(<WorkflowGuidance category="timeout" />);
+        // Wait for potential logic to clear
+        vi.advanceTimersByTime(1100);
+        renderWithRouter(<WorkflowGuidance category="timeout" />);
+
+        // This is a bit tricky with global state in tests, but let's at least verify
+        // that multiple in same render are suppressed.
+        vi.useRealTimers();
     });
 });

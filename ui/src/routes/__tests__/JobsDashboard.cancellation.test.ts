@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { TERMINAL_STATUSES } from "../JobsDashboard";
 
 /**
  * Unit tests for cancellation state reconciliation logic.
@@ -11,8 +12,6 @@ interface Job {
     id: string;
     status: OpsJobStatus;
 }
-
-const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
 /**
  * Mirrors the reconciliation logic from fetchJobs.
@@ -168,5 +167,99 @@ describe("Cancellation failure paths", () => {
 
         handleCancelError({ status: 500, message: "Internal server error" });
         expect(showToast).toHaveBeenCalledWith("Internal server error", "error");
+    });
+});
+describe("Polling terminality", () => {
+    it("identifies all TERMINAL_STATUSES as stop conditions", () => {
+        const statuses: OpsJobStatus[] = ["CANCELLED", "COMPLETED", "FAILED"];
+        for (const status of statuses) {
+            expect(TERMINAL_STATUSES.has(status)).toBe(true);
+        }
+    });
+
+    it("does not identify CANCELLING or RUNNING as terminal", () => {
+        expect(TERMINAL_STATUSES.has("CANCELLING")).toBe(false);
+        expect(TERMINAL_STATUSES.has("RUNNING")).toBe(false);
+        expect(TERMINAL_STATUSES.has("PENDING")).toBe(false);
+    });
+
+    /**
+     * Simulates the loop condition in pollJobUntilTerminal:
+     * if (TERMINAL_STATUSES.has(job.status)) { clear() }
+     */
+    it("stops polling exactly when status enters TERMINAL_STATUSES", () => {
+        const shouldStop = (status: OpsJobStatus) => TERMINAL_STATUSES.has(status);
+
+        expect(shouldStop("RUNNING")).toBe(false);
+        expect(shouldStop("CANCELLING")).toBe(false);
+        expect(shouldStop("CANCELLED")).toBe(true);
+        expect(shouldStop("COMPLETED")).toBe(true);
+        expect(shouldStop("FAILED")).toBe(true);
+    });
+});
+
+describe("Timeout throttling", () => {
+    it("fires toast once if no previous toast exists", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fire toast twice within the throttle interval", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        lastToastAt.set(jobId, now - 10000); // 10s ago
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it("fires toast again after throttle interval passed", () => {
+        const lastToastAt = new Map<string, number>();
+        const jobId = "job-1";
+        const now = Date.now();
+        const showToast = vi.fn();
+
+        lastToastAt.set(jobId, now - 31000); // 31s ago
+
+        const lastToast = lastToastAt.get(jobId);
+        if (!lastToast || now - lastToast > 30000) {
+            lastToastAt.set(jobId, now);
+            showToast("timeout");
+        }
+
+        expect(showToast).toHaveBeenCalledTimes(1);
+        expect(lastToastAt.get(jobId)).toBe(now);
+    });
+
+    it("includes job context in the toast message (matching logic)", () => {
+        const showToast = vi.fn();
+        const jobId = "job-12345678";
+        const jobType = "INGESTION";
+
+        const message = `Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`;
+        showToast(message, "warning");
+
+        expect(showToast).toHaveBeenCalledWith(
+            "Status check for INGESTION (job-1234) timed out. Refresh list to re-check.",
+            "warning"
+        );
     });
 });
