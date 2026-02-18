@@ -33,6 +33,23 @@ export default function JobsDashboard() {
         return () => clearInterval(interval);
     }, [fetchJobs]);
 
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const isInputFocused = document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA" || document.activeElement?.tagName === "SELECT";
+
+            if (e.key === "r" && !isInputFocused) {
+                e.preventDefault();
+                fetchJobs();
+            } else if (e.key === "Escape") {
+                setFilterType("");
+                setFilterStatus("");
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [fetchJobs]);
+
     const pollJobUntilTerminal = useCallback(async (jobId: string, maxAttempts = 10) => {
         let attempts = 0;
         const interval = setInterval(async () => {
