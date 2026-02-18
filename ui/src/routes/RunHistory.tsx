@@ -79,6 +79,10 @@ export default function RunHistory() {
         fetchRuns();
     }, [fetchRuns]);
 
+    const clearFilters = useCallback(() => {
+        setSearchParams({}, { replace: true });
+    }, [setSearchParams]);
+
     const filteredRuns = useMemo(() =>
         runs.filter(run =>
             run.user_nlq_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -143,8 +147,22 @@ export default function RunHistory() {
                             </tr>
                         ) : filteredRuns.length === 0 ? (
                             <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-gray-500 italic">
-                                    No historical runs found matching filters.
+                                <td colSpan={6} className="px-6 py-12 text-center">
+                                    <div className="flex flex-col items-center justify-center space-y-3">
+                                        <p className="text-gray-500 italic">
+                                            {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
+                                                ? "No historical runs found matching these filters."
+                                                : "No runs recorded yet."}
+                                        </p>
+                                        {(statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== "") && (
+                                            <button
+                                                onClick={clearFilters}
+                                                className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
+                                            >
+                                                Clear all filters
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         ) : (
