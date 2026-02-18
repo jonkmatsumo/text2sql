@@ -106,7 +106,7 @@ export default function RunHistory() {
 
     const handleEscapeShortcut = useCallback(() => {
         if (document.activeElement === searchInputRef.current) {
-            searchInputRef.current.blur();
+            searchInputRef.current?.blur();
             return;
         }
         clearFilters();
