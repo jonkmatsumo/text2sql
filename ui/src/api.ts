@@ -28,7 +28,8 @@ import {
   SynthGenerateResponse,
   SynthRun,
   SynthRunSummary,
-  OpsJobResponse
+  OpsJobResponse,
+  JobStatusResponse,
 } from "./types/admin";
 import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
@@ -531,7 +532,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async getJobStatus(jobId: string): Promise<any> {
+  async getJobStatus(jobId: string): Promise<JobStatusResponse> {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}`, {
       headers: getAuthHeaders()
     });
@@ -569,7 +570,7 @@ export const OpsService = {
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"
-  ): Promise<any[]> {
+  ): Promise<Interaction[]> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),

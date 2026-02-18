@@ -89,6 +89,16 @@ export interface OpsJobResponse {
     result?: Record<string, any>;
 }
 
+export interface JobStatusResponse {
+    id: string;
+    job_type: string;
+    status: OpsJobStatus;
+    started_at: string;
+    finished_at?: string | null;
+    error_message?: string | null;
+    result?: Record<string, unknown>;
+}
+
 export interface SynthRunSummary {
     id: string;
     started_at: string;
