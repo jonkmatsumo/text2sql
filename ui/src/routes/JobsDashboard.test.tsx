@@ -57,4 +57,30 @@ describe("JobsDashboard Cancellation", () => {
 
         expect(OpsService.cancelJob).toHaveBeenCalledWith("job-1");
     });
+
+    it("prevents duplicate cancellation requests", async () => {
+        const confirmMock = vi.fn().mockResolvedValue(true);
+        vi.spyOn(useConfirmationHook, "useConfirmation").mockReturnValue({
+            confirm: confirmMock,
+            dialogProps: { isOpen: false, onConfirm: vi.fn(), onClose: vi.fn() }
+        } as any);
+
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+
+        const cancelButton = screen.getByRole("button", { name: /cancel/i });
+
+        // Trigger multiple clicks
+        fireEvent.click(cancelButton);
+        fireEvent.click(cancelButton);
+
+        await waitFor(() => {
+            expect(confirmMock).toHaveBeenCalledTimes(1);
+        });
+    });
 });

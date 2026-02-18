@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { OpsService } from "../api";
-import { OpsJobResponse } from "../types/admin";
+import { OpsJobResponse, OpsJobStatus } from "../types/admin";
 import { JobsTable } from "../components/ops/JobsTable";
 import { useToast } from "../hooks/useToast";
 import { useConfirmation } from "../hooks/useConfirmation";
@@ -9,6 +9,7 @@ import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 export default function JobsDashboard() {
     const [jobs, setJobs] = useState<OpsJobResponse[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(new Set());
     const [filterType, setFilterType] = useState<string>("");
     const [filterStatus, setFilterStatus] = useState<string>("");
     const { show: showToast } = useToast();
@@ -33,6 +34,17 @@ export default function JobsDashboard() {
     }, [fetchJobs]);
 
     const handleCancel = async (jobId: string) => {
+        if (cancellingJobIds.has(jobId)) return;
+
+        const job = jobs.find(j => j.id === jobId);
+        if (!job || job.status === "CANCELLING") return;
+
+        setCancellingJobIds((prev: Set<string>) => {
+            const next = new Set(prev);
+            next.add(jobId);
+            return next;
+        });
+
         const confirmed = await confirm({
             title: "Cancel Job",
             description: "Are you sure you want to cancel this background job? This action cannot be undone.",
@@ -40,17 +52,30 @@ export default function JobsDashboard() {
             danger: true
         });
 
-        if (!confirmed) return;
+        if (!confirmed) {
+            setCancellingJobIds((prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(jobId);
+                return next;
+            });
+            return;
+        }
 
         // Optimistic update
-        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, status: "CANCELLING" as any } : j)));
+        setJobs((prev: OpsJobResponse[]) => prev.map(j => (j.id === jobId ? { ...j, status: "CANCELLING" as OpsJobStatus } : j)));
 
         try {
             await OpsService.cancelJob(jobId);
             showToast("Job cancellation requested", "success");
-            fetchJobs();
-        } catch (err) {
-            showToast("Failed to cancel job", "error");
+        } catch (err: any) {
+            const message = err.message || "Failed to cancel job";
+            showToast(message, "error");
+        } finally {
+            setCancellingJobIds((prev: Set<string>) => {
+                const next = new Set(prev);
+                next.delete(jobId);
+                return next;
+            });
             fetchJobs();
         }
     };

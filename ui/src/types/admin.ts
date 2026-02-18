@@ -77,8 +77,17 @@ export interface PatternReloadResult {
     error?: string;
 }
 
-export type OpsJobStatus = UIComponents["schemas"]["OpsJobStatus"];
-export type OpsJobResponse = UIComponents["schemas"]["OpsJobResponse"];
+export type OpsJobStatus = "PENDING" | "RUNNING" | "CANCELLING" | "CANCELLED" | "COMPLETED" | "FAILED";
+
+export interface OpsJobResponse {
+    id: string;
+    job_type: string;
+    status: OpsJobStatus;
+    started_at: string;
+    finished_at?: string | null;
+    error_message?: string | null;
+    result?: Record<string, any>;
+}
 
 export interface SynthRunSummary {
     id: string;

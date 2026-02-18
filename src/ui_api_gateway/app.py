@@ -1767,6 +1767,13 @@ async def get_job_status(job_id: UUID) -> Any:
 )
 async def cancel_job(job_id: UUID) -> Any:
     """Cancel a background job."""
+    job = await _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] not in [OpsJobStatus.PENDING, OpsJobStatus.RUNNING]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel job in {job['status']} state")
+
     await _update_job_status_cancelled(job_id)
     return await get_job_status(job_id)
 
