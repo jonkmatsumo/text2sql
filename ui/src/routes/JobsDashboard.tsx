@@ -109,6 +109,7 @@ export default function JobsDashboard() {
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearCancelPollInterval();
+                    showToast("Job status check timed out. Refresh manually.", "warning");
                     void fetchJobs();
                 }
             } catch (err) {

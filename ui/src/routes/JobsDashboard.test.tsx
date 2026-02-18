@@ -19,10 +19,13 @@ const mockJobs = [
 ];
 
 describe("JobsDashboard Cancellation", () => {
+    let showToastMock: ReturnType<typeof vi.fn>;
+
     beforeEach(() => {
         vi.clearAllMocks();
         vi.spyOn(OpsService, "listJobs").mockResolvedValue(mockJobs as any);
-        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: vi.fn() } as any);
+        showToastMock = vi.fn();
+        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: showToastMock } as any);
         vi.spyOn(useConfirmationHook, "useConfirmation").mockReturnValue({
             confirm: vi.fn().mockResolvedValue(true),
             dialogProps: { isOpen: false, onConfirm: vi.fn(), onClose: vi.fn() }
@@ -229,6 +232,41 @@ describe("JobsDashboard Cancellation", () => {
         } finally {
             vi.useRealTimers();
             clearIntervalSpy.mockRestore();
+        }
+    });
+
+    it("shows a warning toast when cancel polling times out", async () => {
+        vi.spyOn(OpsService, "cancelJob").mockResolvedValue({ success: true } as any);
+        vi.spyOn(OpsService, "getJobStatus").mockResolvedValue({ ...mockJobs[0], status: "RUNNING" } as any);
+
+        try {
+            render(
+                <MemoryRouter>
+                    <JobsDashboard />
+                </MemoryRouter>
+            );
+
+            await screen.findByText("SCHEMA_HYDRATION");
+            vi.useFakeTimers();
+            fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+            await act(async () => {
+                await Promise.resolve();
+            });
+
+            for (let i = 0; i < 10; i += 1) {
+                await act(async () => {
+                    vi.advanceTimersByTime(2000);
+                    await Promise.resolve();
+                });
+            }
+
+            expect(showToastMock).toHaveBeenCalledWith(
+                "Job status check timed out. Refresh manually.",
+                "warning"
+            );
+        } finally {
+            vi.useRealTimers();
         }
     });
 });
