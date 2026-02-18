@@ -60,6 +60,9 @@ export default function RunDetails() {
         navigator.clipboard.writeText(bundle).then(() => {
             setContextCopied(true);
             setTimeout(() => setContextCopied(false), 2000);
+        }).catch((err) => {
+            showToast("Failed to copy to clipboard", "error");
+            console.error("Clipboard copy failed:", err);
         });
     }, [runId, diagnostics]);
 
