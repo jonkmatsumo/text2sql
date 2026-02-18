@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -146,6 +146,43 @@ describe("Diagnostics Route", () => {
 
         expect(screen.getByText("Older degraded run")).toBeInTheDocument();
         expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
+    });
+
+    it("renders failures and low ratings in separate sections", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([
+                {
+                    id: "failed-1",
+                    user_nlq_text: "Failure query",
+                    execution_status: "FAILED",
+                    thumb: "None",
+                    created_at: "2026-01-03T00:00:00Z",
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: "low-1",
+                    user_nlq_text: "Low rating query",
+                    execution_status: "SUCCESS",
+                    thumb: "DOWN",
+                    created_at: "2026-01-02T00:00:00Z",
+                },
+            ]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Recent failures")).toBeInTheDocument();
+            expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
+        });
+
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+
+        expect(within(failuresSection).getByText("Failure query")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Low rating query")).toBeInTheDocument();
+        expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {

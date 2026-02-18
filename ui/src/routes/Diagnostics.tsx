@@ -67,7 +67,8 @@ export default function Diagnostics() {
     const [data, setData] = useState<DiagnosticsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<DiagnosticsError | null>(null);
-    const [degradedRuns, setDegradedRuns] = useState<Interaction[]>([]);
+    const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
+    const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const isFetchingRef = useRef(false);
 
@@ -99,23 +100,26 @@ export default function Diagnostics() {
                 OpsService.listRuns(5, 0, "FAILED"),
                 OpsService.listRuns(5, 0, "All", "DOWN"),
             ]);
-            // Combine and dedupe by ID
-            const combined = [...failed, ...negative].reduce((acc: Interaction[], curr) => {
-                if (!curr.created_at) {
-                    return acc;
-                }
-                if (!acc.find(item => item.id === curr.id)) {
-                    // Defensive normalization for partial payloads
-                    const normalized = {
-                        ...curr,
-                        user_nlq_text: curr.user_nlq_text || "Unknown",
-                        execution_status: curr.execution_status || "UNKNOWN",
-                    };
-                    acc.push(normalized);
-                }
-                return acc;
-            }, []);
-            setDegradedRuns(combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5));
+            const normalizeCategory = (runs: Interaction[]) => {
+                const seenIds = new Set<string>();
+                return runs
+                    .filter((run) => Boolean(run.created_at))
+                    .filter((run) => {
+                        if (seenIds.has(run.id)) return false;
+                        seenIds.add(run.id);
+                        return true;
+                    })
+                    .map((run) => ({
+                        ...run,
+                        user_nlq_text: run.user_nlq_text || "Unknown",
+                        execution_status: run.execution_status || "UNKNOWN",
+                    }))
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                    .slice(0, 5);
+            };
+
+            setRecentFailures(normalizeCategory(failed));
+            setRecentLowRatings(normalizeCategory(negative));
         } catch (err) {
             console.error("Failed to load degraded runs", err);
         }
@@ -441,45 +445,86 @@ export default function Diagnostics() {
 
                         {/* Recent Degraded Runs Panel */}
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
-                            <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem", display: "flex", alignItems: "center", gap: "8px" }}>
-                                <span style={{ color: "var(--error)" }}>⚠️</span> Recent Degraded Runs
+                            <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>
+                                Recent Run Signals
                             </h3>
-                            {degradedRuns.length === 0 ? (
-                                <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic" }}>
-                                    No recent failed or negatively rated runs detected.
-                                </p>
-                            ) : (
-                                <div style={{ display: "grid", gap: "12px" }}>
-                                    {degradedRuns.map((run) => (
-                                        <div key={run.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                                                    <span className={`pill text-xs font-bold ${run.execution_status === 'FAILED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`} style={{ padding: "2px 8px", borderRadius: "12px" }}>
-                                                        {run.execution_status === 'FAILED' ? 'FAILED' : 'LOW_RATING'}
-                                                    </span>
-                                                    <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? 'Unknown'}</span>
-                                                    <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {run.created_at ? new Date(run.created_at).toLocaleString() : 'Date missing'}</span>
+                            <div style={{ display: "grid", gap: "20px" }}>
+                                <section data-testid="diagnostics-failures-section">
+                                    <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>Recent failures</h4>
+                                    {recentFailures.length === 0 ? (
+                                        <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}>
+                                            No recent failures found.
+                                        </p>
+                                    ) : (
+                                        <div style={{ display: "grid", gap: "12px" }}>
+                                            {recentFailures.map((run) => (
+                                                <div key={`failure-${run.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                                            <span className="pill text-xs font-bold bg-red-100 text-red-800" style={{ padding: "2px 8px", borderRadius: "12px" }}>
+                                                                FAILED
+                                                            </span>
+                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
+                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {new Date(run.created_at).toLocaleString()}</span>
+                                                        </div>
+                                                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                            {run.user_nlq_text || "(No query text available)"}
+                                                        </p>
+                                                    </div>
+                                                    <Link
+                                                        to={`/admin/runs/${run.id}`}
+                                                        className="button-link"
+                                                        style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
+                                                    >
+                                                        Inspect
+                                                    </Link>
                                                 </div>
-                                                <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                    {run.user_nlq_text || '(No query text available)'}
-                                                </p>
-                                            </div>
-                                            <Link
-                                                to={`/admin/runs/${run.id}`}
-                                                className="button-link"
-                                                style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
-                                            >
-                                                Inspect
-                                            </Link>
+                                            ))}
                                         </div>
-                                    ))}
-                                    <div style={{ marginTop: "8px", textAlign: "right" }}>
-                                        <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
-                                            View Full History &rarr;
-                                        </Link>
-                                    </div>
+                                    )}
+                                </section>
+
+                                <section data-testid="diagnostics-low-ratings-section">
+                                    <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>Recent low ratings</h4>
+                                    {recentLowRatings.length === 0 ? (
+                                        <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}>
+                                            No recent low ratings found.
+                                        </p>
+                                    ) : (
+                                        <div style={{ display: "grid", gap: "12px" }}>
+                                            {recentLowRatings.map((run) => (
+                                                <div key={`low-rating-${run.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px", background: "var(--surface-muted)", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                                                            <span className="pill text-xs font-bold bg-amber-100 text-amber-800" style={{ padding: "2px 8px", borderRadius: "12px" }}>
+                                                                LOW_RATING
+                                                            </span>
+                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)", fontFamily: "monospace" }}>{run.id?.slice(0, 8) ?? "Unknown"}</span>
+                                                            <span style={{ fontSize: "0.75rem", color: "var(--muted)" }}>• {new Date(run.created_at).toLocaleString()}</span>
+                                                        </div>
+                                                        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                            {run.user_nlq_text || "(No query text available)"}
+                                                        </p>
+                                                    </div>
+                                                    <Link
+                                                        to={`/admin/runs/${run.id}`}
+                                                        className="button-link"
+                                                        style={{ marginLeft: "16px", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "0.85rem", textDecoration: "none", color: "var(--accent)", fontWeight: 500 }}
+                                                    >
+                                                        Inspect
+                                                    </Link>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
+
+                                <div style={{ marginTop: "4px", textAlign: "right" }}>
+                                    <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
+                                        View Full History &rarr;
+                                    </Link>
                                 </div>
-                            )}
+                            </div>
                         </div>
 
                         {/* Raw Snapshot (Verbose only) */}
