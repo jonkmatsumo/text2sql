@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import JobsDashboard from "./JobsDashboard";
@@ -235,7 +235,7 @@ describe("JobsDashboard Cancellation", () => {
         }
     });
 
-    it("shows a warning toast when cancel polling times out", async () => {
+    it("shows a single timeout warning and refresh affordance when cancel polling times out", async () => {
         vi.spyOn(OpsService, "cancelJob").mockResolvedValue({ success: true } as any);
         vi.spyOn(OpsService, "getJobStatus").mockResolvedValue({ ...mockJobs[0], status: "RUNNING" } as any);
 
@@ -248,7 +248,9 @@ describe("JobsDashboard Cancellation", () => {
 
             await screen.findByText("SCHEMA_HYDRATION");
             vi.useFakeTimers();
-            fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+            const cancelButton = screen.getByRole("button", { name: /cancel/i });
+            fireEvent.click(cancelButton);
+            fireEvent.click(cancelButton);
 
             await act(async () => {
                 await Promise.resolve();
@@ -261,10 +263,22 @@ describe("JobsDashboard Cancellation", () => {
                 });
             }
 
-            expect(showToastMock).toHaveBeenCalledWith(
-                "Job status check timed out. Refresh manually.",
-                "warning"
+            const timeoutWarningToasts = showToastMock.mock.calls.filter(
+                ([message, type]) =>
+                    message === "Job status check timed out. Refresh list to re-check." && type === "warning"
             );
+            expect(timeoutWarningToasts).toHaveLength(1);
+
+            const timeoutBanner = screen.getByTestId("cancel-timeout-refresh-banner");
+            expect(timeoutBanner).toHaveTextContent("Status check timed out —");
+            expect(within(timeoutBanner).getByRole("button", { name: "Refresh list" })).toBeInTheDocument();
+
+            const listJobsCallsBeforeRefresh = (OpsService.listJobs as any).mock.calls.length;
+            fireEvent.click(within(timeoutBanner).getByRole("button", { name: "Refresh list" }));
+            await act(async () => {
+                await Promise.resolve();
+            });
+            expect((OpsService.listJobs as any).mock.calls.length).toBeGreaterThan(listJobsCallsBeforeRefresh);
         } finally {
             vi.useRealTimers();
         }

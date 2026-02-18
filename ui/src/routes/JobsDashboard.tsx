@@ -14,6 +14,7 @@ export default function JobsDashboard() {
     const [jobs, setJobs] = useState<OpsJobResponse[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(new Set());
+    const [cancelPollTimeoutJobIds, setCancelPollTimeoutJobIds] = useState<Set<string>>(new Set());
     const [filterType, setFilterType] = useState<string>("");
     const [filterStatus, setFilterStatus] = useState<string>("");
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -23,6 +24,7 @@ export default function JobsDashboard() {
     const isMountedRef = React.useRef(true);
     const cancelPollIntervalRef = React.useRef<number | null>(null);
     const confirmingCancelJobIdsRef = React.useRef<Set<string>>(new Set());
+    const timeoutNotifiedJobIdsRef = React.useRef<Set<string>>(new Set());
 
     // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
@@ -69,6 +71,20 @@ export default function JobsDashboard() {
                     });
                 }
             }
+
+            setCancelPollTimeoutJobIds((prev) => {
+                if (prev.size === 0) return prev;
+                let changed = false;
+                const next = new Set(prev);
+                for (const job of data) {
+                    if (next.has(job.id) && TERMINAL_STATUSES.has(job.status)) {
+                        next.delete(job.id);
+                        timeoutNotifiedJobIdsRef.current.delete(job.id);
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
         } catch (err) {
             showToast("Failed to load jobs", "error");
         } finally {
@@ -105,11 +121,27 @@ export default function JobsDashboard() {
                 const job = await OpsService.getJobStatus(jobId);
                 if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
                     clearCancelPollInterval();
+                    timeoutNotifiedJobIdsRef.current.delete(jobId);
+                    setCancelPollTimeoutJobIds((prev) => {
+                        if (!prev.has(jobId)) return prev;
+                        const next = new Set(prev);
+                        next.delete(jobId);
+                        return next;
+                    });
                     showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearCancelPollInterval();
-                    showToast("Job status check timed out. Refresh manually.", "warning");
+                    if (!timeoutNotifiedJobIdsRef.current.has(jobId)) {
+                        timeoutNotifiedJobIdsRef.current.add(jobId);
+                        showToast("Job status check timed out. Refresh list to re-check.", "warning");
+                    }
+                    setCancelPollTimeoutJobIds((prev) => {
+                        if (prev.has(jobId)) return prev;
+                        const next = new Set(prev);
+                        next.add(jobId);
+                        return next;
+                    });
                     void fetchJobs();
                 }
             } catch (err) {
@@ -125,6 +157,13 @@ export default function JobsDashboard() {
         if (!job || job.status === "CANCELLING") return;
 
         clearCancelPollInterval();
+        timeoutNotifiedJobIdsRef.current.delete(jobId);
+        setCancelPollTimeoutJobIds((prev) => {
+            if (!prev.has(jobId)) return prev;
+            const next = new Set(prev);
+            next.delete(jobId);
+            return next;
+        });
         confirmingCancelJobIdsRef.current.add(jobId);
         let confirmed = false;
         try {
@@ -173,6 +212,12 @@ export default function JobsDashboard() {
             }
         }
     };
+
+    const handleTimeoutRefresh = useCallback(() => {
+        timeoutNotifiedJobIdsRef.current.clear();
+        setCancelPollTimeoutJobIds(new Set());
+        void fetchJobs();
+    }, [fetchJobs]);
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -229,6 +274,20 @@ export default function JobsDashboard() {
             </div>
 
             <div className="mt-8 flex flex-col">
+                {cancelPollTimeoutJobIds.size > 0 && (
+                    <div
+                        data-testid="cancel-timeout-refresh-banner"
+                        className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                    >
+                        <span>Status check timed out — </span>
+                        <button
+                            onClick={handleTimeoutRefresh}
+                            className="font-medium underline hover:no-underline"
+                        >
+                            Refresh list
+                        </button>
+                    </div>
+                )}
                 <JobsTable jobs={jobs} isLoading={isLoading} onCancel={handleCancel} cancellingJobIds={cancellingJobIds} />
             </div>
 
