@@ -68,8 +68,12 @@ export default function JobsDashboard() {
             await OpsService.cancelJob(jobId);
             showToast("Job cancellation requested", "success");
         } catch (err: any) {
-            const message = err.message || "Failed to cancel job";
+            let message = err.message || "Failed to cancel job";
+            if (err.code === "JOB_ALREADY_TERMINAL" || err.status === 409) {
+                message = "Job is already completed and cannot be canceled.";
+            }
             showToast(message, "error");
+            fetchJobs(); // Force refresh to show current status
         } finally {
             setCancellingJobIds((prev: Set<string>) => {
                 const next = new Set(prev);
@@ -128,7 +132,7 @@ export default function JobsDashboard() {
             </div>
 
             <div className="mt-8 flex flex-col">
-                <JobsTable jobs={jobs} isLoading={isLoading} onCancel={handleCancel} />
+                <JobsTable jobs={jobs} isLoading={isLoading} onCancel={handleCancel} cancellingJobIds={cancellingJobIds} />
             </div>
 
             <ConfirmationDialog {...dialogProps} />

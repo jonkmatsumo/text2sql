@@ -6,6 +6,7 @@ interface JobsTableProps {
     onRefresh?: () => void;
     onCancel?: (jobId: string) => void;
     isLoading?: boolean;
+    cancellingJobIds?: Set<string>;
 }
 
 const statusColors: Record<string, string> = {
@@ -17,7 +18,7 @@ const statusColors: Record<string, string> = {
     FAILED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
 };
 
-export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, onCancel, isLoading }) => {
+export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, onCancel, isLoading, cancellingJobIds = new Set() }) => {
     return (
         <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
             <table className="min-w-full divide-y divide-gray-300 dark:divide-gray-700">
@@ -87,9 +88,10 @@ export const JobsTable: React.FC<JobsTableProps> = ({ jobs, onRefresh, onCancel,
                                     {job.status === "RUNNING" && onCancel && (
                                         <button
                                             onClick={() => onCancel(job.id)}
-                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                                            disabled={cancellingJobIds.has(job.id)}
+                                            className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            Cancel
+                                            {cancellingJobIds.has(job.id) ? "Cancelling..." : "Cancel"}
                                         </button>
                                     )}
                                 </td>
