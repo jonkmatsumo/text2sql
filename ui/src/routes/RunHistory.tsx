@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import { OpsService } from "../api";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
-import { Link } from "react-router-dom";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
 
@@ -24,20 +24,50 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
 ];
 
 export default function RunHistory() {
+    const [searchParams, setSearchParams] = useSearchParams();
+
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [offset, setOffset] = useState(0);
-    const [statusFilter, setStatusFilter] = useState<InteractionStatus | "All">("All");
-    const [thumbFilter, setThumbFilter] = useState<FeedbackThumb>("All");
-    const [searchQuery, setSearchQuery] = useState("");
+
+    // Derived state from URL
+    const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
+    const thumbFilter = (searchParams.get("feedback") as FeedbackThumb) || "All";
+    const searchQuery = searchParams.get("q") || "";
+    const offset = parseInt(searchParams.get("offset") || "0", 10);
+
     const limit = 50;
     const { show: showToast } = useToast();
+
+    const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            Object.entries(updates).forEach(([key, value]) => {
+                if (value === undefined || value === "" || value === "All") {
+                    next.delete(key);
+                } else {
+                    next.set(key, String(value));
+                }
+            });
+            // Reset offset on filter change if not specifically updating offset
+            if (!updates.hasOwnProperty("offset")) {
+                next.delete("offset");
+            }
+            return next;
+        }, { replace: true });
+    }, [setSearchParams]);
 
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
         try {
             const data = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
-            setRuns(data);
+            // Ensure unique IDs to handle shifting items during pagination or API anomalies
+            const seenIds = new Set();
+            const uniqueData = data.filter(run => {
+                if (seenIds.has(run.id)) return false;
+                seenIds.add(run.id);
+                return true;
+            });
+            setRuns(uniqueData);
         } catch (err) {
             showToast("Failed to fetch run history", "error");
         } finally {
@@ -73,7 +103,7 @@ export default function RunHistory() {
                         type="text"
                         placeholder="Keyword search..."
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => updateFilters({ q: e.target.value })}
                         aria-label="Search runs by query or ID"
                         className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                     />
@@ -82,13 +112,13 @@ export default function RunHistory() {
                     label="Status"
                     value={statusFilter}
                     options={STATUS_OPTIONS}
-                    onChange={(val) => { setStatusFilter(val as InteractionStatus | "All"); setOffset(0); }}
+                    onChange={(val) => updateFilters({ status: val as string })}
                 />
                 <FilterSelect
                     label="Feedback"
                     value={thumbFilter}
                     options={THUMB_OPTIONS}
-                    onChange={(val) => { setThumbFilter(val as FeedbackThumb); setOffset(0); }}
+                    onChange={(val) => updateFilters({ feedback: val as string })}
                 />
             </div>
 
@@ -128,8 +158,8 @@ export default function RunHistory() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${run.execution_status === 'SUCCESS' || run.execution_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                                                run.execution_status === 'FAILED' || run.execution_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                                                    'bg-gray-100 text-gray-800'
+                                            run.execution_status === 'FAILED' || run.execution_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                                                'bg-gray-100 text-gray-800'
                                             }`}>
                                             {run.execution_status}
                                         </span>
@@ -164,7 +194,7 @@ export default function RunHistory() {
 
             <div className="mt-4 flex items-center justify-between">
                 <button
-                    onClick={() => setOffset(Math.max(0, offset - limit))}
+                    onClick={() => updateFilters({ offset: Math.max(0, offset - limit) })}
                     disabled={offset === 0 || isLoading}
                     aria-label="Previous page"
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
@@ -175,7 +205,7 @@ export default function RunHistory() {
                     Showing results {offset + 1} - {offset + runs.length}
                 </div>
                 <button
-                    onClick={() => setOffset(offset + limit)}
+                    onClick={() => updateFilters({ offset: offset + limit })}
                     disabled={runs.length < limit || isLoading}
                     aria-label="Next page"
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
