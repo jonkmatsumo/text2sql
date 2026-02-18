@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import RunHistory from "./RunHistory";
@@ -57,5 +57,30 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
             "Search currently filters the loaded page only. Use pagination to search older runs."
         );
+    });
+
+    it("does not clear all filters when Escape is pressed in the search input", async () => {
+        renderRunHistory("/admin/runs?q=missing&status=FAILED");
+
+        const searchInput = await screen.findByLabelText("Search runs by query or ID");
+        searchInput.focus();
+        fireEvent.keyDown(window, { key: "Escape" });
+
+        expect(searchInput).toHaveValue("missing");
+        expect(searchInput).not.toHaveFocus();
+        expect(screen.getByRole("button", { name: "Clear all filters" })).toBeInTheDocument();
+    });
+
+    it("clears all filters when Escape is pressed outside input focus", async () => {
+        renderRunHistory("/admin/runs?q=missing&status=FAILED");
+
+        const searchInput = await screen.findByLabelText("Search runs by query or ID");
+        searchInput.blur();
+        fireEvent.keyDown(window, { key: "Escape" });
+
+        await waitFor(() => {
+            expect(searchInput).toHaveValue("");
+        });
+        expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
 });

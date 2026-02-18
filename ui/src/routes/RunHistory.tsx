@@ -104,12 +104,20 @@ export default function RunHistory() {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
 
+    const handleEscapeShortcut = useCallback(() => {
+        if (document.activeElement === searchInputRef.current) {
+            searchInputRef.current.blur();
+            return;
+        }
+        clearFilters();
+    }, [clearFilters]);
+
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchRuns },
         { key: "/", label: "Focus search", handler: () => searchInputRef.current?.focus() },
-        { key: "Escape", label: "Clear filters", handler: clearFilters, allowInInput: true },
+        { key: "Escape", label: "Clear filters", handler: handleEscapeShortcut, allowInInput: true },
         { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
-    ], [fetchRuns, clearFilters]);
+    ], [fetchRuns, handleEscapeShortcut]);
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
