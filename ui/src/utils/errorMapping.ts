@@ -9,6 +9,10 @@ export interface ErrorMapping {
   title: string;
   severity: ErrorSeverity;
   actions: Array<{ label: string; href: string }>;
+  /** Human-readable explanation shown in WorkflowGuidance */
+  description?: string;
+  /** Richer CTAs for WorkflowGuidance (may include primary flag) */
+  guidanceActions?: Array<{ label: string; href: string; primary?: boolean }>;
 }
 
 const ERROR_MAP: Record<string, ErrorMapping> = {
@@ -16,11 +20,21 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Schema Mismatch",
     severity: "error",
     actions: [{ label: "Resolve Schema Mismatch", href: "/admin/operations" }],
+    description: "The database schema appears to have changed. Updating the system's metadata snapshot might resolve this.",
+    guidanceActions: [
+      { label: "Run Schema Hydration", href: "/admin/operations?tab=schema", primary: true },
+      { label: "Reload NLP Patterns", href: "/admin/operations?tab=nlp" },
+    ],
   },
   schema_missing: {
     title: "Schema Not Found",
     severity: "error",
     actions: [{ label: "Ingest Missing Table", href: "/admin/operations" }],
+    description: "The agent couldn't find the necessary table schema. You may need to ingest the table or refresh the system metadata.",
+    guidanceActions: [
+      { label: "Go to Ingestion Wizard", href: "/admin/operations?tab=ingestion", primary: true },
+      { label: "Check Schema Hydration", href: "/admin/operations?tab=schema" },
+    ],
   },
   auth: {
     title: "Authentication Error",
@@ -41,6 +55,11 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Connection Error",
     severity: "error",
     actions: [{ label: "Check Definition", href: "/admin/settings/query-target" }],
+    description: "The system is having trouble reaching the target database. Please check your connection strings and credentials.",
+    guidanceActions: [
+      { label: "Verify Target Settings", href: "/admin/settings/query-target", primary: true },
+      { label: "Check Connectivity Diagnostics", href: "/admin/diagnostics" },
+    ],
   },
   timeout: {
     title: "Timeout",
@@ -81,11 +100,19 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     title: "Budget Exhausted",
     severity: "warn",
     actions: [{ label: "Manage Quotas", href: "/admin/settings/query-target" }],
+    description: "You have reached your allocated usage quota. You can request a limit increase or wait for the next billing cycle.",
+    guidanceActions: [
+      { label: "Manage Quotas", href: "/admin/settings/query-target", primary: true },
+    ],
   },
   budget_exceeded: {
     title: "Budget Exceeded",
     severity: "warn",
     actions: [{ label: "Manage Quotas", href: "/admin/settings/query-target" }],
+    description: "You have reached your allocated usage quota. You can request a limit increase or wait for the next billing cycle.",
+    guidanceActions: [
+      { label: "Manage Quotas", href: "/admin/settings/query-target", primary: true },
+    ],
   },
   resource_exhausted: {
     title: "Resource Exhausted",

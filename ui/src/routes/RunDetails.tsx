@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getDiagnostics, OpsService } from "../api";
+import { getDiagnostics } from "../api";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
 import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
+import { buildRunContextBundle } from "../utils/buildRunContextBundle";
 import RunIdentifiers from "../components/common/RunIdentifiers";
 
 export default function RunDetails() {
@@ -12,6 +13,7 @@ export default function RunDetails() {
     const { show: showToast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
     const [diagnostics, setDiagnostics] = useState<any>(null);
+    const [contextCopied, setContextCopied] = useState(false);
 
     const fetchDetails = useCallback(async () => {
         setIsLoading(true);
@@ -36,6 +38,29 @@ export default function RunDetails() {
         [diagnostics?.audit_events]
     );
 
+    const copyRunContext = useCallback(() => {
+        const runData = diagnostics?.run_context || {};
+        const validation = diagnostics?.validation || {};
+        const completeness = diagnostics?.completeness || {};
+
+        const bundle = buildRunContextBundle({
+            runId,
+            traceId: diagnostics?.trace_id,
+            requestId: diagnostics?.request_id,
+            userQuery: runData?.user_nlq_text,
+            generatedSql: diagnostics?.generated_sql,
+            validationStatus: validation?.ast_valid ? "PASSED" : (validation?.ast_valid === false ? "FAILED" : undefined),
+            validationErrors: validation?.syntax_errors ?? [],
+            executionStatus: runData?.execution_status,
+            isComplete: !completeness?.is_truncated,
+        });
+
+        navigator.clipboard.writeText(bundle).then(() => {
+            setContextCopied(true);
+            setTimeout(() => setContextCopied(false), 2000);
+        });
+    }, [runId, diagnostics]);
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -47,6 +72,8 @@ export default function RunDetails() {
     const runData = diagnostics?.run_context || {};
     const validation = diagnostics?.validation || {};
     const completeness = diagnostics?.completeness || {};
+    const hasDiagnostics = diagnostics !== null;
+    const hasEvents = normalizedEvents.length > 0;
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -60,11 +87,21 @@ export default function RunDetails() {
                     </button>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Run Details</h1>
                 </div>
-                <RunIdentifiers
-                    traceId={diagnostics?.trace_id}
-                    interactionId={runId}
-                    requestId={diagnostics?.request_id}
-                />
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={copyRunContext}
+                        aria-label="Copy run context bundle"
+                        title="Copy run context bundle to clipboard"
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 rounded px-2.5 py-1 text-xs font-medium transition-colors"
+                    >
+                        {contextCopied ? "✓ Copied!" : "Copy run context"}
+                    </button>
+                    <RunIdentifiers
+                        traceId={diagnostics?.trace_id}
+                        interactionId={runId}
+                        requestId={diagnostics?.request_id}
+                    />
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -75,7 +112,15 @@ export default function RunDetails() {
                             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Decision Log</h2>
                         </div>
                         <div className="p-6">
-                            {normalizedEvents.length > 0 ? (
+                            {!hasDiagnostics ? (
+                                <p className="text-sm text-gray-400 italic" data-testid="no-diagnostics-message">
+                                    No diagnostics snapshot available for this run.
+                                </p>
+                            ) : !hasEvents ? (
+                                <p className="text-sm text-gray-500 italic" data-testid="no-events-message">
+                                    No decision events recorded for this execution.
+                                </p>
+                            ) : (
                                 <div className="flow-root">
                                     <ul className="-mb-8">
                                         {normalizedEvents.map((item: any, idx: number) => (
@@ -113,25 +158,25 @@ export default function RunDetails() {
                                         ))}
                                     </ul>
                                 </div>
-                            ) : (
-                                <p className="text-sm text-gray-500 italic">No detailed audit events recorded for this execution.</p>
                             )}
                         </div>
                     </div>
 
-                    {/* Full Raw Snapshot */}
-                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
-                            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                                Raw Diagnostics Payload
-                            </h2>
-                        </div>
-                        <div className="p-6">
-                            <div className="bg-gray-50 dark:bg-black rounded p-4 font-mono text-xs overflow-auto max-h-96 border border-gray-200 dark:border-gray-800">
-                                <pre className="text-gray-800 dark:text-gray-300">{toPrettyJson(diagnostics)}</pre>
+                    {/* Full Raw Snapshot — only shown when diagnostics exist */}
+                    {hasDiagnostics && (
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+                            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
+                                <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                                    Raw Diagnostics Payload
+                                </h2>
+                            </div>
+                            <div className="p-6">
+                                <div className="bg-gray-50 dark:bg-black rounded p-4 font-mono text-xs overflow-auto max-h-96 border border-gray-200 dark:border-gray-800">
+                                    <pre className="text-gray-800 dark:text-gray-300">{toPrettyJson(diagnostics)}</pre>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 <div className="space-y-6">
@@ -143,7 +188,9 @@ export default function RunDetails() {
                         <div className="p-6 space-y-4">
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase">Input Query</label>
-                                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{runData?.user_nlq_text || "—"}</p>
+                                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">
+                                    {runData?.user_nlq_text || <span className="italic text-gray-400">No query recorded</span>}
+                                </p>
                             </div>
                             <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase">Status</label>
@@ -167,28 +214,40 @@ export default function RunDetails() {
                         </div>
                     </div>
 
-                    {/* Validation Card */}
-                    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
-                        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-                            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">Validation</h2>
+                    {/* Validation Card — gated on diagnostics existing */}
+                    {hasDiagnostics ? (
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm">
+                            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+                                <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">Validation</h2>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-500">AST Valid</span>
+                                    <span className={`text-sm font-mono ${validation?.ast_valid ? 'text-green-600' : 'text-red-600'}`}>
+                                        {validation?.ast_valid !== undefined ? (validation.ast_valid ? 'YES' : 'NO') : '—'}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-500">Syntax Errors</span>
+                                    <span className="text-sm font-mono">{validation?.syntax_errors?.length ?? '—'}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm text-gray-500">Completeness</span>
+                                    <span className="text-sm font-mono">
+                                        {completeness?.is_truncated !== undefined
+                                            ? (completeness.is_truncated ? 'Truncated' : 'Full')
+                                            : '—'}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
-                        <div className="p-6 space-y-4">
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-gray-500">AST Valid</span>
-                                <span className={`text-sm font-mono ${validation?.ast_valid ? 'text-green-600' : 'text-red-600'}`}>
-                                    {validation?.ast_valid ? 'YES' : 'NO'}
-                                </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-gray-500">Syntax Errors</span>
-                                <span className="text-sm font-mono">{validation?.syntax_errors?.length || 0}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-gray-500">Completeness</span>
-                                <span className="text-sm font-mono">{completeness?.is_truncated ? 'Truncated' : 'Full'}</span>
-                            </div>
+                    ) : (
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm p-6">
+                            <p className="text-sm text-gray-400 italic" data-testid="no-validation-message">
+                                No diagnostics snapshot available — validation data unavailable.
+                            </p>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>
