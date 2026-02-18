@@ -18,11 +18,36 @@ export default function JobsDashboard() {
     const { show: showToast } = useToast();
     const { confirm, dialogProps } = useConfirmation();
 
+    // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
+    const cancellingJobIdsRef = React.useRef(cancellingJobIds);
+    React.useEffect(() => { cancellingJobIdsRef.current = cancellingJobIds; }, [cancellingJobIds]);
+
+    const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
+
     const fetchJobs = useCallback(async () => {
         setIsLoading(true);
         try {
             const data = await OpsService.listJobs(50, filterType || undefined, filterStatus || undefined);
             setJobs(data);
+
+            // Reconcile: if a job we thought was CANCELLING is now terminal, notify and clean up
+            const currentCancelling = cancellingJobIdsRef.current;
+            if (currentCancelling.size > 0) {
+                const resolved: string[] = [];
+                for (const job of data) {
+                    if (currentCancelling.has(job.id) && TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
+                        resolved.push(job.id);
+                        showToast(`Job ${job.id.slice(0, 8)} reached terminal state: ${job.status}`, "success");
+                    }
+                }
+                if (resolved.length > 0) {
+                    setCancellingJobIds(prev => {
+                        const next = new Set(prev);
+                        resolved.forEach(id => next.delete(id));
+                        return next;
+                    });
+                }
+            }
         } catch (err) {
             showToast("Failed to load jobs", "error");
         } finally {
