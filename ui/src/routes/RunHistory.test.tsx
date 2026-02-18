@@ -105,4 +105,15 @@ describe("RunHistory search scope messaging", () => {
         });
         expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
+
+    it("shows 'No results' instead of a range when page is empty with non-zero offset", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce([]);
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(screen.getByText("No results")).toBeInTheDocument();
+        });
+
+        expect(screen.queryByText(/Showing results/i)).not.toBeInTheDocument();
+    });
 });

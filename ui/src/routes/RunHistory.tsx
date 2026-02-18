@@ -295,7 +295,7 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    Showing results {offset + 1} – {offset + runs.length}
+                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length}`}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
