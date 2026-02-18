@@ -33,6 +33,26 @@ export default function JobsDashboard() {
         return () => clearInterval(interval);
     }, [fetchJobs]);
 
+    const pollJobUntilTerminal = useCallback(async (jobId: string, maxAttempts = 10) => {
+        let attempts = 0;
+        const interval = setInterval(async () => {
+            attempts++;
+            try {
+                const job = await OpsService.getJobStatus(jobId);
+                if (job.status === "CANCELLED" || job.status === "FAILED" || job.status === "COMPLETED") {
+                    clearInterval(interval);
+                    showToast(`Job ${jobId.slice(0, 8)} reaches terminal state: ${job.status}`, "success");
+                    fetchJobs();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    fetchJobs();
+                }
+            } catch (err) {
+                clearInterval(interval);
+            }
+        }, 2000);
+    }, [fetchJobs, showToast]);
+
     const handleCancel = async (jobId: string) => {
         if (cancellingJobIds.has(jobId)) return;
 
@@ -67,6 +87,7 @@ export default function JobsDashboard() {
         try {
             await OpsService.cancelJob(jobId);
             showToast("Job cancellation requested", "success");
+            pollJobUntilTerminal(jobId);
         } catch (err: any) {
             let message = err.message || "Failed to cancel job";
             if (err.code === "JOB_ALREADY_TERMINAL" || err.status === 409) {
@@ -80,7 +101,6 @@ export default function JobsDashboard() {
                 next.delete(jobId);
                 return next;
             });
-            fetchJobs();
         }
     };
 
