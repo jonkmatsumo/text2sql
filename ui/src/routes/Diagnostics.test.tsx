@@ -110,6 +110,44 @@ describe("Diagnostics Route", () => {
         }
     });
 
+    it("keeps degraded runs with missing created_at from surfacing as most recent", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([
+                {
+                    id: "missing-date",
+                    user_nlq_text: "Run without timestamp",
+                    execution_status: "FAILED",
+                    thumb: "DOWN",
+                },
+                {
+                    id: "older-run",
+                    user_nlq_text: "Older degraded run",
+                    execution_status: "FAILED",
+                    thumb: "DOWN",
+                    created_at: "2026-01-01T00:00:00Z",
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    id: "newer-run",
+                    user_nlq_text: "Newest degraded run",
+                    execution_status: "SUCCESS",
+                    thumb: "DOWN",
+                    created_at: "2026-01-02T00:00:00Z",
+                },
+            ]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Newest degraded run")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("Older degraded run")).toBeInTheDocument();
+        expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
+    });
+
     it("shows debug panels only when isDebug is true", async () => {
         const dataWithDebug = {
             ...mockData,

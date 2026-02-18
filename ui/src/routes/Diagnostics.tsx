@@ -101,13 +101,15 @@ export default function Diagnostics() {
             ]);
             // Combine and dedupe by ID
             const combined = [...failed, ...negative].reduce((acc: Interaction[], curr) => {
+                if (!curr.created_at) {
+                    return acc;
+                }
                 if (!acc.find(item => item.id === curr.id)) {
                     // Defensive normalization for partial payloads
                     const normalized = {
                         ...curr,
                         user_nlq_text: curr.user_nlq_text || "Unknown",
                         execution_status: curr.execution_status || "UNKNOWN",
-                        created_at: curr.created_at || new Date().toISOString()
                     };
                     acc.push(normalized);
                 }
