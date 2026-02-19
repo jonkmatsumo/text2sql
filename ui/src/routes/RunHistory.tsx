@@ -60,8 +60,20 @@ export default function RunHistory() {
 
     const limit = RUN_HISTORY_PAGE_SIZE;
     const searchInputRef = React.useRef<HTMLInputElement>(null);
-    const recoveryOffsetRef = React.useRef<number | null>(null);
+    const recoveryAttemptedRef = React.useRef(false);
     const recoveryToastShownRef = React.useRef(false);
+
+    useEffect(() => {
+        recoveryAttemptedRef.current = false;
+        recoveryToastShownRef.current = false;
+    }, [statusFilter, thumbFilter, searchQuery]);
+
+    useEffect(() => {
+        if (offset === 0) {
+            recoveryAttemptedRef.current = false;
+            recoveryToastShownRef.current = false;
+        }
+    }, [offset]);
 
     const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
         setSearchParams(prev => {
@@ -113,10 +125,10 @@ export default function RunHistory() {
             const more = typeof payload.has_more === "boolean" ? payload.has_more : undefined;
             const count = typeof payload.total_count === "number" ? payload.total_count : undefined;
 
-            // Deterministic empty-page recovery for high offsets.
-            if (offset > 0 && data.length === 0 && more !== true) {
-                if (recoveryOffsetRef.current !== offset) {
-                    recoveryOffsetRef.current = offset;
+            // Single-shot empty-page recovery for non-zero offsets.
+            if (offset > 0 && data.length === 0) {
+                if (!recoveryAttemptedRef.current) {
+                    recoveryAttemptedRef.current = true;
                     const fallbackOffset = Math.max(0, offset - limit);
                     if (!recoveryToastShownRef.current) {
                         showToast("Requested page is out of range. Showing previous results.", "warning");
@@ -126,8 +138,11 @@ export default function RunHistory() {
                 }
                 return;
             }
-            recoveryOffsetRef.current = null;
-            recoveryToastShownRef.current = false;
+
+            if (data.length > 0) {
+                recoveryAttemptedRef.current = false;
+                recoveryToastShownRef.current = false;
+            }
 
             const seenIds = new Set<string>();
             const uniqueData = data.filter((run: Interaction) => {

@@ -105,6 +105,41 @@ describe("RunHistory pagination contract guards", () => {
         expect(showToastMock).toHaveBeenCalledTimes(1);
     });
 
+    it("attempts a single recovery step when has_more is true but non-zero page is empty", async () => {
+        vi.spyOn(OpsService, "listRuns")
+            .mockResolvedValueOnce({ runs: [], has_more: true } as any)
+            .mockResolvedValueOnce({ runs: [], has_more: true } as any);
+
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
+        });
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([RUN_HISTORY_PAGE_SIZE, 100, "All", "All"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([RUN_HISTORY_PAGE_SIZE, 50, "All", "All"]);
+
+        await waitFor(() => {
+            expect(screen.getByTestId("location-search")).toHaveTextContent("offset=50");
+        });
+        expect(screen.getByText("No results on this page")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+        expect(showToastMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not attempt recovery when offset is 0 even if has_more is true and page is empty", async () => {
+        vi.spyOn(OpsService, "listRuns")
+            .mockResolvedValueOnce({ runs: [], has_more: true } as any);
+
+        renderRunHistory("/admin/runs?offset=0");
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(1);
+        });
+        expect(screen.getByText("No results on this page")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+        expect(showToastMock).not.toHaveBeenCalled();
+    });
+
     it("renders total_count in pagination summary when available", async () => {
         vi.spyOn(OpsService, "listRuns").mockResolvedValueOnce({
             runs: buildRuns(3),
