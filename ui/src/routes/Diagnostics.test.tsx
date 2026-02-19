@@ -136,44 +136,95 @@ describe("Diagnostics Route", () => {
         });
     });
 
-    it("shows a single run-signals error surface when one degraded-run call rejects", async () => {
+    it("keeps low-rated runs visible when failed-runs fetch rejects", async () => {
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const lowRatedTs = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [] })
-            .mockRejectedValueOnce(new Error("degraded-runs-failed"));
+            .mockRejectedValueOnce(new Error("failed-runs-broken"))
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-success",
+                        user_nlq_text: "Low-rating run still visible",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowRatedTs,
+                    },
+                ],
+            });
 
         renderDiagnostics();
 
         await waitFor(() => {
-            expect(screen.getByTestId("diagnostics-run-signals-error")).toBeInTheDocument();
+            expect(screen.getByText("Low-rating run still visible")).toBeInTheDocument();
         });
 
-        expect(screen.getByTestId("diagnostics-run-signals-error")).toHaveTextContent(
-            /Run signals are currently unavailable. Refresh to retry./i
-        );
-        expect(screen.queryByTestId("diagnostics-run-signals-loading")).not.toBeInTheDocument();
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+        expect(within(failuresSection).getByText(/Could not load recent failures\. Retry\./i)).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Low-rating run still visible")).toBeInTheDocument();
+
         expect(showToastMock).toHaveBeenCalledWith(
-            "Failed to load low-rated run signals. Refresh to retry.",
+            "Failed to load failed run signals. Refresh to retry.",
             "error",
             expect.objectContaining({
-                dedupeKey: expect.stringContaining("panels=low-ratings"),
+                dedupeKey: expect.stringContaining("panel=failed-runs"),
             })
         );
         expect(consoleErrorSpy).toHaveBeenCalledWith(
             "Failed to load degraded runs",
             expect.objectContaining({
                 surface: "Diagnostics.runSignals",
-                low_ratings: expect.objectContaining({
-                    surface: "Diagnostics.runSignals.lowRatings",
-                    reason: expect.stringContaining("degraded-runs-failed"),
+                failed: expect.objectContaining({
+                    surface: "Diagnostics.runSignals.failed",
+                    reason: expect.stringContaining("failed-runs-broken"),
                 }),
             })
         );
         consoleErrorSpy.mockRestore();
     });
 
-    it("shows one dedupable toast when both run-signal calls fail in the same cycle", async () => {
+    it("keeps failed-runs visible when low-ratings fetch rejects", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const failedTs = new Date(Date.now() - 7 * 60 * 1000).toISOString();
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-success",
+                        user_nlq_text: "Failure run still visible",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failedTs,
+                    },
+                ],
+            })
+            .mockRejectedValueOnce(new Error("low-ratings-broken"));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Failure run still visible")).toBeInTheDocument();
+        });
+
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+        expect(within(failuresSection).getByText("Failure run still visible")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText(/Could not load recent low-rated runs\. Retry\./i)).toBeInTheDocument();
+
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=low-ratings"),
+            })
+        );
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("shows separate dedupable toasts when both run-signal calls fail", async () => {
         const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
@@ -183,15 +234,27 @@ describe("Diagnostics Route", () => {
         renderDiagnostics();
 
         await waitFor(() => {
-            expect(screen.getByTestId("diagnostics-run-signals-error")).toBeInTheDocument();
+            const failuresSection = screen.getByTestId("diagnostics-failures-section");
+            const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+            expect(within(failuresSection).getByText(/Could not load recent failures\. Retry\./i)).toBeInTheDocument();
+            expect(within(lowRatingsSection).getByText(/Could not load recent low-rated runs\. Retry\./i)).toBeInTheDocument();
         });
 
-        expect(showToastMock).toHaveBeenCalledTimes(1);
-        expect(showToastMock).toHaveBeenCalledWith(
-            "Failed to load degraded run signals. Refresh to retry.",
+        expect(showToastMock).toHaveBeenCalledTimes(2);
+        expect(showToastMock).toHaveBeenNthCalledWith(
+            1,
+            "Failed to load failed run signals. Refresh to retry.",
             "error",
             expect.objectContaining({
-                dedupeKey: expect.stringContaining("panels=failed-runs,low-ratings"),
+                dedupeKey: expect.stringContaining("panel=failed-runs"),
+            })
+        );
+        expect(showToastMock).toHaveBeenNthCalledWith(
+            2,
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=low-ratings"),
             })
         );
         consoleErrorSpy.mockRestore();

@@ -99,7 +99,8 @@ export default function Diagnostics() {
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
     const [runSignalsLoading, setRunSignalsLoading] = useState(false);
-    const [runSignalsError, setRunSignalsError] = useState<string | null>(null);
+    const [failedSignalsFetchError, setFailedSignalsFetchError] = useState(false);
+    const [lowRatingsSignalsFetchError, setLowRatingsSignalsFetchError] = useState(false);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const [recencyWindowHours, setRecencyWindowHours] = useState<number>(DEFAULT_RECENCY_WINDOW_HOURS);
     const isFetchingRef = useRef(false);
@@ -112,7 +113,8 @@ export default function Diagnostics() {
         setLoading(true);
         setError(null);
         setRunSignalsLoading(true);
-        setRunSignalsError(null);
+        setFailedSignalsFetchError(false);
+        setLowRatingsSignalsFetchError(false);
         let diagnosticsLoaded = false;
         try {
             const resp = await getDiagnostics(debug);
@@ -142,52 +144,6 @@ export default function Diagnostics() {
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
             ]);
 
-            if (failedResult.status !== "fulfilled" || negativeResult.status !== "fulfilled") {
-                const failedPanels: string[] = [];
-                if (failedResult.status === "rejected") {
-                    failedPanels.push("failed-runs");
-                }
-                if (negativeResult.status === "rejected") {
-                    failedPanels.push("low-ratings");
-                }
-                const panelKey = failedPanels.join(",");
-                const toastMessage =
-                    failedPanels.length > 1
-                        ? "Failed to load degraded run signals. Refresh to retry."
-                        : failedPanels[0] === "failed-runs"
-                            ? "Failed to load failed run signals. Refresh to retry."
-                            : "Failed to load low-rated run signals. Refresh to retry.";
-                const dedupeKey = makeToastDedupeKey(
-                    "diagnostics",
-                    "RUN_SIGNALS_FETCH_FAILED",
-                    toastMessage,
-                    {
-                        surface: "Diagnostics.runSignals",
-                        identifiers: { panels: panelKey },
-                    }
-                );
-                showToast(toastMessage, "error", { dedupeKey });
-                setRecentFailures([]);
-                setRecentLowRatings([]);
-                setRunSignalsError("Run signals are currently unavailable. Refresh to retry.");
-                console.error("Failed to load degraded runs", {
-                    surface: "Diagnostics.runSignals",
-                    failed: failedResult.status === "rejected"
-                        ? {
-                            surface: "Diagnostics.runSignals.failed",
-                            reason: String(failedResult.reason),
-                        }
-                        : null,
-                    low_ratings: negativeResult.status === "rejected"
-                        ? {
-                            surface: "Diagnostics.runSignals.lowRatings",
-                            reason: String(negativeResult.reason),
-                        }
-                        : null,
-                });
-                return;
-            }
-
             const normalizeCategory = (result: ListRunsResponse) => {
                 const runs = result.runs;
                 const seenIds = new Set<string>();
@@ -213,9 +169,61 @@ export default function Diagnostics() {
                     .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
             };
 
-            setRecentFailures(normalizeCategory(failedResult.value));
-            setRecentLowRatings(normalizeCategory(negativeResult.value));
-            setRunSignalsError(null);
+            if (failedResult.status === "fulfilled") {
+                setRecentFailures(normalizeCategory(failedResult.value));
+                setFailedSignalsFetchError(false);
+            } else {
+                const failedToast = "Failed to load failed run signals. Refresh to retry.";
+                const failedDedupeKey = makeToastDedupeKey(
+                    "diagnostics",
+                    "RUN_SIGNALS_FETCH_FAILED",
+                    failedToast,
+                    {
+                        surface: "Diagnostics.runSignals.failed",
+                        identifiers: { panel: "failed-runs" },
+                    }
+                );
+                showToast(failedToast, "error", { dedupeKey: failedDedupeKey });
+                setRecentFailures([]);
+                setFailedSignalsFetchError(true);
+            }
+
+            if (negativeResult.status === "fulfilled") {
+                setRecentLowRatings(normalizeCategory(negativeResult.value));
+                setLowRatingsSignalsFetchError(false);
+            } else {
+                const lowRatingsToast = "Failed to load low-rated run signals. Refresh to retry.";
+                const lowRatingsDedupeKey = makeToastDedupeKey(
+                    "diagnostics",
+                    "RUN_SIGNALS_FETCH_FAILED",
+                    lowRatingsToast,
+                    {
+                        surface: "Diagnostics.runSignals.lowRatings",
+                        identifiers: { panel: "low-ratings" },
+                    }
+                );
+                showToast(lowRatingsToast, "error", { dedupeKey: lowRatingsDedupeKey });
+                setRecentLowRatings([]);
+                setLowRatingsSignalsFetchError(true);
+            }
+
+            if (failedResult.status === "rejected" || negativeResult.status === "rejected") {
+                console.error("Failed to load degraded runs", {
+                    surface: "Diagnostics.runSignals",
+                    failed: failedResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.failed",
+                            reason: String(failedResult.reason),
+                        }
+                        : null,
+                    low_ratings: negativeResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.lowRatings",
+                            reason: String(negativeResult.reason),
+                        }
+                        : null,
+                });
+            }
         } finally {
             setRunSignalsLoading(false);
             isFetchingRef.current = false;
@@ -606,14 +614,6 @@ export default function Diagnostics() {
                                 >
                                     <LoadingState message="Loading degraded run signals..." />
                                 </div>
-                            ) : runSignalsError ? (
-                                <div
-                                    data-testid="diagnostics-run-signals-error"
-                                    role="status"
-                                    style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-muted)", border: "1px solid var(--border-muted)", color: "var(--muted)" }}
-                                >
-                                    {runSignalsError}
-                                </div>
                             ) : (
                                 <div style={{ display: "grid", gap: "20px" }}>
                                     <DiagnosticsRunSignalSection
@@ -621,7 +621,7 @@ export default function Diagnostics() {
                                         runs={visibleFailures}
                                         pillLabel="FAILED"
                                         pillClass="bg-red-100 text-red-800"
-                                        emptyMessage="No recent system failures found."
+                                        emptyMessage={failedSignalsFetchError ? "Could not load recent failures. Retry." : "No recent system failures found."}
                                         testId="diagnostics-failures-section"
                                     />
 
@@ -630,7 +630,7 @@ export default function Diagnostics() {
                                         runs={visibleLowRatings}
                                         pillLabel="LOW_RATING"
                                         pillClass="bg-amber-100 text-amber-800"
-                                        emptyMessage="No recent low-rated runs found."
+                                        emptyMessage={lowRatingsSignalsFetchError ? "Could not load recent low-rated runs. Retry." : "No recent low-rated runs found."}
                                         testId="diagnostics-low-ratings-section"
                                     />
 
