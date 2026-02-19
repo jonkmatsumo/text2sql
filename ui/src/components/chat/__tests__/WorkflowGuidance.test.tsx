@@ -40,7 +40,10 @@ describe("WorkflowGuidance", () => {
         renderWithRouter(<WorkflowGuidance category="transient" />);
         expect(screen.getByText("Transient Error")).toBeInTheDocument();
         expect(screen.getByText(/temporary error occurred/i)).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Retry Operation" })).toBeInTheDocument();
+        const link = screen.getByRole("link", { name: "Retry Operation" });
+        expect(link).toBeInTheDocument();
+        expect(link).toHaveAttribute("href", "/admin/diagnostics");
+        expect(link).not.toHaveAttribute("href", "#");
     });
 
     it("renders schema_missing guidance with correct title and description", () => {
