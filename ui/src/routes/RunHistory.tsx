@@ -389,7 +389,7 @@ export default function RunHistory() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                         <Link
-                                            to={`/ admin / runs / ${run.id} `}
+                                            to={`/admin/runs/${run.id}`}
                                             aria-label={`View details for run ${run.id}`}
                                             className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                         >

@@ -206,6 +206,13 @@ describe("RunHistory search scope messaging", () => {
         });
     });
 
+    it("renders Details links with whitespace-free run details routes", async () => {
+        renderRunHistory();
+
+        const detailsLink = await screen.findByRole("link", { name: "View details for run run-1" });
+        expect(detailsLink).toHaveAttribute("href", "/admin/runs/run-1");
+    });
+
     it("keeps Next disabled when page is empty at non-zero offset even if has_more=true", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [], has_more: true });
         renderRunHistory("/admin/runs?offset=100");
