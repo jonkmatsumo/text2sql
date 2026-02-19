@@ -113,6 +113,9 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     severity: "warn",
     actions: [],
   },
+  // budget_exhausted and budget_exceeded are semantically identical in the UI;
+  // both indicate hard quota limits reached. We alias them here to handle
+  // inconsistent naming across different provider backends.
   budget_exhausted: {
     title: "Budget Exhausted",
     severity: "warn",
