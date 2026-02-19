@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
-import { OpsService, getErrorMessage } from "../api";
+import { OpsService, getErrorMessage, ApiError } from "../api";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
@@ -93,7 +94,10 @@ export default function RunHistory() {
             });
             setRuns(uniqueData);
         } catch (err) {
-            showToast(getErrorMessage(err), "error", { dedupeKey: "run-history-fetch-error" });
+            const message = getErrorMessage(err);
+            const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
+            const dedupeKey = makeToastDedupeKey("run-history", category, message);
+            showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);
         }

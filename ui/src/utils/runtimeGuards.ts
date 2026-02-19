@@ -48,3 +48,47 @@ export function isRunDiagnosticsResponse(value: unknown): value is RunDiagnostic
         typeof v.enabled_flags === "object"
     );
 }
+
+/**
+ * Validates and extracts common identifiers from an unexpected response payload.
+ */
+export function extractIdentifiers(value: unknown): Record<string, string> {
+    const ids: Record<string, string> = {};
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        const v = value as Record<string, unknown>;
+        const keys = ["request_id", "trace_id", "run_id", "job_id", "id"];
+        for (const key of keys) {
+            if (typeof v[key] === "string") {
+                ids[key] = v[key] as string;
+            }
+        }
+    }
+    return ids;
+}
+
+/**
+ * Produces a bounded, safe string summary of an unexpected response payload.
+ * Handles circular references and truncates to maxChars.
+ */
+export function summarizeUnexpectedResponse(value: unknown, maxChars = 8000): string {
+    if (value === null) return "null";
+    if (value === undefined) return "undefined";
+
+    try {
+        const cache = new Set();
+        const json = JSON.stringify(value, (key, val) => {
+            if (typeof val === "object" && val !== null) {
+                if (cache.has(val)) return "[Circular]";
+                cache.add(val);
+            }
+            return val;
+        }, 2);
+
+        if (json.length > maxChars) {
+            return json.substring(0, maxChars) + "... [truncated]";
+        }
+        return json;
+    } catch (err) {
+        return `[Serialization Error: ${err}]`;
+    }
+}

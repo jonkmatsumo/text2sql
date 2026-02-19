@@ -39,7 +39,13 @@ import {
   internalAuthToken
 } from "./config";
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
-import { isInteractionArray, isJobStatusResponse, isRunDiagnosticsResponse } from "./utils/runtimeGuards";
+import {
+  isInteractionArray,
+  isJobStatusResponse,
+  isRunDiagnosticsResponse,
+  extractIdentifiers,
+  summarizeUnexpectedResponse
+} from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
@@ -541,11 +547,14 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
     const data = await response.json();
     if (!isJobStatusResponse(data)) {
-      console.error("Malformed job status response:", data);
+      const ids = extractIdentifiers(data);
+      const summary = summarizeUnexpectedResponse(data);
+      console.error("Operator API contract mismatch (getJobStatus)", { endpoint: "getJobStatus", ids, summary });
       throw new ApiError(
-        "Received unexpected response from server",
+        `Received unexpected response from getJobStatus${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
         200,
-        "MALFORMED_RESPONSE"
+        "MALFORMED_RESPONSE",
+        { endpoint: "getJobStatus", ...ids }
       );
     }
     return data;
@@ -595,11 +604,14 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to load runs");
     const data = await response.json();
     if (!isInteractionArray(data)) {
-      console.error("Malformed interaction list response:", data);
+      const ids = extractIdentifiers(data);
+      const summary = summarizeUnexpectedResponse(data);
+      console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
       throw new ApiError(
-        "Received unexpected response from server",
+        `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
         200,
-        "MALFORMED_RESPONSE"
+        "MALFORMED_RESPONSE",
+        { endpoint: "listRuns", ...ids }
       );
     }
     return data;
@@ -1004,11 +1016,14 @@ export async function getDiagnostics(
 
   const data = await response.json();
   if (!isRunDiagnosticsResponse(data)) {
-    console.error("Malformed diagnostics response:", data);
+    const ids = extractIdentifiers(data);
+    const summary = summarizeUnexpectedResponse(data);
+    console.error("Operator API contract mismatch (getDiagnostics)", { endpoint: "getDiagnostics", ids, summary });
     throw new ApiError(
-      "Received unexpected response from server",
+      `Received unexpected response from getDiagnostics${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
       200,
-      "MALFORMED_RESPONSE"
+      "MALFORMED_RESPONSE",
+      { endpoint: "getDiagnostics", ...ids }
     );
   }
   return data;
