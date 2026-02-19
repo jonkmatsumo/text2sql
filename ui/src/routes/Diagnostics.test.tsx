@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
 import { getDiagnostics, OpsService } from "../api";
 import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
+import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
@@ -60,7 +61,7 @@ function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
 describe("Diagnostics Route", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        (OpsService.listRuns as any).mockResolvedValue([]);
+        (OpsService.listRuns as any).mockResolvedValue({ runs: [] });
     });
 
     it("renders loading state initially", async () => {
@@ -100,14 +101,14 @@ describe("Diagnostics Route", () => {
     });
 
     it("requests degraded runs concurrently", async () => {
-        let resolveFailed: ((value: any[]) => void) | undefined;
-        const failedPromise = new Promise<any[]>((resolve) => {
+        let resolveFailed: ((value: any) => void) | undefined;
+        const failedPromise = new Promise<any>((resolve) => {
             resolveFailed = resolve;
         });
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
             .mockImplementationOnce(() => failedPromise)
-            .mockImplementationOnce(() => Promise.resolve([]));
+            .mockImplementationOnce(() => Promise.resolve({ runs: [] }));
 
         renderDiagnostics();
 
@@ -115,12 +116,12 @@ describe("Diagnostics Route", () => {
             expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
         });
 
-        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([5, 0, "FAILED"]);
-        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([5, 0, "All", "DOWN"]);
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"]);
 
         if (resolveFailed) {
             await act(async () => {
-                resolveFailed!([]);
+                resolveFailed!({ runs: [] });
             });
         }
     });
@@ -130,7 +131,7 @@ describe("Diagnostics Route", () => {
         const recentTs2 = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1h ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "missing-date",
                     user_nlq_text: "Run without timestamp",
@@ -144,8 +145,8 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: recentTs1,
                 },
-            ])
-            .mockResolvedValueOnce([
+            ] })
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "newer-run",
                     user_nlq_text: "Newest degraded run",
@@ -153,7 +154,7 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: recentTs2,
                 },
-            ]);
+            ] });
 
         renderDiagnostics();
 
@@ -170,7 +171,7 @@ describe("Diagnostics Route", () => {
         const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "failed-1",
                     user_nlq_text: "Failure query",
@@ -178,8 +179,8 @@ describe("Diagnostics Route", () => {
                     thumb: "None",
                     created_at: failTs,
                 },
-            ])
-            .mockResolvedValueOnce([
+            ] })
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "low-1",
                     user_nlq_text: "Low rating query",
@@ -187,7 +188,7 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: lowTs,
                 },
-            ]);
+            ] });
 
         renderDiagnostics();
 
@@ -195,7 +196,11 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failures")).toBeInTheDocument();
             expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
         });
-        expect(screen.getByText("Showing latest 5 failures and 5 low-rated runs.")).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                `Showing latest ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.`
+            )
+        ).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
@@ -225,11 +230,11 @@ describe("Diagnostics Route", () => {
 
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
                 { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
-            ])
-            .mockResolvedValueOnce([]);
+            ] })
+            .mockResolvedValueOnce({ runs: [] });
 
         renderDiagnostics();
 
@@ -252,16 +257,16 @@ describe("Diagnostics Route", () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
             if (status === "FAILED") {
-                return Promise.resolve([
+                return Promise.resolve({ runs: [
                     { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
-                ]);
+                ] });
             }
             if (thumb === "DOWN") {
-                return Promise.resolve([
+                return Promise.resolve({ runs: [
                     { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
-                ]);
+                ] });
             }
-            return Promise.resolve([]);
+            return Promise.resolve({ runs: [] });
         });
 
         renderDiagnostics();

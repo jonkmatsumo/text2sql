@@ -7,6 +7,7 @@ import { useToast } from "../hooks/useToast";
 import { useConfirmation } from "../hooks/useConfirmation";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
+import { JOBS_DASHBOARD_PAGE_SIZE } from "../constants/pagination";
 
 export const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
@@ -54,7 +55,11 @@ export default function JobsDashboard() {
         if (!isMountedRef.current) return;
         setIsLoading(true);
         try {
-            const data = await OpsService.listJobs(50, filterType || undefined, filterStatus || undefined);
+            const data = await OpsService.listJobs(
+                JOBS_DASHBOARD_PAGE_SIZE,
+                filterType || undefined,
+                filterStatus || undefined
+            );
             if (!isMountedRef.current) return;
             setJobs(data);
 

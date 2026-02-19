@@ -6,6 +6,7 @@ import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
+import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
 import { formatTimestamp, toPrettyJson } from "../utils/observability";
 import {
     DiagnosticsFilters,
@@ -90,11 +91,11 @@ export default function Diagnostics() {
             isFetchingRef.current = false;
         }
 
-        // Fetch degraded runs concurrently (failed + negatively rated)
+            // Fetch degraded runs concurrently (failed + negatively rated)
         try {
             const [failed, negative] = await Promise.all([
-                OpsService.listRuns(5, 0, "FAILED"),
-                OpsService.listRuns(5, 0, "All", "DOWN"),
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
             ]);
             const normalizeCategory = (result: ListRunsResponse) => {
                 const runs = result.runs;
@@ -115,7 +116,7 @@ export default function Diagnostics() {
                         const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
                         return tB - tA;
                     })
-                    .slice(0, 5);
+                    .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
             };
 
             setRecentFailures(normalizeCategory(failed));
@@ -507,7 +508,7 @@ export default function Diagnostics() {
                                 </label>
                             </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest 5 failures and 5 low-rated runs.
+                                Showing latest {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.
                                 {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
                                     <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
                                         ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing timestamps)
