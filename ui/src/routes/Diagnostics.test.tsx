@@ -126,6 +126,8 @@ describe("Diagnostics Route", () => {
     });
 
     it("keeps degraded runs with missing created_at from surfacing as most recent", async () => {
+        const recentTs1 = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2h ago
+        const recentTs2 = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1h ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
             .mockResolvedValueOnce([
@@ -140,7 +142,7 @@ describe("Diagnostics Route", () => {
                     user_nlq_text: "Older degraded run",
                     execution_status: "FAILED",
                     thumb: "DOWN",
-                    created_at: "2026-01-01T00:00:00Z",
+                    created_at: recentTs1,
                 },
             ])
             .mockResolvedValueOnce([
@@ -149,7 +151,7 @@ describe("Diagnostics Route", () => {
                     user_nlq_text: "Newest degraded run",
                     execution_status: "SUCCESS",
                     thumb: "DOWN",
-                    created_at: "2026-01-02T00:00:00Z",
+                    created_at: recentTs2,
                 },
             ]);
 
@@ -164,6 +166,7 @@ describe("Diagnostics Route", () => {
     });
 
     it("shows 'unknown time' label for runs with missing created_at when included via recency window", async () => {
+        const recentTs = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
             .mockResolvedValueOnce([])
@@ -173,7 +176,7 @@ describe("Diagnostics Route", () => {
                     user_nlq_text: "Query with no timestamp",
                     execution_status: "SUCCESS",
                     thumb: "DOWN",
-                    created_at: "2026-01-01T00:00:00Z",
+                    created_at: recentTs,
                 },
             ]);
 
@@ -189,6 +192,8 @@ describe("Diagnostics Route", () => {
     });
 
     it("renders failures and low ratings in separate sections", async () => {
+        const failTs = new Date(Date.now() - 5 * 60 * 1000).toISOString();  // 5m ago
+        const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
             .mockResolvedValueOnce([
@@ -197,7 +202,7 @@ describe("Diagnostics Route", () => {
                     user_nlq_text: "Failure query",
                     execution_status: "FAILED",
                     thumb: "None",
-                    created_at: "2026-01-03T00:00:00Z",
+                    created_at: failTs,
                 },
             ])
             .mockResolvedValueOnce([
@@ -206,7 +211,7 @@ describe("Diagnostics Route", () => {
                     user_nlq_text: "Low rating query",
                     execution_status: "SUCCESS",
                     thumb: "DOWN",
-                    created_at: "2026-01-02T00:00:00Z",
+                    created_at: lowTs,
                 },
             ]);
 
@@ -223,8 +228,47 @@ describe("Diagnostics Route", () => {
 
         expect(within(failuresSection).getByText("Failure query")).toBeInTheDocument();
         expect(within(lowRatingsSection).getByText("Low rating query")).toBeInTheDocument();
-        expect(within(failuresSection).getByText(new Date("2026-01-03T00:00:00Z").toLocaleString())).toBeInTheDocument();
+        expect(within(failuresSection).getByText(new Date(failTs).toLocaleString())).toBeInTheDocument();
         expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
+    });
+
+    it("renders recency window dropdown with default 24h selection", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-recency-window")).toBeInTheDocument();
+        });
+
+        expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("24");
+    });
+
+    it("client-side recency filter excludes runs older than selected window", async () => {
+        const now = Date.now();
+        const recentTs = new Date(now - 30 * 60 * 1000).toISOString(); // 30m ago
+        const oldTs = new Date(now - 48 * 60 * 60 * 1000).toISOString(); // 48h ago
+
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce([
+                { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
+                { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
+            ])
+            .mockResolvedValueOnce([]);
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Recent failure")).toBeInTheDocument();
+        });
+
+        // Both visible under default 24h window (recent is 30m, old is 48h — old should be excluded)
+        expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
+        expect(screen.getByText("Recent failure")).toBeInTheDocument();
+
+        // Switching to 7d window should show both
+        fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "168" } });
+        expect(screen.getByText("Old failure")).toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {
