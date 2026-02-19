@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getDiagnostics, OpsService } from "../api";
 import { Link } from "react-router-dom";
-import { Interaction, InteractionListResponse } from "../types/admin";
+import { Interaction, ListRunsResponse } from "../types/admin";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
@@ -96,8 +96,8 @@ export default function Diagnostics() {
                 OpsService.listRuns(5, 0, "FAILED"),
                 OpsService.listRuns(5, 0, "All", "DOWN"),
             ]);
-            const normalizeCategory = (result: Interaction[] | InteractionListResponse) => {
-                const runs = Array.isArray(result) ? result : result.data;
+            const normalizeCategory = (result: ListRunsResponse) => {
+                const runs = result.runs;
                 const seenIds = new Set<string>();
                 return runs
                     .filter((run) => {

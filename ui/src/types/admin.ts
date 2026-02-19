@@ -132,7 +132,17 @@ export interface SynthGenerateResponse {
     job_id: string;
 }
 
+export interface ListRunsResponse {
+    runs: Interaction[];
+    has_more?: boolean;
+    total_count?: number;
+}
+
+/**
+ * @deprecated Use ListRunsResponse.
+ */
 export interface InteractionListResponse {
     data: Interaction[];
     has_more?: boolean;
+    total_count?: number;
 }

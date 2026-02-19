@@ -3,7 +3,6 @@ import { useSearchParams, Link } from "react-router-dom";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
 import { OpsService, getErrorMessage, ApiError } from "../api";
-import { isInteractionListResponse } from "../utils/runtimeGuards";
 import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
@@ -33,7 +32,8 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
-    const [hasMore, setHasMore] = useState<boolean | null>(null);
+    const [hasMore, setHasMore] = useState<boolean | undefined>(undefined);
+    const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
@@ -87,8 +87,20 @@ export default function RunHistory() {
         setIsLoading(true);
         try {
             const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
-            const data: Interaction[] = isInteractionListResponse(result) ? result.data : result;
-            const more = isInteractionListResponse(result) ? (result.has_more ?? null) : null;
+            const payload = result as { runs?: unknown; has_more?: unknown; total_count?: unknown };
+            if (!Array.isArray(payload.runs)) {
+                console.error("Operator API contract mismatch (RunHistory.listRuns)", {
+                    endpoint: "RunHistory.listRuns",
+                    summary: "Expected result.runs to be an array",
+                });
+                setRuns([]);
+                setHasMore(undefined);
+                setTotalCount(undefined);
+                return;
+            }
+            const data: Interaction[] = payload.runs as Interaction[];
+            const more = typeof payload.has_more === "boolean" ? payload.has_more : undefined;
+            const count = typeof payload.total_count === "number" ? payload.total_count : undefined;
 
             // Empty page recovery: if we're at an offset > 0 and get no results, go back to 0
             if (data.length === 0 && offset > 0) {
@@ -104,6 +116,7 @@ export default function RunHistory() {
             });
             setRuns(uniqueData);
             setHasMore(more);
+            setTotalCount(count);
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
@@ -147,6 +160,12 @@ export default function RunHistory() {
         [runs, searchQuery]
     );
     const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
+    const canNavigateNext = hasMore !== undefined ? hasMore : runs.length === limit;
+    const rangeSummary = runs.length === 0
+        ? "No results"
+        : (totalCount !== undefined
+            ? `Showing results ${offset + 1} – ${offset + runs.length} of ${totalCount}`
+            : `Showing results ${offset + 1} – ${offset + runs.length}`);
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -209,7 +228,7 @@ export default function RunHistory() {
                                 <p className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-tight">Search is limited to this page</p>
                                 <div className="text-xs text-blue-700 dark:text-blue-400 leading-normal">
                                     <p>Results only include runs already loaded in the table below.</p>
-                                    {((hasMore !== null ? hasMore : runs.length === limit) && searchQuery) && (
+                                    {(canNavigateNext && searchQuery) && (
                                         <p className="mt-1 font-semibold italic text-blue-800 dark:text-blue-300" data-testid="runhistory-more-runs-hint">
                                             More runs exist beyond this page; try Next.
                                         </p>
@@ -340,15 +359,13 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    {runs.length === 0
-                        ? (offset > 0 ? `No more results (Offset: ${offset})` : "No results")
-                        : `Showing results ${offset + 1} – ${offset + runs.length}`}
+                    {rangeSummary}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
-                    disabled={(hasMore !== null ? !hasMore : runs.length < limit) || isLoading}
+                    disabled={!canNavigateNext || isLoading}
                     aria-label="Next page"
-                    title={searchQuery && runs.length < limit ? "Search is limited to this page" : undefined}
+                    title={searchQuery && !canNavigateNext ? "Search is limited to this page" : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Next

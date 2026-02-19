@@ -47,7 +47,7 @@ function renderRunHistory(initialPath = "/admin/runs") {
 describe("RunHistory search scope messaging", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        vi.spyOn(OpsService, "listRuns").mockResolvedValue(mockRuns as any);
+        vi.spyOn(OpsService, "listRuns").mockResolvedValue({ runs: mockRuns } as any);
         vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: vi.fn() } as any);
     });
 
@@ -100,7 +100,7 @@ describe("RunHistory search scope messaging", () => {
 
     it("shows 'more runs exist' hint when q is set and page is full", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE),
             has_more: true
         });
         renderRunHistory("/admin/runs?q=test");
@@ -114,7 +114,7 @@ describe("RunHistory search scope messaging", () => {
 
     it("hides 'more runs exist' hint when q is set but has_more is false", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(5),
+            runs: buildRuns(5),
             has_more: false
         });
         renderRunHistory("/admin/runs?q=test");
@@ -159,7 +159,7 @@ describe("RunHistory search scope messaging", () => {
     });
 
     it("shows 'No results' when page is empty at offset 0", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce([]);
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] });
         renderRunHistory("/admin/runs?offset=0");
 
         await waitFor(() => {
@@ -168,7 +168,7 @@ describe("RunHistory search scope messaging", () => {
     });
 
     it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce(buildRuns(5)); // fewer than limit
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: buildRuns(5) }); // fewer than limit
         renderRunHistory("/admin/runs?q=test");
 
         const nextButton = await screen.findByRole("button", { name: "Next page" });
@@ -179,7 +179,7 @@ describe("RunHistory search scope messaging", () => {
     it("respects has_more metadata for disabling Next button", async () => {
         // Return structured response with has_more: false
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE),
             has_more: false
         });
         renderRunHistory();
@@ -191,7 +191,7 @@ describe("RunHistory search scope messaging", () => {
     it("enables Next button when has_more is true even if results < limit", async () => {
         // This case is unlikely in real world but tests our logic
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(5),
+            runs: buildRuns(5),
             has_more: true
         });
         renderRunHistory();
@@ -200,8 +200,38 @@ describe("RunHistory search scope messaging", () => {
         expect(nextButton).not.toBeDisabled();
     });
 
+    it("falls back to page-size heuristic when has_more is missing", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE)
+        });
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).not.toBeDisabled();
+    });
+
+    it("renders empty state when listRuns payload is malformed", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        (OpsService.listRuns as any).mockResolvedValueOnce({});
+        renderRunHistory();
+
+        await waitFor(() => {
+            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+        });
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Operator API contract mismatch (RunHistory.listRuns)",
+            expect.objectContaining({
+                endpoint: "RunHistory.listRuns",
+                summary: "Expected result.runs to be an array",
+            })
+        );
+
+        consoleErrorSpy.mockRestore();
+    });
+
     it("auto-redirects to offset 0 if page is empty at non-zero offset (Empty Page Recovery)", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce([]); // Empty
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] }); // Empty
         renderRunHistory("/admin/runs?offset=50");
 
         await waitFor(() => {
