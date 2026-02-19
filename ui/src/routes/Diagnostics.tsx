@@ -147,87 +147,74 @@ export default function Diagnostics() {
     const isFetchingRef = useRef(false);
     const isRunSignalsFetchingRef = useRef(false);
 
-    const fetchRunSignals = useCallback(async () => {
-        if (isRunSignalsFetchingRef.current) {
+    const fetchRunSignals = useCallback(async (targetCategory?: "FAILED" | "DOWN") => {
+        if (isRunSignalsFetchingRef.current && !targetCategory) {
             return;
         }
-        isRunSignalsFetchingRef.current = true;
+
+        if (!targetCategory) isRunSignalsFetchingRef.current = true;
         setRunSignalsLoading(true);
-        setFailedSignalsFetchError(false);
-        setLowRatingsSignalsFetchError(false);
+
+        const fetchFailed = !targetCategory || targetCategory === "FAILED";
+        const fetchDown = !targetCategory || targetCategory === "DOWN";
+
+        if (fetchFailed) setFailedSignalsFetchError(false);
+        if (fetchDown) setLowRatingsSignalsFetchError(false);
 
         try {
-            const [failedResult, negativeResult] = await Promise.allSettled([
-                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
-                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
+            const [failedResult, downResult] = await Promise.allSettled([
+                fetchFailed
+                    ? OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED")
+                    : Promise.resolve(null),
+                fetchDown
+                    ? OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN")
+                    : Promise.resolve(null),
             ]);
 
-            if (failedResult.status === "fulfilled") {
+            if (fetchFailed && failedResult.status === "fulfilled" && failedResult.value) {
                 setRecentFailures(normalizeRunSignalCategory(failedResult.value));
                 setFailedSignalsFetchError(false);
-            } else {
-                const failedToast = "Failed to load failed run signals. Refresh to retry.";
-                const failedErrorCategory = getRunSignalsFailureCategory(failedResult.reason);
-                const failedDedupeKey = makeToastDedupeKey(
-                    "diagnostics",
-                    "RUN_SIGNALS_FETCH_FAILED",
-                    failedToast,
-                    {
-                        surface: "Diagnostics.runSignals.failed",
-                        identifiers: {
-                            panel: "failed-runs",
-                            error: failedErrorCategory,
-                        },
-                    }
-                );
-                showToast(failedToast, "error", { dedupeKey: failedDedupeKey });
+            } else if (fetchFailed && failedResult.status === "rejected") {
+                const toastMsg = "Failed to load failed run signals. Refresh to retry.";
+                const errorCategory = getRunSignalsFailureCategory(failedResult.reason);
+                const dedupeKey = makeToastDedupeKey("diagnostics", "RUN_SIGNALS_FETCH_FAILED", toastMsg, {
+                    surface: "Diagnostics.runSignals.failed",
+                    identifiers: { panel: "failed-runs", error: errorCategory }
+                });
+                showToast(toastMsg, "error", { dedupeKey });
                 setRecentFailures([]);
                 setFailedSignalsFetchError(true);
             }
 
-            if (negativeResult.status === "fulfilled") {
-                setRecentLowRatings(normalizeRunSignalCategory(negativeResult.value));
+            if (fetchDown && downResult.status === "fulfilled" && downResult.value) {
+                setRecentLowRatings(normalizeRunSignalCategory(downResult.value));
                 setLowRatingsSignalsFetchError(false);
-            } else {
-                const lowRatingsToast = "Failed to load low-rated run signals. Refresh to retry.";
-                const lowRatingsErrorCategory = getRunSignalsFailureCategory(negativeResult.reason);
-                const lowRatingsDedupeKey = makeToastDedupeKey(
-                    "diagnostics",
-                    "RUN_SIGNALS_FETCH_FAILED",
-                    lowRatingsToast,
-                    {
-                        surface: "Diagnostics.runSignals.lowRatings",
-                        identifiers: {
-                            panel: "low-ratings",
-                            error: lowRatingsErrorCategory,
-                        },
-                    }
-                );
-                showToast(lowRatingsToast, "error", { dedupeKey: lowRatingsDedupeKey });
+            } else if (fetchDown && downResult.status === "rejected") {
+                const toastMsg = "Failed to load low-rated run signals. Refresh to retry.";
+                const errorCategory = getRunSignalsFailureCategory(downResult.reason);
+                const dedupeKey = makeToastDedupeKey("diagnostics", "RUN_SIGNALS_FETCH_FAILED", toastMsg, {
+                    surface: "Diagnostics.runSignals.lowRatings",
+                    identifiers: { panel: "low-ratings", error: errorCategory }
+                });
+                showToast(toastMsg, "error", { dedupeKey });
                 setRecentLowRatings([]);
                 setLowRatingsSignalsFetchError(true);
             }
 
-            if (failedResult.status === "rejected" || negativeResult.status === "rejected") {
+            if (failedResult.status === "rejected" || downResult.status === "rejected") {
                 console.error("Failed to load degraded runs", {
                     surface: "Diagnostics.runSignals",
                     failed: failedResult.status === "rejected"
-                        ? {
-                            surface: "Diagnostics.runSignals.failed",
-                            reason: String(failedResult.reason),
-                        }
+                        ? { surface: "Diagnostics.runSignals.failed", reason: String(failedResult.reason) }
                         : null,
-                    low_ratings: negativeResult.status === "rejected"
-                        ? {
-                            surface: "Diagnostics.runSignals.lowRatings",
-                            reason: String(negativeResult.reason),
-                        }
+                    low_ratings: downResult.status === "rejected"
+                        ? { surface: "Diagnostics.runSignals.lowRatings", reason: String(downResult.reason) }
                         : null,
                 });
             }
         } finally {
             setRunSignalsLoading(false);
-            isRunSignalsFetchingRef.current = false;
+            if (!targetCategory) isRunSignalsFetchingRef.current = false;
         }
     }, [showToast]);
 
@@ -649,7 +636,7 @@ export default function Diagnostics() {
                                         pillClass="bg-red-100 text-red-800"
                                         emptyMessage="No recent system failures found."
                                         errorMessage={failedSignalsFetchError ? "Could not load recent failures." : undefined}
-                                        onRetry={failedSignalsFetchError ? fetchRunSignals : undefined}
+                                        onRetry={failedSignalsFetchError ? () => fetchRunSignals("FAILED") : undefined}
                                         testId="diagnostics-failures-section"
                                     />
 
@@ -660,7 +647,7 @@ export default function Diagnostics() {
                                         pillClass="bg-amber-100 text-amber-800"
                                         emptyMessage="No recent low-rated runs found."
                                         errorMessage={lowRatingsSignalsFetchError ? "Could not load recent low-rated runs." : undefined}
-                                        onRetry={lowRatingsSignalsFetchError ? fetchRunSignals : undefined}
+                                        onRetry={lowRatingsSignalsFetchError ? () => fetchRunSignals("DOWN") : undefined}
                                         testId="diagnostics-low-ratings-section"
                                     />
 

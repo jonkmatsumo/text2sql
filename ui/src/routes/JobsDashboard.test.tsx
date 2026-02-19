@@ -405,7 +405,8 @@ describe("JobsDashboard Cancellation", () => {
         await waitFor(() => {
             expect(showToastMock).toHaveBeenCalledWith(
                 expect.stringContaining("reached terminal state: COMPLETED"),
-                "success"
+                "success",
+                expect.any(Object)
             );
         });
         expect(screen.queryByText("CANCELLING")).not.toBeInTheDocument();
