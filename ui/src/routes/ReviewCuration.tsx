@@ -133,7 +133,7 @@ export default function ReviewCuration() {
         setIsLoading(true);
         try {
             const result = await AdminService.publishApproved();
-            showToast(`Published ${result.published} examples!`, "success");
+            showToast(`Published ${result.published_count} examples!`, "success");
             loadInteractions("APPROVED", "All");
         } catch (err) {
             showToast("Failed to publish", "error");

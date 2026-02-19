@@ -248,7 +248,12 @@ export async function fetchAvailableModels(provider: string): Promise<LlmModelOp
   return [];
 }
 
-export async function submitFeedback(request: FeedbackRequest): Promise<any> {
+export interface FeedbackResponse {
+  status: string;
+  feedback_id?: string;
+}
+
+export async function submitFeedback(request: FeedbackRequest): Promise<FeedbackResponse> {
   const response = await fetch(`${uiApiBase}/feedback`, {
     method: "POST",
     headers: getAuthHeaders(),
@@ -306,7 +311,7 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
 }
 
 
-export async function fetchBlobContent(blobUrl: string): Promise<any> {
+export async function fetchBlobContent(blobUrl: string): Promise<unknown> {
   const response = await fetch(blobUrl);
   if (!response.ok) {
     throw new Error(`Failed to fetch blob content: ${response.statusText}`);
@@ -431,7 +436,7 @@ export const AdminService = {
     return response.json();
   },
 
-  async publishApproved(limit: number = 50): Promise<any> {
+  async publishApproved(limit: number = 50): Promise<{ published_count: number }> {
     const response = await fetch(`${uiApiBase}/registry/publish-approved`, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -523,7 +528,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async hydrateSchema(): Promise<any> {
+  async hydrateSchema(): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/schema-hydrate`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -532,7 +537,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async reindexCache(): Promise<any> {
+  async reindexCache(): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/semantic-cache/reindex`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -561,7 +566,7 @@ export const OpsService = {
     return data;
   },
 
-  async cancelJob(jobId: string): Promise<any> {
+  async cancelJob(jobId: string): Promise<{ status: string }> {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}/cancel`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -711,7 +716,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async deleteTemplate(id: string): Promise<any> {
+  async deleteTemplate(id: string): Promise<{ success: boolean }> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/templates/${id}`, {
       method: "DELETE",
       headers: getAuthHeaders()
@@ -720,7 +725,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async getMetrics(window: string = "7d"): Promise<any> {
+  async getMetrics(window: string = "7d"): Promise<Record<string, unknown>> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/metrics?window=${window}`, {
       headers: getAuthHeaders()
     });
@@ -728,7 +733,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async rollbackRun(runId: string, patterns?: any[]): Promise<any> {
+  async rollbackRun(runId: string, patterns?: any[]): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/rollback`, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -738,7 +743,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async getRunPatterns(runId: string): Promise<any[]> {
+  async getRunPatterns(runId: string): Promise<Suggestion[]> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/patterns`, {
       headers: getAuthHeaders()
     });

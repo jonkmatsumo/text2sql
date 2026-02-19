@@ -69,7 +69,7 @@ export function extractIdentifiers(value: unknown): Record<string, string> {
     const ids: Record<string, string> = {};
     if (value && typeof value === "object" && !Array.isArray(value)) {
         const v = value as Record<string, unknown>;
-        const keys = ["request_id", "trace_id", "run_id", "job_id", "id"];
+        const keys = ["request_id", "trace_id", "run_id", "job_id", "interaction_id", "id"];
         for (const key of keys) {
             if (typeof v[key] === "string") {
                 ids[key] = v[key] as string;
@@ -98,7 +98,7 @@ export function summarizeUnexpectedResponse(value: unknown, maxChars = 8000): st
         }, 2);
 
         if (json.length > maxChars) {
-            return json.substring(0, maxChars) + "... [truncated]";
+            return `${json.substring(0, maxChars)}... [truncated, total_size=${json.length}chars]`;
         }
         return json;
     } catch (err) {
