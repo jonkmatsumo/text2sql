@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import RunHistory from "./RunHistory";
 import { OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
@@ -36,19 +36,28 @@ function buildRuns(count: number) {
     }));
 }
 
+function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-search">{location.search}</div>;
+}
+
 function renderRunHistory(initialPath = "/admin/runs") {
     return render(
         <MemoryRouter initialEntries={[initialPath]}>
             <RunHistory />
+            <LocationProbe />
         </MemoryRouter>
     );
 }
 
 describe("RunHistory search scope messaging", () => {
+    let showToastMock: ReturnType<typeof vi.fn>;
+
     beforeEach(() => {
         vi.clearAllMocks();
+        showToastMock = vi.fn();
         vi.spyOn(OpsService, "listRuns").mockResolvedValue({ runs: mockRuns } as any);
-        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: vi.fn() } as any);
+        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: showToastMock } as any);
     });
 
     it("hides the page-scoped search disclaimer when query is empty", async () => {
@@ -238,5 +247,29 @@ describe("RunHistory search scope messaging", () => {
             // Should have called listRuns again with offset 0
             expect(OpsService.listRuns).toHaveBeenLastCalledWith(RUN_HISTORY_PAGE_SIZE, 0, "All", "All");
         });
+    });
+
+    it("recovers offset deterministically for high-offset empty pages and shows one warning toast", async () => {
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce({ runs: [], has_more: false })
+            .mockResolvedValueOnce({ runs: buildRuns(3), has_more: false });
+
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
+        });
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([RUN_HISTORY_PAGE_SIZE, 100, "All", "All"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([RUN_HISTORY_PAGE_SIZE, 50, "All", "All"]);
+
+        await waitFor(() => {
+            expect(screen.getByTestId("location-search")).toHaveTextContent("offset=50");
+        });
+
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Requested page is out of range. Showing previous results.",
+            "warning"
+        );
+        expect(showToastMock).toHaveBeenCalledTimes(1);
     });
 });

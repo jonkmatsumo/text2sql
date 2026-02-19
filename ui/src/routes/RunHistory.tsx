@@ -55,6 +55,8 @@ export default function RunHistory() {
     const limit = RUN_HISTORY_PAGE_SIZE;
     const { show: showToast } = useToast();
     const searchInputRef = React.useRef<HTMLInputElement>(null);
+    const recoveryOffsetRef = React.useRef<number | null>(null);
+    const recoveryToastShownRef = React.useRef(false);
 
     const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
         setSearchParams(prev => {
@@ -102,11 +104,21 @@ export default function RunHistory() {
             const more = typeof payload.has_more === "boolean" ? payload.has_more : undefined;
             const count = typeof payload.total_count === "number" ? payload.total_count : undefined;
 
-            // Empty page recovery: if we're at an offset > 0 and get no results, go back to 0
-            if (data.length === 0 && offset > 0) {
-                updateFilters({ offset: 0 });
+            // Deterministic empty-page recovery for high offsets.
+            if (offset > 0 && data.length === 0 && more !== true) {
+                if (recoveryOffsetRef.current !== offset) {
+                    recoveryOffsetRef.current = offset;
+                    const fallbackOffset = Math.max(0, offset - limit);
+                    if (!recoveryToastShownRef.current) {
+                        showToast("Requested page is out of range. Showing previous results.", "warning");
+                        recoveryToastShownRef.current = true;
+                    }
+                    updateFilters({ offset: fallbackOffset });
+                }
                 return;
             }
+            recoveryOffsetRef.current = null;
+            recoveryToastShownRef.current = false;
 
             const seenIds = new Set<string>();
             const uniqueData = data.filter((run: Interaction) => {
