@@ -1,4 +1,5 @@
-import { Route, Routes } from "react-router-dom";
+import React, { useMemo } from "react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/common/Layout";
 import ReviewCuration from "./routes/ReviewCuration";
 import Recommendations from "./routes/Recommendations";
@@ -19,6 +20,11 @@ import RunHistory from "./routes/RunHistory";
 
 import { AdminErrorBoundary } from "./components/common/AdminErrorBoundary";
 
+function AdminRouteBoundary() {
+  const location = useLocation();
+  return <AdminErrorBoundary key={location.pathname} />;
+}
+
 export default function App() {
   return (
     <Layout>
@@ -28,7 +34,7 @@ export default function App() {
         <Route path="/traces/interaction/:interactionId" element={<TraceResolver />} />
 
         {/* Protected Operator Routes */}
-        <Route path="/admin" element={<AdminErrorBoundary />}>
+        <Route path="/admin" element={<AdminRouteBoundary />}>
           <Route path="review" element={<ReviewCuration />} />
           <Route path="recommendations" element={<Recommendations />} />
           <Route path="operations" element={<SystemOperations />} />

@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
-import { Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 
 interface Props {
     children?: ReactNode;
@@ -7,6 +7,7 @@ interface Props {
 
 interface State {
     hasError: boolean;
+    error: Error | null;
 }
 
 /**
@@ -16,18 +17,20 @@ interface State {
 export class AdminErrorBoundary extends Component<Props, State> {
     public state: State = {
         hasError: false,
+        error: null,
     };
 
-    public static getDerivedStateFromError(_: Error): State {
-        return { hasError: true };
+    public static getDerivedStateFromError(error: Error): State {
+        return { hasError: true, error };
     }
 
     public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+        // Ensure stack traces still go to console (do not swallow)
         console.error("Uncaught error in Admin Route:", error, errorInfo);
     }
 
     private handleReset = () => {
-        this.setState({ hasError: false });
+        this.setState({ hasError: false, error: null });
         window.location.reload();
     };
 
@@ -35,7 +38,7 @@ export class AdminErrorBoundary extends Component<Props, State> {
         if (this.state.hasError) {
             return (
                 <div className="min-h-[400px] flex items-center justify-center p-4 bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-red-200 dark:border-red-900 rounded-lg m-4">
-                    <div className="text-center max-w-md">
+                    <div className="text-center w-full max-w-2xl">
                         <div className="mb-4 flex justify-center">
                             <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-full">
                                 <svg
@@ -56,20 +59,39 @@ export class AdminErrorBoundary extends Component<Props, State> {
                         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
                             Something went wrong
                         </h2>
-                        <p className="text-gray-600 dark:text-gray-400 mb-8">
+                        <p className="text-gray-600 dark:text-gray-400 mb-8 max-w-md mx-auto">
                             An unexpected error occurred in the Operator Console. This may be due
                             to contract drift or a runtime guard violation.
                         </p>
-                        <div className="flex flex-col sm:flex-row justify-center gap-4">
+
+                        {this.state.error && (
+                            <details className="mb-8 text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden">
+                                <summary className="px-4 py-2 cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                    Technical Details
+                                </summary>
+                                <div className="p-4 border-t border-gray-200 dark:border-gray-700 font-mono text-xs text-red-600 dark:text-red-400 overflow-auto max-h-48">
+                                    <p className="font-bold mb-1">{this.state.error.name}: {this.state.error.message}</p>
+                                    <pre className="whitespace-pre-wrap">{this.state.error.stack}</pre>
+                                </div>
+                            </details>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
                             <button
                                 onClick={this.handleReset}
-                                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-md transition-colors shadow-sm"
+                                className="w-full sm:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-md transition-colors shadow-sm"
                             >
                                 Refresh Console
                             </button>
+                            <Link
+                                to="/admin/runs"
+                                className="w-full sm:w-auto px-6 py-2 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shadow-sm text-center"
+                            >
+                                Back to Runs
+                            </Link>
                             <button
                                 onClick={() => window.history.back()}
-                                className="px-6 py-2 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shadow-sm"
+                                className="w-full sm:w-auto px-6 py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-sm font-medium"
                             >
                                 Go Back
                             </button>
