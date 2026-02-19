@@ -51,6 +51,24 @@ function formatMilliseconds(value: unknown): string {
     return normalized.toFixed(2);
 }
 
+const DEFAULT_RECENCY_WINDOW_HOURS = 168;
+const RECENCY_WINDOW_LABELS: Record<number, string> = {
+    1: "last 1 hour",
+    6: "last 6 hours",
+    24: "last 24 hours",
+    168: "last 7 days",
+};
+
+function getRecencyWindowLabel(hours: number): string {
+    return RECENCY_WINDOW_LABELS[hours] ?? `last ${hours}h`;
+}
+
+function getRunTimestampMs(run: Interaction): number | null {
+    if (!run.created_at) return null;
+    const timestampMs = new Date(run.created_at).getTime();
+    return Number.isFinite(timestampMs) ? timestampMs : null;
+}
+
 export default function Diagnostics() {
     const {
         isDebug,
@@ -66,7 +84,7 @@ export default function Diagnostics() {
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(168); // Default 7d
+    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(DEFAULT_RECENCY_WINDOW_HOURS);
     const isFetchingRef = useRef(false);
 
     const fetchDiagnostics = useCallback(async (debug = false) => {
@@ -112,9 +130,12 @@ export default function Diagnostics() {
                         execution_status: run.execution_status || "UNKNOWN",
                     }))
                     .sort((a, b) => {
-                        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
-                        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
-                        return tB - tA;
+                        const tA = getRunTimestampMs(a);
+                        const tB = getRunTimestampMs(b);
+                        if (tA != null && tB != null && tA !== tB) return tB - tA;
+                        if (tA == null && tB != null) return 1;
+                        if (tA != null && tB == null) return -1;
+                        return a.id.localeCompare(b.id);
                     })
                     .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
             };
@@ -136,17 +157,19 @@ export default function Diagnostics() {
     const rawJsonSnapshot = toPrettyJson(data);
 
     // Apply client-side recency window filter.
-    // Runs without created_at are now excluded and totaled separately.
-    const windowCutoffMs = Date.now() - recencyWindowHours * 60 * 60 * 1000;
+    // Runs with missing/invalid timestamps are excluded and totaled separately.
+    const recencyReferenceMs = lastUpdatedAt ?? Date.now();
+    const windowCutoffMs = recencyReferenceMs - recencyWindowHours * 60 * 60 * 1000;
 
     const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(() => {
         let excludedCount = 0;
         const filtered = recentFailures.filter((run) => {
-            if (!run.created_at) {
+            const timestampMs = getRunTimestampMs(run);
+            if (timestampMs == null) {
                 excludedCount++;
                 return false;
             }
-            return new Date(run.created_at).getTime() >= windowCutoffMs;
+            return timestampMs >= windowCutoffMs;
         });
         return { filtered, excludedCount };
     }, [recentFailures, windowCutoffMs]);
@@ -154,11 +177,12 @@ export default function Diagnostics() {
     const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(() => {
         let excludedCount = 0;
         const filtered = recentLowRatings.filter((run) => {
-            if (!run.created_at) {
+            const timestampMs = getRunTimestampMs(run);
+            if (timestampMs == null) {
                 excludedCount++;
                 return false;
             }
-            return new Date(run.created_at).getTime() >= windowCutoffMs;
+            return timestampMs >= windowCutoffMs;
         });
         return { filtered, excludedCount };
     }, [recentLowRatings, windowCutoffMs]);
@@ -477,10 +501,10 @@ export default function Diagnostics() {
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
                                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                                    Degraded run signals ({recencyWindowHours >= 24 ? `last ${Math.round(recencyWindowHours / 24)} days` : `last ${recencyWindowHours}h`})
+                                    Degraded run signals ({getRecencyWindowLabel(recencyWindowHours)})
                                     {filterMode === "anomalies" && (
                                         <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
-                                            (Global status — non-anomaly derived)
+                                            (Context only; not anomaly-derived)
                                         </span>
                                     )}
                                 </h3>
@@ -500,10 +524,10 @@ export default function Diagnostics() {
                                             cursor: "pointer",
                                         }}
                                     >
-                                        <option value={1}>1h</option>
-                                        <option value={6}>6h</option>
-                                        <option value={24}>24h</option>
-                                        <option value={168}>7d</option>
+                                        <option value={1}>Last 1 hour</option>
+                                        <option value={6}>Last 6 hours</option>
+                                        <option value={24}>Last 24 hours</option>
+                                        <option value={168}>Last 7 days</option>
                                     </select>
                                 </label>
                             </div>
@@ -511,7 +535,7 @@ export default function Diagnostics() {
                                 Showing most recent {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).
                                 {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
                                     <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
-                                        ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing timestamps)
+                                        ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing or invalid timestamps)
                                     </span>
                                 )}
                             </p>

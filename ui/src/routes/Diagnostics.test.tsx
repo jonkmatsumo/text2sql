@@ -206,9 +206,10 @@ describe("Diagnostics Route", () => {
         });
         expect(
             screen.getByText(
-                `Showing most recent ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).`
+                new RegExp(`Showing most recent ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures`)
             )
         ).toBeInTheDocument();
+        expect(screen.getByText(/no server-side time window/i)).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
@@ -260,16 +261,17 @@ describe("Diagnostics Route", () => {
         fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "1" } });
         expect(screen.getByText("Recent failure")).toBeInTheDocument();
         expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
-        expect(screen.getByText(/last 1h/i)).toBeInTheDocument();
+        expect(screen.getByText(/Degraded run signals \(last 1 hour\)/i)).toBeInTheDocument();
     });
 
-    it("excludes runs with missing created_at and shows count in excluded note", async () => {
+    it("excludes runs with missing or invalid created_at and shows count in excluded note", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
             if (status === "FAILED") {
                 return Promise.resolve({
                     runs: [
                         { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
+                        { id: "invalid-ts", user_nlq_text: "Query with invalid timestamp", execution_status: "FAILED", thumb: "None", created_at: "invalid-date" },
                     ]
                 });
             }
@@ -290,9 +292,10 @@ describe("Diagnostics Route", () => {
         });
 
         const note = screen.getByTestId("diagnostics-excluded-note");
-        expect(within(note).getByText(/2 runs excluded due to missing timestamps/i)).toBeInTheDocument();
+        expect(within(note).getByText(/3 runs excluded due to missing or invalid timestamps/i)).toBeInTheDocument();
 
         expect(screen.queryByText("Query with no timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Query with invalid timestamp")).not.toBeInTheDocument();
         expect(screen.queryByText("Low rating no timestamp")).not.toBeInTheDocument();
     });
 
@@ -403,6 +406,7 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Schema Cache Size")).not.toBeInTheDocument();
         // Configuration panel is hidden in anomaly-only mode to reduce noise
         expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
+        expect(screen.getByText(/context only; not anomaly-derived/i)).toBeInTheDocument();
     });
 
     it("round-trips diagnostics view state through query params", async () => {
