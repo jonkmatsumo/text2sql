@@ -159,7 +159,7 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
   const identifiers = buildRunIdentifierBlock(message);
 
   const payload: Record<string, unknown> = {
-    sql: message.sql ?? null,
+    schema_version: 1,
     identifiers,
     validation: {
       status: validationFailed ? "fail" : "pass",
@@ -175,9 +175,11 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
     bundle_metadata: {
       generated_at: new Date().toISOString(),
       environment: message.environment || (import.meta as any).env?.MODE || "development",
-      version: 1
     }
   };
+
+  if (message.traceId) payload.trace_id = message.traceId;
+  if (message.sql) payload.sql = message.sql;
 
   return payload;
 }
