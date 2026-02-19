@@ -1,4 +1,4 @@
-type TimestampInput = number | string | Date | null | undefined;
+export type TimestampInput = number | string | Date | null | undefined;
 
 interface FormatTimestampOptions {
   inputInSeconds?: boolean;
@@ -64,6 +64,13 @@ function toTimestampMs(
   }
 
   return null;
+}
+
+export function parseTimestampMs(
+  value: TimestampInput,
+  options: { inputInSeconds?: boolean } = {}
+): number | null {
+  return toTimestampMs(value, options.inputInSeconds);
 }
 
 export function formatTimestamp(

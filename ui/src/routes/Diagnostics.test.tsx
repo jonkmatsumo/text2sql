@@ -299,23 +299,27 @@ describe("Diagnostics Route", () => {
         expect(screen.getByText(/Degraded run signals \(last 1 hour\)/i)).toBeInTheDocument();
     });
 
-    it("excludes runs with missing or invalid created_at and shows count in excluded note", async () => {
+    it("excludes runs with missing or invalid created_at and shows data-driven excluded count", async () => {
+        const now = Date.now();
+        const validTimestamp = new Date(now - 15 * 60 * 1000).toISOString();
+        const failedRuns = [
+            { id: "fail-valid", user_nlq_text: "Failure with valid timestamp", execution_status: "FAILED", thumb: "None", created_at: validTimestamp },
+            { id: "fail-missing", user_nlq_text: "Failure missing timestamp", execution_status: "FAILED", thumb: "None" },
+            { id: "fail-invalid", user_nlq_text: "Failure invalid timestamp", execution_status: "FAILED", thumb: "None", created_at: "invalid-date" },
+        ];
+        const lowRatingRuns = [
+            { id: "low-valid", user_nlq_text: "Low rating with valid timestamp", execution_status: "SUCCESS", thumb: "DOWN", created_at: validTimestamp },
+            { id: "low-missing", user_nlq_text: "Low rating missing timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
+        ];
+        const expectedExcludedCount = [...failedRuns, ...lowRatingRuns].filter((run) => !run.created_at || Number.isNaN(Date.parse(run.created_at))).length;
+
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
             if (status === "FAILED") {
-                return Promise.resolve({
-                    runs: [
-                        { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
-                        { id: "invalid-ts", user_nlq_text: "Query with invalid timestamp", execution_status: "FAILED", thumb: "None", created_at: "invalid-date" },
-                    ]
-                });
+                return Promise.resolve({ runs: failedRuns });
             }
             if (thumb === "DOWN") {
-                return Promise.resolve({
-                    runs: [
-                        { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
-                    ]
-                });
+                return Promise.resolve({ runs: lowRatingRuns });
             }
             return Promise.resolve({ runs: [] });
         });
@@ -327,11 +331,13 @@ describe("Diagnostics Route", () => {
         });
 
         const note = screen.getByTestId("diagnostics-excluded-note");
-        expect(within(note).getByText(/3 runs excluded due to missing or invalid timestamps/i)).toBeInTheDocument();
-
-        expect(screen.queryByText("Query with no timestamp")).not.toBeInTheDocument();
-        expect(screen.queryByText("Query with invalid timestamp")).not.toBeInTheDocument();
-        expect(screen.queryByText("Low rating no timestamp")).not.toBeInTheDocument();
+        expect(note).toHaveTextContent(String(expectedExcludedCount));
+        expect(note).toHaveTextContent(/excluded due to missing or invalid timestamps/i);
+        expect(screen.queryByText("Failure missing timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Failure invalid timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Low rating missing timestamp")).not.toBeInTheDocument();
+        expect(screen.getByText("Failure with valid timestamp")).toBeInTheDocument();
+        expect(screen.getByText("Low rating with valid timestamp")).toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {

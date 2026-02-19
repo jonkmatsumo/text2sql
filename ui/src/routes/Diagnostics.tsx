@@ -7,7 +7,7 @@ import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
-import { formatTimestamp, toPrettyJson } from "../utils/observability";
+import { formatTimestamp, parseTimestampMs, toPrettyJson } from "../utils/observability";
 import {
     DiagnosticsFilters,
     useDiagnosticsViewFilters,
@@ -63,10 +63,22 @@ function getRecencyWindowLabel(hours: number): string {
     return RECENCY_WINDOW_LABELS[hours] ?? `last ${hours}h`;
 }
 
-function getRunTimestampMs(run: Interaction): number | null {
-    if (!run.created_at) return null;
-    const timestampMs = new Date(run.created_at).getTime();
-    return Number.isFinite(timestampMs) ? timestampMs : null;
+interface WindowedRunSignals {
+    filtered: Interaction[];
+    excludedCount: number;
+}
+
+function filterRunsByRecencyWindow(runs: Interaction[], cutoffMs: number): WindowedRunSignals {
+    let excludedCount = 0;
+    const filtered = runs.filter((run) => {
+        const timestampMs = parseTimestampMs(run.created_at);
+        if (timestampMs == null) {
+            excludedCount += 1;
+            return false;
+        }
+        return timestampMs >= cutoffMs;
+    });
+    return { filtered, excludedCount };
 }
 
 export default function Diagnostics() {
@@ -164,8 +176,8 @@ export default function Diagnostics() {
                         execution_status: run.execution_status || "UNKNOWN",
                     }))
                     .sort((a, b) => {
-                        const tA = getRunTimestampMs(a);
-                        const tB = getRunTimestampMs(b);
+                        const tA = parseTimestampMs(a.created_at);
+                        const tB = parseTimestampMs(b.created_at);
                         if (tA != null && tB != null && tA !== tB) return tB - tA;
                         if (tA == null && tB != null) return 1;
                         if (tA != null && tB == null) return -1;
@@ -197,31 +209,16 @@ export default function Diagnostics() {
     const recencyReferenceMs = lastUpdatedAt ?? Date.now();
     const windowCutoffMs = recencyReferenceMs - recencyWindowHours * 60 * 60 * 1000;
 
-    const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(() => {
-        let excludedCount = 0;
-        const filtered = recentFailures.filter((run) => {
-            const timestampMs = getRunTimestampMs(run);
-            if (timestampMs == null) {
-                excludedCount++;
-                return false;
-            }
-            return timestampMs >= windowCutoffMs;
-        });
-        return { filtered, excludedCount };
-    }, [recentFailures, windowCutoffMs]);
-
-    const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(() => {
-        let excludedCount = 0;
-        const filtered = recentLowRatings.filter((run) => {
-            const timestampMs = getRunTimestampMs(run);
-            if (timestampMs == null) {
-                excludedCount++;
-                return false;
-            }
-            return timestampMs >= windowCutoffMs;
-        });
-        return { filtered, excludedCount };
-    }, [recentLowRatings, windowCutoffMs]);
+    const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(
+        () => filterRunsByRecencyWindow(recentFailures, windowCutoffMs),
+        [recentFailures, windowCutoffMs]
+    );
+    const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(
+        () => filterRunsByRecencyWindow(recentLowRatings, windowCutoffMs),
+        [recentLowRatings, windowCutoffMs]
+    );
+    const totalExcludedRuns = excludedFailuresCount + excludedLowRatingsCount;
+    const showExcludedRunsNote = totalExcludedRuns > 0;
 
     const anomalies = getDiagnosticsAnomalies(data);
     const anomalyIds = new Set(anomalies.map((item) => item.id));
@@ -569,9 +566,9 @@ export default function Diagnostics() {
                             </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
                                 Showing most recent {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).
-                                {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
+                                {showExcludedRunsNote && (
                                     <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
-                                        ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing or invalid timestamps)
+                                        ({totalExcludedRuns} runs excluded due to missing or invalid timestamps)
                                     </span>
                                 )}
                             </p>
