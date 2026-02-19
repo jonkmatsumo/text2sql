@@ -53,6 +53,7 @@ export default function SystemOperations() {
     useEffect(() => {
         const requestedTab = searchParams.get("tab");
         if (requestedTab && !VALID_OPERATIONS_TAB_IDS.has(requestedTab)) {
+            // Normalize invalid tab
             setSearchParams((currentParams) => {
                 const nextParams = new URLSearchParams(currentParams);
                 nextParams.set("tab", DEFAULT_OPERATIONS_TAB);
@@ -62,14 +63,12 @@ export default function SystemOperations() {
         }
 
         const nextTab = getOperationsTabFromParams(searchParams);
-        setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
+        setActiveTab(nextTab);
     }, [searchParams, setSearchParams]);
 
     const handleTabChange = useCallback((nextTab: string) => {
-        if (!VALID_OPERATIONS_TAB_IDS.has(nextTab)) {
-            return;
-        }
-        setActiveTab(nextTab);
+        if (!VALID_OPERATIONS_TAB_IDS.has(nextTab)) return;
+
         setSearchParams((currentParams) => {
             const nextParams = new URLSearchParams(currentParams);
             nextParams.set("tab", nextTab);
