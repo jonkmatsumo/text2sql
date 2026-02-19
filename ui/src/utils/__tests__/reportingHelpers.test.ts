@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractIdentifiers, summarizeUnexpectedResponse } from "../runtimeGuards";
+import { buildContractMismatchReport, extractIdentifiers, summarizeUnexpectedResponse } from "../runtimeGuards";
 
 describe("extractIdentifiers", () => {
     it("extracts common IDs from an object", () => {
@@ -40,6 +40,12 @@ describe("summarizeUnexpectedResponse", () => {
         expect(summary.length).toBeLessThan(largeObj.data.length);
     });
 
+    it("bounds large arrays with a stable marker", () => {
+        const summary = summarizeUnexpectedResponse({ items: [1, 2, 3, 4, 5] }, { maxArrayItems: 2, maxChars: 1000 });
+        expect(summary).toContain('"items"');
+        expect(summary).toContain("[+3 more items]");
+    });
+
     it("handles circular references", () => {
         const a: any = { name: "a" };
         const b: any = { name: "b" };
@@ -53,5 +59,18 @@ describe("summarizeUnexpectedResponse", () => {
     it("handles null and undefined", () => {
         expect(summarizeUnexpectedResponse(null)).toBe("null");
         expect(summarizeUnexpectedResponse(undefined)).toBe("undefined");
+    });
+});
+
+describe("buildContractMismatchReport", () => {
+    it("includes surface, identifiers, and bounded summary", () => {
+        const report = buildContractMismatchReport("OpsService.listRuns", {
+            trace_id: "trace-1",
+            runs: [{ id: "run-1" }, { id: "run-2" }, { id: "run-3" }],
+        }, { maxArrayItems: 1, maxChars: 1000 });
+
+        expect(report.surface).toBe("OpsService.listRuns");
+        expect(report.ids).toEqual({ trace_id: "trace-1" });
+        expect(report.summary).toContain("[+2 more items]");
     });
 });

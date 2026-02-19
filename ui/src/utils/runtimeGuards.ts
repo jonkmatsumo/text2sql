@@ -100,26 +100,125 @@ export function extractIdentifiers(value: unknown): Record<string, string> {
     return ids;
 }
 
+interface ResponseSummaryOptions {
+    maxChars: number;
+    maxArrayItems: number;
+    maxObjectKeys: number;
+    maxDepth: number;
+}
+
+type ResponseSummaryOptionInput = number | Partial<ResponseSummaryOptions>;
+
+const DEFAULT_SUMMARY_OPTIONS: ResponseSummaryOptions = {
+    maxChars: 8000,
+    maxArrayItems: 20,
+    maxObjectKeys: 40,
+    maxDepth: 6,
+};
+
+function normalizeSummaryOptions(input?: ResponseSummaryOptionInput): ResponseSummaryOptions {
+    if (typeof input === "number") {
+        return { ...DEFAULT_SUMMARY_OPTIONS, maxChars: input };
+    }
+
+    return {
+        maxChars: input?.maxChars ?? DEFAULT_SUMMARY_OPTIONS.maxChars,
+        maxArrayItems: input?.maxArrayItems ?? DEFAULT_SUMMARY_OPTIONS.maxArrayItems,
+        maxObjectKeys: input?.maxObjectKeys ?? DEFAULT_SUMMARY_OPTIONS.maxObjectKeys,
+        maxDepth: input?.maxDepth ?? DEFAULT_SUMMARY_OPTIONS.maxDepth,
+    };
+}
+
+function toBoundedSerializable(
+    value: unknown,
+    options: ResponseSummaryOptions,
+    depth: number,
+    seen: Set<unknown>
+): unknown {
+    if (value == null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+        return value;
+    }
+
+    if (typeof value === "bigint") {
+        return `${value.toString()}n`;
+    }
+
+    if (typeof value !== "object") {
+        return String(value);
+    }
+
+    if (seen.has(value)) {
+        return "[Circular]";
+    }
+
+    if (depth >= options.maxDepth) {
+        return "[MaxDepth]";
+    }
+
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+        const limited = value
+            .slice(0, options.maxArrayItems)
+            .map((item) => toBoundedSerializable(item, options, depth + 1, seen));
+
+        if (value.length > options.maxArrayItems) {
+            limited.push(`[+${value.length - options.maxArrayItems} more items]`);
+        }
+
+        return limited;
+    }
+
+    const source = value as Record<string, unknown>;
+    const sortedKeys = Object.keys(source).sort((left, right) => left.localeCompare(right));
+    const limitedKeys = sortedKeys.slice(0, options.maxObjectKeys);
+    const normalized: Record<string, unknown> = {};
+
+    for (const key of limitedKeys) {
+        normalized[key] = toBoundedSerializable(source[key], options, depth + 1, seen);
+    }
+
+    if (sortedKeys.length > options.maxObjectKeys) {
+        normalized.__truncated_keys__ = `[+${sortedKeys.length - options.maxObjectKeys} more keys]`;
+    }
+
+    return normalized;
+}
+
+export interface ContractMismatchReport {
+    surface: string;
+    ids: Record<string, string>;
+    summary: string;
+}
+
+export function buildContractMismatchReport(
+    surface: string,
+    value: unknown,
+    summaryOptions?: ResponseSummaryOptionInput
+): ContractMismatchReport {
+    return {
+        surface,
+        ids: extractIdentifiers(value),
+        summary: summarizeUnexpectedResponse(value, summaryOptions),
+    };
+}
+
 /**
  * Produces a bounded, safe string summary of an unexpected response payload.
- * Handles circular references and truncates to maxChars.
+ * Handles circular references and bounds object breadth/depth for stable logs.
  */
-export function summarizeUnexpectedResponse(value: unknown, maxChars = 8000): string {
+export function summarizeUnexpectedResponse(value: unknown, options?: ResponseSummaryOptionInput): string {
     if (value === null) return "null";
     if (value === undefined) return "undefined";
 
-    try {
-        const cache = new Set();
-        const json = JSON.stringify(value, (key, val) => {
-            if (typeof val === "object" && val !== null) {
-                if (cache.has(val)) return "[Circular]";
-                cache.add(val);
-            }
-            return val;
-        }, 2);
+    const normalizedOptions = normalizeSummaryOptions(options);
 
-        if (json.length > maxChars) {
-            return `${json.substring(0, maxChars)}... [truncated, total_size=${json.length}chars]`;
+    try {
+        const bounded = toBoundedSerializable(value, normalizedOptions, 0, new Set<unknown>());
+        const json = JSON.stringify(bounded, null, 2);
+
+        if (json.length > normalizedOptions.maxChars) {
+            return `${json.substring(0, normalizedOptions.maxChars)}... [truncated, total_size=${json.length}chars]`;
         }
         return json;
     } catch (err) {

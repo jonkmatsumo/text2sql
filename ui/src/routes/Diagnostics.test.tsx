@@ -150,7 +150,13 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByTestId("diagnostics-run-signals-loading")).not.toBeInTheDocument();
         expect(consoleErrorSpy).toHaveBeenCalledWith(
             "Failed to load degraded runs",
-            expect.objectContaining({ low_ratings: expect.stringContaining("degraded-runs-failed") })
+            expect.objectContaining({
+                surface: "Diagnostics.runSignals",
+                low_ratings: expect.objectContaining({
+                    surface: "Diagnostics.runSignals.lowRatings",
+                    reason: expect.stringContaining("degraded-runs-failed"),
+                }),
+            })
         );
         consoleErrorSpy.mockRestore();
     });

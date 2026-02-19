@@ -27,7 +27,10 @@ export default function RunDetails() {
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
-            const dedupeKey = makeToastDedupeKey("run-details", category, message);
+            const dedupeKey = makeToastDedupeKey("run-details", category, message, {
+                surface: "RunDetails.fetchDetails",
+                identifiers: { run_id: runId },
+            });
             showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);

@@ -13,6 +13,7 @@ import FilterSelect from "../components/common/FilterSelect";
 import { formatRunHistoryRange } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
+import { buildContractMismatchReport } from "../utils/runtimeGuards";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -95,8 +96,12 @@ export default function RunHistory() {
             const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
             const payload = result as { runs?: unknown; has_more?: unknown; total_count?: unknown };
             if (!Array.isArray(payload.runs)) {
+                const report = buildContractMismatchReport("RunHistory.listRuns", payload, {
+                    maxChars: 2000,
+                    maxArrayItems: 10,
+                });
                 console.error("Operator API contract mismatch (RunHistory.listRuns)", {
-                    endpoint: "RunHistory.listRuns",
+                    ...report,
                     summary: "Expected result.runs to be an array",
                 });
                 setRuns([]);
@@ -136,7 +141,14 @@ export default function RunHistory() {
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
-            const dedupeKey = makeToastDedupeKey("run-history", category, message);
+            const dedupeKey = makeToastDedupeKey("run-history", category, message, {
+                surface: "RunHistory.fetchRuns",
+                identifiers: {
+                    offset,
+                    status: statusFilter,
+                    feedback: thumbFilter,
+                },
+            });
             showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);

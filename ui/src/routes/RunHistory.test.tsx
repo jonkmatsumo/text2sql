@@ -272,7 +272,7 @@ describe("RunHistory search scope messaging", () => {
         expect(consoleErrorSpy).toHaveBeenCalledWith(
             "Operator API contract mismatch (RunHistory.listRuns)",
             expect.objectContaining({
-                endpoint: "RunHistory.listRuns",
+                surface: "RunHistory.listRuns",
                 summary: "Expected result.runs to be an array",
             })
         );

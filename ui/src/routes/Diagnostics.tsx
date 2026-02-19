@@ -132,8 +132,19 @@ export default function Diagnostics() {
                 setRecentLowRatings([]);
                 setRunSignalsError("Run signals are currently unavailable. Refresh to retry.");
                 console.error("Failed to load degraded runs", {
-                    failed: failedResult.status === "rejected" ? String(failedResult.reason) : undefined,
-                    low_ratings: negativeResult.status === "rejected" ? String(negativeResult.reason) : undefined,
+                    surface: "Diagnostics.runSignals",
+                    failed: failedResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.failed",
+                            reason: String(failedResult.reason),
+                        }
+                        : null,
+                    low_ratings: negativeResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.lowRatings",
+                            reason: String(negativeResult.reason),
+                        }
+                        : null,
                 });
                 return;
             }

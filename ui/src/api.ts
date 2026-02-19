@@ -41,12 +41,11 @@ import {
 } from "./config";
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import {
+  buildContractMismatchReport,
   isInteractionArray,
   isJobStatusResponse,
   isOpsJobResponseArray,
   isRunDiagnosticsResponse,
-  extractIdentifiers,
-  summarizeUnexpectedResponse
 } from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
@@ -589,14 +588,13 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
     const data: unknown = await response.json();
     if (!isJobStatusResponse(data)) {
-      const ids = extractIdentifiers(data);
-      const summary = summarizeUnexpectedResponse(data);
-      console.error("Operator API contract mismatch (getJobStatus)", { endpoint: "getJobStatus", ids, summary });
+      const report = buildContractMismatchReport("OpsService.getJobStatus", data);
+      console.error("Operator API contract mismatch (getJobStatus)", report);
       throw new ApiError(
-        `Received unexpected response from getJobStatus${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        `Received unexpected response from getJobStatus${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
         200,
         "MALFORMED_RESPONSE",
-        { endpoint: "getJobStatus", ...ids }
+        { endpoint: "getJobStatus", surface: report.surface, ...report.ids }
       );
     }
     return data;
@@ -626,14 +624,13 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to list jobs");
     const data: unknown = await response.json();
     if (!isOpsJobResponseArray(data)) {
-      const ids = extractIdentifiers(data);
-      const summary = summarizeUnexpectedResponse(data);
-      console.error("Operator API contract mismatch (listJobs)", { endpoint: "listJobs", ids, summary });
+      const report = buildContractMismatchReport("OpsService.listJobs", data);
+      console.error("Operator API contract mismatch (listJobs)", report);
       throw new ApiError(
-        `Received unexpected response from listJobs${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        `Received unexpected response from listJobs${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
         200,
         "MALFORMED_RESPONSE",
-        { endpoint: "listJobs", ...ids }
+        { endpoint: "listJobs", surface: report.surface, ...report.ids }
       );
     }
     return data;
@@ -666,14 +663,13 @@ export const OpsService = {
       };
     }
 
-    const ids = extractIdentifiers(data);
-    const summary = summarizeUnexpectedResponse(data);
-    console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
+    const report = buildContractMismatchReport("OpsService.listRuns", data);
+    console.error("Operator API contract mismatch (listRuns)", report);
     throw new ApiError(
-      `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      `Received unexpected response from listRuns${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "listRuns", ...ids }
+      { endpoint: "listRuns", surface: report.surface, ...report.ids }
     );
   },
 };
@@ -1076,14 +1072,13 @@ export async function getDiagnostics(
 
   const data = await response.json();
   if (!isRunDiagnosticsResponse(data)) {
-    const ids = extractIdentifiers(data);
-    const summary = summarizeUnexpectedResponse(data);
-    console.error("Operator API contract mismatch (getDiagnostics)", { endpoint: "getDiagnostics", ids, summary });
+    const report = buildContractMismatchReport("Diagnostics.getDiagnostics", data);
+    console.error("Operator API contract mismatch (getDiagnostics)", report);
     throw new ApiError(
-      `Received unexpected response from getDiagnostics${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      `Received unexpected response from getDiagnostics${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "getDiagnostics", ...ids }
+      { endpoint: "getDiagnostics", surface: report.surface, ...report.ids }
     );
   }
   return data;
