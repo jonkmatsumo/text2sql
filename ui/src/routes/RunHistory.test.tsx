@@ -167,13 +167,24 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
 
-    it("shows 'No results' when page is empty at offset 0", async () => {
+    it("shows deterministic empty-page range copy at offset 0", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] });
         renderRunHistory("/admin/runs?offset=0");
 
         await waitFor(() => {
-            expect(screen.getByText(/No results/i)).toBeInTheDocument();
+            expect(screen.getByText("No results on this page")).toBeInTheDocument();
         });
+    });
+
+    it("keeps Next disabled when page is empty at non-zero offset even if has_more=true", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [], has_more: true });
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(screen.getByText("No results on this page")).toBeInTheDocument();
+        });
+
+        expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     });
 
     it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {

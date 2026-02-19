@@ -176,7 +176,9 @@ export default function RunHistory() {
         [runs, searchQuery]
     );
     const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
-    const canNavigateNext = hasMore !== undefined ? hasMore : runs.length === limit;
+    const canNavigateNext =
+        runs.length > 0 &&
+        (hasMore !== undefined ? hasMore : runs.length === limit);
     const rangeSummary = formatRunHistoryRange(offset, runs.length, totalCount);
 
     return (

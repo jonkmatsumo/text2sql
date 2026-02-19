@@ -53,7 +53,7 @@ describe("RunHistory pagination contract guards", () => {
         await waitFor(() => {
             expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
         });
-        expect(screen.getByText("No results for this page")).toBeInTheDocument();
+        expect(screen.getByText("No results on this page")).toBeInTheDocument();
         expect(errorSpy).toHaveBeenCalled();
     });
 
@@ -66,7 +66,7 @@ describe("RunHistory pagination contract guards", () => {
         await waitFor(() => {
             expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
         });
-        expect(screen.getByText("No results for this page")).toBeInTheDocument();
+        expect(screen.getByText("No results on this page")).toBeInTheDocument();
         expect(errorSpy).toHaveBeenCalled();
     });
 

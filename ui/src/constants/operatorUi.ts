@@ -9,15 +9,26 @@ export function formatRunHistoryRange(
     runsLength: number,
     totalCount?: number
 ): string {
-    if (runsLength <= 0) {
-        return "No results for this page";
+    const normalizedOffset = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
+    const normalizedRunsLength = Number.isFinite(runsLength) ? Math.max(0, Math.trunc(runsLength)) : 0;
+
+    if (normalizedRunsLength <= 0) {
+        return "No results on this page";
     }
 
-    const start = offset + 1;
-    const end = offset + runsLength;
+    const start = normalizedOffset + 1;
+    const rawEnd = normalizedOffset + normalizedRunsLength;
+    const normalizedTotalCount =
+        typeof totalCount === "number" && Number.isFinite(totalCount)
+            ? Math.max(0, Math.trunc(totalCount))
+            : undefined;
+    const boundedEnd = normalizedTotalCount === undefined
+        ? rawEnd
+        : Math.min(rawEnd, Math.max(normalizedTotalCount, start));
+    const end = Math.max(start, boundedEnd);
 
-    if (typeof totalCount === "number") {
-        return `Showing ${start}\u2013${end} of ${totalCount}`;
+    if (normalizedTotalCount !== undefined) {
+        return `Showing ${start}\u2013${end} of ${normalizedTotalCount}`;
     }
 
     return `Showing ${start}\u2013${end}`;
