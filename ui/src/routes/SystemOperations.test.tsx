@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import SystemOperations from "./SystemOperations";
 import { OpsService } from "../api";
 
@@ -47,6 +48,20 @@ class MockEventSource {
   }
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-search">{location.search}</div>;
+}
+
+function renderSystemOperations(initialPath = "/admin/operations") {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <SystemOperations />
+      <LocationProbe />
+    </MemoryRouter>
+  );
+}
+
 describe("SystemOperations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,7 +71,7 @@ describe("SystemOperations", () => {
   });
 
   it("streams pattern generation logs", async () => {
-    render(<SystemOperations />);
+    renderSystemOperations();
 
     const runButton = screen.getByText("Run Legacy Generation (Auto)");
     fireEvent.click(runButton);
@@ -94,7 +109,7 @@ describe("SystemOperations", () => {
       progress: { processed: 30, total: 100 },
     };
 
-    render(<SystemOperations />);
+    renderSystemOperations();
 
     expect(screen.getByTestId("job-progress-bar")).toBeInTheDocument();
     expect(screen.getByText("30 / 100")).toBeInTheDocument();
@@ -107,8 +122,55 @@ describe("SystemOperations", () => {
       progress: { processed: 100, total: 100 },
     };
 
-    render(<SystemOperations />);
+    renderSystemOperations();
 
     expect(screen.queryByTestId("job-progress-bar")).not.toBeInTheDocument();
+  });
+
+  it("activates Schema tab from a valid tab query param", () => {
+    renderSystemOperations("/admin/operations?tab=schema");
+
+    expect(screen.getByRole("heading", { name: "Schema Hydration" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Generate Patterns" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to default NLP tab when tab query param is invalid", () => {
+    renderSystemOperations("/admin/operations?tab=unknown");
+
+    expect(screen.getByRole("heading", { name: "Generate Patterns" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Schema Hydration" })).not.toBeInTheDocument();
+  });
+
+  it("normalizes an invalid tab query param to the default tab in URL state", async () => {
+    renderSystemOperations("/admin/operations?tab=unknown");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-search")).toHaveTextContent("tab=nlp");
+    });
+    expect(screen.getByRole("heading", { name: "Generate Patterns" })).toBeInTheDocument();
+  });
+
+  it("updates the tab query param when a tab is clicked", async () => {
+    renderSystemOperations("/admin/operations");
+
+    fireEvent.click(screen.getByRole("button", { name: "Schema" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-search")).toHaveTextContent("tab=schema");
+      expect(screen.getByRole("heading", { name: "Schema Hydration" })).toBeInTheDocument();
+    });
+  });
+
+  it("preserves unrelated query params when tabs are changed", async () => {
+    renderSystemOperations("/admin/operations?foo=bar&tab=schema");
+
+    fireEvent.click(screen.getByRole("button", { name: "Observability" }));
+
+    await waitFor(() => {
+      const search = screen.getByTestId("location-search");
+      expect(search).toHaveTextContent("foo=bar");
+      expect(search).toHaveTextContent("tab=obs");
+      expect(screen.getByRole("heading", { name: "Trace Explorer" })).toBeInTheDocument();
+    });
   });
 });

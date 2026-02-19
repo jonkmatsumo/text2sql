@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { getDiagnostics, getErrorMessage, ApiError } from "../api";
 import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
@@ -12,7 +12,6 @@ import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operator
 
 export default function RunDetails() {
     const { runId } = useParams<{ runId: string }>();
-    const navigate = useNavigate();
     const { show: showToast } = useToast();
     const [isLoading, setIsLoading] = useState(true);
     const [diagnostics, setDiagnostics] = useState<RunDiagnosticsResponse | null>(null);
@@ -28,7 +27,10 @@ export default function RunDetails() {
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
-            const dedupeKey = makeToastDedupeKey("run-details", category, message);
+            const dedupeKey = makeToastDedupeKey("run-details", category, message, {
+                surface: "RunDetails.fetchDetails",
+                identifiers: { run_id: runId },
+            });
             showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);
@@ -65,10 +67,10 @@ export default function RunDetails() {
             setContextCopied(true);
             setTimeout(() => setContextCopied(false), 2000);
         }).catch((err) => {
-            showToast("Failed to copy to clipboard", "error");
+            showToast("Could not copy to clipboard", "error");
             console.error("Clipboard copy failed:", err);
         });
-    }, [runId, diagnostics]);
+    }, [runId, diagnostics, showToast]);
 
     if (isLoading) {
         return (

@@ -1,4 +1,4 @@
-type TimestampInput = number | string | Date | null | undefined;
+export type TimestampInput = number | string | Date | null | undefined;
 
 interface FormatTimestampOptions {
   inputInSeconds?: boolean;
@@ -66,6 +66,13 @@ function toTimestampMs(
   return null;
 }
 
+export function parseTimestampMs(
+  value: TimestampInput,
+  options: { inputInSeconds?: boolean } = {}
+): number | null {
+  return toTimestampMs(value, options.inputInSeconds);
+}
+
 export function formatTimestamp(
   value: TimestampInput,
   options: FormatTimestampOptions = {}
@@ -130,6 +137,11 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
+/**
+ * Builds the machine-readable copy bundle used by AgentChat/export consumers.
+ * Contract: `schema_version` is top-level and only changes for breaking format updates.
+ * `bundle_metadata` holds generation metadata and may expand with backward-compatible keys.
+ */
 export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<string, unknown> {
   const summary = message.validationSummary;
   const report = message.validationReport;

@@ -40,7 +40,20 @@ describe("WorkflowGuidance", () => {
         renderWithRouter(<WorkflowGuidance category="transient" />);
         expect(screen.getByText("Transient Error")).toBeInTheDocument();
         expect(screen.getByText(/temporary error occurred/i)).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Retry Operation" })).toBeInTheDocument();
+        const link = screen.getByRole("link", { name: "Retry Operation" });
+        expect(link).toBeInTheDocument();
+        expect(link).toHaveAttribute("href", "/admin/diagnostics");
+        expect(link).not.toHaveAttribute("href", "#");
+    });
+
+    it("keeps transient primary CTA routable and never placeholder-linked", () => {
+        renderWithRouter(<WorkflowGuidance category="transient" />);
+        const retryLink = screen.getByRole("link", { name: "Retry Operation" });
+        const href = retryLink.getAttribute("href");
+
+        expect(href).toBeTruthy();
+        expect(href).toMatch(/^\/admin\/[^\s#]+$/);
+        expect(href).not.toContain("#");
     });
 
     it("renders schema_missing guidance with correct title and description", () => {

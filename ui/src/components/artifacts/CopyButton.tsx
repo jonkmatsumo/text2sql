@@ -25,8 +25,8 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, label, ariaLabel }
   const [announcement, setAnnouncement] = useState("");
 
   const handleCopy = async () => {
-    const copied = await copyTextToClipboard(text);
-    if (copied) {
+    const success = await copyTextToClipboard(text);
+    if (success) {
       setCopied(true);
       setAnnouncement("Copied to clipboard");
       setTimeout(() => {
@@ -34,8 +34,8 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, label, ariaLabel }
         setAnnouncement("");
       }, 2000);
     } else {
-      console.error("Failed to copy!");
-      setAnnouncement("Copy failed");
+      console.error("Clipboard copy failed");
+      setAnnouncement("Could not copy to clipboard");
       setTimeout(() => setAnnouncement(""), 2000);
     }
   };

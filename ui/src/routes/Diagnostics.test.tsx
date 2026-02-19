@@ -6,6 +6,7 @@ import Diagnostics from "./Diagnostics";
 import { getDiagnostics, OpsService } from "../api";
 import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
 import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
+import * as useToastHook from "../hooks/useToast";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
@@ -59,8 +60,12 @@ function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
 }
 
 describe("Diagnostics Route", () => {
+    let showToastMock: ReturnType<typeof vi.fn>;
+
     beforeEach(() => {
         vi.clearAllMocks();
+        showToastMock = vi.fn();
+        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: showToastMock } as any);
         (OpsService.listRuns as any).mockResolvedValue({ runs: [] });
     });
 
@@ -115,6 +120,7 @@ describe("Diagnostics Route", () => {
         await waitFor(() => {
             expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
         });
+        expect(screen.getByTestId("diagnostics-run-signals-loading")).toBeInTheDocument();
 
         expect((OpsService.listRuns as any).mock.calls[0]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"]);
         expect((OpsService.listRuns as any).mock.calls[1]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"]);
@@ -124,6 +130,210 @@ describe("Diagnostics Route", () => {
                 resolveFailed!({ runs: [] });
             });
         }
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("diagnostics-run-signals-loading")).not.toBeInTheDocument();
+        });
+    });
+
+    it("keeps low-rated runs visible when failed-runs fetch rejects", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const lowRatedTs = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockRejectedValueOnce(new Error("failed-runs-broken"))
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-success",
+                        user_nlq_text: "Low-rating run still visible",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowRatedTs,
+                    },
+                ],
+            });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Low-rating run still visible")).toBeInTheDocument();
+        });
+
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+        expect(within(failuresSection).getByText("Could not load recent failures.")).toBeInTheDocument();
+        expect(within(failuresSection).getByTestId("diagnostics-failures-section-retry")).toBeInTheDocument();
+        expect(within(failuresSection).queryByText("No recent system failures found.")).not.toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Low-rating run still visible")).toBeInTheDocument();
+
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load failed run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=failed-runs"),
+            })
+        );
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load failed run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("error=Error"),
+            })
+        );
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Failed to load degraded runs",
+            expect.objectContaining({
+                surface: "Diagnostics.runSignals",
+                failed: expect.objectContaining({
+                    surface: "Diagnostics.runSignals.failed",
+                    reason: expect.stringContaining("failed-runs-broken"),
+                }),
+            })
+        );
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("keeps failed-runs visible when low-ratings fetch rejects", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const failedTs = new Date(Date.now() - 7 * 60 * 1000).toISOString();
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-success",
+                        user_nlq_text: "Failure run still visible",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failedTs,
+                    },
+                ],
+            })
+            .mockRejectedValueOnce(new Error("low-ratings-broken"));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByText("Failure run still visible")).toBeInTheDocument();
+        });
+
+        const failuresSection = screen.getByTestId("diagnostics-failures-section");
+        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+        expect(within(failuresSection).getByText("Failure run still visible")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Could not load recent low-rated runs.")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByTestId("diagnostics-low-ratings-section-retry")).toBeInTheDocument();
+        expect(within(lowRatingsSection).queryByText("No recent low-rated runs found.")).not.toBeInTheDocument();
+
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=low-ratings"),
+            })
+        );
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("error=Error"),
+            })
+        );
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("shows separate dedupable toasts when both run-signal calls fail", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockRejectedValueOnce(new Error("failed-runs-broken"))
+            .mockRejectedValueOnce(new Error("low-ratings-broken"));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            const failuresSection = screen.getByTestId("diagnostics-failures-section");
+            const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
+            expect(within(failuresSection).getByText("Could not load recent failures.")).toBeInTheDocument();
+            expect(within(lowRatingsSection).getByText("Could not load recent low-rated runs.")).toBeInTheDocument();
+        });
+
+        expect(showToastMock).toHaveBeenCalledTimes(2);
+        expect(showToastMock).toHaveBeenNthCalledWith(
+            1,
+            "Failed to load failed run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=failed-runs"),
+            })
+        );
+        expect(showToastMock).toHaveBeenNthCalledWith(
+            2,
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("panel=low-ratings"),
+            })
+        );
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("retries run-signal fetches from section-level retry controls without reloading diagnostics", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const failedTs = new Date(Date.now() - 9 * 60 * 1000).toISOString();
+        const lowTs = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockRejectedValueOnce(new Error("failed-runs-broken"))
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-initial",
+                        user_nlq_text: "Low-rating run from initial fetch",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-retry",
+                        user_nlq_text: "Failure run recovered",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failedTs,
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-retry",
+                        user_nlq_text: "Low-rating run after retry",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ],
+            });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-failures-section-retry")).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId("diagnostics-failures-section-retry"));
+
+        await waitFor(() => {
+            expect(screen.getByText("Failure run recovered")).toBeInTheDocument();
+        });
+
+        expect(getDiagnostics).toHaveBeenCalledTimes(1);
+        expect(OpsService.listRuns).toHaveBeenCalledTimes(4);
+        consoleErrorSpy.mockRestore();
     });
 
     it("keeps degraded runs with missing created_at from surfacing as most recent", async () => {
@@ -131,30 +341,34 @@ describe("Diagnostics Route", () => {
         const recentTs2 = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1h ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "missing-date",
-                    user_nlq_text: "Run without timestamp",
-                    execution_status: "FAILED",
-                    thumb: "DOWN",
-                },
-                {
-                    id: "older-run",
-                    user_nlq_text: "Older degraded run",
-                    execution_status: "FAILED",
-                    thumb: "DOWN",
-                    created_at: recentTs1,
-                },
-            ] })
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "newer-run",
-                    user_nlq_text: "Newest degraded run",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: recentTs2,
-                },
-            ] });
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "missing-date",
+                        user_nlq_text: "Run without timestamp",
+                        execution_status: "FAILED",
+                        thumb: "DOWN",
+                    },
+                    {
+                        id: "older-run",
+                        user_nlq_text: "Older degraded run",
+                        execution_status: "FAILED",
+                        thumb: "DOWN",
+                        created_at: recentTs1,
+                    },
+                ]
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "newer-run",
+                        user_nlq_text: "Newest degraded run",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: recentTs2,
+                    },
+                ]
+            });
 
         renderDiagnostics();
 
@@ -171,36 +385,41 @@ describe("Diagnostics Route", () => {
         const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "failed-1",
-                    user_nlq_text: "Failure query",
-                    execution_status: "FAILED",
-                    thumb: "None",
-                    created_at: failTs,
-                },
-            ] })
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "low-1",
-                    user_nlq_text: "Low rating query",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: lowTs,
-                },
-            ] });
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-1",
+                        user_nlq_text: "Failure query",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failTs,
+                    },
+                ]
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-1",
+                        user_nlq_text: "Low rating query",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ]
+            });
 
         renderDiagnostics();
 
         await waitFor(() => {
-            expect(screen.getByText("Recent failures")).toBeInTheDocument();
-            expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
+            expect(screen.getByText("System failures (FAILED)")).toBeInTheDocument();
+            expect(screen.getByText("Operator feedback (DOWN)")).toBeInTheDocument();
         });
         expect(
             screen.getByText(
-                `Showing latest ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.`
+                new RegExp(`Showing most recent ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures`)
             )
         ).toBeInTheDocument();
+        expect(screen.getByText(/no server-side time window/i)).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
@@ -220,7 +439,7 @@ describe("Diagnostics Route", () => {
         });
 
         expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("168");
-        expect(screen.getByText(/Runs needing attention \(last 7 days\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/Degraded run signals \(last 7 days\)/i)).toBeInTheDocument();
     });
 
     it("client-side recency filter excludes runs older than selected window", async () => {
@@ -230,10 +449,12 @@ describe("Diagnostics Route", () => {
 
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
-                { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
-            ] })
+            .mockResolvedValueOnce({
+                runs: [
+                    { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
+                    { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
+                ]
+            })
             .mockResolvedValueOnce({ runs: [] });
 
         renderDiagnostics();
@@ -250,21 +471,30 @@ describe("Diagnostics Route", () => {
         fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "1" } });
         expect(screen.getByText("Recent failure")).toBeInTheDocument();
         expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
-        expect(screen.getByText(/last 1h/i)).toBeInTheDocument();
+        expect(screen.getByText(/Degraded run signals \(last 1 hour\)/i)).toBeInTheDocument();
     });
 
-    it("excludes runs with missing created_at and shows count in excluded note", async () => {
+    it("excludes runs with missing or invalid created_at and shows data-driven excluded count", async () => {
+        const now = Date.now();
+        const validTimestamp = new Date(now - 15 * 60 * 1000).toISOString();
+        const failedRuns = [
+            { id: "fail-valid", user_nlq_text: "Failure with valid timestamp", execution_status: "FAILED", thumb: "None", created_at: validTimestamp },
+            { id: "fail-missing", user_nlq_text: "Failure missing timestamp", execution_status: "FAILED", thumb: "None" },
+            { id: "fail-invalid", user_nlq_text: "Failure invalid timestamp", execution_status: "FAILED", thumb: "None", created_at: "invalid-date" },
+        ];
+        const lowRatingRuns = [
+            { id: "low-valid", user_nlq_text: "Low rating with valid timestamp", execution_status: "SUCCESS", thumb: "DOWN", created_at: validTimestamp },
+            { id: "low-missing", user_nlq_text: "Low rating missing timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
+        ];
+        const expectedExcludedCount = [...failedRuns, ...lowRatingRuns].filter((run) => !run.created_at || Number.isNaN(Date.parse(run.created_at))).length;
+
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
             if (status === "FAILED") {
-                return Promise.resolve({ runs: [
-                    { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
-                ] });
+                return Promise.resolve({ runs: failedRuns });
             }
             if (thumb === "DOWN") {
-                return Promise.resolve({ runs: [
-                    { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
-                ] });
+                return Promise.resolve({ runs: lowRatingRuns });
             }
             return Promise.resolve({ runs: [] });
         });
@@ -276,10 +506,13 @@ describe("Diagnostics Route", () => {
         });
 
         const note = screen.getByTestId("diagnostics-excluded-note");
-        expect(within(note).getByText(/2 runs excluded due to missing timestamps/i)).toBeInTheDocument();
-
-        expect(screen.queryByText("Query with no timestamp")).not.toBeInTheDocument();
-        expect(screen.queryByText("Low rating no timestamp")).not.toBeInTheDocument();
+        expect(note).toHaveTextContent(String(expectedExcludedCount));
+        expect(note).toHaveTextContent(/excluded due to missing or invalid timestamps/i);
+        expect(screen.queryByText("Failure missing timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Failure invalid timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Low rating missing timestamp")).not.toBeInTheDocument();
+        expect(screen.getByText("Failure with valid timestamp")).toBeInTheDocument();
+        expect(screen.getByText("Low rating with valid timestamp")).toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {
@@ -389,6 +622,7 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Schema Cache Size")).not.toBeInTheDocument();
         // Configuration panel is hidden in anomaly-only mode to reduce noise
         expect(screen.queryByText("Configuration & Policy")).not.toBeInTheDocument();
+        expect(screen.getByText(/context only; not anomaly-derived/i)).toBeInTheDocument();
     });
 
     it("round-trips diagnostics view state through query params", async () => {

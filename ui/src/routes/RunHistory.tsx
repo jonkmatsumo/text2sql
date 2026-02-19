@@ -10,8 +10,9 @@ import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
-import { formatRunHistoryRange } from "../constants/operatorUi";
+import { formatRunHistoryRange, hasRunHistoryNextPage } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
+import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -31,21 +32,28 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
 
 
 export default function RunHistory() {
+    const { show: showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [hasMore, setHasMore] = useState<boolean | undefined>(undefined);
     const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
-    const [isSearchFocused, setIsSearchFocused] = useState(false);
 
     const copyLink = useCallback(() => {
         navigator.clipboard.writeText(window.location.href).then(() => {
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);
+        }).catch((err) => {
+            showToast("Could not copy to clipboard", "error");
+            console.error("Clipboard copy failed:", err);
         });
-    }, []);
+    }, [showToast]);
+
+    const openShortcutsModal = useCallback(() => setShortcutsOpen(true), []);
+    const closeShortcutsModal = useCallback(() => setShortcutsOpen(false), []);
 
     // Derived state from URL
     const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
@@ -54,10 +62,21 @@ export default function RunHistory() {
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
     const limit = RUN_HISTORY_PAGE_SIZE;
-    const { show: showToast } = useToast();
     const searchInputRef = React.useRef<HTMLInputElement>(null);
-    const recoveryOffsetRef = React.useRef<number | null>(null);
+    const recoveryAttemptedRef = React.useRef(false);
     const recoveryToastShownRef = React.useRef(false);
+
+    useEffect(() => {
+        recoveryAttemptedRef.current = false;
+        recoveryToastShownRef.current = false;
+    }, [statusFilter, thumbFilter, searchQuery]);
+
+    useEffect(() => {
+        if (offset === 0) {
+            recoveryAttemptedRef.current = false;
+            recoveryToastShownRef.current = false;
+        }
+    }, [offset]);
 
     const updateFilters = useCallback((updates: Record<string, string | number | undefined>) => {
         setSearchParams(prev => {
@@ -88,27 +107,17 @@ export default function RunHistory() {
 
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
+        setLoadError(null);
         try {
             const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
-            const payload = result as { runs?: unknown; has_more?: unknown; total_count?: unknown };
-            if (!Array.isArray(payload.runs)) {
-                console.error("Operator API contract mismatch (RunHistory.listRuns)", {
-                    endpoint: "RunHistory.listRuns",
-                    summary: "Expected result.runs to be an array",
-                });
-                setRuns([]);
-                setHasMore(undefined);
-                setTotalCount(undefined);
-                return;
-            }
-            const data: Interaction[] = payload.runs as Interaction[];
-            const more = typeof payload.has_more === "boolean" ? payload.has_more : undefined;
-            const count = typeof payload.total_count === "number" ? payload.total_count : undefined;
+            const data = result.runs;
+            const more = result.has_more;
+            const count = result.total_count;
 
-            // Deterministic empty-page recovery for high offsets.
-            if (offset > 0 && data.length === 0 && more !== true) {
-                if (recoveryOffsetRef.current !== offset) {
-                    recoveryOffsetRef.current = offset;
+            // Single-shot empty-page recovery for non-zero offsets.
+            if (offset > 0 && data.length === 0) {
+                if (!recoveryAttemptedRef.current) {
+                    recoveryAttemptedRef.current = true;
                     const fallbackOffset = Math.max(0, offset - limit);
                     if (!recoveryToastShownRef.current) {
                         showToast("Requested page is out of range. Showing previous results.", "warning");
@@ -118,8 +127,11 @@ export default function RunHistory() {
                 }
                 return;
             }
-            recoveryOffsetRef.current = null;
-            recoveryToastShownRef.current = false;
+
+            if (data.length > 0) {
+                recoveryAttemptedRef.current = false;
+                recoveryToastShownRef.current = false;
+            }
 
             const seenIds = new Set<string>();
             const uniqueData = data.filter((run: Interaction) => {
@@ -133,8 +145,16 @@ export default function RunHistory() {
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
-            const dedupeKey = makeToastDedupeKey("run-history", category, message);
+            const dedupeKey = makeToastDedupeKey("run-history", category, message, {
+                surface: "RunHistory.fetchRuns",
+                identifiers: {
+                    offset,
+                    status: statusFilter,
+                    feedback: thumbFilter,
+                },
+            });
             showToast(message, "error", { dedupeKey });
+            setLoadError("Could not load run history. Refresh to retry.");
         } finally {
             setIsLoading(false);
         }
@@ -148,20 +168,24 @@ export default function RunHistory() {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
 
+    const clearSearch = useCallback(() => {
+        updateFilters({ q: "", offset: 0 });
+    }, [updateFilters]);
+
     const handleEscapeShortcut = useCallback(() => {
-        if (document.activeElement === searchInputRef.current) {
-            searchInputRef.current?.blur();
-            return;
-        }
-        clearFilters();
-    }, [clearFilters]);
+        handleOperatorEscapeShortcut({
+            isModalOpen: shortcutsOpen,
+            closeModal: closeShortcutsModal,
+            clearFilters,
+        });
+    }, [clearFilters, closeShortcutsModal, shortcutsOpen]);
 
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchRuns },
         { key: "/", label: "Focus search", handler: () => searchInputRef.current?.focus() },
         { key: "Escape", label: "Clear filters", handler: handleEscapeShortcut, allowInInput: true },
-        { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
-    ], [fetchRuns, handleEscapeShortcut]);
+        { key: "?", label: "Show shortcuts", handler: openShortcutsModal },
+    ], [fetchRuns, handleEscapeShortcut, openShortcutsModal]);
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
@@ -172,8 +196,8 @@ export default function RunHistory() {
         ),
         [runs, searchQuery]
     );
-    const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
-    const canNavigateNext = hasMore !== undefined ? hasMore : runs.length === limit;
+    const showPageScopedSearchNote = searchQuery.trim() !== "";
+    const canNavigateNext = hasRunHistoryNextPage(hasMore, runs.length, limit);
     const rangeSummary = formatRunHistoryRange(offset, runs.length, totalCount);
 
     return (
@@ -195,7 +219,7 @@ export default function RunHistory() {
                         {linkCopied ? "✓ Copied!" : "Copy link"}
                     </button>
                     <button
-                        onClick={() => setShortcutsOpen(true)}
+                        onClick={openShortcutsModal}
                         aria-label="Show keyboard shortcuts"
                         title="Keyboard shortcuts (?)"
                         className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 font-mono border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm"
@@ -216,12 +240,19 @@ export default function RunHistory() {
                                 placeholder="Keyword search..."
                                 value={searchQuery}
                                 onChange={(e) => updateFilters({ q: e.target.value })}
-                                onFocus={() => setIsSearchFocused(true)}
-                                onBlur={() => setIsSearchFocused(false)}
                                 aria-label="Search runs by query or ID"
                                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                             />
                         </div>
+                        {searchQuery && (
+                            <button
+                                onClick={clearSearch}
+                                aria-label="Clear search query"
+                                className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 whitespace-nowrap"
+                            >
+                                Clear
+                            </button>
+                        )}
                         <button
                             disabled
                             title="Global search across all history is not yet supported by the backend."
@@ -231,9 +262,15 @@ export default function RunHistory() {
                         </button>
                     </div>
                     {showPageScopedSearchNote && (
-                        <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-md flex items-start gap-2" data-testid="runhistory-search-scope-note">
+                        <div
+                            className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-md flex items-start gap-2"
+                            data-testid="runhistory-search-scope-note"
+                        >
                             <span className="text-blue-500 mt-0.5">ℹ️</span>
                             <div className="flex-grow">
+                                <p className="text-xs text-blue-700 dark:text-blue-400 mb-1" data-testid="runhistory-search-scope-inline-label">
+                                    Search is limited to this page.
+                                </p>
                                 <p className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-tight">Search is limited to this page</p>
                                 <div className="text-xs text-blue-700 dark:text-blue-400 leading-normal">
                                     <p>Results only include runs already loaded in the table below.</p>
@@ -244,6 +281,7 @@ export default function RunHistory() {
                                     )}
                                     <button
                                         onClick={() => updateFilters({ offset: offset + limit })}
+                                        disabled={!canNavigateNext || isLoading}
                                         className="mt-1.5 font-bold underline hover:text-blue-900 dark:hover:text-blue-200 block text-[11px] uppercase tracking-wide"
                                     >
                                         Scan next page &rarr;
@@ -286,6 +324,22 @@ export default function RunHistory() {
                                     <LoadingState message="Loading runs..." />
                                 </td>
                             </tr>
+                        ) : loadError ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center">
+                                    <div className="flex flex-col items-center justify-center space-y-3">
+                                        <p className="text-gray-500 italic" data-testid="runhistory-load-error">
+                                            {loadError}
+                                        </p>
+                                        <button
+                                            onClick={fetchRuns}
+                                            className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
+                                        >
+                                            Retry loading runs
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
                         ) : filteredRuns.length === 0 ? (
                             <tr>
                                 <td colSpan={6} className="px-6 py-12 text-center">
@@ -293,7 +347,7 @@ export default function RunHistory() {
                                         <p className="text-gray-500 italic">
                                             {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
                                                 ? (searchQuery !== ""
-                                                    ? "No matches on this page. Try Next to search older runs."
+                                                    ? "No matches found on this page. Try Next to search older runs."
                                                     : "No historical runs found matching these filters.")
                                                 : "No runs recorded yet."}
                                         </p>
@@ -326,7 +380,7 @@ export default function RunHistory() {
                                         {run.user_nlq_text}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px - 2 inline - flex text - xs leading - 5 font - semibold rounded - full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]} `}>
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]}`}>
                                             {run.execution_status}
                                         </span>
                                     </td>
@@ -338,7 +392,7 @@ export default function RunHistory() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                                         <Link
-                                            to={`/ admin / runs / ${run.id} `}
+                                            to={`/admin/runs/${run.id}`}
                                             aria-label={`View details for run ${run.id}`}
                                             className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300"
                                         >
@@ -383,7 +437,7 @@ export default function RunHistory() {
 
             <KeyboardShortcutsModal
                 isOpen={shortcutsOpen}
-                onClose={() => setShortcutsOpen(false)}
+                onClose={closeShortcutsModal}
                 shortcuts={SHORTCUTS}
             />
         </div>

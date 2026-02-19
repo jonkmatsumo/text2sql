@@ -8,6 +8,7 @@ import { useConfirmation } from "../hooks/useConfirmation";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { JOBS_DASHBOARD_PAGE_SIZE } from "../constants/pagination";
+import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
 
 export const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
@@ -21,6 +22,8 @@ export default function JobsDashboard() {
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const { show: showToast } = useToast();
     const { confirm, dialogProps } = useConfirmation();
+    const openShortcutsModal = useCallback(() => setShortcutsOpen(true), []);
+    const closeShortcutsModal = useCallback(() => setShortcutsOpen(false), []);
 
     const isMountedRef = React.useRef(true);
     const activePollersRef = React.useRef<Map<string, number>>(new Map());
@@ -112,11 +115,24 @@ export default function JobsDashboard() {
         return () => clearInterval(interval);
     }, [fetchJobs]);
 
+    const clearFilters = useCallback(() => {
+        setFilterType("");
+        setFilterStatus("");
+    }, []);
+
+    const handleEscapeShortcut = useCallback(() => {
+        handleOperatorEscapeShortcut({
+            isModalOpen: shortcutsOpen,
+            closeModal: closeShortcutsModal,
+            clearFilters,
+        });
+    }, [clearFilters, closeShortcutsModal, shortcutsOpen]);
+
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchJobs },
-        { key: "Escape", label: "Clear filters", handler: () => { setFilterType(""); setFilterStatus(""); }, allowInInput: true },
-        { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
-    ], [fetchJobs]);
+        { key: "Escape", label: "Clear filters", handler: handleEscapeShortcut, allowInInput: true },
+        { key: "?", label: "Show shortcuts", handler: openShortcutsModal },
+    ], [fetchJobs, handleEscapeShortcut, openShortcutsModal]);
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 
@@ -251,7 +267,7 @@ export default function JobsDashboard() {
                 </div>
                 <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none flex items-center gap-3">
                     <button
-                        onClick={() => setShortcutsOpen(true)}
+                        onClick={openShortcutsModal}
                         aria-label="Show keyboard shortcuts"
                         title="Keyboard shortcuts (?)"
                         className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 text-sm font-mono"
@@ -315,7 +331,7 @@ export default function JobsDashboard() {
             <ConfirmationDialog {...dialogProps} />
             <KeyboardShortcutsModal
                 isOpen={shortcutsOpen}
-                onClose={() => setShortcutsOpen(false)}
+                onClose={closeShortcutsModal}
                 shortcuts={SHORTCUTS}
             />
         </div>

@@ -9,6 +9,8 @@ interface DiagnosticsRunSignalSectionProps {
     pillLabel: string;
     pillClass: string;
     emptyMessage: string;
+    errorMessage?: string;
+    onRetry?: () => void;
     testId: string;
 }
 
@@ -18,15 +20,41 @@ export const DiagnosticsRunSignalSection: React.FC<DiagnosticsRunSignalSectionPr
     pillLabel,
     pillClass,
     emptyMessage,
+    errorMessage,
+    onRetry,
     testId,
 }) => {
     return (
         <section data-testid={testId}>
             <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", fontWeight: 600 }}>{title}</h4>
             {runs.length === 0 ? (
-                <p style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}>
-                    {emptyMessage}
-                </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <p
+                        data-testid={`${testId}-message`}
+                        style={{ color: "var(--muted)", fontSize: "0.85rem", fontStyle: "italic", margin: 0 }}
+                    >
+                        {errorMessage ?? emptyMessage}
+                    </p>
+                    {errorMessage && onRetry && (
+                        <button
+                            type="button"
+                            onClick={onRetry}
+                            data-testid={`${testId}-retry`}
+                            className="button-link"
+                            style={{
+                                border: "1px solid var(--border)",
+                                background: "var(--surface)",
+                                color: "var(--accent)",
+                                padding: "3px 8px",
+                                borderRadius: "8px",
+                                fontSize: "0.75rem",
+                                fontWeight: 600,
+                            }}
+                        >
+                            Retry
+                        </button>
+                    )}
+                </div>
             ) : (
                 <div style={{ display: "grid", gap: "12px" }}>
                     {runs.map((run) => (

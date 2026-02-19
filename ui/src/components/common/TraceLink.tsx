@@ -30,15 +30,10 @@ export default function TraceLink({
       await navigator.clipboard.writeText(traceId);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      const textArea = document.createElement("textarea");
-      textArea.value = traceId;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textArea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+      // Note: This component doesn't currently use a toast hook.
+      // Standardizing on console.error and no false positive 'Copied' state.
     }
   };
 

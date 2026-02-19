@@ -41,11 +41,11 @@ import {
 } from "./config";
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import {
+  buildContractMismatchReport,
   isInteractionArray,
   isJobStatusResponse,
+  isOpsJobResponseArray,
   isRunDiagnosticsResponse,
-  extractIdentifiers,
-  summarizeUnexpectedResponse
 } from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
@@ -248,7 +248,12 @@ export async function fetchAvailableModels(provider: string): Promise<LlmModelOp
   return [];
 }
 
-export async function submitFeedback(request: FeedbackRequest): Promise<any> {
+export interface FeedbackResponse {
+  status: string;
+  feedback_id?: string;
+}
+
+export async function submitFeedback(request: FeedbackRequest): Promise<FeedbackResponse> {
   const response = await fetch(`${uiApiBase}/feedback`, {
     method: "POST",
     headers: getAuthHeaders(),
@@ -306,7 +311,7 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
 }
 
 
-export async function fetchBlobContent(blobUrl: string): Promise<any> {
+export async function fetchBlobContent(blobUrl: string): Promise<unknown> {
   const response = await fetch(blobUrl);
   if (!response.ok) {
     throw new Error(`Failed to fetch blob content: ${response.statusText}`);
@@ -431,7 +436,7 @@ export const AdminService = {
     return response.json();
   },
 
-  async publishApproved(limit: number = 50): Promise<any> {
+  async publishApproved(limit: number = 50): Promise<{ published_count: number }> {
     const response = await fetch(`${uiApiBase}/registry/publish-approved`, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -483,6 +488,41 @@ export const AdminService = {
   }
 };
 
+interface RunsPage {
+  items: Interaction[];
+  has_more?: boolean;
+  total_count?: number;
+}
+
+function normalizeRunsPage(data: unknown): RunsPage | null {
+  if (isInteractionArray(data)) {
+    return { items: data };
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  const payload = data as Record<string, unknown>;
+  const itemsCandidate = Array.isArray(payload.items)
+    ? payload.items
+    : Array.isArray(payload.runs)
+      ? payload.runs
+      : Array.isArray(payload.data)
+        ? payload.data
+        : undefined;
+
+  if (itemsCandidate === undefined || !isInteractionArray(itemsCandidate)) {
+    return null;
+  }
+
+  return {
+    items: itemsCandidate,
+    has_more: typeof payload.has_more === "boolean" ? payload.has_more : undefined,
+    total_count: typeof payload.total_count === "number" ? payload.total_count : undefined,
+  };
+}
+
 export const OpsService = {
   async runRecommendations(
     query: string,
@@ -523,7 +563,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async hydrateSchema(): Promise<any> {
+  async hydrateSchema(): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/schema-hydrate`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -532,7 +572,7 @@ export const OpsService = {
     return response.json();
   },
 
-  async reindexCache(): Promise<any> {
+  async reindexCache(): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/semantic-cache/reindex`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -546,22 +586,21 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
-    const data = await response.json();
+    const data: unknown = await response.json();
     if (!isJobStatusResponse(data)) {
-      const ids = extractIdentifiers(data);
-      const summary = summarizeUnexpectedResponse(data);
-      console.error("Operator API contract mismatch (getJobStatus)", { endpoint: "getJobStatus", ids, summary });
+      const report = buildContractMismatchReport("OpsService.getJobStatus", data);
+      console.error("Operator API contract mismatch (getJobStatus)", report);
       throw new ApiError(
-        `Received unexpected response from getJobStatus${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        `Received unexpected response from getJobStatus${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
         200,
         "MALFORMED_RESPONSE",
-        { endpoint: "getJobStatus", ...ids }
+        { endpoint: "getJobStatus", surface: report.surface, ...report.ids }
       );
     }
     return data;
   },
 
-  async cancelJob(jobId: string): Promise<any> {
+  async cancelJob(jobId: string): Promise<{ status: string }> {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}/cancel`, {
       method: "POST",
       headers: getAuthHeaders()
@@ -583,7 +622,18 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to list jobs");
-    return response.json();
+    const data: unknown = await response.json();
+    if (!isOpsJobResponseArray(data)) {
+      const report = buildContractMismatchReport("OpsService.listJobs", data);
+      console.error("Operator API contract mismatch (listJobs)", report);
+      throw new ApiError(
+        `Received unexpected response from listJobs${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
+        200,
+        "MALFORMED_RESPONSE",
+        { endpoint: "listJobs", surface: report.surface, ...report.ids }
+      );
+    }
+    return data;
   },
 
   // NOTE: This assumes default backend pagination is consistent with frontend RUN_HISTORY_PAGE_SIZE.
@@ -603,36 +653,23 @@ export const OpsService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
-    const data = await response.json();
-    if (isInteractionArray(data)) {
-      return { runs: data };
+    const data: unknown = await response.json();
+    const page = normalizeRunsPage(data);
+    if (page) {
+      return {
+        runs: page.items,
+        has_more: page.has_more,
+        total_count: page.total_count,
+      };
     }
 
-    if (data && typeof data === "object" && !Array.isArray(data)) {
-      const payload = data as Record<string, unknown>;
-      const runsCandidate = Array.isArray(payload.runs)
-        ? payload.runs
-        : Array.isArray(payload.data)
-          ? payload.data
-          : undefined;
-
-      if (runsCandidate !== undefined && isInteractionArray(runsCandidate)) {
-        return {
-          runs: runsCandidate,
-          has_more: typeof payload.has_more === "boolean" ? payload.has_more : undefined,
-          total_count: typeof payload.total_count === "number" ? payload.total_count : undefined,
-        };
-      }
-    }
-
-    const ids = extractIdentifiers(data);
-    const summary = summarizeUnexpectedResponse(data);
-    console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
+    const report = buildContractMismatchReport("OpsService.listRuns", data);
+    console.error("Operator API contract mismatch (listRuns)", report);
     throw new ApiError(
-      `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      `Received unexpected response from listRuns${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "listRuns", ...ids }
+      { endpoint: "listRuns", surface: report.surface, ...report.ids }
     );
   },
 };
@@ -711,7 +748,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async deleteTemplate(id: string): Promise<any> {
+  async deleteTemplate(id: string): Promise<{ success: boolean }> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/templates/${id}`, {
       method: "DELETE",
       headers: getAuthHeaders()
@@ -720,7 +757,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async getMetrics(window: string = "7d"): Promise<any> {
+  async getMetrics(window: string = "7d"): Promise<Record<string, unknown>> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/metrics?window=${window}`, {
       headers: getAuthHeaders()
     });
@@ -728,7 +765,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async rollbackRun(runId: string, patterns?: any[]): Promise<any> {
+  async rollbackRun(runId: string, patterns?: any[]): Promise<{ success: boolean; job_id?: string }> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/rollback`, {
       method: "POST",
       headers: getAuthHeaders(),
@@ -738,7 +775,7 @@ export const IngestionService = {
     return response.json();
   },
 
-  async getRunPatterns(runId: string): Promise<any[]> {
+  async getRunPatterns(runId: string): Promise<Suggestion[]> {
     const response = await fetch(`${uiApiBase}/ops/ingestion/runs/${runId}/patterns`, {
       headers: getAuthHeaders()
     });
@@ -1035,14 +1072,13 @@ export async function getDiagnostics(
 
   const data = await response.json();
   if (!isRunDiagnosticsResponse(data)) {
-    const ids = extractIdentifiers(data);
-    const summary = summarizeUnexpectedResponse(data);
-    console.error("Operator API contract mismatch (getDiagnostics)", { endpoint: "getDiagnostics", ids, summary });
+    const report = buildContractMismatchReport("Diagnostics.getDiagnostics", data);
+    console.error("Operator API contract mismatch (getDiagnostics)", report);
     throw new ApiError(
-      `Received unexpected response from getDiagnostics${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      `Received unexpected response from getDiagnostics${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "getDiagnostics", ...ids }
+      { endpoint: "getDiagnostics", surface: report.surface, ...report.ids }
     );
   }
   return data;

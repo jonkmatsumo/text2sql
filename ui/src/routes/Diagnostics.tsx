@@ -7,7 +7,7 @@ import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
-import { formatTimestamp, toPrettyJson } from "../utils/observability";
+import { formatTimestamp, parseTimestampMs, toPrettyJson } from "../utils/observability";
 import {
     DiagnosticsFilters,
     useDiagnosticsViewFilters,
@@ -19,6 +19,8 @@ import {
     getDiagnosticsStatus,
     normalizeNonNegativeMetric,
 } from "../utils/diagnosticsStatus";
+import { useToast } from "../hooks/useToast";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 
 interface DiagnosticsError {
     code?: string;
@@ -51,7 +53,79 @@ function formatMilliseconds(value: unknown): string {
     return normalized.toFixed(2);
 }
 
+const DEFAULT_RECENCY_WINDOW_HOURS = 168;
+const RECENCY_WINDOW_LABELS: Record<number, string> = {
+    1: "last 1 hour",
+    6: "last 6 hours",
+    24: "last 24 hours",
+    168: "last 7 days",
+};
+
+function getRecencyWindowLabel(hours: number): string {
+    return RECENCY_WINDOW_LABELS[hours] ?? `last ${hours}h`;
+}
+
+interface WindowedRunSignals {
+    filtered: Interaction[];
+    excludedCount: number;
+}
+
+function filterRunsByRecencyWindow(runs: Interaction[], cutoffMs: number): WindowedRunSignals {
+    let excludedCount = 0;
+    const filtered = runs.filter((run) => {
+        const timestampMs = parseTimestampMs(run.created_at);
+        if (timestampMs == null) {
+            excludedCount += 1;
+            return false;
+        }
+        return timestampMs >= cutoffMs;
+    });
+    return { filtered, excludedCount };
+}
+
+function normalizeRunSignalCategory(result: ListRunsResponse): Interaction[] {
+    const runs = result.runs;
+    const seenIds = new Set<string>();
+    return runs
+        .filter((run) => {
+            if (seenIds.has(run.id)) return false;
+            seenIds.add(run.id);
+            return true;
+        })
+        .map((run) => ({
+            ...run,
+            user_nlq_text: run.user_nlq_text || "Unknown",
+            execution_status: run.execution_status || "UNKNOWN",
+        }))
+        .sort((a, b) => {
+            const tA = parseTimestampMs(a.created_at);
+            const tB = parseTimestampMs(b.created_at);
+            if (tA != null && tB != null && tA !== tB) return tB - tA;
+            if (tA == null && tB != null) return 1;
+            if (tA != null && tB == null) return -1;
+            return a.id.localeCompare(b.id);
+        })
+        .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
+}
+
+function getRunSignalsFailureCategory(reason: unknown): string {
+    if (reason && typeof reason === "object") {
+        const withCode = reason as { code?: unknown; name?: unknown };
+        if (typeof withCode.code === "string" && withCode.code.trim() !== "") {
+            return withCode.code.trim().slice(0, 64);
+        }
+        if (typeof withCode.name === "string" && withCode.name.trim() !== "") {
+            return withCode.name.trim().slice(0, 64);
+        }
+    }
+    if (typeof reason === "string" && reason.trim() !== "") {
+        return reason.trim().slice(0, 64);
+    }
+    return "UNKNOWN";
+}
+
 export default function Diagnostics() {
+    const { show: showToast } = useToast();
     const {
         isDebug,
         setIsDebug,
@@ -65,9 +139,97 @@ export default function Diagnostics() {
     const [error, setError] = useState<DiagnosticsError | null>(null);
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
+    const [runSignalsLoading, setRunSignalsLoading] = useState(false);
+    const [failedSignalsFetchError, setFailedSignalsFetchError] = useState(false);
+    const [lowRatingsSignalsFetchError, setLowRatingsSignalsFetchError] = useState(false);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(168); // Default 7d
+    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(DEFAULT_RECENCY_WINDOW_HOURS);
     const isFetchingRef = useRef(false);
+    const isRunSignalsFetchingRef = useRef(false);
+
+    const fetchRunSignals = useCallback(async () => {
+        if (isRunSignalsFetchingRef.current) {
+            return;
+        }
+        isRunSignalsFetchingRef.current = true;
+        setRunSignalsLoading(true);
+        setFailedSignalsFetchError(false);
+        setLowRatingsSignalsFetchError(false);
+
+        try {
+            const [failedResult, negativeResult] = await Promise.allSettled([
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
+            ]);
+
+            if (failedResult.status === "fulfilled") {
+                setRecentFailures(normalizeRunSignalCategory(failedResult.value));
+                setFailedSignalsFetchError(false);
+            } else {
+                const failedToast = "Failed to load failed run signals. Refresh to retry.";
+                const failedErrorCategory = getRunSignalsFailureCategory(failedResult.reason);
+                const failedDedupeKey = makeToastDedupeKey(
+                    "diagnostics",
+                    "RUN_SIGNALS_FETCH_FAILED",
+                    failedToast,
+                    {
+                        surface: "Diagnostics.runSignals.failed",
+                        identifiers: {
+                            panel: "failed-runs",
+                            error: failedErrorCategory,
+                        },
+                    }
+                );
+                showToast(failedToast, "error", { dedupeKey: failedDedupeKey });
+                setRecentFailures([]);
+                setFailedSignalsFetchError(true);
+            }
+
+            if (negativeResult.status === "fulfilled") {
+                setRecentLowRatings(normalizeRunSignalCategory(negativeResult.value));
+                setLowRatingsSignalsFetchError(false);
+            } else {
+                const lowRatingsToast = "Failed to load low-rated run signals. Refresh to retry.";
+                const lowRatingsErrorCategory = getRunSignalsFailureCategory(negativeResult.reason);
+                const lowRatingsDedupeKey = makeToastDedupeKey(
+                    "diagnostics",
+                    "RUN_SIGNALS_FETCH_FAILED",
+                    lowRatingsToast,
+                    {
+                        surface: "Diagnostics.runSignals.lowRatings",
+                        identifiers: {
+                            panel: "low-ratings",
+                            error: lowRatingsErrorCategory,
+                        },
+                    }
+                );
+                showToast(lowRatingsToast, "error", { dedupeKey: lowRatingsDedupeKey });
+                setRecentLowRatings([]);
+                setLowRatingsSignalsFetchError(true);
+            }
+
+            if (failedResult.status === "rejected" || negativeResult.status === "rejected") {
+                console.error("Failed to load degraded runs", {
+                    surface: "Diagnostics.runSignals",
+                    failed: failedResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.failed",
+                            reason: String(failedResult.reason),
+                        }
+                        : null,
+                    low_ratings: negativeResult.status === "rejected"
+                        ? {
+                            surface: "Diagnostics.runSignals.lowRatings",
+                            reason: String(negativeResult.reason),
+                        }
+                        : null,
+                });
+            }
+        } finally {
+            setRunSignalsLoading(false);
+            isRunSignalsFetchingRef.current = false;
+        }
+    }, [showToast]);
 
     const fetchDiagnostics = useCallback(async (debug = false) => {
         if (isFetchingRef.current) {
@@ -80,51 +242,19 @@ export default function Diagnostics() {
             const resp = await getDiagnostics(debug);
             setData(resp);
             setLastUpdatedAt(Date.now());
+            await fetchRunSignals();
         } catch (err: unknown) {
             if (err && typeof err === "object") {
                 setError(err as DiagnosticsError);
             } else {
                 setError({ message: "Failed to load diagnostics" });
             }
+            setRunSignalsLoading(false);
         } finally {
             setLoading(false);
             isFetchingRef.current = false;
         }
-
-            // Fetch degraded runs concurrently (failed + negatively rated)
-        try {
-            const [failed, negative] = await Promise.all([
-                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
-                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
-            ]);
-            const normalizeCategory = (result: ListRunsResponse) => {
-                const runs = result.runs;
-                const seenIds = new Set<string>();
-                return runs
-                    .filter((run) => {
-                        if (seenIds.has(run.id)) return false;
-                        seenIds.add(run.id);
-                        return true;
-                    })
-                    .map((run) => ({
-                        ...run,
-                        user_nlq_text: run.user_nlq_text || "Unknown",
-                        execution_status: run.execution_status || "UNKNOWN",
-                    }))
-                    .sort((a, b) => {
-                        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
-                        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
-                        return tB - tA;
-                    })
-                    .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
-            };
-
-            setRecentFailures(normalizeCategory(failed));
-            setRecentLowRatings(normalizeCategory(negative));
-        } catch (err) {
-            console.error("Failed to load degraded runs", err);
-        }
-    }, []);
+    }, [fetchRunSignals]);
 
     useEffect(() => {
         fetchDiagnostics(isDebug);
@@ -136,32 +266,20 @@ export default function Diagnostics() {
     const rawJsonSnapshot = toPrettyJson(data);
 
     // Apply client-side recency window filter.
-    // Runs without created_at are now excluded and totaled separately.
-    const windowCutoffMs = Date.now() - recencyWindowHours * 60 * 60 * 1000;
+    // Runs with missing/invalid timestamps are excluded and totaled separately.
+    const recencyReferenceMs = lastUpdatedAt ?? Date.now();
+    const windowCutoffMs = recencyReferenceMs - recencyWindowHours * 60 * 60 * 1000;
 
-    const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(() => {
-        let excludedCount = 0;
-        const filtered = recentFailures.filter((run) => {
-            if (!run.created_at) {
-                excludedCount++;
-                return false;
-            }
-            return new Date(run.created_at).getTime() >= windowCutoffMs;
-        });
-        return { filtered, excludedCount };
-    }, [recentFailures, windowCutoffMs]);
-
-    const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(() => {
-        let excludedCount = 0;
-        const filtered = recentLowRatings.filter((run) => {
-            if (!run.created_at) {
-                excludedCount++;
-                return false;
-            }
-            return new Date(run.created_at).getTime() >= windowCutoffMs;
-        });
-        return { filtered, excludedCount };
-    }, [recentLowRatings, windowCutoffMs]);
+    const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(
+        () => filterRunsByRecencyWindow(recentFailures, windowCutoffMs),
+        [recentFailures, windowCutoffMs]
+    );
+    const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(
+        () => filterRunsByRecencyWindow(recentLowRatings, windowCutoffMs),
+        [recentLowRatings, windowCutoffMs]
+    );
+    const totalExcludedRuns = excludedFailuresCount + excludedLowRatingsCount;
+    const showExcludedRunsNote = totalExcludedRuns > 0;
 
     const anomalies = getDiagnosticsAnomalies(data);
     const anomalyIds = new Set(anomalies.map((item) => item.id));
@@ -477,15 +595,15 @@ export default function Diagnostics() {
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
                                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                                    Runs needing attention ({recencyWindowHours >= 24 ? `last ${Math.round(recencyWindowHours / 24)} days` : `last ${recencyWindowHours}h`})
+                                    Degraded run signals ({getRecencyWindowLabel(recencyWindowHours)})
                                     {filterMode === "anomalies" && (
                                         <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
-                                            (Global status — non-anomaly derived)
+                                            (Context only; not anomaly-derived)
                                         </span>
                                     )}
                                 </h3>
                                 <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", color: "var(--muted)" }}>
-                                    Window:
+                                    Recency:
                                     <select
                                         data-testid="diagnostics-recency-window"
                                         value={recencyWindowHours}
@@ -500,46 +618,59 @@ export default function Diagnostics() {
                                             cursor: "pointer",
                                         }}
                                     >
-                                        <option value={1}>1h</option>
-                                        <option value={6}>6h</option>
-                                        <option value={24}>24h</option>
-                                        <option value={168}>7d</option>
+                                        <option value={1}>Last 1 hour</option>
+                                        <option value={6}>Last 6 hours</option>
+                                        <option value={24}>Last 24 hours</option>
+                                        <option value={168}>Last 7 days</option>
                                     </select>
                                 </label>
                             </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.
-                                {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
+                                Showing most recent {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).
+                                {showExcludedRunsNote && (
                                     <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
-                                        ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing timestamps)
+                                        ({totalExcludedRuns} runs excluded due to missing or invalid timestamps)
                                     </span>
                                 )}
                             </p>
-                            <div style={{ display: "grid", gap: "20px" }}>
-                                <DiagnosticsRunSignalSection
-                                    title="Recent failures"
-                                    runs={visibleFailures}
-                                    pillLabel="FAILED"
-                                    pillClass="bg-red-100 text-red-800"
-                                    emptyMessage="No recent failures found."
-                                    testId="diagnostics-failures-section"
-                                />
-
-                                <DiagnosticsRunSignalSection
-                                    title="Recent low ratings"
-                                    runs={visibleLowRatings}
-                                    pillLabel="LOW_RATING"
-                                    pillClass="bg-amber-100 text-amber-800"
-                                    emptyMessage="No recent low ratings found."
-                                    testId="diagnostics-low-ratings-section"
-                                />
-
-                                <div style={{ marginTop: "4px", textAlign: "right" }}>
-                                    <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
-                                        View Full History &rarr;
-                                    </Link>
+                            {runSignalsLoading ? (
+                                <div
+                                    data-testid="diagnostics-run-signals-loading"
+                                    style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-muted)", border: "1px solid var(--border-muted)" }}
+                                >
+                                    <LoadingState message="Loading degraded run signals..." />
                                 </div>
-                            </div>
+                            ) : (
+                                <div style={{ display: "grid", gap: "20px" }}>
+                                    <DiagnosticsRunSignalSection
+                                        title="System failures (FAILED)"
+                                        runs={visibleFailures}
+                                        pillLabel="FAILED"
+                                        pillClass="bg-red-100 text-red-800"
+                                        emptyMessage="No recent system failures found."
+                                        errorMessage={failedSignalsFetchError ? "Could not load recent failures." : undefined}
+                                        onRetry={failedSignalsFetchError ? fetchRunSignals : undefined}
+                                        testId="diagnostics-failures-section"
+                                    />
+
+                                    <DiagnosticsRunSignalSection
+                                        title="Operator feedback (DOWN)"
+                                        runs={visibleLowRatings}
+                                        pillLabel="LOW_RATING"
+                                        pillClass="bg-amber-100 text-amber-800"
+                                        emptyMessage="No recent low-rated runs found."
+                                        errorMessage={lowRatingsSignalsFetchError ? "Could not load recent low-rated runs." : undefined}
+                                        onRetry={lowRatingsSignalsFetchError ? fetchRunSignals : undefined}
+                                        testId="diagnostics-low-ratings-section"
+                                    />
+
+                                    <div style={{ marginTop: "4px", textAlign: "right" }}>
+                                        <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
+                                            View Full History &rarr;
+                                        </Link>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Raw Snapshot (Verbose only) */}

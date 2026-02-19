@@ -10,11 +10,13 @@ export interface RunContextInput extends RunIdentifierInput {
 }
 
 /**
- * Builds a human-readable, copy-pasteable context bundle for a run.
- * Useful for sharing with support, filing bugs, or attaching to incident reports.
+ * Builds a human-readable context bundle for operators/support workflows.
+ * This output is intentionally optimized for copy/paste in tickets and chats.
  *
  * This text bundle intentionally differs from `buildCopyBundlePayload`, which emits
  * a structured JSON payload for AgentChat export and downstream parsing.
+ * Stability contract: the text header carries `Bundle-Version`, while schemaed JSON
+ * versioning remains at `schema_version` in `buildCopyBundlePayload`.
  */
 export function buildRunContextBundle(input: RunContextInput): string {
     const lines: string[] = ["=== Run Context Bundle ===", "Bundle-Version: 1"];

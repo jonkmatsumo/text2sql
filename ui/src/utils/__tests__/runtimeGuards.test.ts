@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isInteractionArray, isJobStatusResponse, isRunDiagnosticsResponse } from "../runtimeGuards";
+import { isInteractionArray, isJobStatusResponse, isOpsJobResponseArray, isRunDiagnosticsResponse } from "../runtimeGuards";
 
 describe("runtimeGuards", () => {
     describe("isInteractionArray", () => {
@@ -58,6 +58,28 @@ describe("runtimeGuards", () => {
 
         it("returns false if enabled_flags is missing", () => {
             expect(isRunDiagnosticsResponse({ diagnostics_schema_version: 1 })).toBe(false);
+        });
+    });
+
+    describe("isOpsJobResponseArray", () => {
+        it("returns true for valid jobs array", () => {
+            expect(isOpsJobResponseArray([
+                {
+                    id: "job-1",
+                    job_type: "SCHEMA_HYDRATION",
+                    status: "RUNNING",
+                    started_at: new Date().toISOString(),
+                },
+            ])).toBe(true);
+        });
+
+        it("returns true for an empty jobs array", () => {
+            expect(isOpsJobResponseArray([])).toBe(true);
+        });
+
+        it("returns false for malformed jobs array", () => {
+            expect(isOpsJobResponseArray([{ id: "job-1" }])).toBe(false);
+            expect(isOpsJobResponseArray({ items: [] })).toBe(false);
         });
     });
 });

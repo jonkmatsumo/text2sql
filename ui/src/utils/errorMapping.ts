@@ -155,7 +155,7 @@ const ERROR_MAP: Record<string, ErrorMapping> = {
     actions: [],
     description: "A temporary error occurred in the system. Often, retrying the operation will resolve this.",
     guidanceActions: [
-      { label: "Retry Operation", href: "#", primary: true },
+      { label: "Retry Operation", href: "/admin/diagnostics", primary: true },
     ],
   },
   internal: {

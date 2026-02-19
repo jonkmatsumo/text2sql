@@ -2,7 +2,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import RunHistory from "./RunHistory";
-import { OpsService } from "../api";
+import { ApiError, OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
@@ -74,7 +74,7 @@ describe("RunHistory search scope messaging", () => {
         renderRunHistory("/admin/runs?q=missing");
 
         await waitFor(() => {
-            expect(screen.getByText("No matches on this page. Try Next to search older runs.")).toBeInTheDocument();
+            expect(screen.getByText("No matches found on this page. Try Next to search older runs.")).toBeInTheDocument();
         });
 
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
@@ -85,19 +85,18 @@ describe("RunHistory search scope messaging", () => {
         );
     });
 
-    it("shows the page-scoped disclaimer while the search input is focused", async () => {
-        renderRunHistory();
-        const searchInput = await screen.findByLabelText("Search runs by query or ID");
+    it("shows page-scoped disclaimer and inline label when query is set", async () => {
+        renderRunHistory("/admin/runs?q=top");
 
-        fireEvent.focus(searchInput);
+        await waitFor(() => {
+            expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("top");
+        });
         const disclaimer = screen.getByTestId("runhistory-search-scope-note");
         expect(disclaimer).toHaveTextContent(/Search is limited to this page/i);
         expect(disclaimer).toHaveTextContent(/Results only include runs already loaded/i);
-
-        fireEvent.blur(searchInput);
-        await waitFor(() => {
-            expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
-        });
+        expect(screen.getByTestId("runhistory-search-scope-inline-label")).toHaveTextContent(
+            "Search is limited to this page."
+        );
     });
 
     it("shows 'Search All' disabled button with explanatory tooltip", async () => {
@@ -131,6 +130,19 @@ describe("RunHistory search scope messaging", () => {
         await waitFor(() => {
             expect(screen.queryByTestId("runhistory-more-runs-hint")).not.toBeInTheDocument();
         });
+    });
+
+    it("clears search and resets offset when Clear is clicked", async () => {
+        renderRunHistory("/admin/runs?offset=100&q=missing");
+
+        const clearSearchButton = await screen.findByRole("button", { name: "Clear search query" });
+        fireEvent.click(clearSearchButton);
+
+        await waitFor(() => {
+            expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("");
+        });
+        expect(screen.getByTestId("location-search")).not.toHaveTextContent("q=");
+        expect(screen.getByTestId("location-search")).not.toHaveTextContent("offset=");
     });
 
     it("does not clear all filters when Escape is pressed in the search input", async () => {
@@ -167,13 +179,49 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
 
-    it("shows 'No results' when page is empty at offset 0", async () => {
+    it("closes shortcuts modal before clearing filters when Escape is pressed", async () => {
+        renderRunHistory("/admin/runs?q=missing&status=FAILED");
+
+        await screen.findByRole("button", { name: "Clear all filters" });
+        fireEvent.click(screen.getByRole("button", { name: "Show keyboard shortcuts" }));
+        expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+
+        await act(async () => {
+            fireEvent.keyDown(window, { key: "Escape" });
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+        });
+        expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("missing");
+        expect(screen.getByRole("button", { name: "Clear all filters" })).toBeInTheDocument();
+    });
+
+    it("shows deterministic empty-page range copy at offset 0", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] });
         renderRunHistory("/admin/runs?offset=0");
 
         await waitFor(() => {
-            expect(screen.getByText(/No results/i)).toBeInTheDocument();
+            expect(screen.getByText("No results on this page")).toBeInTheDocument();
         });
+    });
+
+    it("renders Details links with whitespace-free run details routes", async () => {
+        renderRunHistory();
+
+        const detailsLink = await screen.findByRole("link", { name: "View details for run run-1" });
+        expect(detailsLink).toHaveAttribute("href", "/admin/runs/run-1");
+    });
+
+    it("keeps Next disabled when page is empty at non-zero offset even if has_more=true", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [], has_more: true });
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(screen.getByText("No results on this page")).toBeInTheDocument();
+        });
+
+        expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
     });
 
     it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {
@@ -219,24 +267,30 @@ describe("RunHistory search scope messaging", () => {
         expect(nextButton).not.toBeDisabled();
     });
 
-    it("renders empty state when listRuns payload is malformed", async () => {
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
-        (OpsService.listRuns as any).mockResolvedValueOnce({});
+    it("shows an error surface and toast when listRuns response is malformed", async () => {
+        (OpsService.listRuns as any).mockRejectedValueOnce(
+            new ApiError(
+                "Received unexpected response from listRuns",
+                200,
+                "MALFORMED_RESPONSE",
+            )
+        );
         renderRunHistory();
 
         await waitFor(() => {
-            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+            expect(screen.getByTestId("runhistory-load-error")).toHaveTextContent(
+                "Could not load run history. Refresh to retry."
+            );
         });
 
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-            "Operator API contract mismatch (RunHistory.listRuns)",
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Received unexpected response from listRuns",
+            "error",
             expect.objectContaining({
-                endpoint: "RunHistory.listRuns",
-                summary: "Expected result.runs to be an array",
+                dedupeKey: expect.stringContaining("MALFORMED_RESPONSE"),
             })
         );
-
-        consoleErrorSpy.mockRestore();
+        expect(screen.queryByText("No runs recorded yet.")).not.toBeInTheDocument();
     });
 
     it("auto-redirects to offset 0 if page is empty at non-zero offset (Empty Page Recovery)", async () => {
