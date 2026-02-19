@@ -115,6 +115,20 @@ describe("Cancellation idempotency", () => {
         expect(tryCancel("job-2")).toBe(true);
         expect(cancellingIds.has("job-2")).toBe(true);
     });
+
+    it("prevents multiple confirmation dialogs for the same job", () => {
+        const confirmingIds = new Set<string>();
+        const tryOpenConfirm = (jobId: string): boolean => {
+            if (confirmingIds.has(jobId)) return false;
+            confirmingIds.add(jobId);
+            return true;
+        };
+
+        expect(tryOpenConfirm("job-1")).toBe(true);
+        expect(tryOpenConfirm("job-1")).toBe(false);
+        confirmingIds.delete("job-1");
+        expect(tryOpenConfirm("job-1")).toBe(true);
+    });
 });
 
 describe("Cancellation failure paths", () => {
@@ -167,6 +181,23 @@ describe("Cancellation failure paths", () => {
 
         handleCancelError({ status: 500, message: "Internal server error" });
         expect(showToast).toHaveBeenCalledWith("Internal server error", "error");
+    });
+
+    it("RETAINS cancelling state if cancel request succeeds (waiting for polling)", () => {
+        const cancellingIds = new Set(["job-1"]);
+        // Simulate finally block CHANGE: we no longer blindly delete
+        const handleCancelFinally = (jobId: string, success: boolean) => {
+            if (!success) {
+                cancellingIds.delete(jobId);
+            }
+            // If success, we wait for reconciliation!
+        };
+
+        handleCancelFinally("job-1", true);
+        expect(cancellingIds.has("job-1")).toBe(true); // Should still be there!
+
+        handleCancelFinally("job-2", false); // Failed request
+        expect(cancellingIds.has("job-2")).toBe(false); // Should be cleared
     });
 });
 describe("Polling terminality", () => {
