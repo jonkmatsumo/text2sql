@@ -8,6 +8,7 @@ import { useConfirmation } from "../hooks/useConfirmation";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { JOBS_DASHBOARD_PAGE_SIZE } from "../constants/pagination";
+import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
 
 export const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
@@ -112,11 +113,24 @@ export default function JobsDashboard() {
         return () => clearInterval(interval);
     }, [fetchJobs]);
 
+    const clearFilters = useCallback(() => {
+        setFilterType("");
+        setFilterStatus("");
+    }, []);
+
+    const handleEscapeShortcut = useCallback(() => {
+        handleOperatorEscapeShortcut({
+            isModalOpen: shortcutsOpen,
+            closeModal: () => setShortcutsOpen(false),
+            clearFilters,
+        });
+    }, [clearFilters, shortcutsOpen]);
+
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchJobs },
-        { key: "Escape", label: "Clear filters", handler: () => { setFilterType(""); setFilterStatus(""); }, allowInInput: true },
+        { key: "Escape", label: "Clear filters", handler: handleEscapeShortcut, allowInInput: true },
         { key: "?", label: "Show shortcuts", handler: () => setShortcutsOpen(true) },
-    ], [fetchJobs]);
+    ], [fetchJobs, handleEscapeShortcut]);
 
     useOperatorShortcuts({ shortcuts: SHORTCUTS, disabled: shortcutsOpen });
 

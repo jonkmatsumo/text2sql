@@ -33,6 +33,66 @@ describe("JobsDashboard Cancellation", () => {
         } as any);
     });
 
+    it("blurs focused filters on first Escape, then clears filters on second Escape", async () => {
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+
+        const typeFilter = screen.getByDisplayValue("All Types");
+        const statusFilter = screen.getByDisplayValue("All Statuses");
+
+        fireEvent.change(typeFilter, { target: { value: "SCHEMA_HYDRATION" } });
+        fireEvent.change(statusFilter, { target: { value: "RUNNING" } });
+
+        expect(typeFilter).toHaveValue("SCHEMA_HYDRATION");
+        expect(statusFilter).toHaveValue("RUNNING");
+
+        typeFilter.focus();
+        expect(typeFilter).toHaveFocus();
+
+        fireEvent.keyDown(window, { key: "Escape" });
+        expect(typeFilter).not.toHaveFocus();
+        expect(typeFilter).toHaveValue("SCHEMA_HYDRATION");
+        expect(statusFilter).toHaveValue("RUNNING");
+
+        fireEvent.keyDown(window, { key: "Escape" });
+
+        await waitFor(() => {
+            expect(typeFilter).toHaveValue("");
+            expect(statusFilter).toHaveValue("");
+        });
+    });
+
+    it("closes keyboard shortcuts modal before clearing filters on Escape", async () => {
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("SCHEMA_HYDRATION");
+
+        const typeFilter = screen.getByDisplayValue("All Types");
+        const statusFilter = screen.getByDisplayValue("All Statuses");
+        fireEvent.change(typeFilter, { target: { value: "SCHEMA_HYDRATION" } });
+        fireEvent.change(statusFilter, { target: { value: "RUNNING" } });
+
+        fireEvent.click(screen.getByRole("button", { name: "Show keyboard shortcuts" }));
+        expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+
+        fireEvent.keyDown(window, { key: "Escape" });
+        await waitFor(() => {
+            expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+        });
+
+        expect(typeFilter).toHaveValue("SCHEMA_HYDRATION");
+        expect(statusFilter).toHaveValue("RUNNING");
+    });
+
     it("triggers cancellation and shows optimistic update", async () => {
         let resolveCancel: (value: any) => void;
         const cancelPromise = new Promise((resolve) => {

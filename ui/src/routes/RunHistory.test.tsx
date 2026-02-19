@@ -179,6 +179,24 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
 
+    it("closes shortcuts modal before clearing filters when Escape is pressed", async () => {
+        renderRunHistory("/admin/runs?q=missing&status=FAILED");
+
+        await screen.findByRole("button", { name: "Clear all filters" });
+        fireEvent.click(screen.getByRole("button", { name: "Show keyboard shortcuts" }));
+        expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+
+        await act(async () => {
+            fireEvent.keyDown(window, { key: "Escape" });
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+        });
+        expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("missing");
+        expect(screen.getByRole("button", { name: "Clear all filters" })).toBeInTheDocument();
+    });
+
     it("shows deterministic empty-page range copy at offset 0", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] });
         renderRunHistory("/admin/runs?offset=0");

@@ -12,6 +12,7 @@ import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
 import { formatRunHistoryRange } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
+import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -155,12 +156,12 @@ export default function RunHistory() {
     }, [updateFilters]);
 
     const handleEscapeShortcut = useCallback(() => {
-        if (document.activeElement === searchInputRef.current) {
-            searchInputRef.current?.blur();
-            return;
-        }
-        clearFilters();
-    }, [clearFilters]);
+        handleOperatorEscapeShortcut({
+            isModalOpen: shortcutsOpen,
+            closeModal: () => setShortcutsOpen(false),
+            clearFilters,
+        });
+    }, [clearFilters, shortcutsOpen]);
 
     const SHORTCUTS = useMemo(() => [
         { key: "r", label: "Refresh list", handler: fetchRuns },
