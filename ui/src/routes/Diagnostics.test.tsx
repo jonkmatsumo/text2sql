@@ -115,6 +115,7 @@ describe("Diagnostics Route", () => {
         await waitFor(() => {
             expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
         });
+        expect(screen.getByTestId("diagnostics-run-signals-loading")).toBeInTheDocument();
 
         expect((OpsService.listRuns as any).mock.calls[0]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"]);
         expect((OpsService.listRuns as any).mock.calls[1]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"]);
@@ -124,6 +125,34 @@ describe("Diagnostics Route", () => {
                 resolveFailed!({ runs: [] });
             });
         }
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("diagnostics-run-signals-loading")).not.toBeInTheDocument();
+        });
+    });
+
+    it("shows a single run-signals error surface when one degraded-run call rejects", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce({ runs: [] })
+            .mockRejectedValueOnce(new Error("degraded-runs-failed"));
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-run-signals-error")).toBeInTheDocument();
+        });
+
+        expect(screen.getByTestId("diagnostics-run-signals-error")).toHaveTextContent(
+            /Run signals are currently unavailable. Refresh to retry./i
+        );
+        expect(screen.queryByTestId("diagnostics-run-signals-loading")).not.toBeInTheDocument();
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Failed to load degraded runs",
+            expect.objectContaining({ low_ratings: expect.stringContaining("degraded-runs-failed") })
+        );
+        consoleErrorSpy.mockRestore();
     });
 
     it("keeps degraded runs with missing created_at from surfacing as most recent", async () => {

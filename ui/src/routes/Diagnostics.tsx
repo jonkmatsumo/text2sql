@@ -83,6 +83,8 @@ export default function Diagnostics() {
     const [error, setError] = useState<DiagnosticsError | null>(null);
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
+    const [runSignalsLoading, setRunSignalsLoading] = useState(false);
+    const [runSignalsError, setRunSignalsError] = useState<string | null>(null);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const [recencyWindowHours, setRecencyWindowHours] = useState<number>(DEFAULT_RECENCY_WINDOW_HOURS);
     const isFetchingRef = useRef(false);
@@ -94,10 +96,14 @@ export default function Diagnostics() {
         isFetchingRef.current = true;
         setLoading(true);
         setError(null);
+        setRunSignalsLoading(true);
+        setRunSignalsError(null);
+        let diagnosticsLoaded = false;
         try {
             const resp = await getDiagnostics(debug);
             setData(resp);
             setLastUpdatedAt(Date.now());
+            diagnosticsLoaded = true;
         } catch (err: unknown) {
             if (err && typeof err === "object") {
                 setError(err as DiagnosticsError);
@@ -106,15 +112,32 @@ export default function Diagnostics() {
             }
         } finally {
             setLoading(false);
+        }
+
+        if (!diagnosticsLoaded) {
+            setRunSignalsLoading(false);
             isFetchingRef.current = false;
+            return;
         }
 
         // Fetch degraded runs concurrently (failed + negatively rated)
         try {
-            const [failed, negative] = await Promise.all([
+            const [failedResult, negativeResult] = await Promise.allSettled([
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
             ]);
+
+            if (failedResult.status !== "fulfilled" || negativeResult.status !== "fulfilled") {
+                setRecentFailures([]);
+                setRecentLowRatings([]);
+                setRunSignalsError("Run signals are currently unavailable. Refresh to retry.");
+                console.error("Failed to load degraded runs", {
+                    failed: failedResult.status === "rejected" ? String(failedResult.reason) : undefined,
+                    low_ratings: negativeResult.status === "rejected" ? String(negativeResult.reason) : undefined,
+                });
+                return;
+            }
+
             const normalizeCategory = (result: ListRunsResponse) => {
                 const runs = result.runs;
                 const seenIds = new Set<string>();
@@ -140,10 +163,12 @@ export default function Diagnostics() {
                     .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
             };
 
-            setRecentFailures(normalizeCategory(failed));
-            setRecentLowRatings(normalizeCategory(negative));
-        } catch (err) {
-            console.error("Failed to load degraded runs", err);
+            setRecentFailures(normalizeCategory(failedResult.value));
+            setRecentLowRatings(normalizeCategory(negativeResult.value));
+            setRunSignalsError(null);
+        } finally {
+            setRunSignalsLoading(false);
+            isFetchingRef.current = false;
         }
     }, []);
 
@@ -539,31 +564,48 @@ export default function Diagnostics() {
                                     </span>
                                 )}
                             </p>
-                            <div style={{ display: "grid", gap: "20px" }}>
-                                <DiagnosticsRunSignalSection
-                                    title="System failures (FAILED)"
-                                    runs={visibleFailures}
-                                    pillLabel="FAILED"
-                                    pillClass="bg-red-100 text-red-800"
-                                    emptyMessage="No recent system failures found."
-                                    testId="diagnostics-failures-section"
-                                />
-
-                                <DiagnosticsRunSignalSection
-                                    title="Operator feedback (DOWN)"
-                                    runs={visibleLowRatings}
-                                    pillLabel="LOW_RATING"
-                                    pillClass="bg-amber-100 text-amber-800"
-                                    emptyMessage="No recent low-rated runs found."
-                                    testId="diagnostics-low-ratings-section"
-                                />
-
-                                <div style={{ marginTop: "4px", textAlign: "right" }}>
-                                    <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
-                                        View Full History &rarr;
-                                    </Link>
+                            {runSignalsLoading ? (
+                                <div
+                                    data-testid="diagnostics-run-signals-loading"
+                                    style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-muted)", border: "1px solid var(--border-muted)" }}
+                                >
+                                    <LoadingState message="Loading degraded run signals..." />
                                 </div>
-                            </div>
+                            ) : runSignalsError ? (
+                                <div
+                                    data-testid="diagnostics-run-signals-error"
+                                    role="status"
+                                    style={{ padding: "12px", borderRadius: "8px", background: "var(--surface-muted)", border: "1px solid var(--border-muted)", color: "var(--muted)" }}
+                                >
+                                    {runSignalsError}
+                                </div>
+                            ) : (
+                                <div style={{ display: "grid", gap: "20px" }}>
+                                    <DiagnosticsRunSignalSection
+                                        title="System failures (FAILED)"
+                                        runs={visibleFailures}
+                                        pillLabel="FAILED"
+                                        pillClass="bg-red-100 text-red-800"
+                                        emptyMessage="No recent system failures found."
+                                        testId="diagnostics-failures-section"
+                                    />
+
+                                    <DiagnosticsRunSignalSection
+                                        title="Operator feedback (DOWN)"
+                                        runs={visibleLowRatings}
+                                        pillLabel="LOW_RATING"
+                                        pillClass="bg-amber-100 text-amber-800"
+                                        emptyMessage="No recent low-rated runs found."
+                                        testId="diagnostics-low-ratings-section"
+                                    />
+
+                                    <div style={{ marginTop: "4px", textAlign: "right" }}>
+                                        <Link to="/admin/runs" style={{ fontSize: "0.85rem", color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
+                                            View Full History &rarr;
+                                        </Link>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Raw Snapshot (Verbose only) */}
