@@ -43,6 +43,7 @@ import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import {
   isInteractionArray,
   isJobStatusResponse,
+  isOpsJobResponseArray,
   isRunDiagnosticsResponse,
   extractIdentifiers,
   summarizeUnexpectedResponse
@@ -488,6 +489,41 @@ export const AdminService = {
   }
 };
 
+interface RunsPage {
+  items: Interaction[];
+  has_more?: boolean;
+  total_count?: number;
+}
+
+function normalizeRunsPage(data: unknown): RunsPage | null {
+  if (isInteractionArray(data)) {
+    return { items: data };
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  const payload = data as Record<string, unknown>;
+  const itemsCandidate = Array.isArray(payload.items)
+    ? payload.items
+    : Array.isArray(payload.runs)
+      ? payload.runs
+      : Array.isArray(payload.data)
+        ? payload.data
+        : undefined;
+
+  if (itemsCandidate === undefined || !isInteractionArray(itemsCandidate)) {
+    return null;
+  }
+
+  return {
+    items: itemsCandidate,
+    has_more: typeof payload.has_more === "boolean" ? payload.has_more : undefined,
+    total_count: typeof payload.total_count === "number" ? payload.total_count : undefined,
+  };
+}
+
 export const OpsService = {
   async runRecommendations(
     query: string,
@@ -551,7 +587,7 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
-    const data = await response.json();
+    const data: unknown = await response.json();
     if (!isJobStatusResponse(data)) {
       const ids = extractIdentifiers(data);
       const summary = summarizeUnexpectedResponse(data);
@@ -588,7 +624,19 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to list jobs");
-    return response.json();
+    const data: unknown = await response.json();
+    if (!isOpsJobResponseArray(data)) {
+      const ids = extractIdentifiers(data);
+      const summary = summarizeUnexpectedResponse(data);
+      console.error("Operator API contract mismatch (listJobs)", { endpoint: "listJobs", ids, summary });
+      throw new ApiError(
+        `Received unexpected response from listJobs${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        200,
+        "MALFORMED_RESPONSE",
+        { endpoint: "listJobs", ...ids }
+      );
+    }
+    return data;
   },
 
   // NOTE: This assumes default backend pagination is consistent with frontend RUN_HISTORY_PAGE_SIZE.
@@ -608,26 +656,14 @@ export const OpsService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
-    const data = await response.json();
-    if (isInteractionArray(data)) {
-      return { runs: data };
-    }
-
-    if (data && typeof data === "object" && !Array.isArray(data)) {
-      const payload = data as Record<string, unknown>;
-      const runsCandidate = Array.isArray(payload.runs)
-        ? payload.runs
-        : Array.isArray(payload.data)
-          ? payload.data
-          : undefined;
-
-      if (runsCandidate !== undefined && isInteractionArray(runsCandidate)) {
-        return {
-          runs: runsCandidate,
-          has_more: typeof payload.has_more === "boolean" ? payload.has_more : undefined,
-          total_count: typeof payload.total_count === "number" ? payload.total_count : undefined,
-        };
-      }
+    const data: unknown = await response.json();
+    const page = normalizeRunsPage(data);
+    if (page) {
+      return {
+        runs: page.items,
+        has_more: page.has_more,
+        total_count: page.total_count,
+      };
     }
 
     const ids = extractIdentifiers(data);

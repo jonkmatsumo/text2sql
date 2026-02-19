@@ -1,4 +1,4 @@
-import { Interaction, OpsJobStatus, JobStatusResponse } from "../types/admin";
+import { Interaction, OpsJobResponse, OpsJobStatus, JobStatusResponse } from "../types/admin";
 import { RunDiagnosticsResponse } from "../types/diagnostics";
 
 /**
@@ -47,6 +47,27 @@ export function isRunDiagnosticsResponse(value: unknown): value is RunDiagnostic
         v.enabled_flags &&
         typeof v.enabled_flags === "object"
     );
+}
+
+/**
+ * Lightweight runtime check for OpsJobResponse array payloads.
+ */
+export function isOpsJobResponseArray(value: unknown): value is OpsJobResponse[] {
+    if (!Array.isArray(value)) return false;
+    if (value.length === 0) return true;
+
+    return value.every((item) => {
+        const v = item as any;
+        return !!(
+            v &&
+            typeof v === "object" &&
+            typeof v.id === "string" &&
+            typeof v.job_type === "string" &&
+            typeof v.started_at === "string" &&
+            typeof v.status === "string" &&
+            ["PENDING", "RUNNING", "CANCELLING", "CANCELLED", "COMPLETED", "FAILED"].includes(v.status)
+        );
+    });
 }
 
 /**
