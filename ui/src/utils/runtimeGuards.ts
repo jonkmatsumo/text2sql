@@ -50,6 +50,19 @@ export function isRunDiagnosticsResponse(value: unknown): value is RunDiagnostic
 }
 
 /**
+ * Lightweight runtime check for InteractionListResponse.
+ */
+export function isInteractionListResponse(value: unknown): value is { data: Interaction[], has_more?: boolean } {
+    const v = value as any;
+    return !!(
+        v &&
+        typeof v === "object" &&
+        Array.isArray(v.data) &&
+        (v.has_more === undefined || typeof v.has_more === "boolean")
+    );
+}
+
+/**
  * Validates and extracts common identifiers from an unexpected response payload.
  */
 export function extractIdentifiers(value: unknown): Record<string, string> {

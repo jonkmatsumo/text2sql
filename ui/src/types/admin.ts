@@ -131,3 +131,8 @@ export interface SynthGenerateResponse {
     run_id: string;
     job_id: string;
 }
+
+export interface InteractionListResponse {
+    data: Interaction[];
+    has_more?: boolean;
+}

@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
 import { OpsService, getErrorMessage, ApiError } from "../api";
+import { isInteractionListResponse } from "../utils/runtimeGuards";
 import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
@@ -33,6 +34,7 @@ const PAGE_SCOPED_SEARCH_NOTE = "Search filters the current page. Use Next/Prev 
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
+    const [hasMore, setHasMore] = useState<boolean | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
@@ -85,14 +87,24 @@ export default function RunHistory() {
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
         try {
-            const data = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
+            const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
+            const data: Interaction[] = isInteractionListResponse(result) ? result.data : result;
+            const more = isInteractionListResponse(result) ? (result.has_more ?? null) : null;
+
+            // Empty page recovery: if we're at an offset > 0 and get no results, go back to 0
+            if (data.length === 0 && offset > 0) {
+                updateFilters({ offset: 0 });
+                return;
+            }
+
             const seenIds = new Set<string>();
-            const uniqueData = data.filter(run => {
+            const uniqueData = data.filter((run: Interaction) => {
                 if (seenIds.has(run.id)) return false;
                 seenIds.add(run.id);
                 return true;
             });
             setRuns(uniqueData);
+            setHasMore(more);
         } catch (err) {
             const message = getErrorMessage(err);
             const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
@@ -101,7 +113,7 @@ export default function RunHistory() {
         } finally {
             setIsLoading(false);
         }
-    }, [offset, statusFilter, thumbFilter, showToast]);
+    }, [offset, statusFilter, thumbFilter, showToast, limit, updateFilters]);
 
     useEffect(() => {
         fetchRuns();
@@ -304,7 +316,7 @@ export default function RunHistory() {
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
-                    disabled={runs.length < limit || isLoading}
+                    disabled={(hasMore !== null ? !hasMore : runs.length < limit) || isLoading}
                     aria-label="Next page"
                     title={searchQuery && runs.length < limit ? PAGE_SCOPED_SEARCH_NOTE : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"

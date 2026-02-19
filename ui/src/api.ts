@@ -30,6 +30,7 @@ import {
   SynthRunSummary,
   OpsJobResponse,
   JobStatusResponse,
+  InteractionListResponse,
 } from "./types/admin";
 import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
@@ -41,6 +42,7 @@ import {
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import {
   isInteractionArray,
+  isInteractionListResponse,
   isJobStatusResponse,
   isRunDiagnosticsResponse,
   extractIdentifiers,
@@ -591,7 +593,7 @@ export const OpsService = {
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"
-  ): Promise<Interaction[]> {
+  ): Promise<Interaction[] | InteractionListResponse> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),
@@ -603,7 +605,7 @@ export const OpsService = {
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
     const data = await response.json();
-    if (!isInteractionArray(data)) {
+    if (!isInteractionArray(data) && !isInteractionListResponse(data)) {
       const ids = extractIdentifiers(data);
       const summary = summarizeUnexpectedResponse(data);
       console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
