@@ -169,7 +169,7 @@ export default function SystemOperations() {
         setIsLoading(true);
         try {
             const job = await OpsService.hydrateSchema();
-            setActiveJobId(job.id);
+            setActiveJobId(job.job_id ?? null);
             showToast("Schema hydration started", "info");
         } catch (err: unknown) {
             showToast(getErrorMessage(err), "error");
@@ -182,7 +182,7 @@ export default function SystemOperations() {
         setIsLoading(true);
         try {
             const job = await OpsService.reindexCache();
-            setActiveJobId(job.id);
+            setActiveJobId(job.job_id ?? null);
             showToast("Cache re-indexing started", "info");
         } catch (err: unknown) {
             showToast(getErrorMessage(err), "error");

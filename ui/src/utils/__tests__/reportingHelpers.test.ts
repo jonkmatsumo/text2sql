@@ -36,7 +36,7 @@ describe("summarizeUnexpectedResponse", () => {
         const largeObj = { data: "x".repeat(100) };
         const summary = summarizeUnexpectedResponse(largeObj, 10);
         expect(summary).toContain("...");
-        expect(summary).toContain("[truncated]");
+        expect(summary).toContain("[truncated, total_size=");
         expect(summary.length).toBeLessThan(largeObj.data.length);
     });
 
