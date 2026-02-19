@@ -83,6 +83,47 @@ function filterRunsByRecencyWindow(runs: Interaction[], cutoffMs: number): Windo
     return { filtered, excludedCount };
 }
 
+function normalizeRunSignalCategory(result: ListRunsResponse): Interaction[] {
+    const runs = result.runs;
+    const seenIds = new Set<string>();
+    return runs
+        .filter((run) => {
+            if (seenIds.has(run.id)) return false;
+            seenIds.add(run.id);
+            return true;
+        })
+        .map((run) => ({
+            ...run,
+            user_nlq_text: run.user_nlq_text || "Unknown",
+            execution_status: run.execution_status || "UNKNOWN",
+        }))
+        .sort((a, b) => {
+            const tA = parseTimestampMs(a.created_at);
+            const tB = parseTimestampMs(b.created_at);
+            if (tA != null && tB != null && tA !== tB) return tB - tA;
+            if (tA == null && tB != null) return 1;
+            if (tA != null && tB == null) return -1;
+            return a.id.localeCompare(b.id);
+        })
+        .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
+}
+
+function getRunSignalsFailureCategory(reason: unknown): string {
+    if (reason && typeof reason === "object") {
+        const withCode = reason as { code?: unknown; name?: unknown };
+        if (typeof withCode.code === "string" && withCode.code.trim() !== "") {
+            return withCode.code.trim().slice(0, 64);
+        }
+        if (typeof withCode.name === "string" && withCode.name.trim() !== "") {
+            return withCode.name.trim().slice(0, 64);
+        }
+    }
+    if (typeof reason === "string" && reason.trim() !== "") {
+        return reason.trim().slice(0, 64);
+    }
+    return "UNKNOWN";
+}
+
 export default function Diagnostics() {
     const { show: showToast } = useToast();
     const {
@@ -104,83 +145,39 @@ export default function Diagnostics() {
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
     const [recencyWindowHours, setRecencyWindowHours] = useState<number>(DEFAULT_RECENCY_WINDOW_HOURS);
     const isFetchingRef = useRef(false);
+    const isRunSignalsFetchingRef = useRef(false);
 
-    const fetchDiagnostics = useCallback(async (debug = false) => {
-        if (isFetchingRef.current) {
+    const fetchRunSignals = useCallback(async () => {
+        if (isRunSignalsFetchingRef.current) {
             return;
         }
-        isFetchingRef.current = true;
-        setLoading(true);
-        setError(null);
+        isRunSignalsFetchingRef.current = true;
         setRunSignalsLoading(true);
         setFailedSignalsFetchError(false);
         setLowRatingsSignalsFetchError(false);
-        let diagnosticsLoaded = false;
-        try {
-            const resp = await getDiagnostics(debug);
-            setData(resp);
-            setLastUpdatedAt(Date.now());
-            diagnosticsLoaded = true;
-        } catch (err: unknown) {
-            if (err && typeof err === "object") {
-                setError(err as DiagnosticsError);
-            } else {
-                setError({ message: "Failed to load diagnostics" });
-            }
-        } finally {
-            setLoading(false);
-        }
 
-        if (!diagnosticsLoaded) {
-            setRunSignalsLoading(false);
-            isFetchingRef.current = false;
-            return;
-        }
-
-        // Fetch degraded runs concurrently (failed + negatively rated)
         try {
             const [failedResult, negativeResult] = await Promise.allSettled([
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
             ]);
 
-            const normalizeCategory = (result: ListRunsResponse) => {
-                const runs = result.runs;
-                const seenIds = new Set<string>();
-                return runs
-                    .filter((run) => {
-                        if (seenIds.has(run.id)) return false;
-                        seenIds.add(run.id);
-                        return true;
-                    })
-                    .map((run) => ({
-                        ...run,
-                        user_nlq_text: run.user_nlq_text || "Unknown",
-                        execution_status: run.execution_status || "UNKNOWN",
-                    }))
-                    .sort((a, b) => {
-                        const tA = parseTimestampMs(a.created_at);
-                        const tB = parseTimestampMs(b.created_at);
-                        if (tA != null && tB != null && tA !== tB) return tB - tA;
-                        if (tA == null && tB != null) return 1;
-                        if (tA != null && tB == null) return -1;
-                        return a.id.localeCompare(b.id);
-                    })
-                    .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
-            };
-
             if (failedResult.status === "fulfilled") {
-                setRecentFailures(normalizeCategory(failedResult.value));
+                setRecentFailures(normalizeRunSignalCategory(failedResult.value));
                 setFailedSignalsFetchError(false);
             } else {
                 const failedToast = "Failed to load failed run signals. Refresh to retry.";
+                const failedErrorCategory = getRunSignalsFailureCategory(failedResult.reason);
                 const failedDedupeKey = makeToastDedupeKey(
                     "diagnostics",
                     "RUN_SIGNALS_FETCH_FAILED",
                     failedToast,
                     {
                         surface: "Diagnostics.runSignals.failed",
-                        identifiers: { panel: "failed-runs" },
+                        identifiers: {
+                            panel: "failed-runs",
+                            error: failedErrorCategory,
+                        },
                     }
                 );
                 showToast(failedToast, "error", { dedupeKey: failedDedupeKey });
@@ -189,17 +186,21 @@ export default function Diagnostics() {
             }
 
             if (negativeResult.status === "fulfilled") {
-                setRecentLowRatings(normalizeCategory(negativeResult.value));
+                setRecentLowRatings(normalizeRunSignalCategory(negativeResult.value));
                 setLowRatingsSignalsFetchError(false);
             } else {
                 const lowRatingsToast = "Failed to load low-rated run signals. Refresh to retry.";
+                const lowRatingsErrorCategory = getRunSignalsFailureCategory(negativeResult.reason);
                 const lowRatingsDedupeKey = makeToastDedupeKey(
                     "diagnostics",
                     "RUN_SIGNALS_FETCH_FAILED",
                     lowRatingsToast,
                     {
                         surface: "Diagnostics.runSignals.lowRatings",
-                        identifiers: { panel: "low-ratings" },
+                        identifiers: {
+                            panel: "low-ratings",
+                            error: lowRatingsErrorCategory,
+                        },
                     }
                 );
                 showToast(lowRatingsToast, "error", { dedupeKey: lowRatingsDedupeKey });
@@ -226,9 +227,34 @@ export default function Diagnostics() {
             }
         } finally {
             setRunSignalsLoading(false);
-            isFetchingRef.current = false;
+            isRunSignalsFetchingRef.current = false;
         }
     }, [showToast]);
+
+    const fetchDiagnostics = useCallback(async (debug = false) => {
+        if (isFetchingRef.current) {
+            return;
+        }
+        isFetchingRef.current = true;
+        setLoading(true);
+        setError(null);
+        try {
+            const resp = await getDiagnostics(debug);
+            setData(resp);
+            setLastUpdatedAt(Date.now());
+            await fetchRunSignals();
+        } catch (err: unknown) {
+            if (err && typeof err === "object") {
+                setError(err as DiagnosticsError);
+            } else {
+                setError({ message: "Failed to load diagnostics" });
+            }
+            setRunSignalsLoading(false);
+        } finally {
+            setLoading(false);
+            isFetchingRef.current = false;
+        }
+    }, [fetchRunSignals]);
 
     useEffect(() => {
         fetchDiagnostics(isDebug);
@@ -621,7 +647,9 @@ export default function Diagnostics() {
                                         runs={visibleFailures}
                                         pillLabel="FAILED"
                                         pillClass="bg-red-100 text-red-800"
-                                        emptyMessage={failedSignalsFetchError ? "Could not load recent failures. Retry." : "No recent system failures found."}
+                                        emptyMessage="No recent system failures found."
+                                        errorMessage={failedSignalsFetchError ? "Could not load recent failures." : undefined}
+                                        onRetry={failedSignalsFetchError ? fetchRunSignals : undefined}
                                         testId="diagnostics-failures-section"
                                     />
 
@@ -630,7 +658,9 @@ export default function Diagnostics() {
                                         runs={visibleLowRatings}
                                         pillLabel="LOW_RATING"
                                         pillClass="bg-amber-100 text-amber-800"
-                                        emptyMessage={lowRatingsSignalsFetchError ? "Could not load recent low-rated runs. Retry." : "No recent low-rated runs found."}
+                                        emptyMessage="No recent low-rated runs found."
+                                        errorMessage={lowRatingsSignalsFetchError ? "Could not load recent low-rated runs." : undefined}
+                                        onRetry={lowRatingsSignalsFetchError ? fetchRunSignals : undefined}
                                         testId="diagnostics-low-ratings-section"
                                     />
 

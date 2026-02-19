@@ -162,7 +162,9 @@ describe("Diagnostics Route", () => {
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
-        expect(within(failuresSection).getByText(/Could not load recent failures\. Retry\./i)).toBeInTheDocument();
+        expect(within(failuresSection).getByText("Could not load recent failures.")).toBeInTheDocument();
+        expect(within(failuresSection).getByTestId("diagnostics-failures-section-retry")).toBeInTheDocument();
+        expect(within(failuresSection).queryByText("No recent system failures found.")).not.toBeInTheDocument();
         expect(within(lowRatingsSection).getByText("Low-rating run still visible")).toBeInTheDocument();
 
         expect(showToastMock).toHaveBeenCalledWith(
@@ -170,6 +172,13 @@ describe("Diagnostics Route", () => {
             "error",
             expect.objectContaining({
                 dedupeKey: expect.stringContaining("panel=failed-runs"),
+            })
+        );
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load failed run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("error=Error"),
             })
         );
         expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -212,13 +221,22 @@ describe("Diagnostics Route", () => {
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
         expect(within(failuresSection).getByText("Failure run still visible")).toBeInTheDocument();
-        expect(within(lowRatingsSection).getByText(/Could not load recent low-rated runs\. Retry\./i)).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByText("Could not load recent low-rated runs.")).toBeInTheDocument();
+        expect(within(lowRatingsSection).getByTestId("diagnostics-low-ratings-section-retry")).toBeInTheDocument();
+        expect(within(lowRatingsSection).queryByText("No recent low-rated runs found.")).not.toBeInTheDocument();
 
         expect(showToastMock).toHaveBeenCalledWith(
             "Failed to load low-rated run signals. Refresh to retry.",
             "error",
             expect.objectContaining({
                 dedupeKey: expect.stringContaining("panel=low-ratings"),
+            })
+        );
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Failed to load low-rated run signals. Refresh to retry.",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("error=Error"),
             })
         );
         consoleErrorSpy.mockRestore();
@@ -236,8 +254,8 @@ describe("Diagnostics Route", () => {
         await waitFor(() => {
             const failuresSection = screen.getByTestId("diagnostics-failures-section");
             const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
-            expect(within(failuresSection).getByText(/Could not load recent failures\. Retry\./i)).toBeInTheDocument();
-            expect(within(lowRatingsSection).getByText(/Could not load recent low-rated runs\. Retry\./i)).toBeInTheDocument();
+            expect(within(failuresSection).getByText("Could not load recent failures.")).toBeInTheDocument();
+            expect(within(lowRatingsSection).getByText("Could not load recent low-rated runs.")).toBeInTheDocument();
         });
 
         expect(showToastMock).toHaveBeenCalledTimes(2);
@@ -257,6 +275,64 @@ describe("Diagnostics Route", () => {
                 dedupeKey: expect.stringContaining("panel=low-ratings"),
             })
         );
+        consoleErrorSpy.mockRestore();
+    });
+
+    it("retries run-signal fetches from section-level retry controls without reloading diagnostics", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        const failedTs = new Date(Date.now() - 9 * 60 * 1000).toISOString();
+        const lowTs = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any)
+            .mockRejectedValueOnce(new Error("failed-runs-broken"))
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-initial",
+                        user_nlq_text: "Low-rating run from initial fetch",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-retry",
+                        user_nlq_text: "Failure run recovered",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failedTs,
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-retry",
+                        user_nlq_text: "Low-rating run after retry",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ],
+            });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-failures-section-retry")).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByTestId("diagnostics-failures-section-retry"));
+
+        await waitFor(() => {
+            expect(screen.getByText("Failure run recovered")).toBeInTheDocument();
+        });
+
+        expect(getDiagnostics).toHaveBeenCalledTimes(1);
+        expect(OpsService.listRuns).toHaveBeenCalledTimes(4);
         consoleErrorSpy.mockRestore();
     });
 
