@@ -30,7 +30,7 @@ import {
   SynthRunSummary,
   OpsJobResponse,
   JobStatusResponse,
-  InteractionListResponse,
+  ListRunsResponse,
 } from "./types/admin";
 import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
@@ -42,7 +42,6 @@ import {
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import {
   isInteractionArray,
-  isInteractionListResponse,
   isJobStatusResponse,
   isRunDiagnosticsResponse,
   extractIdentifiers,
@@ -593,7 +592,7 @@ export const OpsService = {
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"
-  ): Promise<Interaction[] | InteractionListResponse> {
+  ): Promise<ListRunsResponse> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),
@@ -605,18 +604,36 @@ export const OpsService = {
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
     const data = await response.json();
-    if (!isInteractionArray(data) && !isInteractionListResponse(data)) {
-      const ids = extractIdentifiers(data);
-      const summary = summarizeUnexpectedResponse(data);
-      console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
-      throw new ApiError(
-        `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
-        200,
-        "MALFORMED_RESPONSE",
-        { endpoint: "listRuns", ...ids }
-      );
+    if (isInteractionArray(data)) {
+      return { runs: data };
     }
-    return data;
+
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      const payload = data as Record<string, unknown>;
+      const runsCandidate = Array.isArray(payload.runs)
+        ? payload.runs
+        : Array.isArray(payload.data)
+          ? payload.data
+          : undefined;
+
+      if (runsCandidate !== undefined && isInteractionArray(runsCandidate)) {
+        return {
+          runs: runsCandidate,
+          has_more: typeof payload.has_more === "boolean" ? payload.has_more : undefined,
+          total_count: typeof payload.total_count === "number" ? payload.total_count : undefined,
+        };
+      }
+    }
+
+    const ids = extractIdentifiers(data);
+    const summary = summarizeUnexpectedResponse(data);
+    console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
+    throw new ApiError(
+      `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      200,
+      "MALFORMED_RESPONSE",
+      { endpoint: "listRuns", ...ids }
+    );
   },
 };
 

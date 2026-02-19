@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getDiagnostics, OpsService } from "../api";
 import { Link } from "react-router-dom";
-import { Interaction, InteractionListResponse } from "../types/admin";
+import { Interaction, ListRunsResponse } from "../types/admin";
 import { DiagnosticsResponse } from "../types/diagnostics";
 import { ErrorCard } from "../components/common/ErrorCard";
 import { LoadingState } from "../components/common/LoadingState";
 import { CopyButton } from "../components/artifacts/CopyButton";
+import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
 import { formatTimestamp, toPrettyJson } from "../utils/observability";
 import {
     DiagnosticsFilters,
@@ -65,7 +66,7 @@ export default function Diagnostics() {
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(24);
+    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(168); // Default 7d
     const isFetchingRef = useRef(false);
 
     const fetchDiagnostics = useCallback(async (debug = false) => {
@@ -90,17 +91,16 @@ export default function Diagnostics() {
             isFetchingRef.current = false;
         }
 
-        // Fetch degraded runs concurrently (failed + negatively rated)
+            // Fetch degraded runs concurrently (failed + negatively rated)
         try {
             const [failed, negative] = await Promise.all([
-                OpsService.listRuns(5, 0, "FAILED"),
-                OpsService.listRuns(5, 0, "All", "DOWN"),
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
+                OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"),
             ]);
-            const normalizeCategory = (result: Interaction[] | InteractionListResponse) => {
-                const runs = Array.isArray(result) ? result : result.data;
+            const normalizeCategory = (result: ListRunsResponse) => {
+                const runs = result.runs;
                 const seenIds = new Set<string>();
                 return runs
-                    .filter((run) => Boolean(run.created_at))
                     .filter((run) => {
                         if (seenIds.has(run.id)) return false;
                         seenIds.add(run.id);
@@ -111,8 +111,12 @@ export default function Diagnostics() {
                         user_nlq_text: run.user_nlq_text || "Unknown",
                         execution_status: run.execution_status || "UNKNOWN",
                     }))
-                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                    .slice(0, 5);
+                    .sort((a, b) => {
+                        const tA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                        const tB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                        return tB - tA;
+                    })
+                    .slice(0, DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE);
             };
 
             setRecentFailures(normalizeCategory(failed));
@@ -132,12 +136,33 @@ export default function Diagnostics() {
     const rawJsonSnapshot = toPrettyJson(data);
 
     // Apply client-side recency window filter.
-    // Runs without created_at are always included (labeled "unknown time" in the UI).
+    // Runs without created_at are now excluded and totaled separately.
     const windowCutoffMs = Date.now() - recencyWindowHours * 60 * 60 * 1000;
-    const applyRecencyFilter = (runs: Interaction[]) =>
-        runs.filter((run) => !run.created_at || new Date(run.created_at).getTime() >= windowCutoffMs);
-    const visibleFailures = applyRecencyFilter(recentFailures);
-    const visibleLowRatings = applyRecencyFilter(recentLowRatings);
+
+    const { filtered: visibleFailures, excludedCount: excludedFailuresCount } = useMemo(() => {
+        let excludedCount = 0;
+        const filtered = recentFailures.filter((run) => {
+            if (!run.created_at) {
+                excludedCount++;
+                return false;
+            }
+            return new Date(run.created_at).getTime() >= windowCutoffMs;
+        });
+        return { filtered, excludedCount };
+    }, [recentFailures, windowCutoffMs]);
+
+    const { filtered: visibleLowRatings, excludedCount: excludedLowRatingsCount } = useMemo(() => {
+        let excludedCount = 0;
+        const filtered = recentLowRatings.filter((run) => {
+            if (!run.created_at) {
+                excludedCount++;
+                return false;
+            }
+            return new Date(run.created_at).getTime() >= windowCutoffMs;
+        });
+        return { filtered, excludedCount };
+    }, [recentLowRatings, windowCutoffMs]);
+
     const anomalies = getDiagnosticsAnomalies(data);
     const anomalyIds = new Set(anomalies.map((item) => item.id));
     const diagnosticsStatus = getDiagnosticsStatus(data);
@@ -452,7 +477,7 @@ export default function Diagnostics() {
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
                                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                                    Recent Run Signals
+                                    Runs needing attention ({recencyWindowHours >= 24 ? `last ${Math.round(recencyWindowHours / 24)} days` : `last ${recencyWindowHours}h`})
                                     {filterMode === "anomalies" && (
                                         <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
                                             (Global status — non-anomaly derived)
@@ -483,7 +508,12 @@ export default function Diagnostics() {
                                 </label>
                             </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest 5 failures and 5 low-rated runs.
+                                Showing latest {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.
+                                {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
+                                    <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
+                                        ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing timestamps)
+                                    </span>
+                                )}
                             </p>
                             <div style={{ display: "grid", gap: "20px" }}>
                                 <DiagnosticsRunSignalSection

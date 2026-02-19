@@ -1,6 +1,6 @@
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import RunHistory from "./RunHistory";
 import { OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
@@ -36,19 +36,28 @@ function buildRuns(count: number) {
     }));
 }
 
+function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-search">{location.search}</div>;
+}
+
 function renderRunHistory(initialPath = "/admin/runs") {
     return render(
         <MemoryRouter initialEntries={[initialPath]}>
             <RunHistory />
+            <LocationProbe />
         </MemoryRouter>
     );
 }
 
 describe("RunHistory search scope messaging", () => {
+    let showToastMock: ReturnType<typeof vi.fn>;
+
     beforeEach(() => {
         vi.clearAllMocks();
-        vi.spyOn(OpsService, "listRuns").mockResolvedValue(mockRuns as any);
-        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: vi.fn() } as any);
+        showToastMock = vi.fn();
+        vi.spyOn(OpsService, "listRuns").mockResolvedValue({ runs: mockRuns } as any);
+        vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: showToastMock } as any);
     });
 
     it("hides the page-scoped search disclaimer when query is empty", async () => {
@@ -69,7 +78,10 @@ describe("RunHistory search scope messaging", () => {
         });
 
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
-            "Search filters the current page. Use Next/Prev to search older runs."
+            /Search is limited to this page/i
+        );
+        expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
+            /Results only include runs already loaded/i
         );
     });
 
@@ -78,13 +90,46 @@ describe("RunHistory search scope messaging", () => {
         const searchInput = await screen.findByLabelText("Search runs by query or ID");
 
         fireEvent.focus(searchInput);
-        expect(screen.getByTestId("runhistory-search-scope-note")).toHaveTextContent(
-            "Search filters the current page. Use Next/Prev to search older runs."
-        );
+        const disclaimer = screen.getByTestId("runhistory-search-scope-note");
+        expect(disclaimer).toHaveTextContent(/Search is limited to this page/i);
+        expect(disclaimer).toHaveTextContent(/Results only include runs already loaded/i);
 
         fireEvent.blur(searchInput);
         await waitFor(() => {
             expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
+        });
+    });
+
+    it("shows 'Search All' disabled button with explanatory tooltip", async () => {
+        renderRunHistory();
+        const searchAllBtn = screen.getByRole("button", { name: /Search All/i });
+        expect(searchAllBtn).toBeDisabled();
+        expect(searchAllBtn).toHaveAttribute("title", expect.stringMatching(/not yet supported by the backend/i));
+    });
+
+    it("shows 'more runs exist' hint when q is set and page is full", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            has_more: true
+        });
+        renderRunHistory("/admin/runs?q=test");
+
+        await waitFor(() => {
+            expect(screen.getByTestId("runhistory-more-runs-hint")).toHaveTextContent(
+                "More runs exist beyond this page; try Next."
+            );
+        });
+    });
+
+    it("hides 'more runs exist' hint when q is set but has_more is false", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            runs: buildRuns(5),
+            has_more: false
+        });
+        renderRunHistory("/admin/runs?q=test");
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("runhistory-more-runs-hint")).not.toBeInTheDocument();
         });
     });
 
@@ -123,7 +168,7 @@ describe("RunHistory search scope messaging", () => {
     });
 
     it("shows 'No results' when page is empty at offset 0", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce([]);
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] });
         renderRunHistory("/admin/runs?offset=0");
 
         await waitFor(() => {
@@ -132,18 +177,18 @@ describe("RunHistory search scope messaging", () => {
     });
 
     it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce(buildRuns(5)); // fewer than limit
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: buildRuns(5) }); // fewer than limit
         renderRunHistory("/admin/runs?q=test");
 
         const nextButton = await screen.findByRole("button", { name: "Next page" });
         expect(nextButton).toBeDisabled();
-        expect(nextButton).toHaveAttribute("title", "Search filters the current page. Use Next/Prev to search older runs.");
+        expect(nextButton).toHaveAttribute("title", expect.stringMatching(/Search is limited to this page/i));
     });
 
     it("respects has_more metadata for disabling Next button", async () => {
         // Return structured response with has_more: false
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE),
             has_more: false
         });
         renderRunHistory();
@@ -155,7 +200,7 @@ describe("RunHistory search scope messaging", () => {
     it("enables Next button when has_more is true even if results < limit", async () => {
         // This case is unlikely in real world but tests our logic
         (OpsService.listRuns as any).mockResolvedValueOnce({
-            data: buildRuns(5),
+            runs: buildRuns(5),
             has_more: true
         });
         renderRunHistory();
@@ -164,13 +209,67 @@ describe("RunHistory search scope messaging", () => {
         expect(nextButton).not.toBeDisabled();
     });
 
+    it("falls back to page-size heuristic when has_more is missing", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE)
+        });
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).not.toBeDisabled();
+    });
+
+    it("renders empty state when listRuns payload is malformed", async () => {
+        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+        (OpsService.listRuns as any).mockResolvedValueOnce({});
+        renderRunHistory();
+
+        await waitFor(() => {
+            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+        });
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+            "Operator API contract mismatch (RunHistory.listRuns)",
+            expect.objectContaining({
+                endpoint: "RunHistory.listRuns",
+                summary: "Expected result.runs to be an array",
+            })
+        );
+
+        consoleErrorSpy.mockRestore();
+    });
+
     it("auto-redirects to offset 0 if page is empty at non-zero offset (Empty Page Recovery)", async () => {
-        (OpsService.listRuns as any).mockResolvedValueOnce([]); // Empty
+        (OpsService.listRuns as any).mockResolvedValueOnce({ runs: [] }); // Empty
         renderRunHistory("/admin/runs?offset=50");
 
         await waitFor(() => {
             // Should have called listRuns again with offset 0
             expect(OpsService.listRuns).toHaveBeenLastCalledWith(RUN_HISTORY_PAGE_SIZE, 0, "All", "All");
         });
+    });
+
+    it("recovers offset deterministically for high-offset empty pages and shows one warning toast", async () => {
+        (OpsService.listRuns as any)
+            .mockResolvedValueOnce({ runs: [], has_more: false })
+            .mockResolvedValueOnce({ runs: buildRuns(3), has_more: false });
+
+        renderRunHistory("/admin/runs?offset=100");
+
+        await waitFor(() => {
+            expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
+        });
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([RUN_HISTORY_PAGE_SIZE, 100, "All", "All"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([RUN_HISTORY_PAGE_SIZE, 50, "All", "All"]);
+
+        await waitFor(() => {
+            expect(screen.getByTestId("location-search")).toHaveTextContent("offset=50");
+        });
+
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Requested page is out of range. Showing previous results.",
+            "warning"
+        );
+        expect(showToastMock).toHaveBeenCalledTimes(1);
     });
 });

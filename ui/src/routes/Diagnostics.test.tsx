@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import Diagnostics from "./Diagnostics";
 import { getDiagnostics, OpsService } from "../api";
 import { DIAGNOSTICS_SECTION_ARIA_LABEL } from "../constants/operatorUi";
+import { DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE } from "../constants/pagination";
 
 vi.mock("../api", () => ({
     getDiagnostics: vi.fn(),
@@ -60,7 +61,7 @@ function DiagnosticsRerenderHarness({ initialPath }: { initialPath: string }) {
 describe("Diagnostics Route", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        (OpsService.listRuns as any).mockResolvedValue([]);
+        (OpsService.listRuns as any).mockResolvedValue({ runs: [] });
     });
 
     it("renders loading state initially", async () => {
@@ -100,14 +101,14 @@ describe("Diagnostics Route", () => {
     });
 
     it("requests degraded runs concurrently", async () => {
-        let resolveFailed: ((value: any[]) => void) | undefined;
-        const failedPromise = new Promise<any[]>((resolve) => {
+        let resolveFailed: ((value: any) => void) | undefined;
+        const failedPromise = new Promise<any>((resolve) => {
             resolveFailed = resolve;
         });
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
             .mockImplementationOnce(() => failedPromise)
-            .mockImplementationOnce(() => Promise.resolve([]));
+            .mockImplementationOnce(() => Promise.resolve({ runs: [] }));
 
         renderDiagnostics();
 
@@ -115,12 +116,12 @@ describe("Diagnostics Route", () => {
             expect(OpsService.listRuns).toHaveBeenCalledTimes(2);
         });
 
-        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([5, 0, "FAILED"]);
-        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([5, 0, "All", "DOWN"]);
+        expect((OpsService.listRuns as any).mock.calls[0]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"]);
+        expect((OpsService.listRuns as any).mock.calls[1]).toEqual([DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "All", "DOWN"]);
 
         if (resolveFailed) {
             await act(async () => {
-                resolveFailed!([]);
+                resolveFailed!({ runs: [] });
             });
         }
     });
@@ -130,7 +131,7 @@ describe("Diagnostics Route", () => {
         const recentTs2 = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1h ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "missing-date",
                     user_nlq_text: "Run without timestamp",
@@ -144,8 +145,8 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: recentTs1,
                 },
-            ])
-            .mockResolvedValueOnce([
+            ] })
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "newer-run",
                     user_nlq_text: "Newest degraded run",
@@ -153,7 +154,7 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: recentTs2,
                 },
-            ]);
+            ] });
 
         renderDiagnostics();
 
@@ -165,38 +166,12 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
     });
 
-    it("shows 'unknown time' label for runs with missing created_at when included via recency window", async () => {
-        const recentTs = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30m ago
-        (getDiagnostics as any).mockResolvedValue(mockData);
-        (OpsService.listRuns as any)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([
-                {
-                    id: "no-ts-run",
-                    user_nlq_text: "Query with no timestamp",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: recentTs,
-                },
-            ]);
-
-        renderDiagnostics();
-
-        await waitFor(() => {
-            expect(screen.getByText("Query with no timestamp")).toBeInTheDocument();
-        });
-
-        // Relative time badge should render without crashing
-        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
-        expect(within(lowRatingsSection).getByText("Query with no timestamp")).toBeInTheDocument();
-    });
-
     it("renders failures and low ratings in separate sections", async () => {
         const failTs = new Date(Date.now() - 5 * 60 * 1000).toISOString();  // 5m ago
         const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "failed-1",
                     user_nlq_text: "Failure query",
@@ -204,8 +179,8 @@ describe("Diagnostics Route", () => {
                     thumb: "None",
                     created_at: failTs,
                 },
-            ])
-            .mockResolvedValueOnce([
+            ] })
+            .mockResolvedValueOnce({ runs: [
                 {
                     id: "low-1",
                     user_nlq_text: "Low rating query",
@@ -213,7 +188,7 @@ describe("Diagnostics Route", () => {
                     thumb: "DOWN",
                     created_at: lowTs,
                 },
-            ]);
+            ] });
 
         renderDiagnostics();
 
@@ -221,7 +196,11 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failures")).toBeInTheDocument();
             expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
         });
-        expect(screen.getByText("Showing latest 5 failures and 5 low-rated runs.")).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                `Showing latest ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.`
+            )
+        ).toBeInTheDocument();
 
         const failuresSection = screen.getByTestId("diagnostics-failures-section");
         const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
@@ -232,7 +211,7 @@ describe("Diagnostics Route", () => {
         expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
     });
 
-    it("renders recency window dropdown with default 24h selection", async () => {
+    it("renders recency window dropdown with default 7d (168h) selection", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         renderDiagnostics();
 
@@ -240,7 +219,8 @@ describe("Diagnostics Route", () => {
             expect(screen.getByTestId("diagnostics-recency-window")).toBeInTheDocument();
         });
 
-        expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("24");
+        expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("168");
+        expect(screen.getByText(/Runs needing attention \(last 7 days\)/i)).toBeInTheDocument();
     });
 
     it("client-side recency filter excludes runs older than selected window", async () => {
@@ -250,11 +230,11 @@ describe("Diagnostics Route", () => {
 
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce([
+            .mockResolvedValueOnce({ runs: [
                 { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
                 { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
-            ])
-            .mockResolvedValueOnce([]);
+            ] })
+            .mockResolvedValueOnce({ runs: [] });
 
         renderDiagnostics();
 
@@ -262,13 +242,44 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failure")).toBeInTheDocument();
         });
 
-        // Both visible under default 24h window (recent is 30m, old is 48h — old should be excluded)
-        expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
-        expect(screen.getByText("Recent failure")).toBeInTheDocument();
-
-        // Switching to 7d window should show both
-        fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "168" } });
+        // Both visible under default 7d window (48h < 168h)
         expect(screen.getByText("Old failure")).toBeInTheDocument();
+
+        // Switching to 1h window should hide both (since both are older than 1h, actually 30m is within 1h)
+        // Switch to 1h window
+        fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "1" } });
+        expect(screen.getByText("Recent failure")).toBeInTheDocument();
+        expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
+        expect(screen.getByText(/last 1h/i)).toBeInTheDocument();
+    });
+
+    it("excludes runs with missing created_at and shows count in excluded note", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
+            if (status === "FAILED") {
+                return Promise.resolve({ runs: [
+                    { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
+                ] });
+            }
+            if (thumb === "DOWN") {
+                return Promise.resolve({ runs: [
+                    { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
+                ] });
+            }
+            return Promise.resolve({ runs: [] });
+        });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-excluded-note")).toBeInTheDocument();
+        });
+
+        const note = screen.getByTestId("diagnostics-excluded-note");
+        expect(within(note).getByText(/2 runs excluded due to missing timestamps/i)).toBeInTheDocument();
+
+        expect(screen.queryByText("Query with no timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Low rating no timestamp")).not.toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {
