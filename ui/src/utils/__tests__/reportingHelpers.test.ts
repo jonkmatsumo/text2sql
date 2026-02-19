@@ -67,10 +67,10 @@ describe("buildContractMismatchReport", () => {
         const report = buildContractMismatchReport("OpsService.listRuns", {
             trace_id: "trace-1",
             runs: [{ id: "run-1" }, { id: "run-2" }, { id: "run-3" }],
-        }, { maxArrayItems: 1, maxChars: 1000 });
+        }, undefined, { maxArrayItems: 1, maxChars: 1000 });
 
         expect(report.surface).toBe("OpsService.listRuns");
         expect(report.ids).toEqual({ trace_id: "trace-1" });
-        expect(report.summary).toContain("[+2 more items]");
+        expect(report.response_preview).toContain("[+2 more items]");
     });
 });
