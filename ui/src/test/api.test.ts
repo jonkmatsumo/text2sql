@@ -103,6 +103,16 @@ describe("API Client", () => {
             expect(result).toEqual(mockResponse);
         });
 
+        it("cancelJob should throw MALFORMED_RESPONSE if backend returns unexpected shape", async () => {
+            const malformedResponse = { status: "cancelled" }; // Old shape
+            (global.fetch as Mock).mockResolvedValue({
+                ok: true,
+                json: async () => malformedResponse,
+            });
+
+            await expect(OpsService.cancelJob("test-id")).rejects.toThrow(/Received unexpected response from cancelJob/);
+        });
+
         it("cancelJob should throw error on failure", async () => {
             (global.fetch as Mock).mockResolvedValue({
                 ok: false,

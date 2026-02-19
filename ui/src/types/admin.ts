@@ -99,6 +99,10 @@ export interface JobStatusResponse {
     result?: Record<string, unknown>;
 }
 
+export interface CancelJobResponse {
+    success: boolean;
+}
+
 export interface SynthRunSummary {
     id: string;
     started_at: string;
