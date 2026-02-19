@@ -93,7 +93,7 @@ export default function RunHistory() {
             });
             setRuns(uniqueData);
         } catch (err) {
-            showToast(getErrorMessage(err), "error");
+            showToast(getErrorMessage(err), "error", { dedupeKey: "run-history-fetch-error" });
         } finally {
             setIsLoading(false);
         }

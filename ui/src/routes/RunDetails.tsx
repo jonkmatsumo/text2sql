@@ -25,7 +25,7 @@ export default function RunDetails() {
                 setDiagnostics(diag);
             }
         } catch (err) {
-            showToast(getErrorMessage(err), "error");
+            showToast(getErrorMessage(err), "error", { dedupeKey: `run-details-${runId}` });
         } finally {
             setIsLoading(false);
         }

@@ -7,11 +7,17 @@ export interface Toast {
   message: string;
   type: ToastType;
   duration: number;
+  dedupeKey?: string;
+}
+
+export interface ToastOptions {
+  duration?: number;
+  dedupeKey?: string;
 }
 
 export interface ToastContextValue {
   toasts: Toast[];
-  show: (message: string, type: ToastType, duration?: number) => string;
+  show: (message: string, type: ToastType, options?: number | ToastOptions) => string;
   dismiss: (id: string) => void;
 }
 
@@ -29,9 +35,16 @@ export function ToastProvider({ children }: ToastProviderProps) {
   }, []);
 
   const show = useCallback(
-    (message: string, type: ToastType, duration: number = 4000): string => {
+    (message: string, type: ToastType, options?: number | ToastOptions): string => {
+      const duration = typeof options === "number" ? options : options?.duration ?? 4000;
+      const dedupeKey = typeof options === "object" ? options?.dedupeKey : undefined;
+
+      if (dedupeKey && toasts.some((t) => t.dedupeKey === dedupeKey)) {
+        return "";
+      }
+
       const id = crypto.randomUUID();
-      const toast: Toast = { id, message, type, duration };
+      const toast: Toast = { id, message, type, duration, dedupeKey };
 
       setToasts((prev) => [...prev, toast]);
 
@@ -41,7 +54,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
 
       return id;
     },
-    [dismiss]
+    [dismiss, toasts]
   );
 
   return (
