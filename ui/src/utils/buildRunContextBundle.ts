@@ -1,27 +1,12 @@
-export interface RunContextInput {
-    runId?: string;
-    traceId?: string;
-    requestId?: string;
-    interactionId?: string;
+import { buildRunIdentifierBlock, RunIdentifierInput } from "./copyBundles";
+
+export interface RunContextInput extends RunIdentifierInput {
     userQuery?: string;
     generatedSql?: string;
     validationStatus?: string;
     validationErrors?: string[];
     executionStatus?: string;
     isComplete?: boolean;
-    environment?: string;
-}
-
-/**
- * Shared identifier block builder for consistency across different bundle types (text/JSON).
- */
-export function buildIdentifierBlock(input: RunContextInput): Record<string, string> {
-    const block: Record<string, string> = {};
-    if (input.runId) block["Run ID"] = input.runId;
-    if (input.traceId) block["Trace ID"] = input.traceId;
-    if (input.interactionId) block["Interaction ID"] = input.interactionId;
-    if (input.requestId) block["Request ID"] = input.requestId;
-    return block;
 }
 
 /**
@@ -34,7 +19,7 @@ export function buildIdentifierBlock(input: RunContextInput): Record<string, str
 export function buildRunContextBundle(input: RunContextInput): string {
     const lines: string[] = ["=== Run Context Bundle ===", "Bundle-Version: 1"];
 
-    const identifiers = buildIdentifierBlock(input);
+    const identifiers = buildRunIdentifierBlock(input);
     Object.entries(identifiers).forEach(([key, value]) => {
         lines.push(`${key.padEnd(16)}: ${value}`);
     });
