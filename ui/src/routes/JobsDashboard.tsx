@@ -9,6 +9,7 @@ import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { ConfirmationDialog } from "../components/common/ConfirmationDialog";
 import { JOBS_DASHBOARD_PAGE_SIZE } from "../constants/pagination";
 import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 
 export const TERMINAL_STATUSES = new Set<OpsJobStatus>(["CANCELLED", "COMPLETED", "FAILED"]);
 
@@ -73,7 +74,9 @@ export default function JobsDashboard() {
                 for (const job of data) {
                     if (currentCancelling.has(job.id) && TERMINAL_STATUSES.has(job.status)) {
                         resolved.push(job.id);
-                        showToast(`Job ${job.id.slice(0, 8)} reached terminal state: ${job.status}`, "success");
+                        const toastMsg = `Job ${job.id.slice(0, 8)} reached terminal state: ${job.status}`;
+                        const dedupeKey = makeToastDedupeKey("jobs-dashboard", "JOB_TERMINAL", toastMsg, { identifiers: { jobId: job.id, status: job.status } });
+                        showToast(toastMsg, "success", { dedupeKey });
                     }
                 }
                 if (resolved.length > 0) {
@@ -101,7 +104,9 @@ export default function JobsDashboard() {
                 return changed ? next : prev;
             });
         } catch (err) {
-            showToast("Failed to load jobs", "error");
+            const toastMsg = "Failed to load jobs";
+            const dedupeKey = makeToastDedupeKey("jobs-dashboard", "LOAD_FAILED", toastMsg);
+            showToast(toastMsg, "error", { dedupeKey });
         } finally {
             if (isMountedRef.current) {
                 setIsLoading(false);
@@ -159,7 +164,10 @@ export default function JobsDashboard() {
                         next.delete(jobId);
                         return next;
                     });
-                    showToast(`Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`, "success");
+                    const toastMsg = `Job ${jobId.slice(0, 8)} reached terminal state: ${job.status}`;
+                    showToast(toastMsg, "success", {
+                        dedupeKey: makeToastDedupeKey("jobs-dashboard", "JOB_TERMINAL", toastMsg, { identifiers: { jobId, status: job.status } })
+                    });
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearCancelPollInterval(jobId);
@@ -167,7 +175,10 @@ export default function JobsDashboard() {
                     const lastToast = lastTimeoutToastAtRef.current.get(jobId);
                     if (!lastToast || now - lastToast > 30000) {
                         lastTimeoutToastAtRef.current.set(jobId, now);
-                        showToast(`Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`, "warning");
+                        const toastMsg = `Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`;
+                        showToast(toastMsg, "warning", {
+                            dedupeKey: makeToastDedupeKey("jobs-dashboard", "POLL_TIMEOUT", toastMsg, { identifiers: { jobId } })
+                        });
                     }
                     setCancelPollTimeoutJobIds((prev) => {
                         if (prev.has(jobId)) return prev;
@@ -230,16 +241,21 @@ export default function JobsDashboard() {
         try {
             await OpsService.cancelJob(jobId);
             if (!isMountedRef.current) return;
-            showToast("Job cancellation requested", "success");
+            const toastMsg = "Job cancellation requested";
+            showToast(toastMsg, "success", {
+                dedupeKey: makeToastDedupeKey("jobs-dashboard", "CANCEL_REQUESTED", toastMsg, { identifiers: { jobId } })
+            });
             pollJobUntilTerminal(jobId, job.job_type);
         } catch (err: any) {
             let message = err.message || "Failed to cancel job";
             if (err.code === "JOB_ALREADY_TERMINAL" || err.status === 409) {
                 message = "Job is already completed and cannot be canceled.";
             }
-            showToast(message, "error");
-            void fetchJobs();
-        } finally {
+            showToast(message, "error", {
+                dedupeKey: makeToastDedupeKey("jobs-dashboard", "CANCEL_FAILED", message, { identifiers: { jobId, code: err.code } })
+            });
+
+            // Clean up cancelling state if we failed to even request it
             if (isMountedRef.current) {
                 setCancellingJobIds((prev: Set<string>) => {
                     const next = new Set(prev);
@@ -247,6 +263,7 @@ export default function JobsDashboard() {
                     return next;
                 });
             }
+            void fetchJobs();
         }
     };
 

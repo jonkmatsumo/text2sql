@@ -188,18 +188,21 @@ function toBoundedSerializable(
 export interface ContractMismatchReport {
     surface: string;
     ids: Record<string, string>;
-    summary: string;
+    request_context?: Record<string, unknown>;
+    response_preview: string;
 }
 
 export function buildContractMismatchReport(
     surface: string,
     value: unknown,
+    requestContext?: Record<string, unknown>,
     summaryOptions?: ResponseSummaryOptionInput
 ): ContractMismatchReport {
     return {
         surface,
         ids: extractIdentifiers(value),
-        summary: summarizeUnexpectedResponse(value, summaryOptions),
+        request_context: requestContext,
+        response_preview: summarizeUnexpectedResponse(value, summaryOptions),
     };
 }
 

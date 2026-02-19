@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isInteractionArray, isJobStatusResponse, isOpsJobResponseArray, isRunDiagnosticsResponse } from "../runtimeGuards";
+import { isInteractionArray, isJobStatusResponse, isOpsJobResponseArray, isRunDiagnosticsResponse, buildContractMismatchReport } from "../runtimeGuards";
 
 describe("runtimeGuards", () => {
     describe("isInteractionArray", () => {
@@ -80,6 +80,26 @@ describe("runtimeGuards", () => {
         it("returns false for malformed jobs array", () => {
             expect(isOpsJobResponseArray([{ id: "job-1" }])).toBe(false);
             expect(isOpsJobResponseArray({ items: [] })).toBe(false);
+        });
+    });
+
+    describe("buildContractMismatchReport", () => {
+        it("populates report with context and preview", () => {
+            const malformed = { some: "garbage", request_id: "req-123" };
+            const context = { jobId: "job-abc" };
+            const report = buildContractMismatchReport("TestSurface", malformed, context);
+
+            expect(report.surface).toBe("TestSurface");
+            expect(report.ids.request_id).toBe("req-123");
+            expect(report.request_context).toEqual(context);
+            expect(report.response_preview).toContain("garbage");
+        });
+
+        it("handles null context", () => {
+            const malformed = { id: "123" };
+            const report = buildContractMismatchReport("TestSurface", malformed);
+            expect(report.request_context).toBeUndefined();
+            expect(report.response_preview).toContain("123");
         });
     });
 });

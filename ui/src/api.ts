@@ -588,13 +588,13 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
     const data: unknown = await response.json();
     if (!isJobStatusResponse(data)) {
-      const report = buildContractMismatchReport("OpsService.getJobStatus", data);
+      const report = buildContractMismatchReport("OpsService.getJobStatus", data, { jobId });
       console.error("Operator API contract mismatch (getJobStatus)", report);
       throw new ApiError(
         `Received unexpected response from getJobStatus${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
         200,
         "MALFORMED_RESPONSE",
-        { endpoint: "getJobStatus", surface: report.surface, ...report.ids }
+        { endpoint: "getJobStatus", surface: report.surface, ...report.ids, request_context: report.request_context }
       );
     }
     return data;
@@ -624,13 +624,13 @@ export const OpsService = {
     if (!response.ok) await throwApiError(response, "Failed to list jobs");
     const data: unknown = await response.json();
     if (!isOpsJobResponseArray(data)) {
-      const report = buildContractMismatchReport("OpsService.listJobs", data);
+      const report = buildContractMismatchReport("OpsService.listJobs", data, { limit, jobType, status });
       console.error("Operator API contract mismatch (listJobs)", report);
       throw new ApiError(
         `Received unexpected response from listJobs${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
         200,
         "MALFORMED_RESPONSE",
-        { endpoint: "listJobs", surface: report.surface, ...report.ids }
+        { endpoint: "listJobs", surface: report.surface, ...report.ids, request_context: report.request_context }
       );
     }
     return data;
@@ -663,13 +663,13 @@ export const OpsService = {
       };
     }
 
-    const report = buildContractMismatchReport("OpsService.listRuns", data);
+    const report = buildContractMismatchReport("OpsService.listRuns", data, { limit, offset, status, thumb });
     console.error("Operator API contract mismatch (listRuns)", report);
     throw new ApiError(
       `Received unexpected response from listRuns${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "listRuns", surface: report.surface, ...report.ids }
+      { endpoint: "listRuns", surface: report.surface, ...report.ids, request_context: report.request_context }
     );
   },
 };
@@ -1072,13 +1072,13 @@ export async function getDiagnostics(
 
   const data = await response.json();
   if (!isRunDiagnosticsResponse(data)) {
-    const report = buildContractMismatchReport("Diagnostics.getDiagnostics", data);
+    const report = buildContractMismatchReport("Diagnostics.getDiagnostics", data, { debug, runId });
     console.error("Operator API contract mismatch (getDiagnostics)", report);
     throw new ApiError(
       `Received unexpected response from getDiagnostics${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
       200,
       "MALFORMED_RESPONSE",
-      { endpoint: "getDiagnostics", surface: report.surface, ...report.ids }
+      { endpoint: "getDiagnostics", surface: report.surface, ...report.ids, request_context: report.request_context }
     );
   }
   return data;
