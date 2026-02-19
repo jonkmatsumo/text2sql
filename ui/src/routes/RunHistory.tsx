@@ -59,7 +59,7 @@ export default function RunHistory() {
     const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
     const thumbFilter = (searchParams.get("feedback") as FeedbackThumb) || "All";
     const searchQuery = searchParams.get("q") || "";
-    const offset = parseInt(searchParams.get("offset") || "0", 10);
+    const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10) || 0);
 
     const limit = RUN_HISTORY_PAGE_SIZE;
     const searchInputRef = React.useRef<HTMLInputElement>(null);
