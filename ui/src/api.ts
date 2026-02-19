@@ -38,7 +38,7 @@ import {
   otelWorkerBaseUrl,
   internalAuthToken
 } from "./config";
-import { RUN_HISTORY_PAGE_SIZE } from "./constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
 import { isInteractionArray, isJobStatusResponse, isRunDiagnosticsResponse } from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
@@ -576,6 +576,7 @@ export const OpsService = {
     return response.json();
   },
 
+  // NOTE: This assumes default backend pagination is consistent with frontend RUN_HISTORY_PAGE_SIZE.
   async listRuns(
     limit: number = RUN_HISTORY_PAGE_SIZE,
     offset: number = 0,

@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import RunHistory from "./RunHistory";
 import { OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
-import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
 const mockRuns = [
     {
@@ -127,7 +127,7 @@ describe("RunHistory search scope messaging", () => {
         renderRunHistory("/admin/runs?offset=100");
 
         await waitFor(() => {
-            expect(screen.getByText("No results")).toBeInTheDocument();
+            expect(screen.getByText(/No more results \(Offset: 100\)/i)).toBeInTheDocument();
         });
 
         expect(screen.queryByText(/Showing results/i)).not.toBeInTheDocument();

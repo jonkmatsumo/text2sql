@@ -9,7 +9,7 @@ import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
-import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -294,7 +294,9 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length} `}
+                    {runs.length === 0
+                        ? (offset > 0 ? `No more results (Offset: ${offset})` : "No results")
+                        : `Showing results ${offset + 1} – ${offset + runs.length}`}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
