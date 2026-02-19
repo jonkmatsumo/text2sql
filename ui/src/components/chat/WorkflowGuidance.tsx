@@ -1,4 +1,4 @@
-import React from "react";
+import React, { createContext, useContext, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { getErrorMapping } from "../../utils/errorMapping";
 
@@ -6,35 +6,57 @@ export interface WorkflowGuidanceProps {
     category?: string;
 }
 
+interface WorkflowGuidanceContextType {
+    shouldRender: (category: string) => boolean;
+}
+
+const WorkflowGuidanceContext = createContext<WorkflowGuidanceContextType | null>(null);
+
+const DEDUPE_TTL_MS = 1000;
+
+export const WorkflowGuidanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    // category -> lastShownAtMs
+    const renderedAt = useRef<Map<string, number>>(new Map());
+
+    const shouldRender = useCallback((category: string) => {
+        const now = Date.now();
+        const lastShown = renderedAt.current.get(category);
+
+        if (lastShown && now - lastShown < DEDUPE_TTL_MS) {
+            return false;
+        }
+
+        renderedAt.current.set(category, now);
+        return true;
+    }, []);
+
+    return (
+        <WorkflowGuidanceContext.Provider value={{ shouldRender }}>
+            {children}
+        </WorkflowGuidanceContext.Provider>
+    );
+};
+
+function useWorkflowGuidanceDedupe(category?: string): boolean {
+    const context = useContext(WorkflowGuidanceContext);
+    if (!context || !category) return true; // Fallback to allow rendering if no provider or no category
+    return context.shouldRender(category);
+}
+
 /**
  * Renders contextual guidance and CTAs for actionable error categories.
  * Consumes errorMapping.ts as the single source of truth for descriptions and actions.
  */
-// Simple set to track rendered categories in the current pass to prevent duplicates.
-// This is a simple defensive measure for components that might render WorkflowGuidance in a loop.
-const renderedCategories = new Set<string>();
-
-/** @internal - for testing only */
-export function __clearGuidanceCache() {
-    renderedCategories.clear();
-}
 
 export const WorkflowGuidance: React.FC<WorkflowGuidanceProps> = ({ category }) => {
-    if (!category) return null;
+    const canRender = useWorkflowGuidanceDedupe(category);
 
-    // Deduplication: prevent redundant guidance in multi-error views
-    if (renderedCategories.has(category)) {
-        return null;
-    }
+    if (!category || !canRender) return null;
 
     const mapping = getErrorMapping(category);
 
     // Only render if there is guidance content (description + at least one action)
     if (!mapping.description || !mapping.guidanceActions?.length) return null;
-
-    // Mark as rendered and clear it after a short delay to allow fresh rendering on future passes
-    renderedCategories.add(category);
-    setTimeout(() => renderedCategories.delete(category), 1000);
 
     return (
         <div className="mt-4 p-5 bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-xl shadow-sm">

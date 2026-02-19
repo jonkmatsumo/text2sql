@@ -26,7 +26,7 @@ import { ChartSchema } from "../types/charts";
 import { CopyBundleButton } from "../components/chat/CopyBundleButton";
 import { SQLPreviewCard } from "../components/chat/SQLPreviewCard";
 import { DecisionLogPanel } from "../components/chat/DecisionLogPanel";
-import { WorkflowGuidance } from "../components/chat/WorkflowGuidance";
+import { WorkflowGuidance, WorkflowGuidanceProvider } from "../components/chat/WorkflowGuidance";
 import { CopyButton } from "../components/artifacts/CopyButton";
 import { getVerboseModeFromSearch, loadVerboseMode, saveVerboseMode } from "../utils/verboseMode";
 import { dedupeRows } from "../utils/dedupeRows";
@@ -1388,7 +1388,9 @@ export default function AgentChat() {
             {error && (
               <div style={{ marginBottom: "16px" }}>
                 <ErrorCard {...error} onRetry={handleRetry} />
-                <WorkflowGuidance category={error.category} />
+                <WorkflowGuidanceProvider>
+                  <WorkflowGuidance category={error.category} />
+                </WorkflowGuidanceProvider>
               </div>
             )}
           </section>
