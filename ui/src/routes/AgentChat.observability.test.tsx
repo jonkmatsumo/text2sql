@@ -359,7 +359,7 @@ describe("AgentChat observability", () => {
 
     const copiedPayload = JSON.parse(String(writeText.mock.calls[0][0]));
     expect(copiedPayload.sql).toBe("SELECT * FROM orders");
-    expect(copiedPayload.trace_id).toBe("trace-bundle-1");
+    expect(copiedPayload.identifiers["Trace ID"]).toBe("trace-bundle-1");
     expect(copiedPayload.validation.status).toBe("pass");
     expect(copiedPayload.validation.validation_summary.ast_valid).toBe(true);
     expect(copiedPayload.completeness.status).toBe("paginated");
