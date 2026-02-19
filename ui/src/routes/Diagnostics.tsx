@@ -19,6 +19,8 @@ import {
     getDiagnosticsStatus,
     normalizeNonNegativeMetric,
 } from "../utils/diagnosticsStatus";
+import { useToast } from "../hooks/useToast";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 
 interface DiagnosticsError {
     code?: string;
@@ -82,6 +84,7 @@ function filterRunsByRecencyWindow(runs: Interaction[], cutoffMs: number): Windo
 }
 
 export default function Diagnostics() {
+    const { show: showToast } = useToast();
     const {
         isDebug,
         setIsDebug,
@@ -140,6 +143,30 @@ export default function Diagnostics() {
             ]);
 
             if (failedResult.status !== "fulfilled" || negativeResult.status !== "fulfilled") {
+                const failedPanels: string[] = [];
+                if (failedResult.status === "rejected") {
+                    failedPanels.push("failed-runs");
+                }
+                if (negativeResult.status === "rejected") {
+                    failedPanels.push("low-ratings");
+                }
+                const panelKey = failedPanels.join(",");
+                const toastMessage =
+                    failedPanels.length > 1
+                        ? "Failed to load degraded run signals. Refresh to retry."
+                        : failedPanels[0] === "failed-runs"
+                            ? "Failed to load failed run signals. Refresh to retry."
+                            : "Failed to load low-rated run signals. Refresh to retry.";
+                const dedupeKey = makeToastDedupeKey(
+                    "diagnostics",
+                    "RUN_SIGNALS_FETCH_FAILED",
+                    toastMessage,
+                    {
+                        surface: "Diagnostics.runSignals",
+                        identifiers: { panels: panelKey },
+                    }
+                );
+                showToast(toastMessage, "error", { dedupeKey });
                 setRecentFailures([]);
                 setRecentLowRatings([]);
                 setRunSignalsError("Run signals are currently unavailable. Refresh to retry.");
@@ -193,7 +220,7 @@ export default function Diagnostics() {
             setRunSignalsLoading(false);
             isFetchingRef.current = false;
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         fetchDiagnostics(isDebug);

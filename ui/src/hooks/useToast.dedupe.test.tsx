@@ -3,6 +3,7 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { ToastProvider } from "../context/ToastContext";
 import { useToast } from "./useToast";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
     <ToastProvider>{children}</ToastProvider>
@@ -92,5 +93,35 @@ describe("useToast deduplication", () => {
             id51 = result.current.show("Msg 51 Duplicate", "error", { dedupeKey: "key-51" });
         });
         expect(id51).toBe("");
+    });
+
+    it("dedupes identical diagnostics failure keys but keeps distinct panel failures separate", () => {
+        const { result } = renderHook(() => useToast(), { wrapper });
+        const failedRunsKey = makeToastDedupeKey(
+            "diagnostics",
+            "RUN_SIGNALS_FETCH_FAILED",
+            "Failed to load failed run signals. Refresh to retry.",
+            {
+                surface: "Diagnostics.runSignals",
+                identifiers: { panels: "failed-runs" },
+            }
+        );
+        const lowRatingsKey = makeToastDedupeKey(
+            "diagnostics",
+            "RUN_SIGNALS_FETCH_FAILED",
+            "Failed to load low-rated run signals. Refresh to retry.",
+            {
+                surface: "Diagnostics.runSignals",
+                identifiers: { panels: "low-ratings" },
+            }
+        );
+
+        act(() => {
+            result.current.show("Failed to load failed run signals. Refresh to retry.", "error", { dedupeKey: failedRunsKey });
+            result.current.show("Failed to load failed run signals. Refresh to retry.", "error", { dedupeKey: failedRunsKey });
+            result.current.show("Failed to load low-rated run signals. Refresh to retry.", "error", { dedupeKey: lowRatingsKey });
+        });
+
+        expect(result.current.toasts).toHaveLength(2);
     });
 });
