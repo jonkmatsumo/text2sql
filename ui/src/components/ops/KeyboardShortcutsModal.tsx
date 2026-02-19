@@ -24,7 +24,9 @@ export function KeyboardShortcutsModal({ isOpen, onClose, shortcuts }: KeyboardS
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
+                e.stopImmediatePropagation();
                 e.stopPropagation();
+                e.preventDefault();
                 onClose();
             }
         };

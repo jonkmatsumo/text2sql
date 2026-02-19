@@ -16,6 +16,7 @@ import { DiagnosticsRunSignalSection } from "../components/diagnostics/Diagnosti
 import {
     getDiagnosticsAnomalies,
     getDiagnosticsStatus,
+    normalizeNonNegativeMetric,
 } from "../utils/diagnosticsStatus";
 
 interface DiagnosticsError {
@@ -31,27 +32,20 @@ function readOptionalString(value: unknown): string | undefined {
     return trimmed || undefined;
 }
 
-function normalizeNonNegativeNumber(value: unknown): number | null {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return null;
-    }
-    return value < 0 ? 0 : value;
-}
-
 function formatMetricNumber(value: unknown, digits: number = 2): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return normalized.toFixed(digits).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
 function formatCountWithUnit(value: unknown, unit: string): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return `${Math.round(normalized)} ${unit}`;
 }
 
 function formatMilliseconds(value: unknown): string {
-    const normalized = normalizeNonNegativeNumber(value);
+    const normalized = normalizeNonNegativeMetric(value);
     if (normalized == null) return "—";
     return normalized.toFixed(2);
 }
@@ -71,6 +65,7 @@ export default function Diagnostics() {
     const [recentFailures, setRecentFailures] = useState<Interaction[]>([]);
     const [recentLowRatings, setRecentLowRatings] = useState<Interaction[]>([]);
     const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+    const [recencyWindowHours, setRecencyWindowHours] = useState<number>(24);
     const isFetchingRef = useRef(false);
 
     const fetchDiagnostics = useCallback(async (debug = false) => {
@@ -134,6 +129,14 @@ export default function Diagnostics() {
     const retryPolicy = data?.retry_policy;
     const enabledFlags = data?.enabled_flags ?? {};
     const rawJsonSnapshot = toPrettyJson(data);
+
+    // Apply client-side recency window filter.
+    // Runs without created_at are always included (labeled "unknown time" in the UI).
+    const windowCutoffMs = Date.now() - recencyWindowHours * 60 * 60 * 1000;
+    const applyRecencyFilter = (runs: Interaction[]) =>
+        runs.filter((run) => !run.created_at || new Date(run.created_at).getTime() >= windowCutoffMs);
+    const visibleFailures = applyRecencyFilter(recentFailures);
+    const visibleLowRatings = applyRecencyFilter(recentLowRatings);
     const anomalies = getDiagnosticsAnomalies(data);
     const anomalyIds = new Set(anomalies.map((item) => item.id));
     const diagnosticsStatus = getDiagnosticsStatus(data);
@@ -174,7 +177,7 @@ export default function Diagnostics() {
 
     const latencyRows = Object.entries(data?.debug?.latency_breakdown_ms ?? {}).map(([stage, ms]) => ({
         stage,
-        value: normalizeNonNegativeNumber(ms),
+        value: normalizeNonNegativeMetric(ms),
     }));
     const visibleLatencyRows =
         filterMode === "anomalies"
@@ -229,7 +232,7 @@ export default function Diagnostics() {
     const diagnosticsRequestId =
         readOptionalString(data?.request_id) ??
         readOptionalString(data?.debug?.request_id);
-    const schemaCacheTtlSeconds = normalizeNonNegativeNumber(data?.schema_cache_ttl_seconds);
+    const schemaCacheTtlSeconds = normalizeNonNegativeMetric(data?.schema_cache_ttl_seconds);
     const schemaCacheTtlDisplay = schemaCacheTtlSeconds == null ? "—" : `${schemaCacheTtlSeconds}s`;
 
     if (loading && !data) {
@@ -446,21 +449,45 @@ export default function Diagnostics() {
 
                         {/* Recent Degraded Runs Panel */}
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
-                            <h3 style={{ marginTop: 0, marginBottom: "20px", fontSize: "1.1rem" }}>
-                                Recent Run Signals
-                                {filterMode === "anomalies" && (
-                                    <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
-                                        (Global status — non-anomaly derived)
-                                    </span>
-                                )}
-                            </h3>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+                                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
+                                    Recent Run Signals
+                                    {filterMode === "anomalies" && (
+                                        <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
+                                            (Global status — non-anomaly derived)
+                                        </span>
+                                    )}
+                                </h3>
+                                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", color: "var(--muted)" }}>
+                                    Window:
+                                    <select
+                                        data-testid="diagnostics-recency-window"
+                                        value={recencyWindowHours}
+                                        onChange={(e) => setRecencyWindowHours(Number(e.target.value))}
+                                        style={{
+                                            fontSize: "0.8rem",
+                                            padding: "2px 6px",
+                                            borderRadius: "6px",
+                                            border: "1px solid var(--border)",
+                                            background: "var(--surface)",
+                                            color: "var(--ink)",
+                                            cursor: "pointer",
+                                        }}
+                                    >
+                                        <option value={1}>1h</option>
+                                        <option value={6}>6h</option>
+                                        <option value={24}>24h</option>
+                                        <option value={168}>7d</option>
+                                    </select>
+                                </label>
+                            </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest 5 per category.
+                                Showing latest 5 failures and 5 low-rated runs.
                             </p>
                             <div style={{ display: "grid", gap: "20px" }}>
                                 <DiagnosticsRunSignalSection
                                     title="Recent failures"
-                                    runs={recentFailures}
+                                    runs={visibleFailures}
                                     pillLabel="FAILED"
                                     pillClass="bg-red-100 text-red-800"
                                     emptyMessage="No recent failures found."
@@ -469,7 +496,7 @@ export default function Diagnostics() {
 
                                 <DiagnosticsRunSignalSection
                                     title="Recent low ratings"
-                                    runs={recentLowRatings}
+                                    runs={visibleLowRatings}
                                     pillLabel="LOW_RATING"
                                     pillClass="bg-amber-100 text-amber-800"
                                     emptyMessage="No recent low ratings found."

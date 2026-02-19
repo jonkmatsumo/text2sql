@@ -12,7 +12,8 @@ export interface NormalizedDecisionEvent {
   key: string;
 }
 
-import { buildIdentifierBlock, RunContextInput } from "./buildRunContextBundle";
+import { buildRunIdentifierBlock } from "./copyBundles";
+import { RunContextInput } from "./buildRunContextBundle";
 
 export interface CopyBundleMessageInput extends RunContextInput {
   sql?: string | null;
@@ -155,7 +156,7 @@ export function buildCopyBundlePayload(message: CopyBundleMessageInput): Record<
         ? 1
         : null;
 
-  const identifiers = buildIdentifierBlock(message);
+  const identifiers = buildRunIdentifierBlock(message);
 
   const payload: Record<string, unknown> = {
     sql: message.sql ?? null,

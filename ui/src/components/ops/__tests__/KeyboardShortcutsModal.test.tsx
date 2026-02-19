@@ -62,13 +62,23 @@ describe("KeyboardShortcutsModal", () => {
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    it("calls onClose when Escape is pressed", () => {
+    it("calls onClose and stops propagation when Escape is pressed", () => {
         const onClose = vi.fn();
         render(
             <KeyboardShortcutsModal isOpen={true} onClose={onClose} shortcuts={shortcuts} />
         );
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+        const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+        const stopSpy = vi.spyOn(event, "stopPropagation");
+        const stopImmediateSpy = vi.spyOn(event, "stopImmediatePropagation");
+        const preventSpy = vi.spyOn(event, "preventDefault");
+
+        window.dispatchEvent(event);
+
         expect(onClose).toHaveBeenCalledTimes(1);
+        expect(stopSpy).toHaveBeenCalled();
+        expect(stopImmediateSpy).toHaveBeenCalled();
+        expect(preventSpy).toHaveBeenCalled();
     });
 
     it("focuses the close button when opened", () => {
