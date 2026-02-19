@@ -10,6 +10,7 @@ import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
+import { formatRunHistoryRange } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
@@ -173,11 +174,7 @@ export default function RunHistory() {
     );
     const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
     const canNavigateNext = hasMore !== undefined ? hasMore : runs.length === limit;
-    const rangeSummary = runs.length === 0
-        ? "No results"
-        : (totalCount !== undefined
-            ? `Showing results ${offset + 1} – ${offset + runs.length} of ${totalCount}`
-            : `Showing results ${offset + 1} – ${offset + runs.length}`);
+    const rangeSummary = formatRunHistoryRange(offset, runs.length, totalCount);
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
