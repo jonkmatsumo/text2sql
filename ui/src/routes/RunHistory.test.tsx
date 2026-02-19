@@ -74,7 +74,7 @@ describe("RunHistory search scope messaging", () => {
         renderRunHistory("/admin/runs?q=missing");
 
         await waitFor(() => {
-            expect(screen.getByText("No matches on this page. Try Next to search older runs.")).toBeInTheDocument();
+            expect(screen.getByText("No matches found on this page. Try Next to search older runs.")).toBeInTheDocument();
         });
 
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
@@ -85,19 +85,18 @@ describe("RunHistory search scope messaging", () => {
         );
     });
 
-    it("shows the page-scoped disclaimer while the search input is focused", async () => {
-        renderRunHistory();
-        const searchInput = await screen.findByLabelText("Search runs by query or ID");
+    it("shows page-scoped disclaimer and inline label when query is set", async () => {
+        renderRunHistory("/admin/runs?q=top");
 
-        fireEvent.focus(searchInput);
+        await waitFor(() => {
+            expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("top");
+        });
         const disclaimer = screen.getByTestId("runhistory-search-scope-note");
         expect(disclaimer).toHaveTextContent(/Search is limited to this page/i);
         expect(disclaimer).toHaveTextContent(/Results only include runs already loaded/i);
-
-        fireEvent.blur(searchInput);
-        await waitFor(() => {
-            expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
-        });
+        expect(screen.getByTestId("runhistory-search-scope-inline-label")).toHaveTextContent(
+            "Search is limited to this page."
+        );
     });
 
     it("shows 'Search All' disabled button with explanatory tooltip", async () => {
@@ -131,6 +130,19 @@ describe("RunHistory search scope messaging", () => {
         await waitFor(() => {
             expect(screen.queryByTestId("runhistory-more-runs-hint")).not.toBeInTheDocument();
         });
+    });
+
+    it("clears search and resets offset when Clear is clicked", async () => {
+        renderRunHistory("/admin/runs?offset=100&q=missing");
+
+        const clearSearchButton = await screen.findByRole("button", { name: "Clear search query" });
+        fireEvent.click(clearSearchButton);
+
+        await waitFor(() => {
+            expect(screen.getByLabelText("Search runs by query or ID")).toHaveValue("");
+        });
+        expect(screen.getByTestId("location-search")).not.toHaveTextContent("q=");
+        expect(screen.getByTestId("location-search")).not.toHaveTextContent("offset=");
     });
 
     it("does not clear all filters when Escape is pressed in the search input", async () => {

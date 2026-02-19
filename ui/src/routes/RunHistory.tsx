@@ -39,7 +39,6 @@ export default function RunHistory() {
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
-    const [isSearchFocused, setIsSearchFocused] = useState(false);
 
     const copyLink = useCallback(() => {
         navigator.clipboard.writeText(window.location.href).then(() => {
@@ -151,6 +150,10 @@ export default function RunHistory() {
         setSearchParams({}, { replace: true });
     }, [setSearchParams]);
 
+    const clearSearch = useCallback(() => {
+        updateFilters({ q: "", offset: 0 });
+    }, [updateFilters]);
+
     const handleEscapeShortcut = useCallback(() => {
         if (document.activeElement === searchInputRef.current) {
             searchInputRef.current?.blur();
@@ -175,7 +178,7 @@ export default function RunHistory() {
         ),
         [runs, searchQuery]
     );
-    const showPageScopedSearchNote = searchQuery.trim() !== "" || isSearchFocused;
+    const showPageScopedSearchNote = searchQuery.trim() !== "";
     const canNavigateNext =
         runs.length > 0 &&
         (hasMore !== undefined ? hasMore : runs.length === limit);
@@ -221,12 +224,19 @@ export default function RunHistory() {
                                 placeholder="Keyword search..."
                                 value={searchQuery}
                                 onChange={(e) => updateFilters({ q: e.target.value })}
-                                onFocus={() => setIsSearchFocused(true)}
-                                onBlur={() => setIsSearchFocused(false)}
                                 aria-label="Search runs by query or ID"
                                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
                             />
                         </div>
+                        {searchQuery && (
+                            <button
+                                onClick={clearSearch}
+                                aria-label="Clear search query"
+                                className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 whitespace-nowrap"
+                            >
+                                Clear
+                            </button>
+                        )}
                         <button
                             disabled
                             title="Global search across all history is not yet supported by the backend."
@@ -236,9 +246,15 @@ export default function RunHistory() {
                         </button>
                     </div>
                     {showPageScopedSearchNote && (
-                        <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-md flex items-start gap-2" data-testid="runhistory-search-scope-note">
+                        <div
+                            className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-md flex items-start gap-2"
+                            data-testid="runhistory-search-scope-note"
+                        >
                             <span className="text-blue-500 mt-0.5">ℹ️</span>
                             <div className="flex-grow">
+                                <p className="text-xs text-blue-700 dark:text-blue-400 mb-1" data-testid="runhistory-search-scope-inline-label">
+                                    Search is limited to this page.
+                                </p>
                                 <p className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-tight">Search is limited to this page</p>
                                 <div className="text-xs text-blue-700 dark:text-blue-400 leading-normal">
                                     <p>Results only include runs already loaded in the table below.</p>
@@ -298,7 +314,7 @@ export default function RunHistory() {
                                         <p className="text-gray-500 italic">
                                             {statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== ""
                                                 ? (searchQuery !== ""
-                                                    ? "No matches on this page. Try Next to search older runs."
+                                                    ? "No matches found on this page. Try Next to search older runs."
                                                     : "No historical runs found matching these filters.")
                                                 : "No runs recorded yet."}
                                         </p>
