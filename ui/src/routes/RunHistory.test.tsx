@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import RunHistory from "./RunHistory";
 import { OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
-import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
 const mockRuns = [
     {
@@ -122,15 +122,13 @@ describe("RunHistory search scope messaging", () => {
         expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
     });
 
-    it("shows 'No results' instead of a range when page is empty with non-zero offset", async () => {
+    it("shows 'No results' when page is empty at offset 0", async () => {
         (OpsService.listRuns as any).mockResolvedValueOnce([]);
-        renderRunHistory("/admin/runs?offset=100");
+        renderRunHistory("/admin/runs?offset=0");
 
         await waitFor(() => {
-            expect(screen.getByText("No results")).toBeInTheDocument();
+            expect(screen.getByText(/No results/i)).toBeInTheDocument();
         });
-
-        expect(screen.queryByText(/Showing results/i)).not.toBeInTheDocument();
     });
 
     it("disables Next and shows tooltip when page-scoped search active and results < page size", async () => {
@@ -140,5 +138,39 @@ describe("RunHistory search scope messaging", () => {
         const nextButton = await screen.findByRole("button", { name: "Next page" });
         expect(nextButton).toBeDisabled();
         expect(nextButton).toHaveAttribute("title", "Search filters the current page. Use Next/Prev to search older runs.");
+    });
+
+    it("respects has_more metadata for disabling Next button", async () => {
+        // Return structured response with has_more: false
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            data: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            has_more: false
+        });
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).toBeDisabled();
+    });
+
+    it("enables Next button when has_more is true even if results < limit", async () => {
+        // This case is unlikely in real world but tests our logic
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            data: buildRuns(5),
+            has_more: true
+        });
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).not.toBeDisabled();
+    });
+
+    it("auto-redirects to offset 0 if page is empty at non-zero offset (Empty Page Recovery)", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce([]); // Empty
+        renderRunHistory("/admin/runs?offset=50");
+
+        await waitFor(() => {
+            // Should have called listRuns again with offset 0
+            expect(OpsService.listRuns).toHaveBeenLastCalledWith(RUN_HISTORY_PAGE_SIZE, 0, "All", "All");
+        });
     });
 });

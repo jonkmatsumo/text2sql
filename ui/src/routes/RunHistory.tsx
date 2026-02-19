@@ -2,14 +2,16 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
-import { OpsService } from "../api";
+import { OpsService, getErrorMessage, ApiError } from "../api";
+import { isInteractionListResponse } from "../utils/runtimeGuards";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
-import { RUN_HISTORY_PAGE_SIZE } from "../constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -32,6 +34,7 @@ const PAGE_SCOPED_SEARCH_NOTE = "Search filters the current page. Use Next/Prev 
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
+    const [hasMore, setHasMore] = useState<boolean | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
@@ -84,20 +87,33 @@ export default function RunHistory() {
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
         try {
-            const data = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
+            const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
+            const data: Interaction[] = isInteractionListResponse(result) ? result.data : result;
+            const more = isInteractionListResponse(result) ? (result.has_more ?? null) : null;
+
+            // Empty page recovery: if we're at an offset > 0 and get no results, go back to 0
+            if (data.length === 0 && offset > 0) {
+                updateFilters({ offset: 0 });
+                return;
+            }
+
             const seenIds = new Set<string>();
-            const uniqueData = data.filter(run => {
+            const uniqueData = data.filter((run: Interaction) => {
                 if (seenIds.has(run.id)) return false;
                 seenIds.add(run.id);
                 return true;
             });
             setRuns(uniqueData);
+            setHasMore(more);
         } catch (err) {
-            showToast("Failed to fetch run history", "error");
+            const message = getErrorMessage(err);
+            const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
+            const dedupeKey = makeToastDedupeKey("run-history", category, message);
+            showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);
         }
-    }, [offset, statusFilter, thumbFilter, showToast]);
+    }, [offset, statusFilter, thumbFilter, showToast, limit, updateFilters]);
 
     useEffect(() => {
         fetchRuns();
@@ -294,11 +310,13 @@ export default function RunHistory() {
                     Previous
                 </button>
                 <div className="text-sm text-gray-700 dark:text-gray-300" aria-live="polite">
-                    {runs.length === 0 ? "No results" : `Showing results ${offset + 1} – ${offset + runs.length} `}
+                    {runs.length === 0
+                        ? (offset > 0 ? `No more results (Offset: ${offset})` : "No results")
+                        : `Showing results ${offset + 1} – ${offset + runs.length}`}
                 </div>
                 <button
                     onClick={() => updateFilters({ offset: offset + limit })}
-                    disabled={runs.length < limit || isLoading}
+                    disabled={(hasMore !== null ? !hasMore : runs.length < limit) || isLoading}
                     aria-label="Next page"
                     title={searchQuery && runs.length < limit ? PAGE_SCOPED_SEARCH_NOTE : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"

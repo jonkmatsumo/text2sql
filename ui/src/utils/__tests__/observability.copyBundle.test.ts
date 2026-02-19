@@ -12,6 +12,8 @@ describe("buildCopyBundlePayload", () => {
     });
 
     expect(payload).toEqual(expect.objectContaining({
+      schema_version: 1,
+      trace_id: "trace-1",
       sql: "SELECT * FROM orders",
       identifiers: {
         "Trace ID": "trace-1"
@@ -29,7 +31,7 @@ describe("buildCopyBundlePayload", () => {
       },
       bundle_metadata: expect.objectContaining({
         environment: "test",
-        version: 1
+        generated_at: expect.any(String),
       })
     }));
   });
@@ -40,6 +42,7 @@ describe("buildCopyBundlePayload", () => {
     });
 
     expect(payload).toEqual(expect.objectContaining({
+      schema_version: 1,
       sql: "SELECT 1",
       identifiers: {},
       validation: {
@@ -55,7 +58,7 @@ describe("buildCopyBundlePayload", () => {
       },
       bundle_metadata: expect.objectContaining({
         environment: "test",
-        version: 1
+        generated_at: expect.any(String),
       })
     }));
   });

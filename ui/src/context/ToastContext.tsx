@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useState } from "react";
+import React, { createContext, useCallback, useState, useRef, useEffect } from "react";
 
 export type ToastType = "success" | "error" | "info" | "warning";
 
@@ -7,11 +7,17 @@ export interface Toast {
   message: string;
   type: ToastType;
   duration: number;
+  dedupeKey?: string;
+}
+
+export interface ToastOptions {
+  duration?: number;
+  dedupeKey?: string;
 }
 
 export interface ToastContextValue {
   toasts: Toast[];
-  show: (message: string, type: ToastType, duration?: number) => string;
+  show: (message: string, type: ToastType, options?: number | ToastOptions) => string;
   dismiss: (id: string) => void;
 }
 
@@ -23,15 +29,53 @@ interface ToastProviderProps {
 
 export function ToastProvider({ children }: ToastProviderProps) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Map of dedupeKey -> timestamp (ms)
+  const dedupeCache = useRef<Map<string, number>>(new Map());
+  const TTL_MS = 5 * 60 * 1000; // 5 minutes
+  const MAX_CACHE_SIZE = 50;
+
+  // Cleanup expired entries periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const cache = dedupeCache.current;
+      for (const [key, timestamp] of cache.entries()) {
+        if (now - timestamp > TTL_MS) {
+          cache.delete(key);
+        }
+      }
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const show = useCallback(
-    (message: string, type: ToastType, duration: number = 4000): string => {
+    (message: string, type: ToastType, options?: number | ToastOptions): string => {
+      const duration = typeof options === "number" ? options : options?.duration ?? 4000;
+      const dedupeKey = typeof options === "object" ? options?.dedupeKey : undefined;
+
+      if (dedupeKey) {
+        const now = Date.now();
+        const lastShown = dedupeCache.current.get(dedupeKey);
+
+        if (lastShown && now - lastShown < TTL_MS) {
+          return "";
+        }
+
+        // Bounding logic: if cache is full, remove oldest entry
+        if (dedupeCache.current.size >= MAX_CACHE_SIZE) {
+          const oldestKey = dedupeCache.current.keys().next().value;
+          if (oldestKey) dedupeCache.current.delete(oldestKey);
+        }
+
+        dedupeCache.current.set(dedupeKey, now);
+      }
+
       const id = crypto.randomUUID();
-      const toast: Toast = { id, message, type, duration };
+      const toast: Toast = { id, message, type, duration, dedupeKey };
 
       setToasts((prev) => [...prev, toast]);
 

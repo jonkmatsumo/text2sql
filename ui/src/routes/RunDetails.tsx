@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getDiagnostics } from "../api";
+import { getDiagnostics, getErrorMessage, ApiError } from "../api";
+import { makeToastDedupeKey } from "../utils/toastUtils";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
 import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
@@ -25,7 +26,10 @@ export default function RunDetails() {
                 setDiagnostics(diag);
             }
         } catch (err) {
-            showToast("Failed to fetch run details", "error");
+            const message = getErrorMessage(err);
+            const category = err instanceof ApiError ? err.code : "UNKNOWN_ERROR";
+            const dedupeKey = makeToastDedupeKey("run-details", category, message);
+            showToast(message, "error", { dedupeKey });
         } finally {
             setIsLoading(false);
         }

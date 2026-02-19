@@ -30,6 +30,7 @@ import {
   SynthRunSummary,
   OpsJobResponse,
   JobStatusResponse,
+  InteractionListResponse,
 } from "./types/admin";
 import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
@@ -38,7 +39,15 @@ import {
   otelWorkerBaseUrl,
   internalAuthToken
 } from "./config";
-import { RUN_HISTORY_PAGE_SIZE } from "./constants/operatorUi";
+import { RUN_HISTORY_PAGE_SIZE } from "./constants/pagination";
+import {
+  isInteractionArray,
+  isInteractionListResponse,
+  isJobStatusResponse,
+  isRunDiagnosticsResponse,
+  extractIdentifiers,
+  summarizeUnexpectedResponse
+} from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
@@ -297,6 +306,7 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
   return data.trace_id;
 }
 
+
 export async function fetchBlobContent(blobUrl: string): Promise<any> {
   const response = await fetch(blobUrl);
   if (!response.ok) {
@@ -537,7 +547,19 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
-    return response.json();
+    const data = await response.json();
+    if (!isJobStatusResponse(data)) {
+      const ids = extractIdentifiers(data);
+      const summary = summarizeUnexpectedResponse(data);
+      console.error("Operator API contract mismatch (getJobStatus)", { endpoint: "getJobStatus", ids, summary });
+      throw new ApiError(
+        `Received unexpected response from getJobStatus${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        200,
+        "MALFORMED_RESPONSE",
+        { endpoint: "getJobStatus", ...ids }
+      );
+    }
+    return data;
   },
 
   async cancelJob(jobId: string): Promise<any> {
@@ -565,12 +587,13 @@ export const OpsService = {
     return response.json();
   },
 
+  // NOTE: This assumes default backend pagination is consistent with frontend RUN_HISTORY_PAGE_SIZE.
   async listRuns(
     limit: number = RUN_HISTORY_PAGE_SIZE,
     offset: number = 0,
     status: string = "All",
     thumb: string = "All"
-  ): Promise<Interaction[]> {
+  ): Promise<Interaction[] | InteractionListResponse> {
     const params = new URLSearchParams({
       limit: limit.toString(),
       offset: offset.toString(),
@@ -581,7 +604,19 @@ export const OpsService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
-    return response.json();
+    const data = await response.json();
+    if (!isInteractionArray(data) && !isInteractionListResponse(data)) {
+      const ids = extractIdentifiers(data);
+      const summary = summarizeUnexpectedResponse(data);
+      console.error("Operator API contract mismatch (listRuns)", { endpoint: "listRuns", ids, summary });
+      throw new ApiError(
+        `Received unexpected response from listRuns${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+        200,
+        "MALFORMED_RESPONSE",
+        { endpoint: "listRuns", ...ids }
+      );
+    }
+    return data;
   },
 };
 
@@ -981,5 +1016,17 @@ export async function getDiagnostics(
     );
   }
 
-  return response.json();
+  const data = await response.json();
+  if (!isRunDiagnosticsResponse(data)) {
+    const ids = extractIdentifiers(data);
+    const summary = summarizeUnexpectedResponse(data);
+    console.error("Operator API contract mismatch (getDiagnostics)", { endpoint: "getDiagnostics", ids, summary });
+    throw new ApiError(
+      `Received unexpected response from getDiagnostics${ids.trace_id ? ` (trace_id=${ids.trace_id})` : ""}`,
+      200,
+      "MALFORMED_RESPONSE",
+      { endpoint: "getDiagnostics", ...ids }
+    );
+  }
+  return data;
 }

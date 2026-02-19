@@ -1,5 +1,5 @@
 import { useContext } from "react";
-import { ToastContext, ToastContextValue, ToastType } from "../context/ToastContext";
+import { ToastContext, ToastContextValue, ToastType, ToastOptions } from "../context/ToastContext";
 
 export function useToast(): ToastContextValue {
   const context = useContext(ToastContext);
@@ -9,4 +9,4 @@ export function useToast(): ToastContextValue {
   return context;
 }
 
-export type { ToastType };
+export type { ToastType, ToastOptions };
