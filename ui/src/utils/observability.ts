@@ -15,12 +15,39 @@ export interface NormalizedDecisionEvent {
 import { buildRunIdentifierBlock } from "./copyBundles";
 import { RunContextInput } from "./buildRunContextBundle";
 
+export interface ValidationSummary {
+  ast_valid?: boolean;
+  syntax_errors?: unknown[];
+  missing_identifiers?: string[];
+  detected_cartesian_flag?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ValidationReport {
+  detected_cartesian_flag?: boolean;
+  metadata?: {
+    detected_cartesian_flag?: boolean;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface ResultCompleteness {
+  token_expired?: boolean;
+  schema_mismatch?: boolean;
+  is_truncated?: boolean;
+  is_limited?: boolean;
+  next_page_token?: string | null;
+  pages_fetched?: number;
+  [key: string]: unknown;
+}
+
 export interface CopyBundleMessageInput extends RunContextInput {
   sql?: string | null;
-  result?: any;
-  validationSummary?: any;
-  validationReport?: any;
-  resultCompleteness?: any;
+  result?: unknown;
+  validationSummary?: ValidationSummary | null;
+  validationReport?: ValidationReport | null;
+  resultCompleteness?: ResultCompleteness | null;
 }
 
 function readFirstNonEmptyString(values: unknown[]): string | undefined {
