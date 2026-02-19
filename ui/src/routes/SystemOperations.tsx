@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Tabs from "../components/common/Tabs";
 import TraceLink from "../components/common/TraceLink";
 import IngestionWizard from "../components/ingestion/IngestionWizard";
@@ -13,8 +13,28 @@ import { useToast } from "../hooks/useToast";
 import { useJobPolling } from "../hooks/useJobPolling";
 import { grafanaBaseUrl, isGrafanaConfigured, uiApiBaseUrl } from "../config";
 
+const DEFAULT_OPERATIONS_TAB = "nlp";
+const OPERATIONS_TABS = [
+    { id: "nlp", label: "NLP Patterns" },
+    { id: "ingestion", label: "Ingestion Dash" },
+    { id: "synth", label: "Synthetic Data" },
+    { id: "schema", label: "Schema" },
+    { id: "cache", label: "Semantic Cache" },
+    { id: "obs", label: "Observability" }
+];
+const VALID_OPERATIONS_TAB_IDS = new Set(OPERATIONS_TABS.map((tab) => tab.id));
+
+function getOperationsTabFromParams(searchParams: URLSearchParams): string {
+    const requestedTab = searchParams.get("tab");
+    if (requestedTab && VALID_OPERATIONS_TAB_IDS.has(requestedTab)) {
+        return requestedTab;
+    }
+    return DEFAULT_OPERATIONS_TAB;
+}
+
 export default function SystemOperations() {
-    const [activeTab, setActiveTab] = useState("nlp");
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState(() => getOperationsTabFromParams(searchParams));
     const [logs, setLogs] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [reloadResult, setReloadResult] = useState<PatternReloadResult | null>(null);
@@ -28,16 +48,24 @@ export default function SystemOperations() {
 
     const { show: showToast } = useToast();
 
-    const tabs = [
-        { id: "nlp", label: "NLP Patterns" },
-        { id: "ingestion", label: "Ingestion Dash" },
-        { id: "synth", label: "Synthetic Data" },
-        { id: "schema", label: "Schema" },
-        { id: "cache", label: "Semantic Cache" },
-        { id: "obs", label: "Observability" }
-    ];
-
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
+
+    useEffect(() => {
+        const nextTab = getOperationsTabFromParams(searchParams);
+        setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
+    }, [searchParams]);
+
+    const handleTabChange = useCallback((nextTab: string) => {
+        if (!VALID_OPERATIONS_TAB_IDS.has(nextTab)) {
+            return;
+        }
+        setActiveTab(nextTab);
+        setSearchParams((currentParams) => {
+            const nextParams = new URLSearchParams(currentParams);
+            nextParams.set("tab", nextTab);
+            return nextParams;
+        }, { replace: true });
+    }, [setSearchParams]);
 
     useEffect(() => {
         if (!logsRef.current) return;
@@ -265,7 +293,7 @@ export default function SystemOperations() {
                 </div>
             </header>
 
-            <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+            <Tabs tabs={OPERATIONS_TABS} activeTab={activeTab} onChange={handleTabChange} />
 
             <div style={{ display: "grid", gap: "24px" }}>
                 {activeJob && (
