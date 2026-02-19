@@ -64,7 +64,7 @@ describe("buildRunContextBundle", () => {
     it("handles fully partial payload (no fields)", () => {
         const result = buildRunContextBundle({});
         expect(result).toContain("=== Run Context Bundle ===");
-        expect(result).toContain("Generated at    :");
+        expect(result).toContain("Generated-At    :");
         expect(result).not.toContain("Run ID:");
         expect(result).not.toContain("Trace ID:");
     });
@@ -72,8 +72,13 @@ describe("buildRunContextBundle", () => {
     it("includes generation timestamp", () => {
         const before = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
         const result = buildRunContextBundle({ runId: "test" });
-        expect(result).toContain("Generated at    :");
+        expect(result).toContain("Generated-At    :");
         expect(result).toContain(before);
+    });
+
+    it("includes environment header", () => {
+        const result = buildRunContextBundle({ environment: "production" });
+        expect(result).toContain("Environment     : production");
     });
 
     it("produces full payload with all fields", () => {

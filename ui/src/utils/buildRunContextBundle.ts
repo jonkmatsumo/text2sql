@@ -24,12 +24,12 @@ export function buildRunContextBundle(input: RunContextInput): string {
         lines.push(`${key.padEnd(16)}: ${value}`);
     });
 
-    if (input.executionStatus) lines.push(`${"Execution Status".padEnd(16)}: ${input.executionStatus}`);
-    if (input.isComplete !== undefined) lines.push(`${"Complete".padEnd(16)}: ${input.isComplete ? "yes" : "no"}`);
-
     const env = input.environment || (import.meta as any).env?.MODE || "development";
     lines.push(`${"Environment".padEnd(16)}: ${env}`);
-    lines.push(`${"Generated at".padEnd(16)}: ${new Date().toISOString()}`);
+    lines.push(`${"Generated-At".padEnd(16)}: ${new Date().toISOString()}`);
+
+    if (input.executionStatus) lines.push(`${"Execution Status".padEnd(16)}: ${input.executionStatus}`);
+    if (input.isComplete !== undefined) lines.push(`${"Complete".padEnd(16)}: ${input.isComplete ? "yes" : "no"}`);
 
     if (input.userQuery) {
         lines.push("");
