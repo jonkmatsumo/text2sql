@@ -13,7 +13,6 @@ import FilterSelect from "../components/common/FilterSelect";
 import { formatRunHistoryRange, hasRunHistoryNextPage } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
-import { buildContractMismatchReport } from "../utils/runtimeGuards";
 
 const STATUS_OPTIONS: { value: InteractionStatus | "All"; label: string }[] = [
     { value: "All", label: "All Statuses" },
@@ -39,6 +38,7 @@ export default function RunHistory() {
     const [hasMore, setHasMore] = useState<boolean | undefined>(undefined);
     const [totalCount, setTotalCount] = useState<number | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [linkCopied, setLinkCopied] = useState(false);
 
@@ -107,26 +107,12 @@ export default function RunHistory() {
 
     const fetchRuns = useCallback(async () => {
         setIsLoading(true);
+        setLoadError(null);
         try {
             const result = await OpsService.listRuns(limit, offset, statusFilter, thumbFilter);
-            const payload = result as { runs?: unknown; has_more?: unknown; total_count?: unknown };
-            if (!Array.isArray(payload.runs)) {
-                const report = buildContractMismatchReport("RunHistory.listRuns", payload, {
-                    maxChars: 2000,
-                    maxArrayItems: 10,
-                });
-                console.error("Operator API contract mismatch (RunHistory.listRuns)", {
-                    ...report,
-                    summary: "Expected result.runs to be an array",
-                });
-                setRuns([]);
-                setHasMore(undefined);
-                setTotalCount(undefined);
-                return;
-            }
-            const data: Interaction[] = payload.runs as Interaction[];
-            const more = typeof payload.has_more === "boolean" ? payload.has_more : undefined;
-            const count = typeof payload.total_count === "number" ? payload.total_count : undefined;
+            const data = result.runs;
+            const more = result.has_more;
+            const count = result.total_count;
 
             // Single-shot empty-page recovery for non-zero offsets.
             if (offset > 0 && data.length === 0) {
@@ -168,6 +154,7 @@ export default function RunHistory() {
                 },
             });
             showToast(message, "error", { dedupeKey });
+            setLoadError("Could not load run history. Refresh to retry.");
         } finally {
             setIsLoading(false);
         }
@@ -335,6 +322,22 @@ export default function RunHistory() {
                             <tr>
                                 <td colSpan={6} className="px-6 py-12 text-center">
                                     <LoadingState message="Loading runs..." />
+                                </td>
+                            </tr>
+                        ) : loadError ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center">
+                                    <div className="flex flex-col items-center justify-center space-y-3">
+                                        <p className="text-gray-500 italic" data-testid="runhistory-load-error">
+                                            {loadError}
+                                        </p>
+                                        <button
+                                            onClick={fetchRuns}
+                                            className="text-sm text-indigo-600 hover:text-indigo-500 font-medium"
+                                        >
+                                            Retry loading runs
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ) : filteredRuns.length === 0 ? (

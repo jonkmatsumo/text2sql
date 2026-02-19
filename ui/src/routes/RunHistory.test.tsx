@@ -2,7 +2,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import RunHistory from "./RunHistory";
-import { OpsService } from "../api";
+import { ApiError, OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
@@ -267,24 +267,30 @@ describe("RunHistory search scope messaging", () => {
         expect(nextButton).not.toBeDisabled();
     });
 
-    it("renders empty state when listRuns payload is malformed", async () => {
-        const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
-        (OpsService.listRuns as any).mockResolvedValueOnce({});
+    it("shows an error surface and toast when listRuns response is malformed", async () => {
+        (OpsService.listRuns as any).mockRejectedValueOnce(
+            new ApiError(
+                "Received unexpected response from listRuns",
+                200,
+                "MALFORMED_RESPONSE",
+            )
+        );
         renderRunHistory();
 
         await waitFor(() => {
-            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+            expect(screen.getByTestId("runhistory-load-error")).toHaveTextContent(
+                "Could not load run history. Refresh to retry."
+            );
         });
 
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-            "Operator API contract mismatch (RunHistory.listRuns)",
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Received unexpected response from listRuns",
+            "error",
             expect.objectContaining({
-                surface: "RunHistory.listRuns",
-                summary: "Expected result.runs to be an array",
+                dedupeKey: expect.stringContaining("MALFORMED_RESPONSE"),
             })
         );
-
-        consoleErrorSpy.mockRestore();
+        expect(screen.queryByText("No runs recorded yet.")).not.toBeInTheDocument();
     });
 
     it("auto-redirects to offset 0 if page is empty at non-zero offset (Empty Page Recovery)", async () => {

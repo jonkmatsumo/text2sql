@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import RunHistory from "./RunHistory";
-import { OpsService } from "../api";
+import { ApiError, OpsService } from "../api";
 import * as useToastHook from "../hooks/useToast";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 
@@ -44,30 +44,41 @@ describe("RunHistory pagination contract guards", () => {
         vi.spyOn(useToastHook, "useToast").mockReturnValue({ show: showToastMock } as any);
     });
 
-    it("handles payload with missing runs field without crashing", async () => {
-        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
-        vi.spyOn(OpsService, "listRuns").mockResolvedValueOnce({} as any);
+    it("surfaces malformed listRuns payloads as fetch errors", async () => {
+        vi.spyOn(OpsService, "listRuns").mockRejectedValueOnce(
+            new ApiError("Received unexpected response from listRuns", 200, "MALFORMED_RESPONSE")
+        );
 
         renderRunHistory();
 
         await waitFor(() => {
-            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+            expect(screen.getByTestId("runhistory-load-error")).toHaveTextContent(
+                "Could not load run history. Refresh to retry."
+            );
         });
-        expect(screen.getByText("No results on this page")).toBeInTheDocument();
-        expect(errorSpy).toHaveBeenCalled();
+        expect(screen.queryByText("No runs recorded yet.")).not.toBeInTheDocument();
+        expect(showToastMock).toHaveBeenCalledWith(
+            "Received unexpected response from listRuns",
+            "error",
+            expect.objectContaining({
+                dedupeKey: expect.stringContaining("MALFORMED_RESPONSE"),
+            })
+        );
     });
 
-    it("handles payload with runs=null without crashing", async () => {
-        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
-        vi.spyOn(OpsService, "listRuns").mockResolvedValueOnce({ runs: null } as any);
+    it("does not silently convert malformed listRuns responses into empty-state copy", async () => {
+        vi.spyOn(OpsService, "listRuns").mockRejectedValueOnce(
+            new ApiError("Received unexpected response from listRuns", 200, "MALFORMED_RESPONSE")
+        );
 
         renderRunHistory();
 
         await waitFor(() => {
-            expect(screen.getByText("No runs recorded yet.")).toBeInTheDocument();
+            expect(screen.getByTestId("runhistory-load-error")).toHaveTextContent(
+                "Could not load run history. Refresh to retry."
+            );
         });
-        expect(screen.getByText("No results on this page")).toBeInTheDocument();
-        expect(errorSpy).toHaveBeenCalled();
+        expect(screen.queryByText("No runs recorded yet.")).not.toBeInTheDocument();
     });
 
     it("falls back to page-size heuristic when has_more is undefined", async () => {
