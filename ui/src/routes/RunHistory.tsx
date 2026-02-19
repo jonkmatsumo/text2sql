@@ -31,6 +31,7 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
 
 
 export default function RunHistory() {
+    const { show: showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [runs, setRuns] = useState<Interaction[]>([]);
     const [hasMore, setHasMore] = useState<boolean | undefined>(undefined);
@@ -44,8 +45,11 @@ export default function RunHistory() {
         navigator.clipboard.writeText(window.location.href).then(() => {
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);
+        }).catch((err) => {
+            showToast("Could not copy to clipboard", "error");
+            console.error("Clipboard copy failed:", err);
         });
-    }, []);
+    }, [showToast]);
 
     // Derived state from URL
     const statusFilter = (searchParams.get("status") as InteractionStatus | "All") || "All";
@@ -54,7 +58,6 @@ export default function RunHistory() {
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
     const limit = RUN_HISTORY_PAGE_SIZE;
-    const { show: showToast } = useToast();
     const searchInputRef = React.useRef<HTMLInputElement>(null);
     const recoveryOffsetRef = React.useRef<number | null>(null);
     const recoveryToastShownRef = React.useRef(false);
@@ -326,7 +329,7 @@ export default function RunHistory() {
                                         {run.user_nlq_text}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`px - 2 inline - flex text - xs leading - 5 font - semibold rounded - full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]} `}>
+                                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${STATUS_TONE_CLASSES[getInteractionStatusTone(run.execution_status)]}`}>
                                             {run.execution_status}
                                         </span>
                                     </td>
