@@ -82,6 +82,30 @@ describe("RunHistory pagination contract guards", () => {
         expect(nextButton).not.toBeDisabled();
     });
 
+    it("enables Next when has_more is true even for short pages", async () => {
+        vi.spyOn(OpsService, "listRuns").mockResolvedValueOnce({
+            runs: buildRuns(5),
+            has_more: true,
+        } as any);
+
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).not.toBeDisabled();
+    });
+
+    it("disables Next when has_more is false even for full pages", async () => {
+        vi.spyOn(OpsService, "listRuns").mockResolvedValueOnce({
+            runs: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            has_more: false,
+        } as any);
+
+        renderRunHistory();
+
+        const nextButton = await screen.findByRole("button", { name: "Next page" });
+        expect(nextButton).toBeDisabled();
+    });
+
     it("recovers non-zero offset when page is empty and has_more is false", async () => {
         vi.spyOn(OpsService, "listRuns")
             .mockResolvedValueOnce({ runs: [], has_more: false } as any)

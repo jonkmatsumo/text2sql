@@ -10,7 +10,7 @@ import { LoadingState } from "../components/common/LoadingState";
 import { KeyboardShortcutsModal } from "../components/ops/KeyboardShortcutsModal";
 import TraceLink from "../components/common/TraceLink";
 import FilterSelect from "../components/common/FilterSelect";
-import { formatRunHistoryRange } from "../constants/operatorUi";
+import { formatRunHistoryRange, hasRunHistoryNextPage } from "../constants/operatorUi";
 import { RUN_HISTORY_PAGE_SIZE } from "../constants/pagination";
 import { handleOperatorEscapeShortcut } from "../utils/operatorEscape";
 import { buildContractMismatchReport } from "../utils/runtimeGuards";
@@ -207,9 +207,7 @@ export default function RunHistory() {
         [runs, searchQuery]
     );
     const showPageScopedSearchNote = searchQuery.trim() !== "";
-    const canNavigateNext =
-        runs.length > 0 &&
-        (hasMore !== undefined ? hasMore : runs.length === limit);
+    const canNavigateNext = hasRunHistoryNextPage(hasMore, runs.length, limit);
     const rangeSummary = formatRunHistoryRange(offset, runs.length, totalCount);
 
     return (
@@ -293,6 +291,7 @@ export default function RunHistory() {
                                     )}
                                     <button
                                         onClick={() => updateFilters({ offset: offset + limit })}
+                                        disabled={!canNavigateNext || isLoading}
                                         className="mt-1.5 font-bold underline hover:text-blue-900 dark:hover:text-blue-200 block text-[11px] uppercase tracking-wide"
                                     >
                                         Scan next page &rarr;
