@@ -29,7 +29,6 @@ const THUMB_OPTIONS: { value: FeedbackThumb; label: string }[] = [
     { value: "None", label: "No Feedback" },
 ];
 
-const PAGE_SCOPED_SEARCH_NOTE = "Search filters the current page. Use Next/Prev to search older runs.";
 
 export default function RunHistory() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -181,21 +180,49 @@ export default function RunHistory() {
             <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
                 <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 font-semibold">Search Queries or IDs</label>
-                    <input
-                        ref={searchInputRef}
-                        type="text"
-                        placeholder="Keyword search..."
-                        value={searchQuery}
-                        onChange={(e) => updateFilters({ q: e.target.value })}
-                        onFocus={() => setIsSearchFocused(true)}
-                        onBlur={() => setIsSearchFocused(false)}
-                        aria-label="Search runs by query or ID"
-                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
+                    <div className="flex gap-2">
+                        <div className="relative flex-grow">
+                            <input
+                                ref={searchInputRef}
+                                type="text"
+                                placeholder="Keyword search..."
+                                value={searchQuery}
+                                onChange={(e) => updateFilters({ q: e.target.value })}
+                                onFocus={() => setIsSearchFocused(true)}
+                                onBlur={() => setIsSearchFocused(false)}
+                                aria-label="Search runs by query or ID"
+                                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500"
+                            />
+                        </div>
+                        <button
+                            disabled
+                            title="Global search across all history is not yet supported by the backend."
+                            className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md text-sm font-medium text-gray-400 bg-gray-50 dark:bg-gray-800 cursor-not-allowed opacity-60 whitespace-nowrap"
+                        >
+                            Search All
+                        </button>
+                    </div>
                     {showPageScopedSearchNote && (
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-search-scope-note">
-                            {PAGE_SCOPED_SEARCH_NOTE}
-                        </p>
+                        <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-md flex items-start gap-2" data-testid="runhistory-search-scope-note">
+                            <span className="text-blue-500 mt-0.5">ℹ️</span>
+                            <div className="flex-grow">
+                                <p className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-tight">Search is limited to this page</p>
+                                <div className="text-xs text-blue-700 dark:text-blue-400 leading-normal">
+                                    <p>Results only include runs already loaded in the table below.</p>
+                                    {((hasMore !== null ? hasMore : runs.length === limit) && searchQuery) && (
+                                        <p className="mt-1 font-semibold italic text-blue-800 dark:text-blue-300" data-testid="runhistory-more-runs-hint">
+                                            More runs exist beyond this page; try Next.
+                                        </p>
+                                    )}
+                                    <button
+                                        onClick={() => updateFilters({ offset: offset + limit })}
+                                        className="mt-1.5 font-bold underline hover:text-blue-900 dark:hover:text-blue-200 block text-[11px] uppercase tracking-wide"
+                                    >
+                                        Scan next page &rarr;
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     )}
                 </div>
                 <FilterSelect
@@ -243,9 +270,12 @@ export default function RunHistory() {
                                                 : "No runs recorded yet."}
                                         </p>
                                         {searchQuery !== "" && (
-                                            <p className="text-xs text-gray-500 dark:text-gray-400" data-testid="runhistory-empty-search-scope-note">
-                                                {PAGE_SCOPED_SEARCH_NOTE}
-                                            </p>
+                                            <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700/50 rounded text-left max-w-sm mx-auto" data-testid="runhistory-empty-search-scope-note">
+                                                <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-tight mb-1">Search is limited to this page</p>
+                                                <p className="text-xs text-gray-400 dark:text-gray-500 leading-tight">
+                                                    Results only include runs already loaded in the table. Try clicking <strong>Next</strong> to scan older runs for matches.
+                                                </p>
+                                            </div>
                                         )}
                                         {(statusFilter !== "All" || thumbFilter !== "All" || searchQuery !== "") && (
                                             <button
@@ -318,7 +348,7 @@ export default function RunHistory() {
                     onClick={() => updateFilters({ offset: offset + limit })}
                     disabled={(hasMore !== null ? !hasMore : runs.length < limit) || isLoading}
                     aria-label="Next page"
-                    title={searchQuery && runs.length < limit ? PAGE_SCOPED_SEARCH_NOTE : undefined}
+                    title={searchQuery && runs.length < limit ? "Search is limited to this page" : undefined}
                     className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
                 >
                     Next

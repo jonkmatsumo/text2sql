@@ -69,7 +69,10 @@ describe("RunHistory search scope messaging", () => {
         });
 
         expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
-            "Search filters the current page. Use Next/Prev to search older runs."
+            /Search is limited to this page/i
+        );
+        expect(screen.getByTestId("runhistory-empty-search-scope-note")).toHaveTextContent(
+            /Results only include runs already loaded/i
         );
     });
 
@@ -78,13 +81,46 @@ describe("RunHistory search scope messaging", () => {
         const searchInput = await screen.findByLabelText("Search runs by query or ID");
 
         fireEvent.focus(searchInput);
-        expect(screen.getByTestId("runhistory-search-scope-note")).toHaveTextContent(
-            "Search filters the current page. Use Next/Prev to search older runs."
-        );
+        const disclaimer = screen.getByTestId("runhistory-search-scope-note");
+        expect(disclaimer).toHaveTextContent(/Search is limited to this page/i);
+        expect(disclaimer).toHaveTextContent(/Results only include runs already loaded/i);
 
         fireEvent.blur(searchInput);
         await waitFor(() => {
             expect(screen.queryByTestId("runhistory-search-scope-note")).not.toBeInTheDocument();
+        });
+    });
+
+    it("shows 'Search All' disabled button with explanatory tooltip", async () => {
+        renderRunHistory();
+        const searchAllBtn = screen.getByRole("button", { name: /Search All/i });
+        expect(searchAllBtn).toBeDisabled();
+        expect(searchAllBtn).toHaveAttribute("title", expect.stringMatching(/not yet supported by the backend/i));
+    });
+
+    it("shows 'more runs exist' hint when q is set and page is full", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            data: buildRuns(RUN_HISTORY_PAGE_SIZE),
+            has_more: true
+        });
+        renderRunHistory("/admin/runs?q=test");
+
+        await waitFor(() => {
+            expect(screen.getByTestId("runhistory-more-runs-hint")).toHaveTextContent(
+                "More runs exist beyond this page; try Next."
+            );
+        });
+    });
+
+    it("hides 'more runs exist' hint when q is set but has_more is false", async () => {
+        (OpsService.listRuns as any).mockResolvedValueOnce({
+            data: buildRuns(5),
+            has_more: false
+        });
+        renderRunHistory("/admin/runs?q=test");
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("runhistory-more-runs-hint")).not.toBeInTheDocument();
         });
     });
 
@@ -137,7 +173,7 @@ describe("RunHistory search scope messaging", () => {
 
         const nextButton = await screen.findByRole("button", { name: "Next page" });
         expect(nextButton).toBeDisabled();
-        expect(nextButton).toHaveAttribute("title", "Search filters the current page. Use Next/Prev to search older runs.");
+        expect(nextButton).toHaveAttribute("title", expect.stringMatching(/Search is limited to this page/i));
     });
 
     it("respects has_more metadata for disabling Next button", async () => {
