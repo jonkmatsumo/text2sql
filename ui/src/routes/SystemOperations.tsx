@@ -51,9 +51,19 @@ export default function SystemOperations() {
     const addLog = (msg: string) => setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`]);
 
     useEffect(() => {
+        const requestedTab = searchParams.get("tab");
+        if (requestedTab && !VALID_OPERATIONS_TAB_IDS.has(requestedTab)) {
+            setSearchParams((currentParams) => {
+                const nextParams = new URLSearchParams(currentParams);
+                nextParams.set("tab", DEFAULT_OPERATIONS_TAB);
+                return nextParams;
+            }, { replace: true });
+            return;
+        }
+
         const nextTab = getOperationsTabFromParams(searchParams);
         setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
-    }, [searchParams]);
+    }, [searchParams, setSearchParams]);
 
     const handleTabChange = useCallback((nextTab: string) => {
         if (!VALID_OPERATIONS_TAB_IDS.has(nextTab)) {

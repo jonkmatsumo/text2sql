@@ -141,6 +141,15 @@ describe("SystemOperations", () => {
     expect(screen.queryByRole("heading", { name: "Schema Hydration" })).not.toBeInTheDocument();
   });
 
+  it("normalizes an invalid tab query param to the default tab in URL state", async () => {
+    renderSystemOperations("/admin/operations?tab=unknown");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-search")).toHaveTextContent("tab=nlp");
+    });
+    expect(screen.getByRole("heading", { name: "Generate Patterns" })).toBeInTheDocument();
+  });
+
   it("updates the tab query param when a tab is clicked", async () => {
     renderSystemOperations("/admin/operations");
 
@@ -149,6 +158,19 @@ describe("SystemOperations", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("tab=schema");
       expect(screen.getByRole("heading", { name: "Schema Hydration" })).toBeInTheDocument();
+    });
+  });
+
+  it("preserves unrelated query params when tabs are changed", async () => {
+    renderSystemOperations("/admin/operations?foo=bar&tab=schema");
+
+    fireEvent.click(screen.getByRole("button", { name: "Observability" }));
+
+    await waitFor(() => {
+      const search = screen.getByTestId("location-search");
+      expect(search).toHaveTextContent("foo=bar");
+      expect(search).toHaveTextContent("tab=obs");
+      expect(screen.getByRole("heading", { name: "Trace Explorer" })).toBeInTheDocument();
     });
   });
 });
