@@ -91,7 +91,7 @@ export default function Diagnostics() {
             isFetchingRef.current = false;
         }
 
-            // Fetch degraded runs concurrently (failed + negatively rated)
+        // Fetch degraded runs concurrently (failed + negatively rated)
         try {
             const [failed, negative] = await Promise.all([
                 OpsService.listRuns(DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE, 0, "FAILED"),
@@ -477,7 +477,7 @@ export default function Diagnostics() {
                         <div className="panel" style={{ padding: "24px", gridColumn: "1 / -1" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
                                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                                    Runs needing attention ({recencyWindowHours >= 24 ? `last ${Math.round(recencyWindowHours / 24)} days` : `last ${recencyWindowHours}h`})
+                                    Degraded run signals ({recencyWindowHours >= 24 ? `last ${Math.round(recencyWindowHours / 24)} days` : `last ${recencyWindowHours}h`})
                                     {filterMode === "anomalies" && (
                                         <span style={{ fontSize: "0.8rem", fontWeight: 400, color: "var(--muted)", marginLeft: "8px", verticalAlign: "middle" }}>
                                             (Global status — non-anomaly derived)
@@ -485,7 +485,7 @@ export default function Diagnostics() {
                                     )}
                                 </h3>
                                 <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.8rem", color: "var(--muted)" }}>
-                                    Window:
+                                    Recency:
                                     <select
                                         data-testid="diagnostics-recency-window"
                                         value={recencyWindowHours}
@@ -508,7 +508,7 @@ export default function Diagnostics() {
                                 </label>
                             </div>
                             <p style={{ marginTop: "-12px", marginBottom: "16px", color: "var(--muted)", fontSize: "0.8rem" }}>
-                                Showing latest {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.
+                                Showing most recent {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and {DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).
                                 {(excludedFailuresCount > 0 || excludedLowRatingsCount > 0) && (
                                     <span style={{ marginLeft: "8px", display: "inline-flex", alignItems: "center", color: "var(--muted)", fontStyle: "italic" }} data-testid="diagnostics-excluded-note">
                                         ({excludedFailuresCount + excludedLowRatingsCount} runs excluded due to missing timestamps)
@@ -517,20 +517,20 @@ export default function Diagnostics() {
                             </p>
                             <div style={{ display: "grid", gap: "20px" }}>
                                 <DiagnosticsRunSignalSection
-                                    title="Recent failures"
+                                    title="System failures (FAILED)"
                                     runs={visibleFailures}
                                     pillLabel="FAILED"
                                     pillClass="bg-red-100 text-red-800"
-                                    emptyMessage="No recent failures found."
+                                    emptyMessage="No recent system failures found."
                                     testId="diagnostics-failures-section"
                                 />
 
                                 <DiagnosticsRunSignalSection
-                                    title="Recent low ratings"
+                                    title="Operator feedback (DOWN)"
                                     runs={visibleLowRatings}
                                     pillLabel="LOW_RATING"
                                     pillClass="bg-amber-100 text-amber-800"
-                                    emptyMessage="No recent low ratings found."
+                                    emptyMessage="No recent low-rated runs found."
                                     testId="diagnostics-low-ratings-section"
                                 />
 

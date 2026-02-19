@@ -131,30 +131,34 @@ describe("Diagnostics Route", () => {
         const recentTs2 = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1h ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "missing-date",
-                    user_nlq_text: "Run without timestamp",
-                    execution_status: "FAILED",
-                    thumb: "DOWN",
-                },
-                {
-                    id: "older-run",
-                    user_nlq_text: "Older degraded run",
-                    execution_status: "FAILED",
-                    thumb: "DOWN",
-                    created_at: recentTs1,
-                },
-            ] })
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "newer-run",
-                    user_nlq_text: "Newest degraded run",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: recentTs2,
-                },
-            ] });
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "missing-date",
+                        user_nlq_text: "Run without timestamp",
+                        execution_status: "FAILED",
+                        thumb: "DOWN",
+                    },
+                    {
+                        id: "older-run",
+                        user_nlq_text: "Older degraded run",
+                        execution_status: "FAILED",
+                        thumb: "DOWN",
+                        created_at: recentTs1,
+                    },
+                ]
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "newer-run",
+                        user_nlq_text: "Newest degraded run",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: recentTs2,
+                    },
+                ]
+            });
 
         renderDiagnostics();
 
@@ -171,34 +175,38 @@ describe("Diagnostics Route", () => {
         const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "failed-1",
-                    user_nlq_text: "Failure query",
-                    execution_status: "FAILED",
-                    thumb: "None",
-                    created_at: failTs,
-                },
-            ] })
-            .mockResolvedValueOnce({ runs: [
-                {
-                    id: "low-1",
-                    user_nlq_text: "Low rating query",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: lowTs,
-                },
-            ] });
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "failed-1",
+                        user_nlq_text: "Failure query",
+                        execution_status: "FAILED",
+                        thumb: "None",
+                        created_at: failTs,
+                    },
+                ]
+            })
+            .mockResolvedValueOnce({
+                runs: [
+                    {
+                        id: "low-1",
+                        user_nlq_text: "Low rating query",
+                        execution_status: "SUCCESS",
+                        thumb: "DOWN",
+                        created_at: lowTs,
+                    },
+                ]
+            });
 
         renderDiagnostics();
 
         await waitFor(() => {
-            expect(screen.getByText("Recent failures")).toBeInTheDocument();
-            expect(screen.getByText("Recent low ratings")).toBeInTheDocument();
+            expect(screen.getByText("System failures (FAILED)")).toBeInTheDocument();
+            expect(screen.getByText("Operator feedback (DOWN)")).toBeInTheDocument();
         });
         expect(
             screen.getByText(
-                `Showing latest ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs.`
+                `Showing most recent ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} failures and ${DIAGNOSTICS_RUN_SIGNAL_PAGE_SIZE} low-rated runs (no server-side time window).`
             )
         ).toBeInTheDocument();
 
@@ -220,7 +228,7 @@ describe("Diagnostics Route", () => {
         });
 
         expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("168");
-        expect(screen.getByText(/Runs needing attention \(last 7 days\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/Degraded run signals \(last 7 days\)/i)).toBeInTheDocument();
     });
 
     it("client-side recency filter excludes runs older than selected window", async () => {
@@ -230,10 +238,12 @@ describe("Diagnostics Route", () => {
 
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any)
-            .mockResolvedValueOnce({ runs: [
-                { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
-                { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
-            ] })
+            .mockResolvedValueOnce({
+                runs: [
+                    { id: "recent-fail", user_nlq_text: "Recent failure", execution_status: "FAILED", thumb: "None", created_at: recentTs },
+                    { id: "old-fail", user_nlq_text: "Old failure", execution_status: "FAILED", thumb: "None", created_at: oldTs },
+                ]
+            })
             .mockResolvedValueOnce({ runs: [] });
 
         renderDiagnostics();
@@ -257,14 +267,18 @@ describe("Diagnostics Route", () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
             if (status === "FAILED") {
-                return Promise.resolve({ runs: [
-                    { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
-                ] });
+                return Promise.resolve({
+                    runs: [
+                        { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
+                    ]
+                });
             }
             if (thumb === "DOWN") {
-                return Promise.resolve({ runs: [
-                    { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
-                ] });
+                return Promise.resolve({
+                    runs: [
+                        { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
+                    ]
+                });
             }
             return Promise.resolve({ runs: [] });
         });
