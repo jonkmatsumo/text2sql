@@ -165,32 +165,6 @@ describe("Diagnostics Route", () => {
         expect(screen.queryByText("Run without timestamp")).not.toBeInTheDocument();
     });
 
-    it("shows 'unknown time' label for runs with missing created_at when included via recency window", async () => {
-        const recentTs = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30m ago
-        (getDiagnostics as any).mockResolvedValue(mockData);
-        (OpsService.listRuns as any)
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([
-                {
-                    id: "no-ts-run",
-                    user_nlq_text: "Query with no timestamp",
-                    execution_status: "SUCCESS",
-                    thumb: "DOWN",
-                    created_at: recentTs,
-                },
-            ]);
-
-        renderDiagnostics();
-
-        await waitFor(() => {
-            expect(screen.getByText("Query with no timestamp")).toBeInTheDocument();
-        });
-
-        // Relative time badge should render without crashing
-        const lowRatingsSection = screen.getByTestId("diagnostics-low-ratings-section");
-        expect(within(lowRatingsSection).getByText("Query with no timestamp")).toBeInTheDocument();
-    });
-
     it("renders failures and low ratings in separate sections", async () => {
         const failTs = new Date(Date.now() - 5 * 60 * 1000).toISOString();  // 5m ago
         const lowTs = new Date(Date.now() - 10 * 60 * 1000).toISOString(); // 10m ago
@@ -232,7 +206,7 @@ describe("Diagnostics Route", () => {
         expect(within(failuresSection).queryByText("Low rating query")).not.toBeInTheDocument();
     });
 
-    it("renders recency window dropdown with default 24h selection", async () => {
+    it("renders recency window dropdown with default 7d (168h) selection", async () => {
         (getDiagnostics as any).mockResolvedValue(mockData);
         renderDiagnostics();
 
@@ -240,7 +214,8 @@ describe("Diagnostics Route", () => {
             expect(screen.getByTestId("diagnostics-recency-window")).toBeInTheDocument();
         });
 
-        expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("24");
+        expect(screen.getByTestId("diagnostics-recency-window")).toHaveValue("168");
+        expect(screen.getByText(/Runs needing attention \(last 7 days\)/i)).toBeInTheDocument();
     });
 
     it("client-side recency filter excludes runs older than selected window", async () => {
@@ -262,13 +237,44 @@ describe("Diagnostics Route", () => {
             expect(screen.getByText("Recent failure")).toBeInTheDocument();
         });
 
-        // Both visible under default 24h window (recent is 30m, old is 48h — old should be excluded)
-        expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
-        expect(screen.getByText("Recent failure")).toBeInTheDocument();
-
-        // Switching to 7d window should show both
-        fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "168" } });
+        // Both visible under default 7d window (48h < 168h)
         expect(screen.getByText("Old failure")).toBeInTheDocument();
+
+        // Switching to 1h window should hide both (since both are older than 1h, actually 30m is within 1h)
+        // Switch to 1h window
+        fireEvent.change(screen.getByTestId("diagnostics-recency-window"), { target: { value: "1" } });
+        expect(screen.getByText("Recent failure")).toBeInTheDocument();
+        expect(screen.queryByText("Old failure")).not.toBeInTheDocument();
+        expect(screen.getByText(/last 1h/i)).toBeInTheDocument();
+    });
+
+    it("excludes runs with missing created_at and shows count in excluded note", async () => {
+        (getDiagnostics as any).mockResolvedValue(mockData);
+        (OpsService.listRuns as any).mockImplementation((_limit: number, _offset: number, status?: string, thumb?: string) => {
+            if (status === "FAILED") {
+                return Promise.resolve([
+                    { id: "no-ts", user_nlq_text: "Query with no timestamp", execution_status: "FAILED", thumb: "None" },
+                ]);
+            }
+            if (thumb === "DOWN") {
+                return Promise.resolve([
+                    { id: "no-ts-low", user_nlq_text: "Low rating no timestamp", execution_status: "SUCCESS", thumb: "DOWN" },
+                ]);
+            }
+            return Promise.resolve([]);
+        });
+
+        renderDiagnostics();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("diagnostics-excluded-note")).toBeInTheDocument();
+        });
+
+        const note = screen.getByTestId("diagnostics-excluded-note");
+        expect(within(note).getByText(/2 runs excluded due to missing timestamps/i)).toBeInTheDocument();
+
+        expect(screen.queryByText("Query with no timestamp")).not.toBeInTheDocument();
+        expect(screen.queryByText("Low rating no timestamp")).not.toBeInTheDocument();
     });
 
     it("shows debug panels only when isDebug is true", async () => {
