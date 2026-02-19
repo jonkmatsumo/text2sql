@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { Interaction, InteractionStatus, FeedbackThumb } from "../types/admin";
 import { getInteractionStatusTone, STATUS_TONE_CLASSES } from "../utils/operatorUi";
-import { OpsService } from "../api";
+import { OpsService, getErrorMessage } from "../api";
 import { useToast } from "../hooks/useToast";
 import { useOperatorShortcuts } from "../hooks/useOperatorShortcuts";
 import { LoadingState } from "../components/common/LoadingState";
@@ -93,7 +93,7 @@ export default function RunHistory() {
             });
             setRuns(uniqueData);
         } catch (err) {
-            showToast("Failed to fetch run history", "error");
+            showToast(getErrorMessage(err), "error");
         } finally {
             setIsLoading(false);
         }

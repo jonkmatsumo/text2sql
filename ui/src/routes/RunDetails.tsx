@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getDiagnostics } from "../api";
+import { getDiagnostics, getErrorMessage } from "../api";
 import { useToast } from "../hooks/useToast";
 import { LoadingState } from "../components/common/LoadingState";
 import { toPrettyJson, normalizeDecisionEvents, formatTimestamp } from "../utils/observability";
@@ -25,7 +25,7 @@ export default function RunDetails() {
                 setDiagnostics(diag);
             }
         } catch (err) {
-            showToast("Failed to fetch run details", "error");
+            showToast(getErrorMessage(err), "error");
         } finally {
             setIsLoading(false);
         }

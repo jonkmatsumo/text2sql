@@ -39,6 +39,7 @@ import {
   internalAuthToken
 } from "./config";
 import { RUN_HISTORY_PAGE_SIZE } from "./constants/operatorUi";
+import { isInteractionArray, isJobStatusResponse, isRunDiagnosticsResponse } from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
 const uiApiBase = uiApiBaseUrl;
@@ -297,6 +298,7 @@ export async function resolveTraceByInteraction(interactionId: string): Promise<
   return data.trace_id;
 }
 
+
 export async function fetchBlobContent(blobUrl: string): Promise<any> {
   const response = await fetch(blobUrl);
   if (!response.ok) {
@@ -537,7 +539,16 @@ export const OpsService = {
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to fetch job status");
-    return response.json();
+    const data = await response.json();
+    if (!isJobStatusResponse(data)) {
+      console.error("Malformed job status response:", data);
+      throw new ApiError(
+        "Received unexpected response from server",
+        200,
+        "MALFORMED_RESPONSE"
+      );
+    }
+    return data;
   },
 
   async cancelJob(jobId: string): Promise<any> {
@@ -581,7 +592,16 @@ export const OpsService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) await throwApiError(response, "Failed to load runs");
-    return response.json();
+    const data = await response.json();
+    if (!isInteractionArray(data)) {
+      console.error("Malformed interaction list response:", data);
+      throw new ApiError(
+        "Received unexpected response from server",
+        200,
+        "MALFORMED_RESPONSE"
+      );
+    }
+    return data;
   },
 };
 
@@ -981,5 +1001,14 @@ export async function getDiagnostics(
     );
   }
 
-  return response.json();
+  const data = await response.json();
+  if (!isRunDiagnosticsResponse(data)) {
+    console.error("Malformed diagnostics response:", data);
+    throw new ApiError(
+      "Received unexpected response from server",
+      200,
+      "MALFORMED_RESPONSE"
+    );
+  }
+  return data;
 }

@@ -12,7 +12,7 @@ describe("getDiagnostics", () => {
     });
 
     it("calls the diagnostics endpoint with debug=false by default", async () => {
-        const mockResponse = { diagnostics_schema_version: 1, retry_policy: {} };
+        const mockResponse = { diagnostics_schema_version: 1, retry_policy: {}, enabled_flags: {} };
         (global.fetch as Mock).mockResolvedValue({
             ok: true,
             json: async () => mockResponse,
@@ -34,7 +34,7 @@ describe("getDiagnostics", () => {
     });
 
     it("calls the diagnostics endpoint with debug=true when requested", async () => {
-        const mockResponse = { diagnostics_schema_version: 1, debug: { latency: {} } };
+        const mockResponse = { diagnostics_schema_version: 1, debug: { latency: {} }, enabled_flags: {} };
         (global.fetch as Mock).mockResolvedValue({
             ok: true,
             json: async () => mockResponse,
