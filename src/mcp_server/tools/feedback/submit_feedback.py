@@ -18,7 +18,12 @@ TOOL_NAME = "submit_feedback"
 TOOL_DESCRIPTION = "Submit user feedback (UP/DOWN) for a specific interaction."
 
 
-async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None) -> str:
+async def handler(
+    interaction_id: str,
+    thumb: str,
+    comment: Optional[str] = None,
+    tenant_id: Optional[int] = None,
+) -> str:
     """Submit user feedback (UP/DOWN) for a specific interaction.
 
     Authorization:
@@ -36,13 +41,18 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
         interaction_id: The unique identifier of the interaction.
         thumb: UP or DOWN.
         comment: Optional textual feedback.
+        tenant_id: Tenant identifier.
 
     Returns:
         JSON string with success or error status.
     """
     from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.validation import require_tenant_id
 
     if err := validate_role("SQL_USER_ROLE", TOOL_NAME):
+        return err
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 
     # Validate interaction_id before attempting write

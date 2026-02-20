@@ -27,7 +27,12 @@ class TestSubmitFeedback:
             mock_store.ensure_review_queue = AsyncMock()
             mock_get_store.return_value = mock_store
 
-            result_json = await handler(interaction_id="int-1", thumb="UP", comment="Nice")
+            result_json = await handler(
+                interaction_id="int-1",
+                thumb="UP",
+                comment="Nice",
+                tenant_id=1,
+            )
             result = json.loads(result_json)
 
             assert result["result"] == "OK"
@@ -45,7 +50,12 @@ class TestSubmitFeedback:
             mock_store.ensure_review_queue = AsyncMock()
             mock_get_store.return_value = mock_store
 
-            result_json = await handler(interaction_id="int-1", thumb="DOWN", comment="Bad")
+            result_json = await handler(
+                interaction_id="int-1",
+                thumb="DOWN",
+                comment="Bad",
+                tenant_id=1,
+            )
             result = json.loads(result_json)
 
             assert result["result"] == "OK"
@@ -62,7 +72,7 @@ class TestSubmitFeedback:
             mock_store.create_feedback = AsyncMock(return_value="fb-id")
             mock_get_store.return_value = mock_store
 
-            result_json = await handler(interaction_id="int-1", thumb="UP")
+            result_json = await handler(interaction_id="int-1", thumb="UP", tenant_id=1)
             result = json.loads(result_json)
 
             assert result["result"] == "OK"
@@ -71,7 +81,7 @@ class TestSubmitFeedback:
     @pytest.mark.asyncio
     async def test_submit_feedback_null_interaction_id_fails(self):
         """Test feedback with null interaction_id returns error envelope."""
-        result_json = await handler(interaction_id=None, thumb="UP")
+        result_json = await handler(interaction_id=None, thumb="UP", tenant_id=1)
         result = json.loads(result_json)
 
         assert result["error"]["message"] == "interaction_id is required"
@@ -81,7 +91,7 @@ class TestSubmitFeedback:
     @pytest.mark.asyncio
     async def test_submit_feedback_empty_interaction_id_fails(self):
         """Test feedback with empty interaction_id returns error envelope."""
-        result_json = await handler(interaction_id="", thumb="UP")
+        result_json = await handler(interaction_id="", thumb="UP", tenant_id=1)
         result = json.loads(result_json)
 
         assert result["error"]["message"] == "interaction_id is required"
@@ -100,7 +110,7 @@ class TestSubmitFeedback:
             )
             mock_get_store.return_value = mock_store
 
-            result_json = await handler(interaction_id="nonexistent-id", thumb="UP")
+            result_json = await handler(interaction_id="nonexistent-id", thumb="UP", tenant_id=1)
             result = json.loads(result_json)
 
             assert "does not exist" in result["error"]["message"]
@@ -119,10 +129,19 @@ class TestSubmitFeedback:
             )
             mock_get_store.return_value = mock_store
 
-            result_json = await handler(interaction_id="int-1", thumb="UP")
+            result_json = await handler(interaction_id="int-1", thumb="UP", tenant_id=1)
             result = json.loads(result_json)
 
             assert result["error"]["message"] == "Failed to submit feedback."
             assert result["error"]["category"] == "internal"
             assert result["error"]["sql_state"] == "SUBMIT_FEEDBACK_FAILED"
             assert "password=secret-token" not in result["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_submit_feedback_missing_tenant_id_fails(self):
+        """submit_feedback should reject missing tenant IDs."""
+        result_json = await handler(interaction_id="int-1", thumb="UP", tenant_id=None)
+        result = json.loads(result_json)
+
+        assert result["error"]["category"] == "invalid_request"
+        assert result["error"]["sql_state"] == "MISSING_TENANT_ID"

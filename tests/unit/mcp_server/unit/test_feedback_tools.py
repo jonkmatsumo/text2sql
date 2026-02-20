@@ -20,7 +20,12 @@ async def test_submit_feedback_upvote():
         mock_store.ensure_review_queue = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        result_json = await submit_feedback(interaction_id="int-1", thumb="UP", comment="Nice")
+        result_json = await submit_feedback(
+            interaction_id="int-1",
+            thumb="UP",
+            comment="Nice",
+            tenant_id=1,
+        )
         result = json.loads(result_json)
 
         assert result["result"] == "OK"
@@ -37,7 +42,12 @@ async def test_submit_feedback_downvote():
         mock_store.ensure_review_queue = AsyncMock()
         mock_get_store.return_value = mock_store
 
-        await submit_feedback(interaction_id="int-1", thumb="DOWN", comment="Bad")
+        await submit_feedback(
+            interaction_id="int-1",
+            thumb="DOWN",
+            comment="Bad",
+            tenant_id=1,
+        )
 
         mock_store.create_feedback.assert_called_once()
         mock_store.ensure_review_queue.assert_called_once()

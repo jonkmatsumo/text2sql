@@ -187,6 +187,7 @@ def test_submit_feedback(monkeypatch):
         assert args["interaction_id"] == "int-1"
         assert args["thumb"] == "UP"
         assert args["comment"] == "nice"
+        assert args["tenant_id"] == 1
         return "OK"
 
     monkeypatch.setattr(gateway_app, "_call_tool", fake_call_tool)

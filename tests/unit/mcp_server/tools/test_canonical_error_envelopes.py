@@ -15,14 +15,14 @@ import pytest
             lambda: __import__(
                 "mcp_server.tools.feedback.submit_feedback",
                 fromlist=["handler"],
-            ).handler("", "UP"),
+            ).handler("", "UP", tenant_id=1),
         ),
         (
             "resolve_ambiguity",
             lambda: __import__(
                 "mcp_server.tools.resolve_ambiguity",
                 fromlist=["handler"],
-            ).handler("revenue", "invalid-schema-context"),
+            ).handler("revenue", "invalid-schema-context", tenant_id=1),
         ),
         (
             "get_interaction_details",

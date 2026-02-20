@@ -18,7 +18,7 @@ class TestResolveAmbiguity:
     async def test_resolve_ambiguity_oversized_query_rejected(self):
         """Oversized query should be rejected with structured error."""
         oversized_query = "x" * ((10 * 1024) + 1)
-        result_json = await handler(query=oversized_query, schema_context=[])
+        result_json = await handler(query=oversized_query, schema_context=[], tenant_id=1)
         data = json.loads(result_json)
         assert data["error"]["category"] == "invalid_request"
         assert data["error"]["sql_state"] == "INPUT_TOO_LARGE"
@@ -27,7 +27,7 @@ class TestResolveAmbiguity:
     async def test_resolve_ambiguity_schema_context_too_large_rejected(self):
         """Excessive schema_context names should be rejected deterministically."""
         schema_context = [{"name": f"table_{i}"} for i in range(101)]
-        result_json = await handler(query="show orders", schema_context=schema_context)
+        result_json = await handler(query="show orders", schema_context=schema_context, tenant_id=1)
         data = json.loads(result_json)
         assert data["error"]["category"] == "invalid_request"
         assert data["error"]["sql_state"] == "TOO_MANY_ITEMS"
@@ -49,7 +49,16 @@ class TestResolveAmbiguity:
             result_json = await handler(
                 query="show customers",
                 schema_context=[{"name": "customers", "type": "Table"}],
+                tenant_id=1,
             )
 
         data = json.loads(result_json)
         assert data["result"]["status"] == "CLEAR"
+
+    @pytest.mark.asyncio
+    async def test_resolve_ambiguity_missing_tenant_id_rejected(self):
+        """resolve_ambiguity should reject missing tenant_id."""
+        result_json = await handler(query="show customers", schema_context=[], tenant_id=None)
+        data = json.loads(result_json)
+        assert data["error"]["category"] == "invalid_request"
+        assert data["error"]["sql_state"] == "MISSING_TENANT_ID"
