@@ -19,6 +19,8 @@ class TestExecuteSqlQuery:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -360,10 +362,6 @@ class TestExecuteSqlQuery:
         with (
             patch(
                 "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
-            ),
-            patch(
-                "mcp_server.tools.execute_sql_query.Database.supports_tenant_scope_enforcement",
-                return_value=True,
             ),
             patch("mcp_server.utils.auth.validate_role", return_value=None),
         ):

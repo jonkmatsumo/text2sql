@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -79,6 +80,75 @@ async def test_full_pipeline_successful_select_flow(monkeypatch):
     assert result["query_result"] == [{"value": 1}]
     assert result["messages"][-1].content == "Mocked synthesized response."
     assert len(dal.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_payload(monkeypatch):
+    """Mocked pipeline should execute rewritten SQLite SQL with tenant params."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["sql"] = sql
+                observed["params"] = list(params)
+                return [{"order_id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+            include_columns=payload.get("include_columns", True),
+            timeout_seconds=payload.get("timeout_seconds"),
+            page_token=payload.get("page_token"),
+            page_size=payload.get("page_size"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+
+    state = build_app_input(
+        question="Show orders",
+        from_cache=True,
+        current_sql="SELECT * FROM orders",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert result["error"] is None
+    assert result["query_result"] == [{"order_id": 1}]
+    assert "tenant_id = ?" in str(observed.get("sql", ""))
+    assert observed.get("params") == [1]
+    assert len(dal.calls) == 0
 
 
 @pytest.mark.asyncio

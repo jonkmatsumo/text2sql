@@ -1,8 +1,9 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
+import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import asyncpg
 from opentelemetry import trace
@@ -58,6 +59,109 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
         return []
     first_row = rows[0]
     return [build_column_meta(key, "unknown") for key in first_row.keys()]
+
+
+def _tenant_enforcement_unsupported_response(provider: str) -> str:
+    """Return a canonical tenant-enforcement unsupported response envelope."""
+    return _construct_error_response(
+        message="Tenant enforcement not supported for provider/table configuration.",
+        category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
+        provider=provider,
+        metadata={
+            "sql_state": "TENANT_ENFORCEMENT_UNSUPPORTED",
+            "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
+            "reason_code": "tenant_enforcement_unsupported",
+        },
+    )
+
+
+def _tenant_column_name() -> str:
+    configured = (get_env_str("TENANT_COLUMN_NAME", "tenant_id") or "").strip()
+    return configured or "tenant_id"
+
+
+def _tenant_global_table_allowlist() -> set[str]:
+    raw = (get_env_str("TENANT_GLOBAL_TABLES", "") or "").strip()
+    if not raw:
+        return set()
+    return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
+
+
+def _extract_columns_from_table_definition(definition_payload: str) -> Optional[set[str]]:
+    try:
+        parsed = json.loads(definition_payload)
+    except Exception:
+        return None
+    columns = parsed.get("columns")
+    if not isinstance(columns, list):
+        return None
+    extracted = set()
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if isinstance(name, str) and name.strip():
+            extracted.add(name.strip().lower())
+    return extracted or None
+
+
+async def _load_table_columns_for_rewrite(
+    table_names: Sequence[str],
+    tenant_id: int,
+) -> dict[str, set[str]]:
+    """Best-effort table column lookup from metadata store."""
+    try:
+        store = Database.get_metadata_store()
+    except Exception:
+        return {}
+
+    table_columns: dict[str, set[str]] = {}
+    for table_name in table_names:
+        normalized = (table_name or "").strip().lower()
+        if not normalized:
+            continue
+        candidates = [normalized]
+        short_name = normalized.split(".")[-1]
+        if short_name != normalized:
+            candidates.append(short_name)
+
+        for candidate in candidates:
+            try:
+                definition_payload = await store.get_table_definition(
+                    candidate, tenant_id=tenant_id
+                )
+            except Exception:
+                continue
+            columns = _extract_columns_from_table_definition(definition_payload)
+            if not columns:
+                continue
+            table_columns[normalized] = columns
+            table_columns[candidate] = columns
+            break
+
+    return table_columns
+
+
+def _missing_tenant_column_tables(
+    table_names: Sequence[str],
+    table_columns: dict[str, set[str]],
+    tenant_column: str,
+) -> list[str]:
+    tenant_column_normalized = tenant_column.strip().lower()
+    if not tenant_column_normalized:
+        return []
+
+    missing: list[str] = []
+    for table_name in table_names:
+        normalized = (table_name or "").strip().lower()
+        if not normalized:
+            continue
+        columns = table_columns.get(normalized)
+        if columns is None:
+            columns = table_columns.get(normalized.split(".")[-1])
+        if columns is not None and tenant_column_normalized not in columns:
+            missing.append(normalized)
+    return missing
 
 
 def _resolve_row_limit(conn: object) -> int:
@@ -372,8 +476,14 @@ async def handler(
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 
-    supports_tenant_enforcement = Database.supports_tenant_scope_enforcement()
-    if tenant_id is not None and not supports_tenant_enforcement:
+    caps = Database.get_query_target_capabilities()
+    tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
+    if isinstance(tenant_mode_raw, str):
+        tenant_enforcement_mode = tenant_mode_raw.strip().lower() or "rls_session"
+    else:
+        tenant_enforcement_mode = "rls_session"
+
+    if tenant_id is not None and tenant_enforcement_mode == "unsupported":
         from dal.feature_flags import allow_non_postgres_tenant_bypass
 
         if allow_non_postgres_tenant_bypass():
@@ -383,16 +493,10 @@ async def handler(
                 provider,
             )
         else:
-            return _construct_error_response(
-                message=f"Tenant isolation not supported for provider {provider}",
-                category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
-                provider=provider,
-                metadata={
-                    "sql_state": "TENANT_ENFORCEMENT_UNSUPPORTED",
-                    "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
-                    "reason_code": "tenant_enforcement_unsupported",
-                },
-            )
+            return _tenant_enforcement_unsupported_response(provider)
+
+    effective_sql_query = sql_query
+    effective_params = list(params or [])
 
     # 1. SQL Length Check
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
@@ -503,6 +607,40 @@ async def handler(
             provider=provider,
         )
 
+    if tenant_id is not None and tenant_enforcement_mode == "sql_rewrite":
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+
+        tenant_column = _tenant_column_name()
+        global_table_allowlist = _tenant_global_table_allowlist()
+        try:
+            rewrite_result = rewrite_tenant_scoped_sql(
+                effective_sql_query,
+                provider=provider,
+                tenant_id=tenant_id,
+                tenant_column=tenant_column,
+                global_table_allowlist=global_table_allowlist,
+            )
+        except TenantSQLRewriteError:
+            return _tenant_enforcement_unsupported_response(provider)
+
+        if rewrite_result.tenant_predicates_added <= 0:
+            return _tenant_enforcement_unsupported_response(provider)
+
+        table_columns = await _load_table_columns_for_rewrite(
+            rewrite_result.tables_rewritten,
+            tenant_id,
+        )
+        missing_tenant_column_tables = _missing_tenant_column_tables(
+            rewrite_result.tables_rewritten,
+            table_columns,
+            tenant_column,
+        )
+        if missing_tenant_column_tables:
+            return _tenant_enforcement_unsupported_response(provider)
+
+        effective_sql_query = rewrite_result.rewritten_sql
+        effective_params.extend(rewrite_result.params)
+
     def _unsupported_capability_response(
         required_capability: str,
         provider_name: str,
@@ -546,7 +684,6 @@ async def handler(
             },
         )
 
-    caps = Database.get_query_target_capabilities()
     fallback_policy = parse_capability_fallback_policy(
         get_env_str("AGENT_CAPABILITY_FALLBACK_MODE")
     )
@@ -632,7 +769,7 @@ async def handler(
     if provider == "redshift":
         from dal.redshift import validate_redshift_query
 
-        errors = validate_redshift_query(sql_query)
+        errors = validate_redshift_query(effective_sql_query)
         if errors:
             return _construct_error_response(
                 "Redshift query validation failed.",
@@ -661,11 +798,17 @@ async def handler(
                 if (page_token or effective_page_size) and callable(fetch_page):
                     if include_columns and callable(fetch_page_with_columns):
                         rows, columns, next_token = await fetch_page_with_columns(
-                            sql_query, page_token, effective_page_size, *(params or [])
+                            effective_sql_query,
+                            page_token,
+                            effective_page_size,
+                            *effective_params,
                         )
                         return rows
                     rows, next_token = await fetch_page(
-                        sql_query, page_token, effective_page_size, *(params or [])
+                        effective_sql_query,
+                        page_token,
+                        effective_page_size,
+                        *effective_params,
                     )
                     return rows
                 if include_columns:
@@ -675,37 +818,39 @@ async def handler(
                         callable(fetch_with_columns) and "fetch_with_columns" in type(conn).__dict__
                     )
                     supports_prepare = callable(prepare) and "prepare" in type(conn).__dict__
-                    if params:
+                    if effective_params:
                         if supports_fetch_with_columns:
-                            rows, columns = await fetch_with_columns(sql_query, *params)
+                            rows, columns = await fetch_with_columns(
+                                effective_sql_query, *effective_params
+                            )
                         elif supports_prepare:
                             from dal.util.column_metadata import columns_from_asyncpg_attributes
 
-                            statement = await prepare(sql_query)
-                            rows = await statement.fetch(*params)
+                            statement = await prepare(effective_sql_query)
+                            rows = await statement.fetch(*effective_params)
                             columns = columns_from_asyncpg_attributes(statement.get_attributes())
                             rows = [dict(row) for row in rows]
                         else:
-                            rows = await conn.fetch(sql_query, *params)
+                            rows = await conn.fetch(effective_sql_query, *effective_params)
                             rows = [dict(row) for row in rows]
                     else:
                         if supports_fetch_with_columns:
-                            rows, columns = await fetch_with_columns(sql_query)
+                            rows, columns = await fetch_with_columns(effective_sql_query)
                         elif supports_prepare:
                             from dal.util.column_metadata import columns_from_asyncpg_attributes
 
-                            statement = await prepare(sql_query)
+                            statement = await prepare(effective_sql_query)
                             rows = await statement.fetch()
                             columns = columns_from_asyncpg_attributes(statement.get_attributes())
                             rows = [dict(row) for row in rows]
                         else:
-                            rows = await conn.fetch(sql_query)
+                            rows = await conn.fetch(effective_sql_query)
                             rows = [dict(row) for row in rows]
                 else:
-                    if params:
-                        rows = await conn.fetch(sql_query, *params)
+                    if effective_params:
+                        rows = await conn.fetch(effective_sql_query, *effective_params)
                     else:
-                        rows = await conn.fetch(sql_query)
+                        rows = await conn.fetch(effective_sql_query)
                     rows = [dict(row) for row in rows]
                 return rows
 

@@ -167,6 +167,8 @@ async def test_execution_and_resolution_tool_contracts():
     from mcp_server.tools.resolve_ambiguity import handler as resolve_handler
 
     Database._query_target_capabilities = BackendCapabilities(
+        supports_tenant_enforcement=True,
+        tenant_enforcement_mode="rls_session",
         supports_column_metadata=True,
         supports_cancel=True,
         supports_pagination=True,
