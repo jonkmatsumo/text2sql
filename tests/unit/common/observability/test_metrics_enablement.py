@@ -62,3 +62,28 @@ def test_optional_metrics_skips_counter_when_explicitly_disabled(monkeypatch):
         metric.add_counter("agent.test.counter", value=1)
 
     mock_get_meter.assert_not_called()
+
+
+def test_optional_metrics_registers_histogram_once_per_name(monkeypatch):
+    """Histogram instruments should be cached and reused across emissions."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    monkeypatch.delenv("AGENT_OBSERVABILITY_METRICS_ENABLED", raising=False)
+
+    metric = OptionalMetrics(
+        meter_name="test-agent",
+        enabled_env_var="AGENT_OBSERVABILITY_METRICS_ENABLED",
+    )
+    fake_meter = MagicMock()
+    fake_histogram = MagicMock()
+    fake_meter.create_histogram.return_value = fake_histogram
+
+    with patch("common.observability.metrics.metrics.get_meter", return_value=fake_meter):
+        metric.record_histogram("agent.test.latency_ms", value=1.0)
+        metric.record_histogram("agent.test.latency_ms", value=2.0)
+
+    fake_meter.create_histogram.assert_called_once_with(
+        name="agent.test.latency_ms",
+        description="",
+        unit="1",
+    )
+    assert fake_histogram.record.call_count == 2

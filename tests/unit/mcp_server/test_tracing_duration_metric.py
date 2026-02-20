@@ -27,6 +27,7 @@ async def test_trace_tool_records_duration_histogram():
 
     with (
         patch("opentelemetry.trace.get_tracer", return_value=mock_tracer),
+        patch("mcp_server.utils.tracing.mcp_metrics.add_counter") as mock_add_counter,
         patch("mcp_server.utils.tracing.mcp_metrics.record_histogram") as mock_record_histogram,
     ):
         traced = trace_tool("list_tables")(handler)
@@ -34,3 +35,5 @@ async def test_trace_tool_records_duration_histogram():
 
     histogram_names = [call.args[0] for call in mock_record_histogram.call_args_list]
     assert "mcp.tool.duration_ms" in histogram_names
+    counter_names = [call.args[0] for call in mock_add_counter.call_args_list]
+    assert "mcp.tool.calls_total" in counter_names

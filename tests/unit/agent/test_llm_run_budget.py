@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from langchain_core.messages import AIMessage
 
@@ -49,3 +51,18 @@ def test_route_after_validation_stops_retry_on_budget_exceeded():
         "error_category": "budget_exceeded",
     }
     assert route_after_validation(state) == "synthesize"
+
+
+def test_llm_budget_exhaustion_emits_metric_counter():
+    """Budget exhaustion should emit a bounded OTEL counter signal."""
+    wrapped = _wrap_llm(_FakeLLM())
+
+    with (
+        llm_run_budget_context(8),
+        patch("agent.utils.llm_run_budget.agent_metrics.add_counter") as mock_add_counter,
+    ):
+        with pytest.raises(LLMBudgetExceededError):
+            wrapped.invoke("select one")
+
+    metric_names = [call.args[0] for call in mock_add_counter.call_args_list]
+    assert "agent.llm_budget.exhausted_total" in metric_names

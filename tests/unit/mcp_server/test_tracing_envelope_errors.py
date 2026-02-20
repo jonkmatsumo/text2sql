@@ -34,7 +34,10 @@ async def test_trace_tool_marks_error_for_error_envelope():
             },
         }
 
-    with patch("opentelemetry.trace.get_tracer", return_value=tracer):
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=tracer),
+        patch("mcp_server.utils.tracing.mcp_metrics.add_counter") as mock_add_counter,
+    ):
         traced = trace_tool("list_tables")(handler)
         await traced()
 
@@ -43,6 +46,16 @@ async def test_trace_tool_marks_error_for_error_envelope():
     span = spans[0]
     assert span.status.status_code == StatusCode.ERROR
     assert span.attributes["mcp.tool.error.category"] == "invalid_request"
+    logical_error_calls = [
+        call
+        for call in mock_add_counter.call_args_list
+        if call.args[0] == "mcp.tool.logical_failures_total"
+    ]
+    assert len(logical_error_calls) == 1
+    assert logical_error_calls[0].kwargs["attributes"] == {
+        "tool_name": "list_tables",
+        "error_category": "invalid_request",
+    }
 
 
 @pytest.mark.asyncio
@@ -57,7 +70,10 @@ async def test_trace_tool_keeps_ok_for_non_error_envelope():
             "error": None,
         }
 
-    with patch("opentelemetry.trace.get_tracer", return_value=tracer):
+    with (
+        patch("opentelemetry.trace.get_tracer", return_value=tracer),
+        patch("mcp_server.utils.tracing.mcp_metrics.add_counter") as mock_add_counter,
+    ):
         traced = trace_tool("list_tables")(handler)
         await traced()
 
@@ -66,3 +82,9 @@ async def test_trace_tool_keeps_ok_for_non_error_envelope():
     span = spans[0]
     assert span.status.status_code == StatusCode.OK
     assert "mcp.tool.error.category" not in span.attributes
+    logical_error_calls = [
+        call
+        for call in mock_add_counter.call_args_list
+        if call.args[0] == "mcp.tool.logical_failures_total"
+    ]
+    assert logical_error_calls == []

@@ -23,6 +23,11 @@ from agent.models.run_budget import (
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import tool_error_invalid_request
+from mcp_server.utils.reserved_fields import (
+    REQUEST_ID_RESERVED_FIELD,
+    TRACE_CONTEXT_RESERVED_FIELD,
+    split_reserved_tool_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,24 +150,25 @@ class MCPToolWrapper:
 
         # Config is accepted for LangGraph compatibility but not used by MCP
         # Telemetry wrapping is handled by tools.py _wrap_tool()
-        outbound_input = dict(input)
+        outbound_input, reserved_metadata = split_reserved_tool_metadata(dict(input))
         try:
             from agent.telemetry import telemetry
 
+            explicit_request_id = reserved_metadata.get(REQUEST_ID_RESERVED_FIELD)
             request_id = (
-                outbound_input.get("_request_id")
+                explicit_request_id
                 or outbound_input.get("request_id")
                 or run_id
                 or telemetry.get_current_trace_id()
                 or str(uuid4())
             )
-            outbound_input["_request_id"] = str(request_id)
+            outbound_input[REQUEST_ID_RESERVED_FIELD] = str(request_id)
 
             trace_carrier: dict[str, str] = {}
             telemetry.inject_context(trace_carrier)
             traceparent = trace_carrier.get("traceparent")
             if traceparent:
-                outbound_input["_trace_context"] = {
+                outbound_input[TRACE_CONTEXT_RESERVED_FIELD] = {
                     "traceparent": traceparent,
                     **(
                         {"tracestate": trace_carrier["tracestate"]}
