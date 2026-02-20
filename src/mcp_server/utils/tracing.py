@@ -84,6 +84,48 @@ def _extract_truncation_signal(response: Any) -> tuple[bool, bool]:
     return False, False
 
 
+def _extract_envelope_error_category(response: Any) -> str | None:
+    """Extract envelope-level error category from response payload, if present."""
+    payload: dict[str, Any] | None = None
+
+    if isinstance(response, dict):
+        payload = response
+    elif hasattr(response, "model_dump"):
+        try:
+            dumped = response.model_dump()
+            if isinstance(dumped, dict):
+                payload = dumped
+        except Exception:
+            payload = None
+    elif isinstance(response, str):
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except Exception:
+            payload = None
+
+    if not isinstance(payload, dict):
+        return None
+
+    if "error" not in payload:
+        return None
+
+    error_payload = payload.get("error")
+    if error_payload is None:
+        return None
+
+    if isinstance(error_payload, dict):
+        category = error_payload.get("category")
+        return str(category) if category is not None else "unknown"
+
+    category_attr = getattr(error_payload, "category", None)
+    if category_attr is not None:
+        return str(getattr(category_attr, "value", category_attr))
+
+    return "unknown"
+
+
 def _inject_tool_version(response: Any, tool_name: str) -> Any:
     """Inject tool_version into envelope metadata using central registry."""
     tool_version = get_tool_version(tool_name)
@@ -342,6 +384,13 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                 "parse_failed": bool(truncation_parse_failed),
                             },
                         )
+
+                    error_category = _extract_envelope_error_category(actual_response)
+                    if error_category is not None:
+                        span.set_status(Status(StatusCode.ERROR))
+                        span.set_attribute("mcp.tool.error.category", str(error_category))
+                    else:
+                        span.set_status(Status(StatusCode.OK))
 
                     return actual_response
 
