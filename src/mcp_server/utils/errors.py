@@ -6,6 +6,7 @@ error parsing across different tools.
 
 from typing import Optional
 
+from common.errors.error_codes import ErrorCode, canonical_error_code_for_category
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import (
@@ -35,6 +36,7 @@ def build_error_metadata(
     retryable: bool = False,
     retry_after_seconds: Optional[float] = None,
     code: Optional[str] = None,
+    error_code: Optional[str] = None,
     hint: Optional[str] = None,
 ) -> ToolError:
     """Build bounded, redacted ToolError."""
@@ -42,26 +44,29 @@ def build_error_metadata(
     safe_hint = sanitize_error_message(hint, fallback="") if hint else None
     if safe_hint == "":
         safe_hint = None
-    error_code = code or "TOOL_ERROR"
+    machine_code = code or "TOOL_ERROR"
+    canonical_error_code = error_code or canonical_error_code_for_category(category).value
+    if not canonical_error_code:
+        canonical_error_code = ErrorCode.INTERNAL_ERROR.value
     safe_details = {"hint": safe_hint} if safe_hint else None
 
     if category == ErrorCategory.INVALID_REQUEST:
         err = tool_error_invalid_request(
-            code=error_code,
+            code=machine_code,
             message=safe_message,
             provider=provider,
             details_safe=safe_details,
         )
     elif category == ErrorCategory.UNSUPPORTED_CAPABILITY:
         err = tool_error_unsupported_capability(
-            code=error_code,
+            code=machine_code,
             message=safe_message,
             provider=provider,
             details_safe=safe_details,
         )
     elif category == ErrorCategory.TIMEOUT:
         err = tool_error_timeout(
-            code=error_code,
+            code=machine_code,
             message=safe_message,
             provider=provider,
             details_safe=safe_details,
@@ -69,7 +74,7 @@ def build_error_metadata(
         )
     elif category == ErrorCategory.INTERNAL:
         err = tool_error_internal(
-            code=error_code,
+            code=machine_code,
             message=safe_message,
             provider=provider,
             details_safe=safe_details,
@@ -77,7 +82,8 @@ def build_error_metadata(
     else:
         err = ToolError(
             category=category,
-            code=error_code,
+            code=machine_code,
+            error_code=canonical_error_code,
             message=safe_message,
             retryable=retryable,
             provider=provider,
@@ -85,7 +91,7 @@ def build_error_metadata(
             retry_after_seconds=retry_after_seconds,
         )
 
-    updates = {}
+    updates = {"error_code": canonical_error_code}
     if bool(retryable) != bool(err.retryable):
         updates["retryable"] = bool(retryable)
     if retry_after_seconds is not None and err.retry_after_seconds != retry_after_seconds:
@@ -102,6 +108,7 @@ def tool_error_response(
     *,
     message: str,
     code: str,
+    error_code: Optional[str] = None,
     category: ErrorCategory = ErrorCategory.INVALID_REQUEST,
     provider: str = "mcp_server",
     retryable: bool = False,
@@ -131,6 +138,7 @@ def tool_error_response(
             retryable=retryable,
             retry_after_seconds=retry_after_seconds,
             code=code,
+            error_code=error_code,
         ),
     )
     return envelope.model_dump_json(exclude_none=True)

@@ -55,6 +55,7 @@ async def test_trace_tool_marks_error_for_error_envelope():
     assert logical_error_calls[0].kwargs["attributes"] == {
         "tool_name": "list_tables",
         "error_category": "invalid_request",
+        "error_code": "VALIDATION_ERROR",
     }
 
 

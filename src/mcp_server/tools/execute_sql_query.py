@@ -10,6 +10,7 @@ from opentelemetry import trace
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
+from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
 from common.sql.complexity import (
@@ -88,7 +89,14 @@ def _construct_error_response(
     # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
     # Remove keys that are passed explicitly to avoid multiple values error
-    for key in ["message", "category", "provider", "is_retryable", "retry_after_seconds"]:
+    for key in [
+        "message",
+        "category",
+        "provider",
+        "is_retryable",
+        "retry_after_seconds",
+        "error_code",
+    ]:
         meta_dict.pop(key, None)
 
     error_meta = build_error_metadata(
@@ -98,6 +106,7 @@ def _construct_error_response(
         retryable=is_retryable,
         retry_after_seconds=retry_after_seconds,
         code=meta_dict.get("sql_state"),
+        error_code=(metadata or {}).get("error_code"),
         hint=meta_dict.get("hint"),
     )
 
@@ -361,6 +370,7 @@ async def handler(
                 provider=provider,
                 metadata={
                     "sql_state": "TENANT_ENFORCEMENT_UNSUPPORTED",
+                    "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
                     "reason_code": "tenant_enforcement_unsupported",
                 },
             )

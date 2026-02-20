@@ -18,6 +18,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
 from common.constants.reason_codes import ToolVersionNegotiationErrorCode
+from common.errors.error_codes import ErrorCode, canonical_error_code_for_category
 from common.models.error_metadata import ErrorCategory
 from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
@@ -129,10 +130,9 @@ def _current_trace_id(span: Any) -> str | None:
     return format(trace_id, "032x")
 
 
-def _extract_envelope_error_category(response: Any) -> str | None:
-    """Extract envelope-level error category from response payload, if present."""
+def _extract_envelope_payload(response: Any) -> dict[str, Any] | None:
+    """Extract dictionary payload from typed/enveloped tool outputs."""
     payload: dict[str, Any] | None = None
-
     if isinstance(response, dict):
         payload = response
     elif hasattr(response, "model_dump"):
@@ -149,6 +149,12 @@ def _extract_envelope_error_category(response: Any) -> str | None:
                 payload = parsed
         except Exception:
             payload = None
+    return payload
+
+
+def _extract_envelope_error_category(response: Any) -> str | None:
+    """Extract envelope-level error category from response payload, if present."""
+    payload = _extract_envelope_payload(response)
 
     if not isinstance(payload, dict):
         return None
@@ -169,6 +175,44 @@ def _extract_envelope_error_category(response: Any) -> str | None:
         return str(getattr(category_attr, "value", category_attr))
 
     return "unknown"
+
+
+def _extract_envelope_error_code(response: Any) -> str | None:
+    """Extract canonical envelope-level error code from response payload, if present."""
+    payload = _extract_envelope_payload(response)
+    if not isinstance(payload, dict):
+        return None
+    if "error" not in payload:
+        return None
+
+    error_payload = payload.get("error")
+    if error_payload is None:
+        return None
+
+    if isinstance(error_payload, dict):
+        if error_payload.get("error_code") is not None:
+            return str(error_payload.get("error_code"))
+        category = error_payload.get("category")
+        if category is not None:
+            return canonical_error_code_for_category(str(category)).value
+        if error_payload.get("code") is not None:
+            return str(error_payload.get("code"))
+        return ErrorCode.INTERNAL_ERROR.value
+
+    error_code_attr = getattr(error_payload, "error_code", None)
+    if error_code_attr is not None:
+        return str(error_code_attr)
+
+    category_attr = getattr(error_payload, "category", None)
+    if category_attr is not None:
+        normalized_category = str(getattr(category_attr, "value", category_attr))
+        return canonical_error_code_for_category(normalized_category).value
+
+    code_attr = getattr(error_payload, "code", None)
+    if code_attr is not None:
+        return str(code_attr)
+
+    return ErrorCode.INTERNAL_ERROR.value
 
 
 def _inject_tool_version(response: Any, tool_name: str) -> Any:
@@ -519,18 +563,24 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     )
 
                     error_category = _extract_envelope_error_category(actual_response)
+                    error_code = _extract_envelope_error_code(actual_response)
                     if error_category is not None:
                         span.set_status(Status(StatusCode.ERROR))
                         span.set_attribute("mcp.tool.error.category", str(error_category))
+                        if error_code is not None:
+                            span.set_attribute("mcp.tool.error.code", str(error_code))
+                        metric_attributes = {
+                            "tool_name": tool_name,
+                            "error_category": str(error_category),
+                        }
+                        if error_code is not None:
+                            metric_attributes["error_code"] = str(error_code)
                         mcp_metrics.add_counter(
                             "mcp.tool.logical_failures_total",
                             description=(
                                 "Count of MCP tool logical failures surfaced via error envelopes"
                             ),
-                            attributes={
-                                "tool_name": tool_name,
-                                "error_category": str(error_category),
-                            },
+                            attributes=metric_attributes,
                         )
                     else:
                         span.set_status(Status(StatusCode.OK))
