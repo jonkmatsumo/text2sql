@@ -54,6 +54,61 @@ def test_rewrite_rejects_nested_selects():
         )
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM orders UNION SELECT * FROM archived_orders",
+        "SELECT * FROM orders INTERSECT SELECT * FROM archived_orders",
+        "SELECT * FROM orders EXCEPT SELECT * FROM archived_orders",
+    ],
+)
+def test_rewrite_rejects_set_operations(sql: str):
+    """Set operations are out of scope and must fail closed."""
+    with pytest.raises(TenantSQLRewriteError, match="set operations"):
+        rewrite_tenant_scoped_sql(
+            sql,
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_rejects_correlated_subqueries():
+    """Correlated subqueries are rejected by the eligibility gate."""
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(
+            (
+                "SELECT * FROM orders o "
+                "WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.customer_id)"
+            ),
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_rejects_window_functions():
+    """Window functions are rejected until the rewriter can scope them safely."""
+    with pytest.raises(TenantSQLRewriteError, match="window functions"):
+        rewrite_tenant_scoped_sql(
+            (
+                "SELECT order_id, ROW_NUMBER() OVER "
+                "(PARTITION BY customer_id ORDER BY created_at) AS rn "
+                "FROM orders"
+            ),
+            provider="duckdb",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_rejects_ctes_by_default():
+    """Common table expressions are intentionally fail-closed in v1."""
+    with pytest.raises(TenantSQLRewriteError, match="CTEs"):
+        rewrite_tenant_scoped_sql(
+            "WITH scoped_orders AS (SELECT * FROM orders) SELECT * FROM scoped_orders",
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
 def test_rewrite_rejects_when_tenant_column_missing_in_schema_map():
     """Known schema without tenant column should fail safely."""
     with pytest.raises(TenantSQLRewriteError, match="Tenant column missing"):
