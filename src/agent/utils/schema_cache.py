@@ -223,7 +223,7 @@ def get_schema_refresh_cooldown_seconds() -> float:
     """Return minimum interval between tenant refresh attempts."""
     from common.config.env import get_env_float
 
-    default_cooldown = 0.0
+    default_cooldown = 10.0
     try:
         raw_cooldown = get_env_float("SCHEMA_REFRESH_COOLDOWN_SECONDS", default_cooldown)
     except ValueError:
