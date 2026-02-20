@@ -26,12 +26,14 @@ class ToolContext(BaseModel):
     def from_env(cls, tenant_id: Optional[int] = None) -> "ToolContext":
         """Resolve context from environment and provided tenant_id."""
         from common.config.env import get_env_str
+        from common.observability.context import request_id_var
 
         roles_str = get_env_str("MCP_USER_ROLE", "")
         roles = {r.strip().upper() for r in roles_str.split(",") if r.strip()}
+        request_id = request_id_var.get() or os.environ.get("OTEL_TRACE_ID")
 
         return cls(
             tenant_id=tenant_id,
             user_role=roles,
-            request_id=os.environ.get("OTEL_TRACE_ID"),  # Best effort
+            request_id=request_id,  # Best effort fallback for non-request contexts
         )

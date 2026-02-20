@@ -10,6 +10,7 @@ Wraps MCP tools in a LangGraph-compatible interface with:
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
+from uuid import uuid4
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from agent.models.run_budget import (
@@ -147,6 +148,15 @@ class MCPToolWrapper:
         outbound_input = dict(input)
         try:
             from agent.telemetry import telemetry
+
+            request_id = (
+                outbound_input.get("_request_id")
+                or outbound_input.get("request_id")
+                or run_id
+                or telemetry.get_current_trace_id()
+                or str(uuid4())
+            )
+            outbound_input["_request_id"] = str(request_id)
 
             trace_carrier: dict[str, str] = {}
             telemetry.inject_context(trace_carrier)

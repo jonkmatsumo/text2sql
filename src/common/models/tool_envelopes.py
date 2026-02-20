@@ -44,6 +44,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     truncation_reason: Optional[str] = Field(
         None, description="Standardized truncation reason alias for partial_reason"
     )
+    request_id: Optional[str] = Field(
+        None, description="Request identifier propagated for cross-layer correlation"
+    )
 
     # Capability negotiation fields
     capability_required: Optional[str] = None
@@ -258,6 +261,9 @@ class GenericToolMetadata(BaseModel):
     bytes_returned: Optional[int] = None
     bytes_total: Optional[int] = None
     snapshot_id: Optional[str] = Field(None, description="Schema snapshot ID for lineage tracking")
+    request_id: Optional[str] = Field(
+        None, description="Request identifier propagated for cross-layer correlation"
+    )
 
     @model_validator(mode="before")
     @classmethod

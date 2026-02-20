@@ -102,6 +102,14 @@ def _extract_trace_context(payload: Any) -> dict[str, str]:
     return carrier
 
 
+def _normalize_request_id(value: Any) -> str | None:
+    """Normalize request identifier values from reserved args/context."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _extract_envelope_error_category(response: Any) -> str | None:
     """Extract envelope-level error category from response payload, if present."""
     payload: dict[str, Any] | None = None
@@ -172,6 +180,51 @@ def _inject_tool_version(response: Any, tool_name: str) -> Any:
     return response
 
 
+def _inject_request_id(response: Any, request_id: str | None) -> Any:
+    """Inject request_id into envelope metadata for cross-layer correlation."""
+    if not request_id:
+        return response
+
+    def _apply_to_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            payload["metadata"] = metadata
+        metadata["request_id"] = request_id
+        return payload
+
+    if isinstance(response, dict):
+        return _apply_to_payload(dict(response))
+
+    if isinstance(response, str):
+        try:
+            payload = json.loads(response)
+        except Exception:
+            return response
+        if not isinstance(payload, dict):
+            return response
+        payload = _apply_to_payload(payload)
+        return json.dumps(payload, separators=(",", ":"))
+
+    if hasattr(response, "model_dump"):
+        try:
+            payload = response.model_dump()
+        except Exception:
+            return response
+        if not isinstance(payload, dict):
+            return response
+        payload = _apply_to_payload(payload)
+        model_validate = getattr(type(response), "model_validate", None)
+        if callable(model_validate):
+            try:
+                return model_validate(payload)
+            except Exception:
+                return payload
+        return payload
+
+    return response
+
+
 def _normalize_requested_tool_version(value: Any) -> tuple[str | None, str | None]:
     """Normalize and validate requested tool version input.
 
@@ -206,6 +259,11 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
             # Get a tracer
             tracer = trace.get_tracer("mcp.server")
             trace_context_payload = kwargs.pop("_trace_context", None)
+            request_id = _normalize_request_id(kwargs.pop("_request_id", None))
+            if request_id is None:
+                from common.observability.context import request_id_var, run_id_var
+
+                request_id = _normalize_request_id(request_id_var.get() or run_id_var.get())
             parent_context = None
             trace_carrier = _extract_trace_context(trace_context_payload)
             if trace_carrier:
@@ -235,6 +293,8 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 span.set_attribute("mcp.tool.supported_version", supported_tool_version)
                 if requested_tool_version is not None:
                     span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
+                if request_id is not None:
+                    span.set_attribute("mcp.request_id", request_id)
 
                 # Capture tenant_id if present
                 tenant_id = kwargs.get("tenant_id")
@@ -382,6 +442,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         is_truncated, truncation_parse_failed = _extract_truncation_signal(response)
 
                     actual_response = _inject_tool_version(actual_response, tool_name)
+                    actual_response = _inject_request_id(actual_response, request_id)
                     resp_size = len(str(actual_response).encode("utf-8"))
 
                     # 3. Record response attributes
