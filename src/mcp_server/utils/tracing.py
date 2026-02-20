@@ -522,6 +522,16 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     if error_category is not None:
                         span.set_status(Status(StatusCode.ERROR))
                         span.set_attribute("mcp.tool.error.category", str(error_category))
+                        mcp_metrics.add_counter(
+                            "mcp.tool.logical_failures_total",
+                            description=(
+                                "Count of MCP tool logical failures surfaced via error envelopes"
+                            ),
+                            attributes={
+                                "tool_name": tool_name,
+                                "error_category": str(error_category),
+                            },
+                        )
                     else:
                         span.set_status(Status(StatusCode.OK))
 
