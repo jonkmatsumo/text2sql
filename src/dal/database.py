@@ -26,6 +26,7 @@ class Database:
     _query_target_provider: str = "postgres"
     _query_target_capabilities = None
     _query_target_sync_max_rows: int = 0
+    supports_tenant_enforcement: bool = True
 
     @classmethod
     async def init(cls):
@@ -572,6 +573,54 @@ class Database:
     def get_query_target_provider(cls) -> str:
         """Return the active query-target provider."""
         return cls._query_target_provider
+
+    @classmethod
+    def supports_tenant_scope_enforcement(cls) -> bool:
+        """Return whether the active query-target enforces tenant isolation."""
+        provider = cls.get_query_target_provider().lower()
+        if provider == "postgres":
+            return bool(getattr(cls, "supports_tenant_enforcement", True))
+        if provider == "sqlite":
+            from dal.sqlite import SqliteQueryTargetDatabase
+
+            return bool(getattr(SqliteQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "mysql":
+            from dal.mysql import MysqlQueryTargetDatabase
+
+            return bool(getattr(MysqlQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "snowflake":
+            from dal.snowflake import SnowflakeQueryTargetDatabase
+
+            return bool(getattr(SnowflakeQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "redshift":
+            from dal.redshift import RedshiftQueryTargetDatabase
+
+            return bool(getattr(RedshiftQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "bigquery":
+            from dal.bigquery import BigQueryQueryTargetDatabase
+
+            return bool(getattr(BigQueryQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "athena":
+            from dal.athena import AthenaQueryTargetDatabase
+
+            return bool(getattr(AthenaQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "databricks":
+            from dal.databricks import DatabricksQueryTargetDatabase
+
+            return bool(
+                getattr(DatabricksQueryTargetDatabase, "supports_tenant_enforcement", False)
+            )
+        if provider == "duckdb":
+            from dal.duckdb import DuckDBQueryTargetDatabase
+
+            return bool(getattr(DuckDBQueryTargetDatabase, "supports_tenant_enforcement", False))
+        if provider == "clickhouse":
+            from dal.clickhouse import ClickHouseQueryTargetDatabase
+
+            return bool(
+                getattr(ClickHouseQueryTargetDatabase, "supports_tenant_enforcement", False)
+            )
+        return False
 
     @classmethod
     def get_query_target_capabilities(cls):

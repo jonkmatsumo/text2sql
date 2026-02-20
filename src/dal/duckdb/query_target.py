@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from dal.duckdb.config import DuckDBConfig
 from dal.tracing import trace_query_operation
-from dal.util.read_only import enforce_read_only_sql
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
 
@@ -12,6 +12,7 @@ from dal.util.timeouts import run_with_timeout
 class DuckDBQueryTargetDatabase:
     """DuckDB query-target database wrapper."""
 
+    supports_tenant_enforcement: bool = False
     _config: Optional[DuckDBConfig] = None
 
     @classmethod
@@ -152,6 +153,9 @@ class _DuckDBConnection:
         return next(iter(row.values()))
 
     async def _run_query(self, sql: str, params: List[Any]) -> List[Dict[str, Any]]:
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
+
         def _execute():
             cursor = self._conn.execute(sql, params)
             cols = [desc[0] for desc in cursor.description] if cursor.description else []
@@ -167,6 +171,9 @@ class _DuckDBConnection:
     async def _run_query_with_columns(
         self, sql: str, params: List[Any]
     ) -> tuple[List[Dict[str, Any]], list]:
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
+
         def _execute():
             from dal.util.column_metadata import columns_from_cursor_description
 

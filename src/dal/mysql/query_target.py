@@ -6,13 +6,14 @@ import aiomysql
 from dal.mysql.param_translation import translate_postgres_params_to_mysql
 from dal.mysql.quoting import translate_double_quotes_to_backticks
 from dal.tracing import trace_query_operation
-from dal.util.read_only import enforce_read_only_sql
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
 class MysqlQueryTargetDatabase:
     """MySQL query-target database using aiomysql."""
 
+    supports_tenant_enforcement: bool = False
     _host: Optional[str] = None
     _port: int = 3306
     _db_name: Optional[str] = None
@@ -114,6 +115,8 @@ class _MysqlConnection:
         enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             async with self._conn.cursor() as cursor:
@@ -132,6 +135,8 @@ class _MysqlConnection:
         enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             async with self._conn.cursor() as cursor:
@@ -155,6 +160,8 @@ class _MysqlConnection:
         enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             from dal.util.column_metadata import columns_from_cursor_description
@@ -180,6 +187,8 @@ class _MysqlConnection:
         enforce_read_only_sql(sql, "mysql", self._read_only)
         sql = translate_double_quotes_to_backticks(sql)
         sql, bound_params = translate_postgres_params_to_mysql(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             async with self._conn.cursor() as cursor:

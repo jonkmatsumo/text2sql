@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from dal.tracing import trace_query_operation
-from dal.util.read_only import enforce_read_only_sql
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 from dal.util.row_limits import cap_rows_with_metadata
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class RedshiftQueryTargetDatabase:
     """Redshift query-target database using asyncpg."""
 
+    supports_tenant_enforcement: bool = False
     _host: Optional[str] = None
     _port: int = 5439
     _db_name: Optional[str] = None
@@ -119,6 +120,8 @@ class _RedshiftConnection:
 
     async def execute(self, sql: str, *params: Any) -> str:
         enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             return await self._conn.execute(sql, *params)
@@ -133,6 +136,8 @@ class _RedshiftConnection:
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             rows = await self._conn.fetch(sql, *params)
@@ -154,6 +159,8 @@ class _RedshiftConnection:
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
         enforce_read_only_sql(sql, provider="redshift", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             from dal.util.column_metadata import columns_from_asyncpg_attributes

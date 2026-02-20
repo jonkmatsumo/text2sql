@@ -1,6 +1,7 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
+import logging
 from typing import Any, Dict, List, Optional
 
 import asyncpg
@@ -32,6 +33,7 @@ from mcp_server.utils.json_budget import JSONBudget
 
 TOOL_NAME = "execute_sql_query"
 TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
+logger = logging.getLogger(__name__)
 
 
 def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
@@ -341,6 +343,27 @@ async def handler(
     # 0. Enforce Tenant ID
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
+
+    supports_tenant_enforcement = Database.supports_tenant_scope_enforcement()
+    if tenant_id is not None and not supports_tenant_enforcement:
+        from dal.feature_flags import allow_non_postgres_tenant_bypass
+
+        if allow_non_postgres_tenant_bypass():
+            logger.warning(
+                "ALLOW_NON_POSTGRES_TENANT_BYPASS=true enabled for provider=%s; "
+                "continuing without tenant isolation enforcement.",
+                provider,
+            )
+        else:
+            return _construct_error_response(
+                message=f"Tenant isolation not supported for provider {provider}",
+                category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
+                provider=provider,
+                metadata={
+                    "sql_state": "TENANT_ENFORCEMENT_UNSUPPORTED",
+                    "reason_code": "tenant_enforcement_unsupported",
+                },
+            )
 
     # 1. SQL Length Check
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
