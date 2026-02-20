@@ -3,6 +3,8 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
+from common.observability.metrics import agent_metrics
+
 
 @dataclass
 class RunSummary:
@@ -37,12 +39,29 @@ class AgentMonitor:
         """Record a completed run summary."""
         with self._lock:
             self.run_history.append(summary)
+        agent_metrics.add_counter(
+            "agent.monitor.run_total",
+            description="Count of completed agent runs",
+            attributes={"status": summary.status},
+        )
+        agent_metrics.record_histogram(
+            "agent.monitor.run.duration_ms",
+            float(summary.duration_ms),
+            unit="ms",
+            description="Duration of completed agent runs in milliseconds",
+            attributes={"status": summary.status},
+        )
 
     def increment(self, counter: str) -> None:
         """Increment a named counter safely."""
         with self._lock:
             if counter in self.counters:
                 self.counters[counter] += 1
+                agent_metrics.add_counter(
+                    "agent.monitor.event_total",
+                    description="Count of agent monitor lifecycle events",
+                    attributes={"counter": counter},
+                )
 
     def get_snapshot(self) -> Dict[str, Any]:
         """Return a snapshot of current metrics and history."""

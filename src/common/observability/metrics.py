@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,32 @@ from opentelemetry import metrics
 from common.config.env import get_env_bool
 
 logger = logging.getLogger(__name__)
+
+
+def is_otel_exporter_configured() -> bool:
+    """Return True when OTEL exporter environment indicates external export is configured."""
+    if get_env_bool("OTEL_DISABLE_EXPORTER", False):
+        return False
+
+    endpoint = (os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
+    metrics_endpoint = (os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or "").strip()
+    metrics_exporter = (os.getenv("OTEL_METRICS_EXPORTER") or "").strip().lower()
+    if metrics_exporter == "none":
+        return False
+
+    return bool(endpoint or metrics_endpoint)
+
+
+def is_metrics_enabled(enabled_env_var: str) -> bool:
+    """Resolve metric enablement with explicit override support."""
+    raw = os.getenv(enabled_env_var)
+    if raw is not None:
+        try:
+            return get_env_bool(enabled_env_var, False) is True
+        except ValueError:
+            logger.warning("Invalid %s value '%s'; metrics disabled.", enabled_env_var, raw)
+            return False
+    return is_otel_exporter_configured()
 
 
 def _normalize_attributes(attributes: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -39,7 +66,7 @@ class OptionalMetrics:
     _histograms: dict[str, Any] = field(default_factory=dict)
 
     def _enabled(self) -> bool:
-        return get_env_bool(self.enabled_env_var, False) is True
+        return is_metrics_enabled(self.enabled_env_var)
 
     def _get_meter(self):
         if self._meter is None:
