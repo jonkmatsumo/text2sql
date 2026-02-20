@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
+from agent.models.termination import TerminationReason
 from agent.nodes.cache_lookup import cache_lookup_node
 from agent.nodes.clarify import clarify_node
 from agent.nodes.correct import correct_sql_node
@@ -72,6 +73,9 @@ def _safe_env_bool(name: str, default: bool) -> bool:
     if parsed is None:
         return bool(default)
     return bool(parsed)
+
+
+MAX_CLARIFY_ROUNDS = _safe_env_int("AGENT_MAX_CLARIFY_ROUNDS", 3, 1)
 
 
 def _resolve_budget_env_int(shared_name: str, legacy_name: str, default: int, minimum: int) -> int:
@@ -255,6 +259,7 @@ def route_after_router(state: AgentState) -> str:
     Conditional edge logic after router node.
 
     Routes to clarify if ambiguity detected, otherwise to plan.
+    Routes to synthesize for terminal node-level exits.
     Note: Retrieve has already run, so router has schema_context.
 
     Args:
@@ -263,7 +268,25 @@ def route_after_router(state: AgentState) -> str:
     Returns:
         str: Next node name
     """
+    termination_reason = state.get("termination_reason")
+    if isinstance(termination_reason, TerminationReason):
+        termination_reason = termination_reason.value
+    if termination_reason in (
+        TerminationReason.BUDGET_EXHAUSTED.value,
+        TerminationReason.TIMEOUT.value,
+    ):
+        return "synthesize"
+
     if state.get("ambiguity_type"):
+        clarify_count = int(state.get("clarify_count") or 0)
+        if clarify_count >= MAX_CLARIFY_ROUNDS:
+            state["error"] = (
+                "I can't resolve the ambiguity with the provided information. "
+                "Please specify the exact fields, filters, or time range you want."
+            )
+            state["error_category"] = "invalid_request"
+            state["termination_reason"] = TerminationReason.INVALID_REQUEST
+            return "synthesize"
         return "clarify"
     return "plan"
 
@@ -922,6 +945,7 @@ def create_workflow() -> StateGraph:
         {
             "clarify": "clarify",
             "plan": "plan",
+            "synthesize": "synthesize",
         },
     )
 

@@ -178,6 +178,9 @@ class AgentState(TypedDict):
     # User's response to clarification prompt
     user_clarification: Optional[str]
 
+    # Number of clarify-node rounds completed in the current run
+    clarify_count: Optional[int]
+
     # =========================================================================
     # Error Taxonomy Fields
     # =========================================================================

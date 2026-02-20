@@ -28,7 +28,7 @@ class TestClarifyNode:
 
     @pytest.mark.asyncio
     async def test_no_question_returns_empty(self, base_state):
-        """Test that no clarification question returns empty dict."""
+        """Test that no clarification question still increments clarify counter."""
         base_state["clarification_question"] = None
 
         with patch("agent.nodes.clarify.telemetry.start_span") as mock_span:
@@ -45,7 +45,7 @@ class TestClarifyNode:
 
             result = await clarify_node(base_state)
 
-        assert result == {}
+        assert result["clarify_count"] == 1
 
     @pytest.mark.asyncio
     async def test_with_interrupt_available(self, base_state):
@@ -73,6 +73,7 @@ class TestClarifyNode:
         assert result.get("user_clarification") == "Customer region"
         assert result.get("ambiguity_type") is None
         assert result.get("clarification_question") is None
+        assert result.get("clarify_count") == 1
 
     @pytest.mark.asyncio
     async def test_without_interrupt_fallback(self, base_state):
@@ -97,6 +98,7 @@ class TestClarifyNode:
         # Should proceed without clarification
         assert result.get("user_clarification") is None
         assert result.get("ambiguity_type") is None
+        assert result.get("clarify_count") == 1
 
     @pytest.mark.asyncio
     async def test_interrupt_receives_correct_payload(self, base_state):
