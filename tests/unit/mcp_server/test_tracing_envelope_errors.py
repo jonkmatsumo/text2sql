@@ -46,6 +46,11 @@ async def test_trace_tool_marks_error_for_error_envelope():
     span = spans[0]
     assert span.status.status_code == StatusCode.ERROR
     assert span.attributes["mcp.tool.error.category"] == "invalid_request"
+    assert span.attributes["error.category"] == "invalid_request"
+    assert span.attributes["mcp.tool.provider"] == "postgres"
+    assert span.attributes["provider"] == "postgres"
+    assert span.attributes["mcp.tool.error.code"] == "VALIDATION_ERROR"
+    assert span.attributes["error.code"] == "VALIDATION_ERROR"
     logical_error_calls = [
         call
         for call in mock_add_counter.call_args_list
@@ -56,6 +61,7 @@ async def test_trace_tool_marks_error_for_error_envelope():
         "tool_name": "list_tables",
         "error_category": "invalid_request",
         "error_code": "VALIDATION_ERROR",
+        "provider": "postgres",
     }
 
 

@@ -215,6 +215,37 @@ def _extract_envelope_error_code(response: Any) -> str | None:
     return ErrorCode.INTERNAL_ERROR.value
 
 
+def _extract_envelope_provider(response: Any) -> str | None:
+    """Extract provider metadata from an envelope payload when present."""
+    payload = _extract_envelope_payload(response)
+    if not isinstance(payload, dict):
+        return None
+
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        provider = metadata.get("provider")
+        if provider is not None:
+            normalized = str(provider).strip()
+            if normalized:
+                return normalized
+
+    error_payload = payload.get("error")
+    if isinstance(error_payload, dict):
+        provider = error_payload.get("provider")
+        if provider is not None:
+            normalized = str(provider).strip()
+            if normalized:
+                return normalized
+
+    error_provider = getattr(error_payload, "provider", None)
+    if error_provider is not None:
+        normalized = str(error_provider).strip()
+        if normalized:
+            return normalized
+
+    return None
+
+
 def _inject_tool_version(response: Any, tool_name: str) -> Any:
     """Inject tool_version into envelope metadata using central registry."""
     tool_version = get_tool_version(tool_name)
@@ -370,8 +401,10 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
                 if request_id is not None:
                     span.set_attribute("mcp.request_id", request_id)
+                    span.set_attribute("request_id", request_id)
                 if trace_id is not None:
                     span.set_attribute("mcp.trace_id", trace_id)
+                    span.set_attribute("trace_id", trace_id)
                 mcp_metrics.add_counter(
                     "mcp.tool.calls_total",
                     description="Count of MCP tool invocations by tool name",
@@ -564,17 +597,25 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
 
                     error_category = _extract_envelope_error_category(actual_response)
                     error_code = _extract_envelope_error_code(actual_response)
+                    provider = _extract_envelope_provider(actual_response)
+                    if provider is not None:
+                        span.set_attribute("mcp.tool.provider", provider)
+                        span.set_attribute("provider", provider)
                     if error_category is not None:
                         span.set_status(Status(StatusCode.ERROR))
                         span.set_attribute("mcp.tool.error.category", str(error_category))
+                        span.set_attribute("error.category", str(error_category))
                         if error_code is not None:
                             span.set_attribute("mcp.tool.error.code", str(error_code))
+                            span.set_attribute("error.code", str(error_code))
                         metric_attributes = {
                             "tool_name": tool_name,
                             "error_category": str(error_category),
                         }
                         if error_code is not None:
                             metric_attributes["error_code"] = str(error_code)
+                        if provider is not None:
+                            metric_attributes["provider"] = provider
                         mcp_metrics.add_counter(
                             "mcp.tool.logical_failures_total",
                             description=(
