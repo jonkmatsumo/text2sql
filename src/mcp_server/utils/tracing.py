@@ -23,6 +23,11 @@ from common.models.tool_versions import get_tool_version
 from common.observability.metrics import mcp_metrics
 from common.tenancy.limits import TenantConcurrencyLimitExceeded, get_mcp_tool_tenant_limiter
 from mcp_server.utils.errors import tool_error_response
+from mcp_server.utils.reserved_fields import (
+    REQUEST_ID_RESERVED_FIELD,
+    TRACE_CONTEXT_RESERVED_FIELD,
+    split_reserved_tool_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,11 +284,12 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             # Check enforcement mode
             mode = get_env_str("TELEMETRY_ENFORCEMENT_MODE", "warn").lower()
+            tool_kwargs, reserved_kwargs = split_reserved_tool_metadata(kwargs)
 
             # Get a tracer
             tracer = trace.get_tracer("mcp.server")
-            trace_context_payload = kwargs.pop("_trace_context", None)
-            request_id = _normalize_request_id(kwargs.pop("_request_id", None))
+            trace_context_payload = reserved_kwargs.get(TRACE_CONTEXT_RESERVED_FIELD)
+            request_id = _normalize_request_id(reserved_kwargs.get(REQUEST_ID_RESERVED_FIELD))
             if request_id is None:
                 from common.observability.context import request_id_var, run_id_var
 
@@ -307,7 +313,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 context=parent_context,
             ) as span:
                 trace_id = _current_trace_id(span)
-                requested_tool_version = kwargs.pop("requested_tool_version", None)
+                requested_tool_version = tool_kwargs.pop("requested_tool_version", None)
                 supported_tool_version = get_tool_version(tool_name)
                 normalized_version, version_parse_error = _normalize_requested_tool_version(
                     requested_tool_version
@@ -329,13 +335,13 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 )
 
                 # Capture tenant_id if present
-                tenant_id = kwargs.get("tenant_id")
+                tenant_id = tool_kwargs.get("tenant_id")
                 if tenant_id is not None:
                     span.set_attribute("mcp.tenant_id", str(tenant_id))
 
                 # Estimate request size (approximate)
                 try:
-                    req_size = len(json.dumps(kwargs, default=str).encode("utf-8"))
+                    req_size = len(json.dumps(tool_kwargs, default=str).encode("utf-8"))
                     span.set_attribute("mcp.tool.request.size_bytes", req_size)
                 except Exception:
                     pass
@@ -351,16 +357,16 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 try:
 
                     async def _invoke_with_tenant_limit() -> Any:
-                        raw_tenant_id = kwargs.get("tenant_id")
+                        raw_tenant_id = tool_kwargs.get("tenant_id")
                         if raw_tenant_id is None:
-                            return await func(*args, **kwargs)
+                            return await func(*args, **tool_kwargs)
 
                         try:
                             tenant_id_int = int(raw_tenant_id)
                         except (TypeError, ValueError):
-                            return await func(*args, **kwargs)
+                            return await func(*args, **tool_kwargs)
                         if tenant_id_int <= 0:
-                            return await func(*args, **kwargs)
+                            return await func(*args, **tool_kwargs)
 
                         limiter = get_mcp_tool_tenant_limiter()
                         try:
@@ -370,7 +376,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                     "tenant.active_tool_calls", int(lease.active_runs)
                                 )
                                 span.set_attribute("tenant.limit_exceeded", False)
-                                return await func(*args, **kwargs)
+                                return await func(*args, **tool_kwargs)
                         except TenantConcurrencyLimitExceeded as exc:
                             span.set_attribute("tenant.limit", int(exc.limit))
                             span.set_attribute("tenant.active_tool_calls", int(exc.active_runs))
