@@ -13,9 +13,11 @@ import time
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 
+from agent.models.termination import TerminationReason
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
+from common.models.error_metadata import ErrorCategory
 
 load_dotenv()
 
@@ -153,6 +155,32 @@ Generate the SQL execution plan:""",
                 ),
             ]
         )
+
+        from agent.utils.budget import TokenBudget
+
+        budget = TokenBudget.from_dict(state.get("token_budget"))
+        if budget and budget.is_exhausted():
+            span.set_attribute("budget.exhausted", True)
+            span.set_outputs({"error": "Token budget exhausted for this request."})
+            return {
+                "error": "Token budget exhausted for this request.",
+                "error_category": "budget_exhausted",
+                "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                "retry_after_seconds": None,
+                **_latency_payload(),
+            }
+
+        deadline_ts = state.get("deadline_ts")
+        if deadline_ts is not None and time.monotonic() > deadline_ts:
+            span.set_attribute("timeout.triggered", True)
+            span.set_outputs({"error": "Request deadline exceeded before planning."})
+            return {
+                "error": "Request deadline exceeded before planning.",
+                "error_category": ErrorCategory.TIMEOUT.value,
+                "termination_reason": TerminationReason.TIMEOUT,
+                "retry_after_seconds": None,
+                **_latency_payload(),
+            }
 
         from agent.llm_client import get_llm
 

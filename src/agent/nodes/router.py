@@ -8,15 +8,18 @@ This module implements the entry point that:
 
 import json
 import logging
+import time
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from agent.models.termination import TerminationReason
 from agent.state import AgentState
 from agent.telemetry import telemetry
 from agent.telemetry_schema import SpanKind, TelemetryKeys
 from agent.tools import get_mcp_tools
 from agent.utils.parsing import parse_tool_output, unwrap_envelope
+from common.models.error_metadata import ErrorCategory
 
 load_dotenv()
 
@@ -73,6 +76,33 @@ async def router_node(state: AgentState) -> dict:
         name="router",
         span_type=SpanKind.AGENT_NODE,
     ) as span:
+        from agent.utils.budget import TokenBudget
+
+        def _budget_or_deadline_termination(stage_name: str) -> dict | None:
+            budget = TokenBudget.from_dict(state.get("token_budget"))
+            if budget and budget.is_exhausted():
+                span.set_attribute("budget.exhausted", True)
+                span.set_outputs({"error": "Token budget exhausted for this request."})
+                return {
+                    "error": "Token budget exhausted for this request.",
+                    "error_category": "budget_exhausted",
+                    "termination_reason": TerminationReason.BUDGET_EXHAUSTED,
+                    "retry_after_seconds": None,
+                }
+
+            deadline_ts = state.get("deadline_ts")
+            if deadline_ts is not None and time.monotonic() > deadline_ts:
+                span.set_attribute("timeout.triggered", True)
+                span.set_outputs({"error": f"Request deadline exceeded before {stage_name}."})
+                return {
+                    "error": f"Request deadline exceeded before {stage_name}.",
+                    "error_category": ErrorCategory.TIMEOUT.value,
+                    "termination_reason": TerminationReason.TIMEOUT,
+                    "retry_after_seconds": None,
+                }
+
+            return None
+
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "router")
         messages = state["messages"]
@@ -95,6 +125,9 @@ async def router_node(state: AgentState) -> dict:
                         ("human", "{question}"),
                     ]
                 )
+                guard_result = _budget_or_deadline_termination("query contextualization")
+                if guard_result is not None:
+                    return guard_result
                 from agent.llm_client import get_llm
 
                 contextualize_chain = contextualize_prompt | get_llm(
@@ -169,6 +202,9 @@ async def router_node(state: AgentState) -> dict:
         if status in ("AMBIGUOUS", "MISSING"):
             # Use LLM to phrase the question/refusal nicely
             prompt = ChatPromptTemplate.from_messages([("system", CLARIFICATION_SYSTEM_PROMPT)])
+            guard_result = _budget_or_deadline_termination("clarification generation")
+            if guard_result is not None:
+                return guard_result
             from agent.llm_client import get_llm
 
             chain = prompt | get_llm(temperature=0, seed=state.get("seed"))
