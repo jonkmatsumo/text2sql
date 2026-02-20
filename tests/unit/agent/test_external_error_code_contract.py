@@ -84,3 +84,52 @@ def test_error_code_derived_from_category_when_metadata_code_is_not_canonical(mo
     assert resp.status_code == 200
     body = resp.json()
     assert body["error_code"] == ErrorCode.VALIDATION_ERROR.value
+
+
+@pytest.mark.parametrize(
+    ("error_category", "error_metadata", "expected_error_code"),
+    [
+        ("budget_exceeded", None, ErrorCode.DB_TIMEOUT.value),
+        (
+            "invalid_request",
+            {"error_code": ErrorCode.AMBIGUITY_UNRESOLVED.value},
+            ErrorCode.AMBIGUITY_UNRESOLVED.value,
+        ),
+        (
+            "TENANT_ENFORCEMENT_UNSUPPORTED",
+            None,
+            ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
+        ),
+        ("mutation_blocked", None, ErrorCode.READONLY_VIOLATION.value),
+        ("unauthorized", None, ErrorCode.SQL_POLICY_VIOLATION.value),
+        ("timeout", None, ErrorCode.DB_TIMEOUT.value),
+        ("connectivity", None, ErrorCode.DB_CONNECTION_ERROR.value),
+        ("syntax", None, ErrorCode.DB_SYNTAX_ERROR.value),
+    ],
+)
+def test_error_code_present_for_all_known_error_paths(
+    monkeypatch,
+    error_category,
+    error_metadata,
+    expected_error_code,
+):
+    """Any external error response should include a canonical error_code."""
+
+    async def fake_run_agent_with_tracing(*args, **kwargs):
+        del args, kwargs
+        return {
+            "messages": [type("Msg", (), {"content": "failed"})()],
+            "error": "raw provider error details here",
+            "error_category": error_category,
+            "error_metadata": error_metadata,
+        }
+
+    monkeypatch.setattr(agent_app, "run_agent_with_tracing", fake_run_agent_with_tracing)
+
+    client = TestClient(agent_app.app)
+    resp = client.post("/agent/run", json={"question": "hi", "tenant_id": 1})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body.get("error"), str) and body["error"]
+    assert body.get("error_code") == expected_error_code

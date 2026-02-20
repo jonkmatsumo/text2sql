@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ToolError
 
 
@@ -22,6 +23,7 @@ def _build_tool_error(
     return ToolError(
         category=category,
         code=code,
+        error_code=canonical_error_code_for_category(category).value,
         message=message,
         retryable=retryable,
         reason_code=reason_code,

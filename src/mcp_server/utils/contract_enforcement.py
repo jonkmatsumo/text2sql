@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import (
     ExecuteSQLQueryResponseEnvelope,
@@ -66,6 +67,7 @@ def _build_malformed_envelope(
     error = ToolError(
         category=ErrorCategory.TOOL_RESPONSE_MALFORMED,
         code="TOOL_RESPONSE_MALFORMED",
+        error_code=canonical_error_code_for_category(ErrorCategory.TOOL_RESPONSE_MALFORMED).value,
         message="Tool response failed envelope contract validation.",
         retryable=False,
         provider=tool_name,

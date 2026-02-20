@@ -6,6 +6,8 @@ import json
 
 import pytest
 
+from common.errors.error_codes import ErrorCode, parse_error_code
+
 
 @pytest.mark.parametrize(
     "tool_name,invoker",
@@ -48,8 +50,10 @@ async def test_failing_tools_emit_canonical_error_envelope(tool_name, invoker, m
     assert isinstance(error, dict), f"{tool_name} must include error object"
     assert isinstance(error.get("category"), str) and error["category"]
     assert isinstance(error.get("code"), str) and error["code"]
+    assert isinstance(error.get("error_code"), str) and error["error_code"]
     assert isinstance(error.get("message"), str) and error["message"]
     assert isinstance(error.get("retryable"), bool)
+    assert parse_error_code(error["error_code"]) in set(ErrorCode)
 
     # Legacy aliases remain present for compatibility while migration is ongoing.
     assert error.get("sql_state") == error.get("code")

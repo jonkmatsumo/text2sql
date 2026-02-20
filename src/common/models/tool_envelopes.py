@@ -4,6 +4,7 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ToolError
 from common.models.tool_versions import DEFAULT_TOOL_VERSION
 
@@ -350,6 +351,7 @@ def _create_error_envelope(
     error_meta = ToolError(
         category=category or "unknown",
         code="TOOL_ERROR",
+        error_code=canonical_error_code_for_category(category or "unknown").value,
         message=message,
         retryable=False,
         provider="unspecified",

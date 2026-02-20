@@ -16,6 +16,7 @@ from typing import Any, Optional
 from agent.mcp_client.sdk_client import MCPClient
 from agent.models.run_budget import RunBudgetExceededError, consume_tool_call_budget
 from agent.telemetry import telemetry
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ToolError
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ def _extract_tool_error(payload: Any) -> Optional[ToolError]:
         return ToolError(
             category="internal",
             code="UNSTRUCTURED_TOOL_ERROR",
+            error_code=canonical_error_code_for_category("internal").value,
             message=error_obj,
             retryable=False,
             provider="mcp_server",

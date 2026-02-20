@@ -890,10 +890,12 @@ async def run_agent_stream(request: AgentRunRequest) -> StreamingResponse:
 
         except TenantConcurrencyLimitExceeded:
             agent_monitor.increment("tenant_limit_exceeded")
+            limit_error_code = canonical_error_code_for_category(ErrorCategory.LIMIT_EXCEEDED).value
             err = json.dumps(
                 {
                     "error": "Tenant concurrency limit exceeded.",
                     "category": "LIMIT_EXCEEDED",
+                    "error_code": limit_error_code,
                 }
             )
             yield f"event: error\ndata: {err}\n\n"

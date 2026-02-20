@@ -169,6 +169,7 @@ def parse_tool_output(tool_output):
                 aggregated_results.append(normalized)
 
         except Exception as e:
+            from common.errors.error_codes import canonical_error_code_for_category
             from common.models.error_metadata import ErrorCategory
 
             # Return a special error envelope to signal parsing failure
@@ -179,6 +180,10 @@ def parse_tool_output(tool_output):
                     "metadata": {"provider": "agent_parser"},
                     "error": {
                         "category": ErrorCategory.TOOL_RESPONSE_MALFORMED.value,
+                        "code": "TOOL_RESPONSE_MALFORMED",
+                        "error_code": canonical_error_code_for_category(
+                            ErrorCategory.TOOL_RESPONSE_MALFORMED
+                        ).value,
                         "message": f"Malformed tool response: {str(e)[:200]}",
                         "retryable": False,
                     },
