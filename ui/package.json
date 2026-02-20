@@ -12,7 +12,8 @@
     "gen:types:otel": "openapi-typescript src/gen/otel_openapi.json -o src/gen/otel_types.ts",
     "gen:types:ui": "openapi-typescript src/gen/ui_openapi.json -o src/gen/ui_types.ts",
     "gen:types:agent": "openapi-typescript src/gen/agent_openapi.json -o src/gen/agent_types.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "dependencies": {
     "react": "^18.3.1",

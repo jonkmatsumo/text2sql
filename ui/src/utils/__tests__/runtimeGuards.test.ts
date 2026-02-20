@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isInteractionArray, isJobStatusResponse, isOpsJobResponseArray, isRunDiagnosticsResponse, buildContractMismatchReport } from "../runtimeGuards";
+import { isInteractionArray, isJobStatusResponse, isOpsJobResponseArray, isDiagnosticsResponse, isRunDiagnosticsResponse, buildContractMismatchReport } from "../runtimeGuards";
 
 describe("runtimeGuards", () => {
     describe("isInteractionArray", () => {
@@ -43,21 +43,46 @@ describe("runtimeGuards", () => {
         });
     });
 
+    describe("isDiagnosticsResponse", () => {
+        it("returns true for valid base diagnostics response", () => {
+            expect(isDiagnosticsResponse({
+                diagnostics_schema_version: 1,
+                enabled_flags: {}
+            })).toBe(true);
+        });
+
+        it("returns false if diagnostics_schema_version is missing", () => {
+            expect(isDiagnosticsResponse({ enabled_flags: {} })).toBe(false);
+        });
+    });
+
     describe("isRunDiagnosticsResponse", () => {
-        it("returns true for valid diagnostics response", () => {
+        it("returns true for valid run diagnostics response", () => {
+            expect(isRunDiagnosticsResponse({
+                diagnostics_schema_version: 1,
+                enabled_flags: {},
+                run_context: { user_nlq_text: "test" },
+                validation: { ast_valid: true }
+            })).toBe(true);
+        });
+
+        it("returns true for minimal diagnostics response (optional fields)", () => {
             expect(isRunDiagnosticsResponse({
                 diagnostics_schema_version: 1,
                 enabled_flags: {}
             })).toBe(true);
         });
 
-        it("returns false if diagnostics_schema_version is missing or wrong type", () => {
+        it("returns false if required field from base is missing", () => {
             expect(isRunDiagnosticsResponse({ enabled_flags: {} })).toBe(false);
-            expect(isRunDiagnosticsResponse({ diagnostics_schema_version: "1", enabled_flags: {} })).toBe(false);
         });
 
-        it("returns false if enabled_flags is missing", () => {
-            expect(isRunDiagnosticsResponse({ diagnostics_schema_version: 1 })).toBe(false);
+        it("returns false if run-specific keys are wrong type", () => {
+            expect(isRunDiagnosticsResponse({
+                diagnostics_schema_version: 1,
+                enabled_flags: {},
+                run_context: "not an object"
+            })).toBe(false);
         });
     });
 

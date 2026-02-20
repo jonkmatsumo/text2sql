@@ -29,7 +29,6 @@ export default function JobsDashboard() {
     const isMountedRef = React.useRef(true);
     const activePollersRef = React.useRef<Map<string, number>>(new Map());
     const confirmingCancelJobIdsRef = React.useRef(new Set<string>());
-    const lastTimeoutToastAtRef = React.useRef(new Map<string, number>());
 
     // Ref so fetchJobs can read the latest cancellingJobIds without being recreated
     const cancellingJobIdsRef = React.useRef(cancellingJobIds);
@@ -97,7 +96,6 @@ export default function JobsDashboard() {
                 for (const job of data) {
                     if (next.has(job.id) && TERMINAL_STATUSES.has(job.status)) {
                         next.delete(job.id);
-                        lastTimeoutToastAtRef.current.delete(job.id);
                         changed = true;
                     }
                 }
@@ -157,7 +155,6 @@ export default function JobsDashboard() {
                 const job = await OpsService.getJobStatus(jobId);
                 if (TERMINAL_STATUSES.has(job.status as OpsJobStatus)) {
                     clearCancelPollInterval(jobId);
-                    lastTimeoutToastAtRef.current.delete(jobId);
                     setCancelPollTimeoutJobIds((prev) => {
                         if (!prev.has(jobId)) return prev;
                         const next = new Set(prev);
@@ -171,15 +168,10 @@ export default function JobsDashboard() {
                     void fetchJobs();
                 } else if (attempts >= maxAttempts) {
                     clearCancelPollInterval(jobId);
-                    const now = Date.now();
-                    const lastToast = lastTimeoutToastAtRef.current.get(jobId);
-                    if (!lastToast || now - lastToast > 30000) {
-                        lastTimeoutToastAtRef.current.set(jobId, now);
-                        const toastMsg = `Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`;
-                        showToast(toastMsg, "warning", {
-                            dedupeKey: makeToastDedupeKey("jobs-dashboard", "POLL_TIMEOUT", toastMsg, { identifiers: { jobId } })
-                        });
-                    }
+                    const toastMsg = `Status check for ${jobType} (${jobId.slice(0, 8)}) timed out. Refresh list to re-check.`;
+                    showToast(toastMsg, "warning", {
+                        dedupeKey: makeToastDedupeKey("jobs-dashboard", "POLL_TIMEOUT", toastMsg, { identifiers: { jobId } })
+                    });
                     setCancelPollTimeoutJobIds((prev) => {
                         if (prev.has(jobId)) return prev;
                         const next = new Set(prev);
@@ -201,10 +193,9 @@ export default function JobsDashboard() {
         if (cancellingJobIds.has(jobId) || confirmingCancelJobIdsRef.current.has(jobId)) return;
 
         const job = jobs.find(j => j.id === jobId);
-        if (!job || job.status === "CANCELLING") return;
+        if (!job || job.status === "CANCELLING" || TERMINAL_STATUSES.has(job.status)) return;
 
         clearCancelPollInterval(jobId);
-        lastTimeoutToastAtRef.current.delete(jobId);
         setCancelPollTimeoutJobIds((prev) => {
             if (!prev.has(jobId)) return prev;
             const next = new Set(prev);
@@ -268,7 +259,6 @@ export default function JobsDashboard() {
     };
 
     const handleTimeoutRefresh = useCallback(() => {
-        lastTimeoutToastAtRef.current.clear();
         setCancelPollTimeoutJobIds(new Set());
         void fetchJobs();
     }, [fetchJobs]);

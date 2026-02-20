@@ -46,6 +46,7 @@ import {
   isInteractionArray,
   isJobStatusResponse,
   isOpsJobResponseArray,
+  isDiagnosticsResponse,
   isRunDiagnosticsResponse,
   isCancelJobResponse,
 } from "./utils/runtimeGuards";
@@ -1084,7 +1085,9 @@ export async function getDiagnostics(
   }
 
   const data = await response.json();
-  if (!isRunDiagnosticsResponse(data)) {
+  const isValid = runId ? isRunDiagnosticsResponse(data) : isDiagnosticsResponse(data);
+
+  if (!isValid) {
     const report = buildContractMismatchReport("Diagnostics.getDiagnostics", data, { debug, runId });
     console.error("Operator API contract mismatch (getDiagnostics)", report);
     throw new ApiError(
