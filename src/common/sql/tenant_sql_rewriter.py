@@ -68,10 +68,11 @@ def rewrite_tenant_scoped_sql(
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
 
+    rewrite_targets = _rewrite_target_tables(expression)
     rewritten_tables: list[str] = []
     predicates: list[exp.Expression] = []
 
-    for table in _rewrite_target_tables(expression):
+    for table in rewrite_targets:
         table_keys = _table_keys(table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
@@ -95,7 +96,14 @@ def rewrite_tenant_scoped_sql(
         )
 
     if not predicates:
-        raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+        if not rewrite_targets:
+            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+        return TenantSQLRewriteResult(
+            rewritten_sql=expression.sql(dialect=dialect),
+            params=[],
+            tables_rewritten=[],
+            tenant_predicates_added=0,
+        )
 
     combined_predicate = predicates[0]
     for predicate in predicates[1:]:

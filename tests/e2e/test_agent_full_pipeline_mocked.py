@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -134,6 +135,25 @@ async def test_full_pipeline_sqlite_tenant_rewrite_payload(monkeypatch):
     monkeypatch.setattr(
         "mcp_server.tools.execute_sql_query.Database.get_connection",
         lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    metadata_store = type("MetadataStore", (), {})()
+
+    async def _get_table_definition(table_name: str, tenant_id: int | None = None) -> str:
+        del tenant_id
+        if table_name != "orders":
+            raise KeyError(table_name)
+        return json.dumps(
+            {
+                "table_name": "orders",
+                "columns": [{"name": "order_id"}, {"name": "tenant_id"}],
+                "foreign_keys": [],
+            }
+        )
+
+    metadata_store.get_table_definition = _get_table_definition
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: metadata_store,
     )
 
     state = build_app_input(

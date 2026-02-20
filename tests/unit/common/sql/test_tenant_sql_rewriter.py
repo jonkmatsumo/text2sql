@@ -139,3 +139,34 @@ def test_rewrite_rejects_when_tenant_column_missing_in_schema_map():
             tenant_id=1,
             table_columns={"orders": ["id", "status"]},
         )
+
+
+def test_rewrite_allows_explicitly_global_tables_without_tenant_predicates():
+    """Allowlisted global tables should pass without tenant predicates."""
+    result = rewrite_tenant_scoped_sql(
+        "SELECT * FROM global_reference",
+        provider="sqlite",
+        tenant_id=1,
+        global_table_allowlist={"global_reference"},
+    )
+
+    assert "tenant_id = ?" not in result.rewritten_sql
+    assert result.params == []
+    assert result.tenant_predicates_added == 0
+    assert result.tables_rewritten == []
+
+
+def test_rewrite_still_scopes_non_global_tables_when_allowlist_is_present():
+    """Allowlist should only exempt listed tables and still scope the rest."""
+    result = rewrite_tenant_scoped_sql(
+        "SELECT o.id FROM global_reference g JOIN orders o ON g.order_id = o.id",
+        provider="duckdb",
+        tenant_id=7,
+        global_table_allowlist={"global_reference"},
+    )
+
+    assert "g.tenant_id = ?" not in result.rewritten_sql
+    assert "o.tenant_id = ?" in result.rewritten_sql
+    assert result.params == [7]
+    assert result.tenant_predicates_added == 1
+    assert result.tables_rewritten == ["orders"]
