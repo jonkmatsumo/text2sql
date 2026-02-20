@@ -22,6 +22,7 @@ from agent.replay_bundle import (
 )
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
+from common.errors.error_codes import ErrorCode, canonical_error_code_for_category, parse_error_code
 from common.models.error_metadata import ErrorCategory
 from common.observability.metrics import agent_metrics
 from common.observability.monitor import RunSummary, agent_monitor
@@ -79,6 +80,7 @@ class AgentRunResponse(BaseModel):
     result: Optional[Any] = None
     response: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     from_cache: bool = False
     cache_similarity: Optional[float] = None
     interaction_id: Optional[str] = None
@@ -123,6 +125,30 @@ class AuditDiagnosticsResponse(BaseModel):
 
 
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _canonical_response_error_code(
+    *,
+    error: Optional[str],
+    error_category: Any = None,
+    error_metadata: Optional[dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolve canonical error_code for external API responses."""
+    if not error:
+        return None
+
+    if isinstance(error_metadata, dict):
+        metadata_error_code = error_metadata.get("error_code")
+        if metadata_error_code:
+            return parse_error_code(metadata_error_code).value
+
+    if error_category is None and isinstance(error_metadata, dict):
+        error_category = error_metadata.get("category")
+
+    if error_category is not None:
+        return canonical_error_code_for_category(error_category).value
+
+    return ErrorCode.INTERNAL_ERROR.value
 
 
 def _collect_replay_integrity_mismatches(
@@ -286,11 +312,21 @@ async def _run_agent_internal(
             if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
                 trace_id = None
 
+            sanitized_error = (
+                redact_sensitive_info(state.get("error")) if state.get("error") else None
+            )
+            error_metadata = state.get("error_metadata")
+
             return AgentRunResponse(
                 sql=state.get("current_sql"),
                 result=state.get("query_result"),
                 response=response_text,
-                error=redact_sensitive_info(state.get("error")) if state.get("error") else None,
+                error=sanitized_error,
+                error_code=_canonical_response_error_code(
+                    error=sanitized_error,
+                    error_category=state.get("error_category"),
+                    error_metadata=error_metadata,
+                ),
                 from_cache=state.get("from_cache", False),
                 cache_similarity=state.get("cache_similarity"),
                 interaction_id=state.get("interaction_id"),
@@ -299,7 +335,7 @@ async def _run_agent_internal(
                 viz_reason=state.get("viz_reason"),
                 provenance=None,  # Populate if needed
                 result_completeness=state.get("result_completeness"),
-                error_metadata=state.get("error_metadata"),
+                error_metadata=error_metadata,
                 retry_summary=state.get("retry_summary"),
                 decision_summary=state.get("decision_summary"),
                 retry_correction_summary=state.get("retry_correction_summary"),
@@ -308,14 +344,27 @@ async def _run_agent_internal(
         agent_monitor.increment("tenant_limit_exceeded")
         return AgentRunResponse(
             error="Tenant concurrency limit exceeded.",
-            error_metadata={"code": "TENANT_CONCURRENCY_LIMIT_EXCEEDED"},
+            error_code=ErrorCode.DB_TIMEOUT.value,
+            error_metadata={
+                "category": ErrorCategory.LIMIT_EXCEEDED.value,
+                "code": "TENANT_CONCURRENCY_LIMIT_EXCEEDED",
+                "error_code": ErrorCode.DB_TIMEOUT.value,
+            },
         )
     except asyncio.TimeoutError:
-        return AgentRunResponse(error="Request timed out.", trace_id=None)
+        return AgentRunResponse(
+            error="Request timed out.",
+            error_code=ErrorCode.DB_TIMEOUT.value,
+            trace_id=None,
+        )
     except Exception as exc:
         from common.sanitization.text import redact_sensitive_info as _redact
 
-        return AgentRunResponse(error=_redact(str(exc)), trace_id=None)
+        return AgentRunResponse(
+            error=_redact(str(exc)),
+            error_code=ErrorCode.INTERNAL_ERROR.value,
+            trace_id=None,
+        )
 
 
 @app.post("/agent/run", response_model=AgentRunResponse)
@@ -374,6 +423,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 if not request.replay_bundle:
                     return AgentRunResponse(
                         error="Replay mode requires a replay_bundle payload.",
+                        error_code=ErrorCode.VALIDATION_ERROR.value,
                         trace_id=None,
                         replay_metadata={
                             "mode": "replay",
@@ -386,6 +436,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 except (ValidationError, ValueError) as exc:
                     return AgentRunResponse(
                         error=redact_sensitive_info(f"Invalid replay bundle: {exc}"),
+                        error_code=ErrorCode.VALIDATION_ERROR.value,
                         trace_id=None,
                         replay_metadata={
                             "mode": "replay",
@@ -473,10 +524,12 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     )
                     return AgentRunResponse(
                         error="Replay integrity check failed.",
+                        error_code=ErrorCode.VALIDATION_ERROR.value,
                         trace_id=None,
                         error_metadata={
                             "category": ErrorCategory.INVALID_REQUEST.value,
                             "code": "REPLAY_MISMATCH",
+                            "error_code": ErrorCode.VALIDATION_ERROR.value,
                             "message": "Replay integrity check failed.",
                             "provider": "agent_service",
                             "retryable": False,
@@ -549,11 +602,21 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
             include_decision_debug = get_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False) is True
 
+            sanitized_error = (
+                redact_sensitive_info(state.get("error")) if state.get("error") else None
+            )
+            error_metadata = state.get("error_metadata")
+
             return AgentRunResponse(
                 sql=state.get("current_sql"),
                 result=state.get("query_result"),
                 response=response_text,
-                error=redact_sensitive_info(state.get("error")) if state.get("error") else None,
+                error=sanitized_error,
+                error_code=_canonical_response_error_code(
+                    error=sanitized_error,
+                    error_category=state.get("error_category"),
+                    error_metadata=error_metadata,
+                ),
                 from_cache=state.get("from_cache", False),
                 cache_similarity=state.get("cache_similarity"),
                 interaction_id=state.get("interaction_id"),
@@ -562,7 +625,7 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                 viz_reason=state.get("viz_reason"),
                 provenance=provenance,
                 result_completeness=state.get("result_completeness"),
-                error_metadata=state.get("error_metadata"),
+                error_metadata=error_metadata,
                 retry_summary=state.get("retry_summary"),
                 capability_summary={
                     "required": state.get("result_capability_required"),
@@ -624,10 +687,12 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
         )
         return AgentRunResponse(
             error=error_message,
+            error_code=canonical_error_code_for_category(ErrorCategory.LIMIT_EXCEEDED).value,
             trace_id=None,
             error_metadata={
                 "category": ErrorCategory.LIMIT_EXCEEDED.value,
                 "code": error_code,
+                "error_code": canonical_error_code_for_category(ErrorCategory.LIMIT_EXCEEDED).value,
                 "message": error_message,
                 "provider": "agent_service",
                 "retryable": True,
@@ -641,11 +706,19 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             },
         )
     except asyncio.TimeoutError:
-        return AgentRunResponse(error="Request timed out.", trace_id=None)
+        return AgentRunResponse(
+            error="Request timed out.",
+            error_code=ErrorCode.DB_TIMEOUT.value,
+            trace_id=None,
+        )
     except Exception as exc:
         from common.sanitization.text import redact_sensitive_info as _redact
 
-        return AgentRunResponse(error=_redact(str(exc)), trace_id=None)
+        return AgentRunResponse(
+            error=_redact(str(exc)),
+            error_code=ErrorCode.INTERNAL_ERROR.value,
+            trace_id=None,
+        )
 
 
 @app.get("/agent/diagnostics", response_model=AgentDiagnosticsResponse)
