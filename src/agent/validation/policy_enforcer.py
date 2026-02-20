@@ -14,6 +14,7 @@ from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_bool
 from common.models.error_metadata import ErrorCategory
 from common.policy.sql_policy import is_sensitive_column_name
+from common.sql.comments import strip_sql_comments
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +115,10 @@ class PolicyEnforcer:
         Returns:
             True if valid, raises ValueError if invalid.
         """
+        stripped_sql = strip_sql_comments(sql)
         try:
             # Parse SQL to AST
-            parsed = sqlglot.parse(sql)
+            parsed = sqlglot.parse(stripped_sql)
         except Exception as e:
             cls._emit_policy_rejection(
                 reason="invalid_sql_syntax",

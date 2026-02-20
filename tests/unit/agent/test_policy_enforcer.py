@@ -146,6 +146,20 @@ class TestPolicyEnforcerCTESupport:
         """
         assert PolicyEnforcer.validate_sql(sql) is True
 
+    def test_mutation_keyword_inside_comment_does_not_affect_validation(self):
+        """Comments containing mutation keywords should not alter parse/validation behavior."""
+        sql = """
+            SELECT *
+            FROM customer
+            -- DROP TABLE customer
+        """
+        assert PolicyEnforcer.validate_sql(sql) is True
+
+    def test_leading_block_comment_then_select_is_allowed(self):
+        """Leading block comments should be stripped before SQL parsing."""
+        sql = "/* synthetic comment */ SELECT * FROM customer"
+        assert PolicyEnforcer.validate_sql(sql) is True
+
 
 class TestPolicyEnforcerSensitiveColumns:
     """Tests for sensitive column guardrails."""
