@@ -38,11 +38,19 @@ class TestCapabilitiesCompleteness:
         assert KNOWN_PROVIDERS == QUERY_TARGET_ALLOWED
 
     def test_unknown_provider_returns_defaults(self):
-        """Unknown providers should return the default (Postgres-like) capabilities."""
+        """Unknown providers should return safe default capability flags."""
         caps = capabilities_for_provider("unknown-provider")
         assert isinstance(caps, BackendCapabilities)
+        assert caps.provider_name == "unknown-provider"
         assert caps.execution_model == "sync"
         assert caps.supports_arrays is True
+        assert caps.tenant_enforcement_mode == "unsupported"
+
+    @pytest.mark.parametrize("provider", KNOWN_PROVIDERS)
+    def test_known_providers_expose_stable_provider_name(self, provider: str):
+        """Provider identity should be stable and normalized in capability payloads."""
+        caps = capabilities_for_provider(provider)
+        assert caps.provider_name == provider
 
     @pytest.mark.parametrize("provider", ASYNC_PROVIDERS)
     def test_async_providers_have_async_execution_model(self, provider: str):
@@ -102,7 +110,7 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_fk_enforcement is False
-        assert caps.supports_session_read_only is True
+        assert caps.supports_db_readonly_session is True
         assert caps.enforces_statement_read_only is True
 
     def test_snowflake_capabilities(self):
@@ -113,7 +121,7 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_cost_estimation is False
-        assert caps.supports_session_read_only is False
+        assert caps.supports_db_readonly_session is False
         assert caps.enforces_statement_read_only is True
 
     def test_bigquery_capabilities(self):
@@ -124,7 +132,7 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is False
         assert caps.supports_cost_estimation is True
-        assert caps.supports_session_read_only is False
+        assert caps.supports_db_readonly_session is False
         assert caps.enforces_statement_read_only is True
 
     def test_athena_capabilities(self):
@@ -179,3 +187,30 @@ class TestPaginationCapability:
         caps = capabilities_for_provider(provider)
         expected = provider in PAGINATION_PROVIDERS
         assert caps.supports_pagination is expected
+
+
+class TestTenantEnforcementCapabilities:
+    """Tenant enforcement mode registration should be deterministic."""
+
+    def test_postgres_uses_rls_session_mode(self):
+        """Postgres should report RLS session tenant enforcement."""
+        caps = capabilities_for_provider("postgres")
+        assert caps.supports_tenant_enforcement is True
+        assert caps.tenant_enforcement_mode == "rls_session"
+
+    @pytest.mark.parametrize("provider", ["sqlite", "duckdb"])
+    def test_sql_rewrite_providers(self, provider: str):
+        """SQLite/DuckDB should opt in to tenant SQL rewrite mode."""
+        caps = capabilities_for_provider(provider)
+        assert caps.supports_tenant_enforcement is True
+        assert caps.tenant_enforcement_mode == "sql_rewrite"
+
+    @pytest.mark.parametrize(
+        "provider",
+        sorted(KNOWN_PROVIDERS - {"postgres", "sqlite", "duckdb"}),
+    )
+    def test_remaining_providers_are_unsupported(self, provider: str):
+        """Providers outside the allowlist should fail tenant enforcement."""
+        caps = capabilities_for_provider(provider)
+        assert caps.supports_tenant_enforcement is False
+        assert caps.tenant_enforcement_mode == "unsupported"

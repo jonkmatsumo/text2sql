@@ -39,6 +39,7 @@ async def handler(
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
     from mcp_server.utils.auth import validate_role
+    from mcp_server.utils.provider import resolve_provider
     from mcp_server.utils.validation import require_tenant_id, validate_limit
 
     if err := validate_role("TABLE_ADMIN_ROLE", TOOL_NAME):
@@ -65,7 +66,7 @@ async def handler(
     envelope = ToolResponseEnvelope(
         result=data,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(),
+            provider=resolve_provider(Database.get_provider_identity()),
             execution_time_ms=execution_time_ms,
             snapshot_id=snapshot_id,
         ),

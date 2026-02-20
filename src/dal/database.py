@@ -575,6 +575,19 @@ class Database:
         return cls._query_target_provider
 
     @classmethod
+    def get_provider_identity(cls) -> str:
+        """Return canonical provider identity from capabilities when available."""
+        caps = cls._query_target_capabilities
+        if caps is not None:
+            provider_name_raw = getattr(caps, "provider_name", None)
+            if not isinstance(provider_name_raw, str):
+                provider_name_raw = ""
+            provider_name = provider_name_raw.strip().lower()
+            if provider_name and provider_name not in {"unknown", "unspecified"}:
+                return provider_name
+        return cls._query_target_provider
+
+    @classmethod
     def supports_tenant_scope_enforcement(cls) -> bool:
         """Return whether the active query-target enforces tenant isolation."""
         provider = cls.get_query_target_provider().lower()

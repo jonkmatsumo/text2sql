@@ -38,6 +38,21 @@ TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
 logger = logging.getLogger(__name__)
 
 
+def _active_provider() -> str:
+    """Resolve active provider identity from capabilities with a safe fallback."""
+    try:
+        caps = Database.get_query_target_capabilities()
+        provider_name_raw = getattr(caps, "provider_name", None)
+        if not isinstance(provider_name_raw, str):
+            provider_name_raw = ""
+        provider_name = provider_name_raw.strip().lower()
+        if provider_name and provider_name not in {"unknown", "unspecified"}:
+            return resolve_provider(provider_name)
+    except Exception:
+        pass
+    return resolve_provider(Database.get_query_target_provider())
+
+
 def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
@@ -343,7 +358,7 @@ async def handler(
         - Timeout: If execution exceeds the allotted time.
         - Capacity detection: If query triggers row/resource caps.
     """
-    provider = resolve_provider(Database.get_query_target_provider())
+    provider = _active_provider()
 
     from mcp_server.utils.auth import validate_role
 
@@ -799,7 +814,7 @@ async def handler(
         return envelope.model_dump_json(exclude_none=True)
 
     except asyncpg.PostgresError as e:
-        provider = resolve_provider(Database.get_query_target_provider())
+        provider = _active_provider()
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
@@ -811,7 +826,7 @@ async def handler(
             metadata=metadata.to_dict(),  # include raw details if any
         )
     except Exception as e:
-        provider = resolve_provider(Database.get_query_target_provider())
+        provider = _active_provider()
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
