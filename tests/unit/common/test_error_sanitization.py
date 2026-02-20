@@ -9,7 +9,7 @@ def test_sanitize_message_removes_relation_identifier_details():
     message = 'relation "users" does not exist'
     safe = sanitize_error_message(message, error_code=ErrorCode.DB_SYNTAX_ERROR.value)
 
-    assert safe == "SQL validation failed."
+    assert safe == "relation <redacted_identifier> does not exist"
     assert "users" not in safe.lower()
 
 

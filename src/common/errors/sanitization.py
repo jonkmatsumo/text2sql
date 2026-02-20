@@ -16,24 +16,30 @@ _SAFE_ERROR_TEMPLATES: dict[ErrorCode, str] = {
     ),
     ErrorCode.DB_CONNECTION_ERROR: "Database connection failed.",
     ErrorCode.DB_TIMEOUT: "Database connection timed out.",
-    ErrorCode.DB_SYNTAX_ERROR: "SQL validation failed.",
-    ErrorCode.INTERNAL_ERROR: "An internal error occurred.",
 }
 
 _SQL_FRAGMENT_RE = re.compile(
     r"(?is)\b(select|insert|update|delete|merge|create|drop|alter|truncate|call)\b"
     r".*\b(from|into|table|set|values|where)\b"
 )
-_QUOTED_IDENTIFIER_RE = re.compile(r"[\"'`](?:[^\"'`]|\\.)+[\"'`]")
+_DB_OBJECT_QUOTED_RE = re.compile(
+    r"(?i)\b(relation|table|column|schema|object)\s+[\"'`](?:[^\"'`]|\\.)+[\"'`]"
+)
 _DOTTED_IDENTIFIER_RE = re.compile(r"\b[a-zA-Z_][\w$]*\.[a-zA-Z_][\w$]*\b")
 _MULTI_SPACE_RE = re.compile(r"\s+")
+_SQLISH_CONTEXT_RE = re.compile(
+    r"(?i)\b(select|insert|update|delete|merge|create|drop|alter|truncate|call|from|where|join)\b"
+)
 
 
 def _sanitize_sql_like_text(message: str) -> str:
     if _SQL_FRAGMENT_RE.search(message):
         return "SQL validation failed."
-    sanitized = _QUOTED_IDENTIFIER_RE.sub("<redacted_identifier>", message)
-    sanitized = _DOTTED_IDENTIFIER_RE.sub("<redacted_identifier>", sanitized)
+    sanitized = _DB_OBJECT_QUOTED_RE.sub(
+        lambda match: f"{match.group(1)} <redacted_identifier>", message
+    )
+    if _SQLISH_CONTEXT_RE.search(sanitized):
+        sanitized = _DOTTED_IDENTIFIER_RE.sub("<redacted_identifier>", sanitized)
     sanitized = _MULTI_SPACE_RE.sub(" ", sanitized).strip()
     return sanitized
 

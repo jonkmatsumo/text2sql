@@ -46,7 +46,7 @@ class TestMcpPolicyEnforcement:
         assert "error" in data
         assert data["error"]["category"] == "invalid_request"
         # This one should specifically be the PolicyEnforcer message
-        assert "Access to table 'secret_internal_table' is not allowed" in data["error"]["message"]
+        assert "Access to table <redacted_identifier> is not allowed" in data["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_mcp_blocks_denylisted_table(self):
