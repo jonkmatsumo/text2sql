@@ -15,6 +15,7 @@ from dal.util.read_only import enforce_read_only_sql
 class BigQueryQueryTargetDatabase:
     """BigQuery query-target database wrapper."""
 
+    supports_tenant_enforcement: bool = False
     _config: Optional[BigQueryConfig] = None
 
     @classmethod

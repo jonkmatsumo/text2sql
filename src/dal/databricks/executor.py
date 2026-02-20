@@ -35,9 +35,11 @@ class DatabricksAsyncQueryExecutor(AsyncQueryExecutor):
 
     async def submit(self, sql: str, params: Optional[list] = None) -> str:
         """Submit a query for asynchronous execution."""
-        from dal.util.read_only import enforce_read_only_sql
+        from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 
         enforce_read_only_sql(sql, provider="databricks", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         payload = {
             "statement": sql,
             "warehouse_id": self._warehouse_id,

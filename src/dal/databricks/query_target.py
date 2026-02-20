@@ -14,6 +14,7 @@ from dal.tracing import trace_query_operation
 class DatabricksQueryTargetDatabase:
     """Databricks SQL Warehouse query-target wrapper."""
 
+    supports_tenant_enforcement: bool = False
     _config: Optional[DatabricksConfig] = None
 
     @classmethod

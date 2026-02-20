@@ -6,13 +6,14 @@ import aiosqlite
 
 from dal.sqlite.param_translation import translate_postgres_params_to_sqlite
 from dal.tracing import trace_query_operation
-from dal.util.read_only import enforce_read_only_sql
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 
 
 class SqliteQueryTargetDatabase:
     """SQLite query-target database for local/dev use."""
 
+    supports_tenant_enforcement: bool = False
     _db_path: Optional[str] = None
     _max_rows: int = 0
 
@@ -68,6 +69,8 @@ class _SqliteConnection:
     async def execute(self, sql: str, *params: Any) -> str:
         enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             cursor = await self._conn.execute(sql, bound_params)
@@ -84,6 +87,8 @@ class _SqliteConnection:
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             cursor = await self._conn.execute(sql, bound_params)
@@ -107,6 +112,8 @@ class _SqliteConnection:
         """Fetch rows with column metadata when supported."""
         enforce_read_only_sql(sql, "sqlite", self._read_only)
         sql, bound_params = translate_postgres_params_to_sqlite(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             from dal.util.column_metadata import columns_from_cursor_description

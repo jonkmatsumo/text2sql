@@ -33,9 +33,11 @@ class AthenaAsyncQueryExecutor(AsyncQueryExecutor):
 
     async def submit(self, sql: str, params: Optional[list] = None) -> str:
         """Submit a query for asynchronous execution."""
-        from dal.util.read_only import enforce_read_only_sql
+        from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 
         enforce_read_only_sql(sql, provider="athena", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         return await trace_query_operation(
             "dal.query.submit",
             provider="athena",

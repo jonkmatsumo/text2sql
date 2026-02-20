@@ -35,6 +35,7 @@ class ErrorCategory(str, Enum):
     TOOL_VERSION_INVALID = "tool_version_invalid"
     TOOL_VERSION_UNSUPPORTED = "tool_version_unsupported"
     TOOL_RESPONSE_MALFORMED = "tool_response_malformed"
+    TENANT_ENFORCEMENT_UNSUPPORTED = "TENANT_ENFORCEMENT_UNSUPPORTED"
 
 
 class ToolError(BaseModel):

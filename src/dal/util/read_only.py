@@ -23,6 +23,10 @@ _FALLBACK_MUTATION_PREFIX = {
     "REVOKE",
 }
 _SQL_COMMENT_RE = re.compile(r"(--[^\n]*|/\*.*?\*/)", flags=re.DOTALL)
+_MUTATION_KEYWORD_RE = re.compile(
+    r"\b(?:INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|TRUNCATE|CALL)\b",
+    flags=re.IGNORECASE,
+)
 
 
 def is_mutating_sql(sql: str, provider: str) -> bool:
@@ -70,6 +74,22 @@ def is_mutating_sql(sql: str, provider: str) -> bool:
         return True
     first_token = stripped.split(maxsplit=1)[0].upper()
     return first_token in _FALLBACK_MUTATION_PREFIX
+
+
+def validate_no_mutation_keywords(sql: str) -> None:
+    """Reject SQL text that contains mutation keywords (comments ignored)."""
+    if not isinstance(sql, str):
+        raise PermissionError("Read-only enforcement blocked non-string SQL payload.")
+
+    stripped = _SQL_COMMENT_RE.sub("", sql)
+    match = _MUTATION_KEYWORD_RE.search(stripped)
+    if not match:
+        return
+
+    blocked_keyword = match.group(0).upper()
+    raise PermissionError(
+        "Read-only enforcement blocked mutation keyword " f"'{blocked_keyword}' in rendered SQL."
+    )
 
 
 def enforce_read_only_sql(sql: str, provider: str, read_only: bool) -> None:

@@ -31,9 +31,11 @@ class BigQueryAsyncQueryExecutor(AsyncQueryExecutor):
         """Submit a query for asynchronous execution."""
         from google.cloud import bigquery
 
-        from dal.util.read_only import enforce_read_only_sql
+        from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 
         enforce_read_only_sql(sql, provider="bigquery", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         job_config = bigquery.QueryJobConfig()
         if params:
             job_config.query_parameters = params

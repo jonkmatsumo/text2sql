@@ -21,9 +21,11 @@ class SnowflakeAsyncQueryExecutor(AsyncQueryExecutor):
 
     async def submit(self, sql: str, params: Optional[dict[str, Any] | List[Any]] = None) -> str:
         """Submit a query for asynchronous execution."""
-        from dal.util.read_only import enforce_read_only_sql
+        from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 
         enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         bound_params = params if params is not None else []
         return await trace_query_operation(
             "dal.query.submit",

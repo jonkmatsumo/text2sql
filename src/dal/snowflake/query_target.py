@@ -11,12 +11,13 @@ from dal.snowflake.config import SnowflakeConfig
 from dal.snowflake.executor import SnowflakeAsyncQueryExecutor
 from dal.snowflake.param_translation import translate_postgres_params_to_snowflake
 from dal.tracing import trace_query_operation
-from dal.util.read_only import enforce_read_only_sql
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 
 
 class SnowflakeQueryTargetDatabase:
     """Snowflake query-target database connection wrapper."""
 
+    supports_tenant_enforcement: bool = False
     _account: Optional[str] = None
     _user: Optional[str] = None
     _password: Optional[str] = None
@@ -121,6 +122,8 @@ class _SnowflakeConnection:
     async def execute(self, sql: str, *params: Any) -> str:
         enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
 
         async def _run():
             return await asyncio.to_thread(_execute, self._conn, sql, bound_params)
@@ -136,6 +139,8 @@ class _SnowflakeConnection:
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
         enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         rows = await trace_query_operation(
             "dal.query.execute",
             provider="snowflake",
@@ -158,6 +163,8 @@ class _SnowflakeConnection:
         """Fetch rows with column metadata when supported."""
         enforce_read_only_sql(sql, provider="snowflake", read_only=self._read_only)
         sql, bound_params = translate_postgres_params_to_snowflake(sql, list(params))
+        if self._read_only:
+            validate_no_mutation_keywords(sql)
         rows, columns = await trace_query_operation(
             "dal.query.execute",
             provider="snowflake",

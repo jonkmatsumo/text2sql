@@ -360,6 +360,10 @@ class TestExecuteSqlQuery:
             patch(
                 "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
             ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.supports_tenant_scope_enforcement",
+                return_value=True,
+            ),
             patch("mcp_server.utils.auth.validate_role", return_value=None),
         ):
             result = await handler(sql_query, tenant_id=7)

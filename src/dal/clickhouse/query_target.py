@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from dal.clickhouse.config import ClickHouseConfig
 from dal.clickhouse.param_translation import translate_postgres_params_to_clickhouse
 from dal.tracing import trace_query_operation
+from dal.util.read_only import enforce_read_only_sql, validate_no_mutation_keywords
 from dal.util.row_limits import cap_rows_with_metadata, get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
 
@@ -11,6 +12,7 @@ from dal.util.timeouts import run_with_timeout
 class ClickHouseQueryTargetDatabase:
     """ClickHouse query-target database wrapper."""
 
+    supports_tenant_enforcement: bool = False
     _config: Optional[ClickHouseConfig] = None
 
     @classmethod
@@ -88,8 +90,6 @@ class _ClickHouseConnection:
         return self._last_truncated_reason
 
     async def execute(self, sql: str, *params: Any) -> str:
-        from dal.util.read_only import enforce_read_only_sql
-
         enforce_read_only_sql(sql, provider="clickhouse", read_only=self._read_only)
 
         async def _run():
@@ -105,8 +105,6 @@ class _ClickHouseConnection:
         )
 
     async def fetch(self, sql: str, *params: Any) -> List[Dict[str, Any]]:
-        from dal.util.read_only import enforce_read_only_sql
-
         enforce_read_only_sql(sql, provider="clickhouse", read_only=self._read_only)
 
         async def _run():
@@ -129,8 +127,6 @@ class _ClickHouseConnection:
 
     async def fetch_with_columns(self, sql: str, *params: Any) -> tuple[List[Dict[str, Any]], list]:
         """Fetch rows with column metadata when supported."""
-        from dal.util.read_only import enforce_read_only_sql
-
         enforce_read_only_sql(sql, provider="clickhouse", read_only=self._read_only)
 
         async def _run():
@@ -163,6 +159,8 @@ class _ClickHouseConnection:
 
     async def _run_query(self, sql: str, params: List[Any]) -> List[Dict[str, Any]]:
         translated_sql, bound_params = translate_postgres_params_to_clickhouse(sql, params)
+        if self._read_only:
+            validate_no_mutation_keywords(translated_sql)
 
         async def _execute():
             rows, columns = await self._conn.fetch(
@@ -182,6 +180,8 @@ class _ClickHouseConnection:
         self, sql: str, params: List[Any]
     ) -> tuple[List[Dict[str, Any]], list]:
         translated_sql, bound_params = translate_postgres_params_to_clickhouse(sql, params)
+        if self._read_only:
+            validate_no_mutation_keywords(translated_sql)
 
         async def _execute():
             rows, columns = await self._conn.fetch(
