@@ -25,8 +25,33 @@ def test_agent_monitor_record_run_emits_counter_and_histogram():
     ):
         monitor.record_run(summary)
 
-    mock_add_counter.assert_called_once()
+    counter_names = [call.args[0] for call in mock_add_counter.call_args_list]
+    assert "agent.monitor.run_total" in counter_names
+    assert "agent.monitor.requests_total" in counter_names
     mock_histogram.assert_called_once()
+
+
+def test_agent_monitor_records_budget_exhaustion_counter():
+    """Budget-exhausted runs should increment dedicated monitor metrics."""
+    monitor = AgentMonitor(max_history=5)
+    summary = RunSummary(
+        run_id="run-2",
+        timestamp=1700000001.0,
+        status="error",
+        error_category="budget_exceeded",
+        duration_ms=45.0,
+        tenant_id=1,
+        llm_calls=1,
+        llm_tokens=120,
+    )
+
+    with patch("common.observability.monitor.agent_metrics.add_counter") as mock_add_counter:
+        monitor.record_run(summary)
+
+    counter_names = [call.args[0] for call in mock_add_counter.call_args_list]
+    assert "agent.monitor.token_budget_exhausted_total" in counter_names
+    snapshot = monitor.get_snapshot()
+    assert snapshot["counters"]["token_budget_exhausted"] == 1
 
 
 def test_agent_monitor_increment_emits_event_counter():

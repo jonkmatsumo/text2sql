@@ -7,6 +7,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from common.observability.metrics import agent_metrics
+
 
 @dataclass
 class LLMBudgetState:
@@ -39,6 +41,14 @@ class LLMBudgetExceededError(RuntimeError):
 
 
 _RUN_LLM_BUDGET: ContextVar[LLMBudgetState | None] = ContextVar("run_llm_budget", default=None)
+
+
+def _record_budget_exhausted(phase: str) -> None:
+    agent_metrics.add_counter(
+        "agent.llm_budget.exhausted_total",
+        description="Count of run-level LLM budget exhaustion events",
+        attributes={"phase": str(phase)},
+    )
 
 
 def estimate_token_count(value: Any) -> int:
@@ -82,6 +92,7 @@ def consume_prompt_tokens(estimated_tokens: int) -> LLMBudgetState | None:
 
     requested = max(0, int(estimated_tokens))
     if state.total + requested > state.max_tokens:
+        _record_budget_exhausted("prompt")
         raise LLMBudgetExceededError(state=state, requested_tokens=requested)
 
     state.call_count += 1
@@ -101,6 +112,7 @@ def reconcile_prompt_tokens(
 
     delta = int(actual_tokens) - max(0, int(estimated_tokens))
     if delta > 0 and state.total + delta > state.max_tokens:
+        _record_budget_exhausted("prompt_reconcile")
         raise LLMBudgetExceededError(state=state, requested_tokens=delta)
     state.prompt_total = max(0, int(state.prompt_total + delta))
     return state
@@ -114,6 +126,7 @@ def consume_completion_tokens(estimated_tokens: int) -> LLMBudgetState | None:
 
     requested = max(0, int(estimated_tokens))
     if state.total + requested > state.max_tokens:
+        _record_budget_exhausted("completion")
         raise LLMBudgetExceededError(state=state, requested_tokens=requested)
 
     state.completion_total += requested

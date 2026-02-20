@@ -28,6 +28,10 @@ class AgentMonitor:
         self.max_history = max_history
         self.run_history: deque[RunSummary] = deque(maxlen=max_history)
         self.counters: Dict[str, int] = {
+            "request_total": 0,
+            "request_succeeded": 0,
+            "request_failed": 0,
+            "token_budget_exhausted": 0,
             "circuit_breaker_open": 0,
             "rate_limited": 0,
             "tenant_limit_exceeded": 0,
@@ -37,13 +41,35 @@ class AgentMonitor:
 
     def record_run(self, summary: RunSummary) -> None:
         """Record a completed run summary."""
+        status = str(summary.status or "").strip().lower()
+        request_outcome = "succeeded" if status == "success" else "failed"
+        error_category = str(summary.error_category or "").strip().lower()
+        budget_exhausted = error_category in {"budget_exhausted", "budget_exceeded"}
+
         with self._lock:
             self.run_history.append(summary)
+            self.counters["request_total"] += 1
+            if request_outcome == "succeeded":
+                self.counters["request_succeeded"] += 1
+            else:
+                self.counters["request_failed"] += 1
+            if budget_exhausted:
+                self.counters["token_budget_exhausted"] += 1
         agent_metrics.add_counter(
             "agent.monitor.run_total",
             description="Count of completed agent runs",
             attributes={"status": summary.status},
         )
+        agent_metrics.add_counter(
+            "agent.monitor.requests_total",
+            description="Count of completed agent requests by final outcome",
+            attributes={"outcome": request_outcome},
+        )
+        if budget_exhausted:
+            agent_metrics.add_counter(
+                "agent.monitor.token_budget_exhausted_total",
+                description="Count of agent runs ending due to token budget exhaustion",
+            )
         agent_metrics.record_histogram(
             "agent.monitor.run.duration_ms",
             float(summary.duration_ms),

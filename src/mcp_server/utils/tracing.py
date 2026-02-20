@@ -295,6 +295,11 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
                 if request_id is not None:
                     span.set_attribute("mcp.request_id", request_id)
+                mcp_metrics.add_counter(
+                    "mcp.tool.calls_total",
+                    description="Count of MCP tool invocations by tool name",
+                    attributes={"tool_name": tool_name},
+                )
 
                 # Capture tenant_id if present
                 tenant_id = kwargs.get("tenant_id")
@@ -362,7 +367,6 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                 ),
                                 attributes={
                                     "tool_name": tool_name,
-                                    "tenant_id": str(tenant_id_int),
                                     "limit_kind": str(exc.limit_kind),
                                 },
                             )
