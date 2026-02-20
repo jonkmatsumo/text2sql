@@ -32,6 +32,7 @@ from agent.graph import run_agent_with_tracing  # noqa: E402
 from dal.database import Database  # noqa: E402
 from dal.factory import get_evaluation_store  # noqa: E402
 from schema.evaluation.metrics import MetricSuiteV1  # noqa: E402
+from schema.evaluation.metrics_v2 import MetricSuiteV2  # noqa: E402
 from schema.evaluation.models import EvaluationCaseResultCreate, EvaluationRunCreate  # noqa: E402
 
 load_dotenv()
@@ -173,6 +174,7 @@ async def evaluate_test_case(
     test_case: Dict[str, Any],
     tenant_id: int,
     dry_run: bool = False,
+    metrics_version: str = "v1",
 ) -> Dict[str, Any]:
     """Evaluate a single test case.
 
@@ -214,8 +216,12 @@ async def evaluate_test_case(
         actual_result = result.get("query_result")
         error = result.get("error")
 
-        # Determine Metrics V1
-        metrics = MetricSuiteV1.compute_all(generated_sql, ground_truth_sql or "")
+        # Determine Metrics
+        if metrics_version == "v2":
+            metrics = MetricSuiteV2.compute_all(generated_sql, ground_truth_sql or "")
+        else:
+            metrics = MetricSuiteV1.compute_all(generated_sql, ground_truth_sql or "")
+
         is_correct = metrics["exact_match"]
         error_message = None
 
@@ -235,6 +241,9 @@ async def evaluate_test_case(
             f"Rows: {len(actual_result) if actual_result else 0}, "
             f"Time: {execution_time_ms}ms"
         )
+        if metrics_version == "v2":
+            print(f"  V2 Score: {metrics['structural_score_v2']}")
+
         if error_message:
             print(f"  Error: {error_message}")
 
@@ -252,6 +261,9 @@ async def evaluate_test_case(
             "execution_time_ms": execution_time_ms,
             "error_message": error_message,
             "trace_id": trace_id,
+            "metrics_version": metrics_version,
+            "structural_score_v2": metrics.get("structural_score_v2"),
+            "value_aware_score": metrics.get("value_aware_score"),
         }
 
     except Exception as e:
@@ -385,6 +397,7 @@ async def run_evaluation_suite(
     dry_run: bool = False,
     output_dir: str = "evaluation_artifacts",
     run_id: Optional[str] = None,
+    metrics_version: str = "v1",
 ) -> Optional[Dict[str, Any]]:
     """Run full evaluation suite against Golden Dataset.
 
@@ -453,6 +466,7 @@ async def run_evaluation_suite(
                         "category": category,
                         "difficulty": difficulty,
                         "golden_only": golden_only,
+                        "metrics_version": metrics_version,
                     },
                 )
             )
@@ -472,7 +486,9 @@ async def run_evaluation_suite(
     results = []
     try:
         for test_case in test_cases:
-            result = await evaluate_test_case(test_case, tenant_id, dry_run=dry_run)
+            result = await evaluate_test_case(
+                test_case, tenant_id, dry_run=dry_run, metrics_version=metrics_version
+            )
             results.append(result)
 
         # Persistence: Save Results
@@ -498,6 +514,7 @@ async def run_evaluation_suite(
         golden_only=golden_only,
         output_dir_parent=output_dir,
         run_id=run_id,
+        metrics_version=metrics_version,
     )
 
     # Persistence: Update Run with Summary
@@ -524,6 +541,7 @@ def summarize_evaluation_results(
     golden_only: bool = False,
     output_dir_parent: str = "evaluation_artifacts",
     run_id: Optional[str] = None,
+    metrics_version: str = "v1",
 ) -> Dict[str, Any]:
     """Summarize evaluation results and emit artifacts.
 
@@ -568,7 +586,15 @@ def summarize_evaluation_results(
         "avg_structural_score": avg_structural_score,
         "min_structural_score": min_structural_score,
         "avg_time_ms": avg_time,
+        "metrics_version": metrics_version,
     }
+
+    if metrics_version == "v2":
+        v2_scores = [
+            r["structural_score_v2"] for r in evaluated if r.get("structural_score_v2") is not None
+        ]
+        summary["avg_structural_score_v2"] = sum(v2_scores) / len(v2_scores) if v2_scores else 0
+        print(f"Avg Structural Score V2: {summary['avg_structural_score_v2']:.3f}")
 
     if golden_only:
         # Emit artifacts to {output_dir}/{run_id}/
@@ -643,6 +669,12 @@ Examples:
         help="Root directory for artifacts",
     )
     parser.add_argument("--run-id", type=str, help="Run ID for this evaluation")
+    parser.add_argument(
+        "--metrics-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help="Metrics version to use (v1=structural, v2=value-aware)",
+    )
 
     args = parser.parse_args()
 
@@ -673,6 +705,7 @@ Examples:
             dry_run=args.dry_run,
             output_dir=args.output_dir,
             run_id=args.run_id,
+            metrics_version=args.metrics_version,
         )
     )
 

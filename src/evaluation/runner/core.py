@@ -11,6 +11,7 @@ from agent.graph import run_agent_with_tracing
 from evaluation.runner.config import EvaluationCaseResult, EvaluationConfig, EvaluationSummary
 from evaluation.runner.regression import RegressionDetector, RegressionReport
 from schema.evaluation.metrics import MetricSuiteV1
+from schema.evaluation.metrics_v2 import MetricSuiteV2
 
 # Configure logging
 logger = logging.getLogger("eval_runner")
@@ -77,8 +78,11 @@ class EvaluationRunner:
             elif result.get("ambiguity_type"):
                 execution_status = "CLARIFICATION_REQUIRED"
 
-            # Metrics V1 Computation
-            metrics = MetricSuiteV1.compute_all(generated_sql, expected_sql)
+            # Metrics Computation
+            if self.config.metrics_version == "v2":
+                metrics = MetricSuiteV2.compute_all(generated_sql, expected_sql)
+            else:
+                metrics = MetricSuiteV1.compute_all(generated_sql, expected_sql)
 
             return EvaluationCaseResult(
                 case_id=case_id,
@@ -96,6 +100,11 @@ class EvaluationRunner:
                 error=error,
                 latency_ms=latency_ms,
                 trace_id=trace_id,
+                # V2 fields (populated if version is V2, else None)
+                structural_score_v2=metrics.get("structural_score_v2"),
+                value_aware_score=metrics.get("value_aware_score"),
+                v2_subscores=metrics.get("v2_subscores"),
+                metrics_version=metrics.get("metrics_version", "v1"),
             )
 
         except Exception as e:
@@ -103,7 +112,10 @@ class EvaluationRunner:
             end_time = time.time()
 
             # Empty metrics for failure
-            metrics = MetricSuiteV1.compute_all(None, expected_sql)
+            if self.config.metrics_version == "v2":
+                metrics = MetricSuiteV2.compute_all(None, expected_sql)
+            else:
+                metrics = MetricSuiteV1.compute_all(None, expected_sql)
 
             return EvaluationCaseResult(
                 case_id=case_id,
@@ -121,6 +133,14 @@ class EvaluationRunner:
                 error=str(e),
                 latency_ms=(end_time - start_time) * 1000,
                 trace_id=trace_id,
+                structural_score_v2=0.0 if self.config.metrics_version == "v2" else None,
+                value_aware_score=0.0 if self.config.metrics_version == "v2" else None,
+                v2_subscores=(
+                    {k: 0.0 for k in MetricSuiteV2.V2_WEIGHTS}
+                    if self.config.metrics_version == "v2"
+                    else None
+                ),
+                metrics_version=self.config.metrics_version,
             )
 
     async def run_evaluation(self) -> EvaluationSummary:
@@ -152,6 +172,13 @@ class EvaluationRunner:
         avg_structural_score = sum(structural_scores) / total_cases if total_cases > 0 else 0.0
         min_structural_score = min(structural_scores) if structural_scores else 0.0
 
+        structural_scores_v2 = [
+            r.structural_score_v2 for r in results if r.structural_score_v2 is not None
+        ]
+        avg_structural_score_v2 = (
+            sum(structural_scores_v2) / len(structural_scores_v2) if structural_scores_v2 else 0.0
+        )
+
         latencies = [r.latency_ms for r in results]
         avg_latency = statistics.mean(latencies) if latencies else 0.0
         p95_latency = (
@@ -172,6 +199,10 @@ class EvaluationRunner:
             accuracy=exact_match_rate,
             avg_latency_ms=avg_latency,
             p95_latency_ms=p95_latency,
+            avg_structural_score_v2=(
+                avg_structural_score_v2 if self.config.metrics_version == "v2" else None
+            ),
+            metrics_version=self.config.metrics_version,
         )
 
         self.persist_artifacts(results, summary)

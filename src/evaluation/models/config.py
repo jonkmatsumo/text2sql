@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,3 +27,4 @@ class EvaluationConfig(BaseModel):
     agent_config: Dict[str, Any] = Field(
         default_factory=dict, description="Configuration overrides for the agent"
     )
+    metrics_version: Literal["v1", "v2"] = Field("v1", description="Metrics suite version to use")
