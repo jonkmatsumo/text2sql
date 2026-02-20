@@ -2,6 +2,7 @@
 
 import abc
 import asyncio
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -11,6 +12,8 @@ from opentelemetry import trace
 
 from common.observability.metrics import agent_metrics
 from common.observability.monitor import agent_monitor
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaSnapshotCache(abc.ABC):
@@ -155,6 +158,16 @@ def _record_schema_refresh_cooldown_active(retry_after_seconds: float) -> None:
         attributes={"scope": "schema_snapshot_id"},
         description="Schema refresh cooldown rejections",
     )
+
+
+def _invalidate_policy_table_allowlist_cache() -> None:
+    """Invalidate policy allowlist cache after schema refresh."""
+    try:
+        from agent.validation.policy_enforcer import clear_table_cache
+
+        clear_table_cache()
+    except Exception:
+        logger.debug("Policy allowlist cache invalidation skipped.", exc_info=True)
 
 
 def get_schema_refresh_collision_count() -> int:
@@ -340,6 +353,7 @@ async def get_or_refresh_schema_snapshot_id(
 
         _record_schema_refresh_count()
         snapshot_id = await refresh_fn()
+        _invalidate_policy_table_allowlist_cache()
         with _STATE_LOCK:
             _LAST_TENANT_REFRESH_TS[cache_key] = now
         if isinstance(snapshot_id, str) and snapshot_id and snapshot_id != "unknown":

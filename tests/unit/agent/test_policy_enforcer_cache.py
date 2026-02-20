@@ -44,3 +44,45 @@ class TestPolicyEnforcerCache:
             assert "t2" in tables3
             assert "t1" not in tables3
             assert mock_connect.call_count == 2  # New call
+
+    def test_cache_reused_within_ttl_window(self, monkeypatch):
+        """Allowlist cache should be reused while TTL has not expired."""
+        monkeypatch.setenv("POLICY_ALLOWED_TABLES_CACHE_TTL_SECONDS", "300")
+        now = {"value": 100.0}
+        monkeypatch.setattr("agent.validation.policy_enforcer.time.monotonic", lambda: now["value"])
+
+        with patch("psycopg2.connect") as mock_connect:
+            mock_cursor = mock_connect.return_value.cursor.return_value
+            mock_cursor.__enter__.return_value = mock_cursor
+
+            mock_cursor.fetchall.return_value = [("t1",)]
+            tables1 = PolicyEnforcer.get_allowed_tables()
+            assert tables1 == {"t1"}
+            assert mock_connect.call_count == 1
+
+            now["value"] = 399.9
+            mock_cursor.fetchall.return_value = [("t2",)]
+            tables2 = PolicyEnforcer.get_allowed_tables()
+            assert tables2 == {"t1"}
+            assert mock_connect.call_count == 1
+
+    def test_cache_refreshes_after_ttl_expiry(self, monkeypatch):
+        """Allowlist cache should be refreshed once TTL elapses."""
+        monkeypatch.setenv("POLICY_ALLOWED_TABLES_CACHE_TTL_SECONDS", "300")
+        now = {"value": 100.0}
+        monkeypatch.setattr("agent.validation.policy_enforcer.time.monotonic", lambda: now["value"])
+
+        with patch("psycopg2.connect") as mock_connect:
+            mock_cursor = mock_connect.return_value.cursor.return_value
+            mock_cursor.__enter__.return_value = mock_cursor
+
+            mock_cursor.fetchall.return_value = [("t1",)]
+            tables1 = PolicyEnforcer.get_allowed_tables()
+            assert tables1 == {"t1"}
+            assert mock_connect.call_count == 1
+
+            now["value"] = 400.1
+            mock_cursor.fetchall.return_value = [("t2",)]
+            tables2 = PolicyEnforcer.get_allowed_tables()
+            assert tables2 == {"t2"}
+            assert mock_connect.call_count == 2

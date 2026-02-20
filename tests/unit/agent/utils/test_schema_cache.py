@@ -170,3 +170,20 @@ async def test_schema_refresh_cooldown_raises_limit_exceeded(monkeypatch):
 
     assert exc_info.value.retry_after_seconds > 0
     assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_schema_refresh_invalidation_hook_runs_on_refresh():
+    """Policy allowlist cache invalidation should run after snapshot refresh."""
+    reset_schema_cache()
+
+    async def refresh_fn():
+        return "fp-refresh"
+
+    with patch("agent.utils.schema_cache._invalidate_policy_table_allowlist_cache") as mock_clear:
+        first = await get_or_refresh_schema_snapshot_id(tenant_id=31, refresh_fn=refresh_fn)
+        second = await get_or_refresh_schema_snapshot_id(tenant_id=31, refresh_fn=refresh_fn)
+
+    assert first == "fp-refresh"
+    assert second == "fp-refresh"
+    assert mock_clear.call_count == 1

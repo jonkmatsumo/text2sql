@@ -4,7 +4,8 @@ Validates SQL against security policies using AST analysis.
 """
 
 import logging
-from functools import lru_cache
+import threading
+import time
 from typing import Optional, Set
 
 import sqlglot
@@ -17,6 +18,10 @@ from common.policy.sql_policy import is_sensitive_column_name
 from common.sql.comments import strip_sql_comments
 
 logger = logging.getLogger(__name__)
+
+_TABLE_CACHE_LOCK = threading.Lock()
+_TABLE_CACHE_VALUE: Optional[Set[str]] = None
+_TABLE_CACHE_FETCHED_AT: Optional[float] = None
 
 
 def _get_db_url() -> str:
@@ -33,19 +38,23 @@ def _get_db_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 
 
-@lru_cache(maxsize=1)
 def _introspect_allowed_tables() -> Set[str]:
     """Introspect allowed tables from information_schema.
 
     Returns tables from the public schema only.
     Caches result to avoid per-query overhead.
 
-    Cache is process-lifetime (lru_cache) and assumes schema stability.
+    Cache is process-local with TTL and assumes eventual schema stability.
     Call clear_table_cache() if schema changes at runtime (e.g. migrations).
 
     Returns:
         Set of lowercase table names allowed for querying.
     """
+    now = time.monotonic()
+    cached = _get_cached_tables(now=now)
+    if cached is not None:
+        return cached
+
     try:
         import psycopg2
 
@@ -63,6 +72,7 @@ def _introspect_allowed_tables() -> Set[str]:
                 """
                 )
                 tables = {row[0].lower() for row in cur.fetchall()}
+                _set_cached_tables(tables, fetched_at=now)
                 logger.info(f"Introspected {len(tables)} tables from public schema")
                 return tables
         finally:
@@ -70,12 +80,52 @@ def _introspect_allowed_tables() -> Set[str]:
     except Exception as e:
         logger.warning("Failed to introspect tables: %s. Using empty allowlist.", e)
         logger.exception("PolicyEnforcer introspection failed")
-        return set()
+        empty_tables: Set[str] = set()
+        _set_cached_tables(empty_tables, fetched_at=now)
+        return empty_tables
 
 
 def clear_table_cache() -> None:
     """Clear the cached table introspection for testing or schema changes."""
-    _introspect_allowed_tables.cache_clear()
+    global _TABLE_CACHE_VALUE
+    global _TABLE_CACHE_FETCHED_AT
+    with _TABLE_CACHE_LOCK:
+        _TABLE_CACHE_VALUE = None
+        _TABLE_CACHE_FETCHED_AT = None
+
+
+def _get_table_cache_ttl_seconds() -> int:
+    """Return allowlist cache TTL in seconds."""
+    from common.config.env import get_env_int
+
+    default_ttl_seconds = 300
+    try:
+        raw_ttl = get_env_int("POLICY_ALLOWED_TABLES_CACHE_TTL_SECONDS", default_ttl_seconds)
+    except ValueError:
+        return default_ttl_seconds
+    if raw_ttl is None:
+        return default_ttl_seconds
+    return max(1, int(raw_ttl))
+
+
+def _get_cached_tables(*, now: float) -> Optional[Set[str]]:
+    """Return a copy of cached allowlist when TTL is still valid."""
+    ttl_seconds = _get_table_cache_ttl_seconds()
+    with _TABLE_CACHE_LOCK:
+        if _TABLE_CACHE_VALUE is None or _TABLE_CACHE_FETCHED_AT is None:
+            return None
+        if now - _TABLE_CACHE_FETCHED_AT >= ttl_seconds:
+            return None
+        return set(_TABLE_CACHE_VALUE)
+
+
+def _set_cached_tables(tables: Set[str], *, fetched_at: float) -> None:
+    """Store allowlist cache snapshot."""
+    global _TABLE_CACHE_VALUE
+    global _TABLE_CACHE_FETCHED_AT
+    with _TABLE_CACHE_LOCK:
+        _TABLE_CACHE_VALUE = set(tables)
+        _TABLE_CACHE_FETCHED_AT = float(fetched_at)
 
 
 class PolicyEnforcer:
