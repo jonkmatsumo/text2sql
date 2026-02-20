@@ -71,7 +71,7 @@ def rewrite_tenant_scoped_sql(
     rewritten_tables: list[str] = []
     predicates: list[exp.Expression] = []
 
-    for table in expression.find_all(exp.Table):
+    for table in _rewrite_target_tables(expression):
         table_keys = _table_keys(table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
@@ -248,5 +248,34 @@ def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
         join_this = join.args.get("this")
         if isinstance(join_this, exp.Table):
             tables.append(join_this)
+
+    return tables
+
+
+def _rewrite_target_tables(expression: exp.Select) -> list[exp.Table]:
+    """Return tenant-scopeable base tables for rewrite or fail closed."""
+    tables: list[exp.Table] = []
+
+    from_clause = expression.args.get("from_")
+    if isinstance(from_clause, exp.From):
+        from_this = from_clause.args.get("this")
+        if isinstance(from_this, exp.Table):
+            tables.append(from_this)
+        elif from_this is not None:
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support non-table FROM sources."
+            )
+
+    joins = expression.args.get("joins") or []
+    for join in joins:
+        if not isinstance(join, exp.Join):
+            continue
+        join_this = join.args.get("this")
+        if isinstance(join_this, exp.Table):
+            tables.append(join_this)
+        elif join_this is not None:
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support non-table JOIN sources."
+            )
 
     return tables

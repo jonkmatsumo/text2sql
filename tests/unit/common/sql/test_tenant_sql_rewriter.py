@@ -5,31 +5,52 @@ import pytest
 from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
 
 
-def test_rewrite_simple_from_sqlite():
-    """A basic FROM query should get one tenant predicate and one tenant param."""
+@pytest.mark.parametrize(
+    ("sql", "provider", "tenant_id", "expected_predicates", "expected_param_count"),
+    [
+        (
+            "SELECT * FROM orders AS t",
+            "sqlite",
+            7,
+            ["t.tenant_id = ?"],
+            1,
+        ),
+        (
+            "SELECT o.id, c.name FROM orders AS o JOIN customers AS c ON o.customer_id = c.id",
+            "duckdb",
+            42,
+            ["o.tenant_id = ?", "c.tenant_id = ?"],
+            2,
+        ),
+        (
+            "SELECT o.id FROM orders o "
+            "JOIN customers c ON o.customer_id = c.id "
+            "JOIN regions r ON c.region_id = r.id",
+            "sqlite",
+            9,
+            ["o.tenant_id = ?", "c.tenant_id = ?", "r.tenant_id = ?"],
+            3,
+        ),
+    ],
+)
+def test_rewrite_applies_predicates_to_aliases_and_joins(
+    sql: str,
+    provider: str,
+    tenant_id: int,
+    expected_predicates: list[str],
+    expected_param_count: int,
+):
+    """Rewrite should scope each eligible FROM/JOIN table using effective aliases."""
     result = rewrite_tenant_scoped_sql(
-        "SELECT * FROM orders",
-        provider="sqlite",
-        tenant_id=7,
+        sql,
+        provider=provider,
+        tenant_id=tenant_id,
     )
 
-    assert "orders.tenant_id = ?" in result.rewritten_sql
-    assert result.params == [7]
-    assert result.tenant_predicates_added == 1
-
-
-def test_rewrite_join_with_aliases_duckdb():
-    """JOIN queries should include one tenant predicate per table alias."""
-    result = rewrite_tenant_scoped_sql(
-        "SELECT o.id, c.name FROM orders o JOIN customers c ON o.customer_id = c.id",
-        provider="duckdb",
-        tenant_id=42,
-    )
-
-    assert "o.tenant_id = ?" in result.rewritten_sql
-    assert "c.tenant_id = ?" in result.rewritten_sql
-    assert result.params == [42, 42]
-    assert result.tenant_predicates_added == 2
+    for predicate in expected_predicates:
+        assert predicate in result.rewritten_sql
+    assert result.params == [tenant_id] * expected_param_count
+    assert result.tenant_predicates_added == expected_param_count
 
 
 def test_rewrite_existing_where_clause():
