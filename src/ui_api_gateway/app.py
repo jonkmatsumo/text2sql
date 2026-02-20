@@ -686,6 +686,7 @@ class FeedbackRequest(BaseModel):
     interaction_id: str
     thumb: str
     comment: Optional[str] = None
+    tenant_id: int = Field(default=1, ge=1)
 
 
 class LLMModelOption(BaseModel):
@@ -2008,6 +2009,7 @@ async def submit_feedback(request: FeedbackRequest) -> Any:
             "interaction_id": request.interaction_id,
             "thumb": request.thumb,
             "comment": request.comment,
+            "tenant_id": request.tenant_id,
         },
     )
 

@@ -114,10 +114,19 @@ class FeedbackAdapter:
         self.client = mcp_client
 
     async def submit_feedback_async(
-        self, interaction_id: str, thumb: str, comment: Optional[str] = None
+        self,
+        interaction_id: str,
+        thumb: str,
+        tenant_id: int,
+        comment: Optional[str] = None,
     ) -> None:
         """Submit feedback to MCP."""
         await self.client.call_tool(
             "submit_feedback",
-            {"interaction_id": interaction_id, "thumb": thumb, "comment": comment},
+            {
+                "interaction_id": interaction_id,
+                "thumb": thumb,
+                "comment": comment,
+                "tenant_id": tenant_id,
+            },
         )

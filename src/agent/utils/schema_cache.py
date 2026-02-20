@@ -2,6 +2,7 @@
 
 import abc
 import asyncio
+import logging
 import threading
 import time
 from collections import OrderedDict
@@ -11,6 +12,8 @@ from opentelemetry import trace
 
 from common.observability.metrics import agent_metrics
 from common.observability.monitor import agent_monitor
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaSnapshotCache(abc.ABC):
@@ -157,6 +160,16 @@ def _record_schema_refresh_cooldown_active(retry_after_seconds: float) -> None:
     )
 
 
+def _invalidate_policy_table_allowlist_cache() -> None:
+    """Invalidate policy allowlist cache after schema refresh."""
+    try:
+        from agent.validation.policy_enforcer import clear_table_cache
+
+        clear_table_cache()
+    except Exception:
+        logger.debug("Policy allowlist cache invalidation skipped.", exc_info=True)
+
+
 def get_schema_refresh_collision_count() -> int:
     """Return the cumulative number of concurrent snapshot refresh collisions."""
     with _STATE_LOCK:
@@ -210,7 +223,7 @@ def get_schema_refresh_cooldown_seconds() -> float:
     """Return minimum interval between tenant refresh attempts."""
     from common.config.env import get_env_float
 
-    default_cooldown = 0.0
+    default_cooldown = 10.0
     try:
         raw_cooldown = get_env_float("SCHEMA_REFRESH_COOLDOWN_SECONDS", default_cooldown)
     except ValueError:
@@ -302,7 +315,6 @@ def set_cached_schema_snapshot_id(
         _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
         _evict_snapshot_lru_if_needed()
         _LAST_SCHEMA_REFRESH_TIMESTAMP = time.time()
-        _LAST_TENANT_REFRESH_TS[cache_key] = float(cached_at)
     if previous_snapshot_id and previous_snapshot_id != snapshot_id:
         _record_schema_snapshot_churn()
 
@@ -340,6 +352,7 @@ async def get_or_refresh_schema_snapshot_id(
 
         _record_schema_refresh_count()
         snapshot_id = await refresh_fn()
+        _invalidate_policy_table_allowlist_cache()
         with _STATE_LOCK:
             _LAST_TENANT_REFRESH_TS[cache_key] = now
         if isinstance(snapshot_id, str) and snapshot_id and snapshot_id != "unknown":

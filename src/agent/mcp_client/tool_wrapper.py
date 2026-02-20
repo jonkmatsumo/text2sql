@@ -20,6 +20,7 @@ from agent.models.run_budget import (
     current_run_budget,
     extract_rows_returned_from_tool_result,
 )
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import tool_error_invalid_request
@@ -106,6 +107,7 @@ class MCPToolWrapper:
             error=ToolError(
                 category=ErrorCategory.BUDGET_EXCEEDED,
                 code=RunBudgetExceededError.code,
+                error_code=canonical_error_code_for_category(ErrorCategory.BUDGET_EXCEEDED).value,
                 message=message,
                 retryable=False,
                 provider="agent_mcp_client",

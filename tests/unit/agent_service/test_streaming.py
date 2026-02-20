@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -48,3 +49,34 @@ async def test_agent_run_stream(client):
 
             assert "event: result" in full_text
             assert "SELECT * FROM table" in full_text
+
+
+@pytest.mark.asyncio
+async def test_agent_run_stream_populates_error_code_for_error_payload(client):
+    """Streamed final payloads with errors should include canonical error_code."""
+    mock_events = [
+        {
+            "event": "final",
+            "data": {
+                "error": 'relation "users" does not exist',
+                "error_category": "syntax",
+            },
+        },
+    ]
+
+    async def mock_stream(*args, **kwargs):
+        del args, kwargs
+        for event in mock_events:
+            yield event
+
+    with patch("agent.graph.run_agent_with_tracing_stream", side_effect=mock_stream):
+        payload = {"question": "test question", "tenant_id": 1, "thread_id": "test_thread"}
+        with client.stream("POST", "/agent/run/stream", json=payload) as response:
+            assert response.status_code == 200
+            lines = list(response.iter_lines())
+
+    data_lines = [line for line in lines if line.startswith("data: ")]
+    assert data_lines
+    final_payload = json.loads(data_lines[-1][6:])
+    assert final_payload["error_code"] == "DB_SYNTAX_ERROR"
+    assert "users" not in final_payload["error"].lower()

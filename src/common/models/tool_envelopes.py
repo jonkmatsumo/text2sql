@@ -4,6 +4,7 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from common.errors.error_codes import canonical_error_code_for_category
 from common.models.error_metadata import ToolError
 from common.models.tool_versions import DEFAULT_TOOL_VERSION
 
@@ -50,6 +51,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
     trace_id: Optional[str] = Field(
         None, description="Trace identifier propagated for cross-layer correlation"
     )
+    provider: str = Field("unspecified", description="Database or system provider")
 
     # Capability negotiation fields
     capability_required: Optional[str] = None
@@ -250,7 +252,7 @@ class GenericToolMetadata(BaseModel):
         default=CURRENT_TOOL_VERSION,
         description="Semantic version for tool response contract",
     )
-    provider: str = Field("unknown", description="Database or system provider")
+    provider: str = Field("unspecified", description="Database or system provider")
     execution_time_ms: Optional[float] = None
     truncated: Optional[bool] = None
     returned_count: Optional[int] = None
@@ -349,9 +351,10 @@ def _create_error_envelope(
     error_meta = ToolError(
         category=category or "unknown",
         code="TOOL_ERROR",
+        error_code=canonical_error_code_for_category(category or "unknown").value,
         message=message,
         retryable=False,
-        provider="unknown",
+        provider="unspecified",
     )
     meta = ExecuteSQLQueryMetadata(rows_returned=0, is_truncated=False)
     if metadata:

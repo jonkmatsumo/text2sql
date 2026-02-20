@@ -51,6 +51,10 @@ class ToolError(BaseModel):
 
     category: ErrorCategory = Field(..., description="Provider-agnostic error category")
     code: Optional[str] = Field(None, description="Stable machine-readable error code")
+    error_code: Optional[str] = Field(
+        None,
+        description="Canonical bounded error code used across DAL/MCP/Agent contracts",
+    )
     message: str = Field(
         ..., max_length=2048, description="Safe user-facing error message (redacted/bounded)"
     )

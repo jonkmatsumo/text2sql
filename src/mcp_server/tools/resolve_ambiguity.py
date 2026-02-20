@@ -22,36 +22,45 @@ def get_resolver() -> AmbiguityResolver:
     return _resolver
 
 
-async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
+async def handler(query: str, schema_context: List[Dict[str, Any]], tenant_id: int) -> str:
     """Resolve potential ambiguities in a user query against provided schema context.
 
     Authorization:
-        No explicit role gate in this tool. Access control is enforced by upstream
-        transport/auth layers.
+        Requires 'SQL_USER_ROLE' (or higher).
 
     Data Access:
-        Read-only access to the internal ambiguity resolution logic and provided
-        schema context.
+        Read-only access to ambiguity resolution logic and tenant-scoped schema context.
 
     Failure Modes:
+        - Unauthorized: If the required role is missing.
+        - Invalid Request: If tenant_id is missing.
         - Resolution Failed: If the resolver encounters internal errors during analysis.
 
     Args:
         query: The user query to analyze for ambiguities.
         schema_context: List of schema objects providing context for resolution.
+        tenant_id: Tenant identifier.
 
     Returns:
         JSON string with resolution status and bindings.
     """
     import time
 
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.errors import tool_error_response
     from mcp_server.utils.validation import (
         DEFAULT_MAX_INPUT_BYTES,
         DEFAULT_MAX_LIST_ITEMS,
+        require_tenant_id,
         validate_string_length,
         validate_string_list_length,
     )
+
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME):
+        return err
+
+    if err := require_tenant_id(tenant_id, TOOL_NAME):
+        return err
 
     if err := validate_string_length(
         query,

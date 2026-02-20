@@ -191,7 +191,9 @@ async def test_execution_and_resolution_tool_contracts():
         patch("mcp_server.tools.resolve_ambiguity.get_resolver", return_value=resolver),
     ):
         execute_payload = json.loads(await execute_handler("SELECT 1 AS one", tenant_id=1))
-        resolve_payload = json.loads(await resolve_handler("top orders", [{"name": "orders"}]))
+        resolve_payload = json.loads(
+            await resolve_handler("top orders", [{"name": "orders"}], tenant_id=1)
+        )
 
     _assert_execute_envelope_shape(execute_payload)
     _assert_generic_envelope_shape(resolve_payload)
@@ -299,7 +301,7 @@ async def test_persistence_and_feedback_tool_contracts():
             )
         )
         update_payload = json.loads(await update_handler("interaction-1", tenant_id=1))
-        feedback_payload = json.loads(await feedback_handler("interaction-1", "UP"))
+        feedback_payload = json.loads(await feedback_handler("interaction-1", "UP", tenant_id=1))
 
     _assert_generic_envelope_shape(save_payload)
     _assert_generic_envelope_shape(load_payload)

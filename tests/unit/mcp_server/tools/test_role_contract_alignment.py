@@ -47,7 +47,12 @@ ENFORCED_SQL_USER_ROLE_HANDLERS = [
     (
         "submit_feedback",
         submit_feedback_handler,
-        {"interaction_id": "i-1", "thumb": "UP", "comment": None},
+        {"interaction_id": "i-1", "thumb": "UP", "comment": None, "tenant_id": 1},
+    ),
+    (
+        "resolve_ambiguity",
+        resolve_ambiguity_handler,
+        {"query": "find records", "schema_context": [], "tenant_id": 1},
     ),
     (
         "create_interaction",
@@ -101,24 +106,3 @@ async def test_enforced_sql_user_role_tools_reject_missing_role(
     assert payload["error"]["category"] == "unauthorized"
     assert payload["error"]["sql_state"] == "UNAUTHORIZED_ROLE"
     assert tool_name in payload["error"]["message"]
-
-
-@pytest.mark.asyncio
-async def test_non_enforced_resolve_ambiguity_remains_callable_without_role(
-    monkeypatch,
-):
-    """resolve_ambiguity should remain callable when role enforcement is upstream-only."""
-    monkeypatch.setenv("MCP_USER_ROLE", "")
-
-    class _DummyResolver:
-        def resolve(self, query, schema_context):
-            _ = (query, schema_context)
-            return {"status": "CLEAR", "resolved_bindings": {}, "ambiguities": []}
-
-    monkeypatch.setattr("mcp_server.tools.resolve_ambiguity.get_resolver", lambda: _DummyResolver())
-
-    response = await resolve_ambiguity_handler(query="find records", schema_context=[])
-    payload = json.loads(response)
-
-    assert payload.get("error") is None
-    assert payload["result"]["status"] == "CLEAR"

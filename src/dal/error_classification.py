@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from common.config.env import get_env_bool
+from common.errors.error_codes import ErrorCode, canonical_error_code_for_category
 from common.models.error_metadata import ErrorCategory, ErrorMetadata
 from common.sanitization.bounding import redact_recursive
 from dal.feature_flags import experimental_features_enabled
@@ -53,6 +54,7 @@ def extract_error_metadata(provider: str, exc: Exception) -> ErrorMetadata:
 
     return ErrorMetadata(
         sql_state=sql_state,
+        error_code=info.error_code.value,
         message=redacted_message,
         line_number=line_number,
         position=position,
@@ -76,6 +78,7 @@ class ErrorClassification:
     """Structured provider-aware error classification."""
 
     category: ErrorCategory
+    error_code: ErrorCode
     provider: str
     is_retryable: bool
     retry_after_seconds: Optional[float] = None
@@ -273,6 +276,7 @@ def _classification(
     }
     return ErrorClassification(
         category=category,
+        error_code=canonical_error_code_for_category(category),
         provider=provider,
         is_retryable=retryable,
         retry_after_seconds=retry_after,
