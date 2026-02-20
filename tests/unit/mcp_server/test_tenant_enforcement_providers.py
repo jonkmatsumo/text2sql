@@ -209,9 +209,10 @@ async def test_non_postgres_provider_rejects_tenant_scoped_execution(provider: s
 
 
 @pytest.mark.asyncio
-async def test_non_postgres_tenant_bypass_flag_allows_legacy_behavior(monkeypatch):
-    """Allow legacy non-Postgres behavior when bypass flag is explicitly enabled."""
+async def test_non_postgres_tenant_bypass_flag_no_longer_allows_execution(monkeypatch):
+    """Unsupported providers should reject even if legacy bypass flag is set."""
     monkeypatch.setenv("ALLOW_NON_POSTGRES_TENANT_BYPASS", "true")
+    mock_connection = MagicMock()
     with (
         patch("mcp_server.utils.auth.validate_role", return_value=None),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"),
@@ -221,11 +222,12 @@ async def test_non_postgres_tenant_bypass_flag_allows_legacy_behavior(monkeypatc
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_conn_ctx(rows=[{"ok": 1}]),
+            mock_connection,
         ),
     ):
-        payload = await handler("SELECT 1 AS ok", tenant_id=7)
+        payload = await handler("SELECT * FROM orders", tenant_id=7)
 
     result = json.loads(payload)
-    assert result.get("error") is None
-    assert result["rows"] == [{"ok": 1}]
+    assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    mock_connection.assert_not_called()

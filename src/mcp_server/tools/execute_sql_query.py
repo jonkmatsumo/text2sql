@@ -484,16 +484,7 @@ async def handler(
         tenant_enforcement_mode = "rls_session"
 
     if tenant_id is not None and tenant_enforcement_mode == "unsupported":
-        from dal.feature_flags import allow_non_postgres_tenant_bypass
-
-        if allow_non_postgres_tenant_bypass():
-            logger.warning(
-                "ALLOW_NON_POSTGRES_TENANT_BYPASS=true enabled for provider=%s; "
-                "continuing without tenant isolation enforcement.",
-                provider,
-            )
-        else:
-            return _tenant_enforcement_unsupported_response(provider)
+        return _tenant_enforcement_unsupported_response(provider)
 
     effective_sql_query = sql_query
     effective_params = list(params or [])
