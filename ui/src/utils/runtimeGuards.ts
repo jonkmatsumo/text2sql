@@ -1,4 +1,4 @@
-import { Interaction, OpsJobResponse, OpsJobStatus, JobStatusResponse } from "../types/admin";
+import { Interaction, OpsJobResponse, OpsJobStatus, JobStatusResponse, CancelJobResponse } from "../types/admin";
 import { RunDiagnosticsResponse } from "../types/diagnostics";
 
 /**
@@ -32,6 +32,18 @@ export function isJobStatusResponse(value: unknown): value is JobStatusResponse 
         typeof v.job_type === "string" &&
         typeof v.started_at === "string" &&
         ["PENDING", "RUNNING", "CANCELLING", "CANCELLED", "COMPLETED", "FAILED"].includes(v.status)
+    );
+}
+
+/**
+ * Lightweight runtime check for CancelJobResponse.
+ */
+export function isCancelJobResponse(value: unknown): value is CancelJobResponse {
+    const v = value as any;
+    return !!(
+        v &&
+        typeof v === "object" &&
+        typeof v.success === "boolean"
     );
 }
 

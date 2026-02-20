@@ -31,6 +31,7 @@ import {
   OpsJobResponse,
   JobStatusResponse,
   ListRunsResponse,
+  CancelJobResponse,
 } from "./types/admin";
 import type { DiagnosticsResponse, RunDiagnosticsResponse } from "./types/diagnostics";
 import {
@@ -46,6 +47,7 @@ import {
   isJobStatusResponse,
   isOpsJobResponseArray,
   isRunDiagnosticsResponse,
+  isCancelJobResponse,
 } from "./utils/runtimeGuards";
 
 const agentBase = agentServiceBaseUrl;
@@ -600,13 +602,24 @@ export const OpsService = {
     return data;
   },
 
-  async cancelJob(jobId: string): Promise<{ status: string }> {
+  async cancelJob(jobId: string): Promise<CancelJobResponse> {
     const response = await fetch(`${uiApiBase}/ops/jobs/${jobId}/cancel`, {
       method: "POST",
       headers: getAuthHeaders()
     });
     if (!response.ok) await throwApiError(response, "Failed to cancel job");
-    return response.json();
+    const data: unknown = await response.json();
+    if (!isCancelJobResponse(data)) {
+      const report = buildContractMismatchReport("OpsService.cancelJob", data, { jobId });
+      console.error("Operator API contract mismatch (cancelJob)", report);
+      throw new ApiError(
+        `Received unexpected response from cancelJob${report.ids.trace_id ? ` (trace_id=${report.ids.trace_id})` : ""}`,
+        200,
+        "MALFORMED_RESPONSE",
+        { endpoint: "cancelJob", surface: report.surface, ...report.ids, request_context: report.request_context }
+      );
+    }
+    return data;
   },
 
   async listJobs(

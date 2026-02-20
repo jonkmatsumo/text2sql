@@ -326,4 +326,20 @@ describe("RunHistory search scope messaging", () => {
         );
         expect(showToastMock).toHaveBeenCalledTimes(1);
     });
+
+    describe("Offset Sanitization", () => {
+        it("clamps negative offset to 0", async () => {
+            renderRunHistory("/admin/runs?offset=-10");
+            await waitFor(() => {
+                expect(OpsService.listRuns).toHaveBeenCalledWith(RUN_HISTORY_PAGE_SIZE, 0, "All", "All");
+            });
+        });
+
+        it("treats NaN offset as 0", async () => {
+            renderRunHistory("/admin/runs?offset=abc");
+            await waitFor(() => {
+                expect(OpsService.listRuns).toHaveBeenCalledWith(RUN_HISTORY_PAGE_SIZE, 0, "All", "All");
+            });
+        });
+    });
 });
