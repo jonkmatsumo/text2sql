@@ -329,6 +329,10 @@ describe("JobsDashboard Cancellation", () => {
                     message.includes("timed out") && message.includes("Refresh list to re-check") && type === "warning"
             );
             expect(timeoutWarningToasts).toHaveLength(1);
+            expect(timeoutWarningToasts[0][2]).toMatchObject({
+                dedupeKey: expect.stringContaining("jobs-dashboard:POLL_TIMEOUT")
+            });
+            expect(timeoutWarningToasts[0][2].dedupeKey).toContain("jobId=job-1");
 
             const timeoutBanner = screen.getByTestId("cancel-timeout-refresh-banner");
             expect(timeoutBanner).toHaveTextContent("Status check timed out —");
@@ -416,4 +420,24 @@ describe("JobsDashboard Cancellation", () => {
             resolveCancel!({ success: true });
         });
     }, 10000);
+
+    it("does not show cancellation button for terminal jobs", async () => {
+        const terminalJobs = [
+            { ...mockJobs[0], id: "job-completed", status: "COMPLETED" },
+            { ...mockJobs[0], id: "job-failed", status: "FAILED" },
+            { ...mockJobs[0], id: "job-cancelled", status: "CANCELLED" },
+        ];
+        vi.spyOn(OpsService, "listJobs").mockResolvedValue(terminalJobs as any);
+
+        render(
+            <MemoryRouter>
+                <JobsDashboard />
+            </MemoryRouter>
+        );
+
+        await screen.findByText("COMPLETED");
+
+        const cancelButtons = screen.queryAllByRole("button", { name: /cancel/i });
+        expect(cancelButtons).toHaveLength(0);
+    });
 });

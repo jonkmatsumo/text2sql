@@ -1,5 +1,5 @@
 import { Interaction, OpsJobResponse, OpsJobStatus, JobStatusResponse, CancelJobResponse } from "../types/admin";
-import { RunDiagnosticsResponse } from "../types/diagnostics";
+import { DiagnosticsResponse, RunDiagnosticsResponse } from "../types/diagnostics";
 
 /**
  * Lightweight runtime check for Interaction array.
@@ -48,7 +48,21 @@ export function isCancelJobResponse(value: unknown): value is CancelJobResponse 
 }
 
 /**
- * Lightweight runtime check for RunDiagnosticsResponse.
+ * Lightweight runtime check for DiagnosticsResponse (base/system shape).
+ */
+export function isDiagnosticsResponse(value: unknown): value is DiagnosticsResponse {
+    const v = value as any;
+    return !!(
+        v &&
+        typeof v === "object" &&
+        typeof v.diagnostics_schema_version === "number" &&
+        v.enabled_flags &&
+        typeof v.enabled_flags === "object"
+    );
+}
+
+/**
+ * Lightweight runtime check for RunDiagnosticsResponse (superset shape).
  */
 export function isRunDiagnosticsResponse(value: unknown): value is RunDiagnosticsResponse {
     const v = value as any;
@@ -57,7 +71,10 @@ export function isRunDiagnosticsResponse(value: unknown): value is RunDiagnostic
         typeof v === "object" &&
         typeof v.diagnostics_schema_version === "number" &&
         v.enabled_flags &&
-        typeof v.enabled_flags === "object"
+        typeof v.enabled_flags === "object" &&
+        // Run specific keys
+        (v.run_context === undefined || typeof v.run_context === "object") &&
+        (v.validation === undefined || typeof v.validation === "object")
     );
 }
 
