@@ -315,7 +315,6 @@ def set_cached_schema_snapshot_id(
         _SCHEMA_SNAPSHOT_ID_CACHE.move_to_end(cache_key)
         _evict_snapshot_lru_if_needed()
         _LAST_SCHEMA_REFRESH_TIMESTAMP = time.time()
-        _LAST_TENANT_REFRESH_TS[cache_key] = float(cached_at)
     if previous_snapshot_id and previous_snapshot_id != snapshot_id:
         _record_schema_snapshot_churn()
 
