@@ -10,6 +10,7 @@ import functools
 import json
 import logging
 import re
+import time
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
 from opentelemetry import propagate, trace
@@ -254,6 +255,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                             f"Mode={mode}."
                         )
 
+                call_started_at = time.monotonic()
                 try:
 
                     async def _invoke_with_tenant_limit() -> Any:
@@ -407,6 +409,15 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                 "parse_failed": bool(truncation_parse_failed),
                             },
                         )
+                    duration_ms = max(0.0, (time.monotonic() - call_started_at) * 1000.0)
+                    span.set_attribute("mcp.tool.duration_ms", duration_ms)
+                    mcp_metrics.record_histogram(
+                        "mcp.tool.duration_ms",
+                        duration_ms,
+                        unit="ms",
+                        description="MCP tool end-to-end duration in milliseconds",
+                        attributes={"tool_name": tool_name},
+                    )
 
                     error_category = _extract_envelope_error_category(actual_response)
                     if error_category is not None:
@@ -418,6 +429,15 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     return actual_response
 
                 except Exception as e:
+                    duration_ms = max(0.0, (time.monotonic() - call_started_at) * 1000.0)
+                    span.set_attribute("mcp.tool.duration_ms", duration_ms)
+                    mcp_metrics.record_histogram(
+                        "mcp.tool.duration_ms",
+                        duration_ms,
+                        unit="ms",
+                        description="MCP tool end-to-end duration in milliseconds",
+                        attributes={"tool_name": tool_name},
+                    )
                     span.record_exception(e)
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     # Try to classify error if possible
