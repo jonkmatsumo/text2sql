@@ -73,6 +73,7 @@ class TestExecuteSqlQuery:
             assert data["schema_version"] == "1.0"
             assert data["rows"][0]["count"] == 1000
             assert data["metadata"]["tool_version"] == "v1"
+            assert data["metadata"]["provider"] == "postgres"
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
 

@@ -31,6 +31,7 @@ from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
 from mcp_server.utils.json_budget import JSONBudget
+from mcp_server.utils.provider import resolve_provider
 
 TOOL_NAME = "execute_sql_query"
 TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
@@ -79,12 +80,14 @@ def _construct_error_response(
     message: str,
     category: ErrorCategory = ErrorCategory.UNKNOWN,
     metadata: Optional[Dict[str, Any]] = None,
-    provider: str = "unknown",
+    provider: str | None = None,
     is_retryable: bool = False,
     retry_after_seconds: Optional[float] = None,
 ) -> str:
     """Construct a standardized error response."""
     from mcp_server.utils.errors import build_error_metadata
+
+    resolved_provider = resolve_provider(provider)
 
     # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
@@ -102,7 +105,7 @@ def _construct_error_response(
     error_meta = build_error_metadata(
         message=message,
         category=category,
-        provider=provider,
+        provider=resolved_provider,
         retryable=is_retryable,
         retry_after_seconds=retry_after_seconds,
         code=meta_dict.get("sql_state"),
@@ -125,6 +128,7 @@ def _construct_error_response(
         metadata=ExecuteSQLQueryMetadata(
             rows_returned=0,
             is_truncated=False,
+            provider=resolved_provider,
         ),
         error=error_meta,
     )
@@ -339,7 +343,7 @@ async def handler(
         - Timeout: If execution exceeds the allotted time.
         - Capacity detection: If query triggers row/resource caps.
     """
-    provider = Database.get_query_target_provider()
+    provider = resolve_provider(Database.get_query_target_provider())
 
     from mcp_server.utils.auth import validate_role
 
@@ -773,6 +777,7 @@ async def handler(
         envelope_metadata = ExecuteSQLQueryMetadata(
             rows_returned=len(result_rows),
             is_truncated=is_truncated,
+            provider=provider,
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
             partial_reason=partial_reason,
@@ -794,7 +799,7 @@ async def handler(
         return envelope.model_dump_json(exclude_none=True)
 
     except asyncpg.PostgresError as e:
-        provider = Database.get_query_target_provider()
+        provider = resolve_provider(Database.get_query_target_provider())
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
@@ -806,7 +811,7 @@ async def handler(
             metadata=metadata.to_dict(),  # include raw details if any
         )
     except Exception as e:
-        provider = Database.get_query_target_provider()
+        provider = resolve_provider(Database.get_query_target_provider())
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(

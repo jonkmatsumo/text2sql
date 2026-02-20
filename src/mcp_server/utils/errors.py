@@ -16,6 +16,7 @@ from common.models.tool_errors import (
     tool_error_unsupported_capability,
 )
 from common.sanitization.text import redact_sensitive_info
+from mcp_server.utils.provider import resolve_provider
 
 MAX_ERROR_MESSAGE_LENGTH = 2048
 
@@ -32,7 +33,7 @@ def build_error_metadata(
     *,
     message: str,
     category: ErrorCategory,
-    provider: str,
+    provider: str | None,
     retryable: bool = False,
     retry_after_seconds: Optional[float] = None,
     code: Optional[str] = None,
@@ -40,6 +41,7 @@ def build_error_metadata(
     hint: Optional[str] = None,
 ) -> ToolError:
     """Build bounded, redacted ToolError."""
+    resolved_provider = resolve_provider(provider)
     safe_message = sanitize_error_message(message)
     safe_hint = sanitize_error_message(hint, fallback="") if hint else None
     if safe_hint == "":
@@ -54,21 +56,21 @@ def build_error_metadata(
         err = tool_error_invalid_request(
             code=machine_code,
             message=safe_message,
-            provider=provider,
+            provider=resolved_provider,
             details_safe=safe_details,
         )
     elif category == ErrorCategory.UNSUPPORTED_CAPABILITY:
         err = tool_error_unsupported_capability(
             code=machine_code,
             message=safe_message,
-            provider=provider,
+            provider=resolved_provider,
             details_safe=safe_details,
         )
     elif category == ErrorCategory.TIMEOUT:
         err = tool_error_timeout(
             code=machine_code,
             message=safe_message,
-            provider=provider,
+            provider=resolved_provider,
             details_safe=safe_details,
             retry_after_seconds=retry_after_seconds,
         )
@@ -76,7 +78,7 @@ def build_error_metadata(
         err = tool_error_internal(
             code=machine_code,
             message=safe_message,
-            provider=provider,
+            provider=resolved_provider,
             details_safe=safe_details,
         )
     else:
@@ -86,7 +88,7 @@ def build_error_metadata(
             error_code=canonical_error_code,
             message=safe_message,
             retryable=retryable,
-            provider=provider,
+            provider=resolved_provider,
             details_safe=safe_details,
             retry_after_seconds=retry_after_seconds,
         )
@@ -110,7 +112,7 @@ def tool_error_response(
     code: str,
     error_code: Optional[str] = None,
     category: ErrorCategory = ErrorCategory.INVALID_REQUEST,
-    provider: str = "mcp_server",
+    provider: str | None = None,
     retryable: bool = False,
     retry_after_seconds: Optional[float] = None,
 ) -> str:
@@ -128,13 +130,14 @@ def tool_error_response(
         retryable: Whether the caller should retry.
         retry_after_seconds: Optional backoff hint.
     """
+    resolved_provider = resolve_provider(provider)
     envelope = ToolResponseEnvelope(
         result=None,
-        metadata=GenericToolMetadata(provider=provider),
+        metadata=GenericToolMetadata(provider=resolved_provider),
         error=build_error_metadata(
             message=message,
             category=category,
-            provider=provider,
+            provider=resolved_provider,
             retryable=retryable,
             retry_after_seconds=retry_after_seconds,
             code=code,
