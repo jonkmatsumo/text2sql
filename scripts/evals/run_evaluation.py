@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 # Add database/query-target to path for golden dataset imports
-sys.path.insert(0, str(ROOT / "database" / "query-target"))
+sys.path.insert(0, str(ROOT / "data" / "database" / "query-target"))
 
 from golden import (  # noqa: E402
     GoldenDatasetNotFoundError,
@@ -279,6 +279,9 @@ async def evaluate_test_case(
             "error_message": error_message,
             "skipped": False,  # Explicitly mark as not skipped so it counts as failure
             "trace_id": trace_id,
+            "metrics_version": metrics_version,
+            "structural_score_v2": 0.0 if metrics_version == "v2" else None,
+            "value_aware_score": 0.0 if metrics_version == "v2" else None,
         }
 
 
