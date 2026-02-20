@@ -33,9 +33,12 @@ async def handler(query: str, sql: str, tenant_id: int, schema_snapshot_id: str 
     from common.models.error_metadata import ErrorCategory
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
     from dal.database import Database
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import require_tenant_id
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 

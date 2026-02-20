@@ -26,14 +26,14 @@ async def handler(query: str, schema_context: List[Dict[str, Any]]) -> str:
     """Resolve potential ambiguities in a user query against provided schema context.
 
     Authorization:
-        Requires 'SQL_USER_ROLE' (or higher).
+        No explicit role gate in this tool. Access control is enforced by upstream
+        transport/auth layers.
 
     Data Access:
         Read-only access to the internal ambiguity resolution logic and provided
         schema context.
 
     Failure Modes:
-        - Unauthorized: If the required role is missing.
         - Resolution Failed: If the resolver encounters internal errors during analysis.
 
     Args:

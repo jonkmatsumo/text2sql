@@ -6,13 +6,39 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from dal.tracing import TracedAsyncpgConnection, trace_query_operation
+from dal.tracing import TracedAsyncpgConnection, trace_enabled, trace_query_operation
 
 
 class _DummyAsyncpgConn:
     async def execute(self, sql: str, *params: object) -> str:
         _ = (sql, params)
         return "OK"
+
+
+def test_trace_enabled_defaults_true_when_otel_exporter_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DAL tracing should default to enabled when OTEL exporter is configured."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    monkeypatch.delenv("DAL_TRACE_QUERIES", raising=False)
+
+    assert trace_enabled() is True
+
+
+def test_trace_enabled_respects_explicit_false_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit DAL_TRACE_QUERIES=false should disable tracing despite exporter config."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    monkeypatch.setenv("DAL_TRACE_QUERIES", "false")
+
+    assert trace_enabled() is False
+
+
+def test_trace_enabled_respects_explicit_true_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit DAL_TRACE_QUERIES=true should keep tracing enabled."""
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+    monkeypatch.setenv("DAL_TRACE_QUERIES", "true")
+
+    assert trace_enabled() is True
 
 
 @pytest.mark.asyncio

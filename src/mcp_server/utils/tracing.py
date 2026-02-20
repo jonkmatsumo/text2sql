@@ -10,9 +10,10 @@ import functools
 import json
 import logging
 import re
+import time
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
-from opentelemetry import trace
+from opentelemetry import propagate, trace
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
@@ -82,6 +83,31 @@ def _extract_truncation_signal(response: Any) -> tuple[bool, bool]:
         return False, False
 
     return False, False
+
+
+def _extract_trace_context(payload: Any) -> dict[str, str]:
+    """Extract W3C trace carrier values from reserved tool kwargs."""
+    if not isinstance(payload, dict):
+        return {}
+
+    carrier: dict[str, str] = {}
+    traceparent = payload.get("traceparent")
+    tracestate = payload.get("tracestate")
+
+    if isinstance(traceparent, str) and traceparent.strip():
+        carrier["traceparent"] = traceparent.strip()
+    if isinstance(tracestate, str) and tracestate.strip():
+        carrier["tracestate"] = tracestate.strip()
+
+    return carrier
+
+
+def _normalize_request_id(value: Any) -> str | None:
+    """Normalize request identifier values from reserved args/context."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
 
 
 def _extract_envelope_error_category(response: Any) -> str | None:
@@ -154,6 +180,51 @@ def _inject_tool_version(response: Any, tool_name: str) -> Any:
     return response
 
 
+def _inject_request_id(response: Any, request_id: str | None) -> Any:
+    """Inject request_id into envelope metadata for cross-layer correlation."""
+    if not request_id:
+        return response
+
+    def _apply_to_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            payload["metadata"] = metadata
+        metadata["request_id"] = request_id
+        return payload
+
+    if isinstance(response, dict):
+        return _apply_to_payload(dict(response))
+
+    if isinstance(response, str):
+        try:
+            payload = json.loads(response)
+        except Exception:
+            return response
+        if not isinstance(payload, dict):
+            return response
+        payload = _apply_to_payload(payload)
+        return json.dumps(payload, separators=(",", ":"))
+
+    if hasattr(response, "model_dump"):
+        try:
+            payload = response.model_dump()
+        except Exception:
+            return response
+        if not isinstance(payload, dict):
+            return response
+        payload = _apply_to_payload(payload)
+        model_validate = getattr(type(response), "model_validate", None)
+        if callable(model_validate):
+            try:
+                return model_validate(payload)
+            except Exception:
+                return payload
+        return payload
+
+    return response
+
+
 def _normalize_requested_tool_version(value: Any) -> tuple[str | None, str | None]:
     """Normalize and validate requested tool version input.
 
@@ -187,6 +258,16 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
 
             # Get a tracer
             tracer = trace.get_tracer("mcp.server")
+            trace_context_payload = kwargs.pop("_trace_context", None)
+            request_id = _normalize_request_id(kwargs.pop("_request_id", None))
+            if request_id is None:
+                from common.observability.context import request_id_var, run_id_var
+
+                request_id = _normalize_request_id(request_id_var.get() or run_id_var.get())
+            parent_context = None
+            trace_carrier = _extract_trace_context(trace_context_payload)
+            if trace_carrier:
+                parent_context = propagate.extract(trace_carrier)
 
             # Check if tracing is actually enabled/configured
             # This is a heuristic: if we get a NoOpSpan, maybe tracing is off.
@@ -199,6 +280,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
             with tracer.start_as_current_span(
                 span_name,
                 kind=trace.SpanKind.SERVER,
+                context=parent_context,
             ) as span:
                 requested_tool_version = kwargs.pop("requested_tool_version", None)
                 supported_tool_version = get_tool_version(tool_name)
@@ -211,6 +293,8 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 span.set_attribute("mcp.tool.supported_version", supported_tool_version)
                 if requested_tool_version is not None:
                     span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
+                if request_id is not None:
+                    span.set_attribute("mcp.request_id", request_id)
 
                 # Capture tenant_id if present
                 tenant_id = kwargs.get("tenant_id")
@@ -231,6 +315,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                             f"Mode={mode}."
                         )
 
+                call_started_at = time.monotonic()
                 try:
 
                     async def _invoke_with_tenant_limit() -> Any:
@@ -357,6 +442,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                         is_truncated, truncation_parse_failed = _extract_truncation_signal(response)
 
                     actual_response = _inject_tool_version(actual_response, tool_name)
+                    actual_response = _inject_request_id(actual_response, request_id)
                     resp_size = len(str(actual_response).encode("utf-8"))
 
                     # 3. Record response attributes
@@ -384,6 +470,15 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                                 "parse_failed": bool(truncation_parse_failed),
                             },
                         )
+                    duration_ms = max(0.0, (time.monotonic() - call_started_at) * 1000.0)
+                    span.set_attribute("mcp.tool.duration_ms", duration_ms)
+                    mcp_metrics.record_histogram(
+                        "mcp.tool.duration_ms",
+                        duration_ms,
+                        unit="ms",
+                        description="MCP tool end-to-end duration in milliseconds",
+                        attributes={"tool_name": tool_name},
+                    )
 
                     error_category = _extract_envelope_error_category(actual_response)
                     if error_category is not None:
@@ -395,6 +490,15 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     return actual_response
 
                 except Exception as e:
+                    duration_ms = max(0.0, (time.monotonic() - call_started_at) * 1000.0)
+                    span.set_attribute("mcp.tool.duration_ms", duration_ms)
+                    mcp_metrics.record_histogram(
+                        "mcp.tool.duration_ms",
+                        duration_ms,
+                        unit="ms",
+                        description="MCP tool end-to-end duration in milliseconds",
+                        attributes={"tool_name": tool_name},
+                    )
                     span.record_exception(e)
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     # Try to classify error if possible

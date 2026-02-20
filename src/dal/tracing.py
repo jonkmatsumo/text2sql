@@ -2,15 +2,15 @@ import hashlib
 import inspect
 from typing import Any, Awaitable, Dict, Optional
 
-from common.config.env import get_env_bool
 from common.observability.context import run_id_var
+from common.observability.metrics import is_metrics_enabled
 from dal.util.read_only import enforce_read_only_sql
 from dal.util.row_limits import cap_rows_with_metadata
 
 
 def trace_enabled() -> bool:
-    """Return True when DAL query tracing is enabled."""
-    return get_env_bool("DAL_TRACE_QUERIES", False)
+    """Return True when DAL query tracing is enabled or OTEL exporter defaults apply."""
+    return is_metrics_enabled("DAL_TRACE_QUERIES")
 
 
 def _hash_sql(sql: str) -> str:

@@ -51,7 +51,10 @@ async def test_valid_tool_input_passes_through_to_mcp():
     payload = {"tenant_id": 7}
     result = await tool.ainvoke(payload)
 
-    invoke_fn.assert_called_once_with(payload)
+    invoke_fn.assert_called_once()
+    forwarded = invoke_fn.call_args.args[0]
+    assert forwarded["tenant_id"] == payload["tenant_id"]
+    assert isinstance(forwarded.get("_request_id"), str)
     assert result == {"ok": True}
 
 

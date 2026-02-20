@@ -37,10 +37,15 @@ async def get_mcp_tools():
     from agent.telemetry import telemetry
 
     ctx = telemetry.capture_context()
+    request_id = telemetry.get_current_trace_id()
     if ctx.sticky_metadata:
         run_id = ctx.sticky_metadata.get("run_id")
         if run_id:
             headers["X-Run-ID"] = str(run_id)
+        if not request_id:
+            request_id = ctx.sticky_metadata.get("request_id")
+    if request_id:
+        headers["X-Request-ID"] = str(request_id)
 
     # Create SDK client and discover tools
     client = MCPClient(server_url=mcp_url, transport=mcp_transport, headers=headers)

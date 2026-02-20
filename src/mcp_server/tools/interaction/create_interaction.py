@@ -42,14 +42,14 @@ async def handler(
     Returns:
         JSON-encoded ToolResponseEnvelope containing the new interaction_id.
     """
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.envelopes import tool_success_response
     from mcp_server.utils.validation import require_tenant_id
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
-
-    # We allow read-only access for creating interactions (baseline role)
-    # but we can enforce a baseline role if needed. Using empty string for no strict role.
 
     store = get_interaction_store()
     interaction_id = await store.create_interaction(

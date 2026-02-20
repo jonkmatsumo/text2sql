@@ -40,6 +40,11 @@ async def handler(interaction_id: str, thumb: str, comment: Optional[str] = None
     Returns:
         JSON string with success or error status.
     """
+    from mcp_server.utils.auth import validate_role
+
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME):
+        return err
+
     # Validate interaction_id before attempting write
     if not interaction_id or not interaction_id.strip():
         return tool_error_response(

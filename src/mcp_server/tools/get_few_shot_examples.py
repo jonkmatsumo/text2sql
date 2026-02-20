@@ -28,8 +28,11 @@ async def handler(query: str, tenant_id: int, limit: int = 3) -> str:
     Returns:
         JSON string with similar query-SQL pairs.
     """
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.validation import require_tenant_id
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 

@@ -42,10 +42,13 @@ async def handler(
     Returns:
         JSON-encoded ToolResponseEnvelope with "OK" status.
     """
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.envelopes import tool_success_response
     from mcp_server.utils.errors import tool_error_response
     from mcp_server.utils.validation import require_tenant_id
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 
