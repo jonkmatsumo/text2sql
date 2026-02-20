@@ -135,9 +135,8 @@ class TenantRewriter:
         # Transform replaces the node.
 
         col_ident = exp.Identifier(this=policy.tenant_column, quoted=False)
-        # Use a Parameter node for :tenant_id
-        # In sqlglot, :name is typically a Placeholder or Parameter
-        param = exp.Parameter(this=exp.Var(this="tenant_id"))
+        # Use a Parameter node with a numeric Var to generate $1 for Postgres
+        param = exp.Parameter(this=exp.Var(this="1"))
 
         condition = exp.EQ(this=exp.Column(this=col_ident), expression=param)
 
