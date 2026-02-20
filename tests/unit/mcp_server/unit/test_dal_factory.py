@@ -56,6 +56,8 @@ class TestProviderRegistries:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -111,6 +113,8 @@ class TestDefaultProviders:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -205,6 +209,8 @@ class TestSingletonBehavior:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -267,6 +273,8 @@ class TestResetSingletons:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -315,6 +323,8 @@ class TestEnvVarProviderSelection:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,
@@ -371,6 +381,8 @@ class TestInterfaceCompliance:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,

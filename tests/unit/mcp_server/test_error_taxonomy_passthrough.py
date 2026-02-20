@@ -1,6 +1,7 @@
 """Tests for canonical error-code passthrough in MCP envelopes and telemetry."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -90,12 +91,15 @@ async def test_execute_sql_tenant_rejection_includes_canonical_error_code():
     with (
         patch("mcp_server.utils.auth.validate_role", return_value=None),
         patch(
-            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
-            return_value="sqlite",
-        ),
-        patch(
-            "mcp_server.tools.execute_sql_query.Database.supports_tenant_scope_enforcement",
-            return_value=False,
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=SimpleNamespace(
+                provider_name="sqlite",
+                tenant_enforcement_mode="unsupported",
+                supports_column_metadata=True,
+                supports_cancel=True,
+                supports_pagination=True,
+                execution_model="sync",
+            ),
         ),
     ):
         payload = await handler("SELECT 1", tenant_id=7)

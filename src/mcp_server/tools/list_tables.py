@@ -3,6 +3,7 @@
 from typing import Optional
 
 from dal.database import Database
+from mcp_server.utils.provider import resolve_provider
 
 TOOL_NAME = "list_tables"
 TOOL_DESCRIPTION = "List available tables in the database."
@@ -55,7 +56,7 @@ async def handler(tenant_id: int, search_term: Optional[str] = None) -> str:
     envelope = ToolResponseEnvelope(
         result=tables,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(),
+            provider=resolve_provider(Database.get_provider_identity()),
             execution_time_ms=execution_time_ms,
             items_returned=len(tables),
         ),

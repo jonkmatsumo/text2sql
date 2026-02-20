@@ -52,3 +52,20 @@ def test_translate_params_without_placeholders():
     """Reject params when no placeholders are present."""
     with pytest.raises(ValueError, match="no \\$N placeholders"):
         translate_postgres_params_to_sqlite("SELECT 1", ["unused"])
+
+
+def test_translate_qmark_placeholders_passthrough():
+    """Allow qmark placeholders without renumbering."""
+    sql, params = translate_postgres_params_to_sqlite("SELECT ? AS a, ? AS b", [1, 2])
+    assert sql == "SELECT ? AS a, ? AS b"
+    assert params == [1, 2]
+
+
+def test_translate_mixed_numbered_and_qmark_placeholders():
+    """Support mixed placeholders for rewritten tenant predicates."""
+    sql, params = translate_postgres_params_to_sqlite(
+        "SELECT * FROM t WHERE status = $1 AND tenant_id = ?",
+        ["active", 9],
+    )
+    assert sql == "SELECT * FROM t WHERE status = ? AND tenant_id = ?"
+    assert params == ["active", 9]

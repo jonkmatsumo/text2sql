@@ -18,6 +18,8 @@ class TestExecuteSqlValidation:
         from dal.database import Database
 
         Database._query_target_capabilities = BackendCapabilities(
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             supports_column_metadata=True,
             supports_cancel=True,
             supports_pagination=True,

@@ -4,6 +4,7 @@ import json
 from typing import Optional
 
 from dal.database import Database
+from mcp_server.utils.provider import resolve_provider
 
 TOOL_NAME = "get_table_schema"
 TOOL_DESCRIPTION = "Retrieve the schema (columns, data types, foreign keys) for a list of tables."
@@ -48,7 +49,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
 
     store = Database.get_metadata_store()
     schema_list = []
-    provider = Database.get_query_target_provider()
+    provider = resolve_provider(Database.get_provider_identity())
 
     for table in table_names:
         try:
@@ -90,7 +91,7 @@ async def handler(table_names: list[str], tenant_id: int, snapshot_id: Optional[
     envelope = ToolResponseEnvelope(
         result=schema_list,
         metadata=GenericToolMetadata(
-            provider=Database.get_query_target_provider(),
+            provider=provider,
             execution_time_ms=execution_time_ms,
             snapshot_id=snapshot_id,
             items_returned=len(schema_list),

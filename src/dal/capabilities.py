@@ -1,11 +1,18 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
+
+TenantEnforcementMode = Literal["rls_session", "sql_rewrite", "unsupported"]
 
 
 @dataclass(frozen=True)
 class BackendCapabilities:
     """Capability flags for query-target backends."""
 
+    provider_name: str = "unspecified"
+    supports_tenant_enforcement: bool = False
+    tenant_enforcement_mode: TenantEnforcementMode = "unsupported"
+    supports_db_readonly_session: bool = False
+    notes: Optional[str] = None
     execution_model: Literal["sync", "async"] = "sync"
     supports_column_metadata: bool = True
     supports_cancel: bool = False
@@ -16,10 +23,13 @@ class BackendCapabilities:
     supports_fk_enforcement: bool = True
     supports_cost_estimation: bool = False
     supports_schema_cache: bool = False
-    # Can provider/session enforce DB-level read-only mode?
-    supports_session_read_only: bool = False
     # Does DAL apply defensive statement-level read-only guard?
     enforces_statement_read_only: bool = False
+
+    @property
+    def supports_session_read_only(self) -> bool:
+        """Backward-compatible alias for `supports_db_readonly_session`."""
+        return self.supports_db_readonly_session
 
 
 PAGINATION_PROVIDERS: set[str] = set()
@@ -27,10 +37,11 @@ PAGINATION_PROVIDERS: set[str] = set()
 
 def capabilities_for_provider(provider: str) -> BackendCapabilities:
     """Return capability flags for a given query-target provider."""
-    normalized = provider.lower()
+    normalized = (provider or "").strip().lower()
     supports_pagination = normalized in PAGINATION_PROVIDERS
     if normalized == "redshift":
         return BackendCapabilities(
+            provider_name="redshift",
             execution_model="sync",
             supports_pagination=supports_pagination,
             supports_arrays=False,
@@ -38,11 +49,12 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=False,
             supports_fk_enforcement=False,
             supports_schema_cache=False,
-            supports_session_read_only=True,
+            supports_db_readonly_session=True,
             enforces_statement_read_only=True,
         )
     if normalized == "mysql":
         return BackendCapabilities(
+            provider_name="mysql",
             execution_model="sync",
             supports_pagination=supports_pagination,
             supports_arrays=False,
@@ -50,17 +62,24 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
-            supports_session_read_only=True,
+            supports_db_readonly_session=True,
         )
     if normalized == "postgres":
         return BackendCapabilities(
+            provider_name="postgres",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="rls_session",
             execution_model="sync",
             supports_cancel=True,
             supports_pagination=supports_pagination,
-            supports_session_read_only=True,
+            supports_db_readonly_session=True,
         )
     if normalized == "sqlite":
         return BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            notes="Tenant enforcement uses SQL rewrite v1.",
             execution_model="sync",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -69,10 +88,10 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
-            supports_session_read_only=True,
         )
     if normalized == "snowflake":
         return BackendCapabilities(
+            provider_name="snowflake",
             execution_model="async",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -84,6 +103,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         )
     if normalized == "bigquery":
         return BackendCapabilities(
+            provider_name="bigquery",
             execution_model="async",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -97,6 +117,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         )
     if normalized == "athena":
         return BackendCapabilities(
+            provider_name="athena",
             execution_model="async",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -108,6 +129,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         )
     if normalized == "databricks":
         return BackendCapabilities(
+            provider_name="databricks",
             execution_model="async",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -119,6 +141,7 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         )
     if normalized == "cockroachdb":
         return BackendCapabilities(
+            provider_name="cockroachdb",
             execution_model="sync",
             supports_pagination=supports_pagination,
             supports_arrays=True,
@@ -129,6 +152,10 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
         )
     if normalized == "duckdb":
         return BackendCapabilities(
+            provider_name="duckdb",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            notes="Tenant enforcement uses SQL rewrite v1.",
             execution_model="sync",
             supports_cancel=True,
             supports_pagination=supports_pagination,
@@ -137,10 +164,10 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_transactions=True,
             supports_fk_enforcement=False,
             supports_schema_cache=True,
-            supports_session_read_only=True,
         )
     if normalized == "clickhouse":
         return BackendCapabilities(
+            provider_name="clickhouse",
             execution_model="sync",
             supports_pagination=supports_pagination,
             supports_arrays=False,
@@ -149,4 +176,4 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_fk_enforcement=False,
             supports_schema_cache=False,
         )
-    return BackendCapabilities()
+    return BackendCapabilities(provider_name=normalized or "unspecified")

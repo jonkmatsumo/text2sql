@@ -569,58 +569,22 @@ class Database:
         return cls._metadata_store
 
     @classmethod
-    @classmethod
     def get_query_target_provider(cls) -> str:
         """Return the active query-target provider."""
         return cls._query_target_provider
 
     @classmethod
-    def supports_tenant_scope_enforcement(cls) -> bool:
-        """Return whether the active query-target enforces tenant isolation."""
-        provider = cls.get_query_target_provider().lower()
-        if provider == "postgres":
-            return bool(getattr(cls, "supports_tenant_enforcement", True))
-        if provider == "sqlite":
-            from dal.sqlite import SqliteQueryTargetDatabase
-
-            return bool(getattr(SqliteQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "mysql":
-            from dal.mysql import MysqlQueryTargetDatabase
-
-            return bool(getattr(MysqlQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "snowflake":
-            from dal.snowflake import SnowflakeQueryTargetDatabase
-
-            return bool(getattr(SnowflakeQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "redshift":
-            from dal.redshift import RedshiftQueryTargetDatabase
-
-            return bool(getattr(RedshiftQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "bigquery":
-            from dal.bigquery import BigQueryQueryTargetDatabase
-
-            return bool(getattr(BigQueryQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "athena":
-            from dal.athena import AthenaQueryTargetDatabase
-
-            return bool(getattr(AthenaQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "databricks":
-            from dal.databricks import DatabricksQueryTargetDatabase
-
-            return bool(
-                getattr(DatabricksQueryTargetDatabase, "supports_tenant_enforcement", False)
-            )
-        if provider == "duckdb":
-            from dal.duckdb import DuckDBQueryTargetDatabase
-
-            return bool(getattr(DuckDBQueryTargetDatabase, "supports_tenant_enforcement", False))
-        if provider == "clickhouse":
-            from dal.clickhouse import ClickHouseQueryTargetDatabase
-
-            return bool(
-                getattr(ClickHouseQueryTargetDatabase, "supports_tenant_enforcement", False)
-            )
-        return False
+    def get_provider_identity(cls) -> str:
+        """Return canonical provider identity from capabilities when available."""
+        caps = cls._query_target_capabilities
+        if caps is not None:
+            provider_name_raw = getattr(caps, "provider_name", None)
+            if not isinstance(provider_name_raw, str):
+                provider_name_raw = ""
+            provider_name = provider_name_raw.strip().lower()
+            if provider_name and provider_name not in {"unknown", "unspecified"}:
+                return provider_name
+        return cls._query_target_provider
 
     @classmethod
     def get_query_target_capabilities(cls):

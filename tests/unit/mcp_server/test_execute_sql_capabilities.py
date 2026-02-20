@@ -15,6 +15,8 @@ async def test_execute_tool_rejects_include_columns_when_unsupported():
 
     # Setup mock capabilities without column metadata
     caps = BackendCapabilities(
+        supports_tenant_enforcement=True,
+        tenant_enforcement_mode="rls_session",
         supports_column_metadata=False,
         supports_cancel=True,
         supports_pagination=True,
@@ -49,6 +51,8 @@ async def test_tool_returns_classified_unsupported_capability_error():
     from dal.capabilities import BackendCapabilities
 
     caps = BackendCapabilities(
+        supports_tenant_enforcement=True,
+        tenant_enforcement_mode="rls_session",
         supports_column_metadata=False,
         supports_cancel=True,
         supports_pagination=True,
