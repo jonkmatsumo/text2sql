@@ -26,9 +26,13 @@ CREATE TABLE IF NOT EXISTS evaluation_results (
     generated_sql TEXT,
     is_correct BOOLEAN NOT NULL,
     structural_score FLOAT,
+    structural_score_v2 FLOAT,
+    value_aware_score FLOAT,
+    metrics_version TEXT DEFAULT 'v1',
     error_message TEXT,
     execution_time_ms INTEGER,
     raw_response JSONB DEFAULT '{}'::jsonb,
+    trace_id TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
