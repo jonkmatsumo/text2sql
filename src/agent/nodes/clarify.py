@@ -45,6 +45,8 @@ async def clarify_node(state: AgentState) -> dict:
     ) as span:
         span.set_attribute(TelemetryKeys.EVENT_TYPE, SpanKind.AGENT_NODE)
         span.set_attribute(TelemetryKeys.EVENT_NAME, "clarify")
+        clarify_count = int(state.get("clarify_count") or 0) + 1
+        span.set_attribute("clarify.count", clarify_count)
         clarification_question = state.get("clarification_question")
         ambiguity_type = state.get("ambiguity_type")
 
@@ -57,7 +59,7 @@ async def clarify_node(state: AgentState) -> dict:
 
         if not clarification_question:
             span.set_outputs({"error": "No clarification question"})
-            return {}
+            return {"clarify_count": clarify_count}
 
         # Use LangGraph interrupt if available
         if interrupt is not None:
@@ -96,6 +98,7 @@ async def clarify_node(state: AgentState) -> dict:
                 "ambiguity_type": None,  # Clear after getting response
                 "clarification_question": None,
                 "messages": new_messages,
+                "clarify_count": clarify_count,
             }
         else:
             # Fallback: Log warning and proceed without clarification
@@ -112,4 +115,5 @@ async def clarify_node(state: AgentState) -> dict:
                 "user_clarification": None,
                 "ambiguity_type": None,
                 "clarification_question": None,
+                "clarify_count": clarify_count,
             }

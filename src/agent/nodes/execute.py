@@ -286,7 +286,10 @@ async def validate_and_execute_node(state: AgentState) -> dict:
                 span.set_attribute("validation.pre_exec_blocked", False)
 
             # Execute via MCP Tool
-            execute_params = [tenant_id] if (tenant_id and "$1" in rewritten_sql) else []
+            rewrite_occurred = rewritten_sql != original_sql
+            execute_params = (
+                [tenant_id] if (tenant_id and rewrite_occurred and "$1" in rewritten_sql) else []
+            )
             remaining = None
             deadline_ts = state.get("deadline_ts")
             if deadline_ts is not None:
