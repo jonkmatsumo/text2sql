@@ -8,6 +8,8 @@ import pytest
 
 from agent.graph import MAX_CLARIFY_ROUNDS, app
 from common.errors.error_codes import ErrorCode
+from common.models.error_metadata import ErrorCategory
+from mcp_server.utils.errors import build_error_metadata
 from tests.utils.mock_agent_runtime import (
     MockDAL,
     MockMCPClient,
@@ -25,18 +27,25 @@ def _error_envelope(
     code: str = "TOOL_ERROR",
     retryable: bool = False,
 ) -> dict[str, Any]:
+    try:
+        normalized_category = ErrorCategory(category)
+    except Exception:
+        normalized_category = ErrorCategory.UNKNOWN
+
+    error_payload = build_error_metadata(
+        message=message,
+        category=normalized_category,
+        provider="mock",
+        code=code,
+        error_code=error_code,
+        retryable=retryable,
+    ).model_dump(exclude_none=True)
+
     return {
         "schema_version": "1.0",
         "rows": [],
-        "metadata": {"rows_returned": 0, "is_truncated": False},
-        "error": {
-            "category": category,
-            "message": message,
-            "error_code": error_code,
-            "code": code,
-            "retryable": retryable,
-            "provider": "mock",
-        },
+        "metadata": {"rows_returned": 0, "is_truncated": False, "provider": "mock"},
+        "error": error_payload,
     }
 
 
@@ -116,6 +125,11 @@ async def test_full_pipeline_tenant_enforcement_rejection_flow(monkeypatch):
 
     assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    assert "sqlite" not in str(result.get("error") or "").lower()
+    assert (
+        "tenant isolation is not supported for this provider"
+        in str(result.get("error") or "").lower()
+    )
 
 
 @pytest.mark.asyncio
@@ -172,3 +186,4 @@ async def test_full_pipeline_db_timeout_propagation_flow(monkeypatch):
 
     assert _value(result["error_category"]) == "timeout"
     assert result["error_metadata"]["error_code"] == ErrorCode.DB_TIMEOUT.value
+    assert "huge_table" not in str(result.get("error") or "").lower()

@@ -96,7 +96,7 @@ async def test_non_postgres_provider_rejects_tenant_scoped_execution(provider: s
 
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-    assert result["error"]["message"] == f"Tenant isolation not supported for provider {provider}"
+    assert result["error"]["message"] == "Tenant isolation is not supported for this provider."
     mock_connection.assert_not_called()
 
 

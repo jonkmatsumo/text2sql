@@ -38,7 +38,7 @@ def test_error_code_present_on_error(monkeypatch):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["error"] == "Execution timed out."
+    assert body["error"] == "Database connection timed out."
     assert body["error_code"] == ErrorCode.DB_TIMEOUT.value
 
 

@@ -7,6 +7,7 @@ error parsing across different tools.
 from typing import Optional
 
 from common.errors.error_codes import ErrorCode, canonical_error_code_for_category
+from common.errors.sanitization import sanitize_error_message
 from common.models.error_metadata import ErrorCategory, ToolError
 from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
 from common.models.tool_errors import (
@@ -15,18 +16,7 @@ from common.models.tool_errors import (
     tool_error_timeout,
     tool_error_unsupported_capability,
 )
-from common.sanitization.text import redact_sensitive_info
 from mcp_server.utils.provider import resolve_provider
-
-MAX_ERROR_MESSAGE_LENGTH = 2048
-
-
-def sanitize_error_message(message: str, fallback: str = "Request failed.") -> str:
-    """Redact and bound user-facing error text."""
-    safe_text = redact_sensitive_info((message or "").strip())
-    if not safe_text:
-        safe_text = fallback
-    return safe_text[:MAX_ERROR_MESSAGE_LENGTH]
 
 
 def build_error_metadata(
@@ -42,14 +32,19 @@ def build_error_metadata(
 ) -> ToolError:
     """Build bounded, redacted ToolError."""
     resolved_provider = resolve_provider(provider)
-    safe_message = sanitize_error_message(message)
-    safe_hint = sanitize_error_message(hint, fallback="") if hint else None
-    if safe_hint == "":
-        safe_hint = None
     machine_code = code or "TOOL_ERROR"
     canonical_error_code = error_code or canonical_error_code_for_category(category).value
     if not canonical_error_code:
         canonical_error_code = ErrorCode.INTERNAL_ERROR.value
+    safe_message = sanitize_error_message(
+        message,
+        error_code=canonical_error_code,
+        fallback="Request failed.",
+    )
+    safe_hint = None
+    if hint:
+        maybe_hint = sanitize_error_message(hint, fallback="")
+        safe_hint = maybe_hint or None
     safe_details = {"hint": safe_hint} if safe_hint else None
 
     if category == ErrorCategory.INVALID_REQUEST:

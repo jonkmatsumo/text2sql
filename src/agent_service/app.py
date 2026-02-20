@@ -23,10 +23,10 @@ from agent.replay_bundle import (
 from agent.telemetry import telemetry
 from common.config.env import get_env_bool, get_env_str
 from common.errors.error_codes import ErrorCode, canonical_error_code_for_category, parse_error_code
+from common.errors.sanitization import sanitize_error_message, sanitize_exception
 from common.models.error_metadata import ErrorCategory
 from common.observability.metrics import agent_metrics
 from common.observability.monitor import RunSummary, agent_monitor
-from common.sanitization.text import redact_sensitive_info
 from common.tenancy.limits import TenantConcurrencyLimitExceeded, get_agent_run_tenant_limiter
 
 try:
@@ -312,21 +312,28 @@ async def _run_agent_internal(
             if trace_id and not _TRACE_ID_RE.fullmatch(trace_id):
                 trace_id = None
 
-            sanitized_error = (
-                redact_sensitive_info(state.get("error")) if state.get("error") else None
-            )
             error_metadata = state.get("error_metadata")
+            response_error_code = _canonical_response_error_code(
+                error=state.get("error"),
+                error_category=state.get("error_category"),
+                error_metadata=error_metadata,
+            )
+            sanitized_error = (
+                sanitize_error_message(
+                    state.get("error"),
+                    error_code=response_error_code,
+                    fallback="Request failed.",
+                )
+                if state.get("error")
+                else None
+            )
 
             return AgentRunResponse(
                 sql=state.get("current_sql"),
                 result=state.get("query_result"),
                 response=response_text,
                 error=sanitized_error,
-                error_code=_canonical_response_error_code(
-                    error=sanitized_error,
-                    error_category=state.get("error_category"),
-                    error_metadata=error_metadata,
-                ),
+                error_code=response_error_code,
                 from_cache=state.get("from_cache", False),
                 cache_similarity=state.get("cache_similarity"),
                 interaction_id=state.get("interaction_id"),
@@ -358,10 +365,8 @@ async def _run_agent_internal(
             trace_id=None,
         )
     except Exception as exc:
-        from common.sanitization.text import redact_sensitive_info as _redact
-
         return AgentRunResponse(
-            error=_redact(str(exc)),
+            error=sanitize_exception(exc, error_code=ErrorCode.INTERNAL_ERROR.value),
             error_code=ErrorCode.INTERNAL_ERROR.value,
             trace_id=None,
         )
@@ -435,7 +440,11 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
                     replay_bundle = validate_replay_bundle(request.replay_bundle)
                 except (ValidationError, ValueError) as exc:
                     return AgentRunResponse(
-                        error=redact_sensitive_info(f"Invalid replay bundle: {exc}"),
+                        error=sanitize_error_message(
+                            f"Invalid replay bundle: {exc}",
+                            error_code=ErrorCode.VALIDATION_ERROR.value,
+                            fallback="Invalid replay bundle.",
+                        ),
                         error_code=ErrorCode.VALIDATION_ERROR.value,
                         trace_id=None,
                         replay_metadata={
@@ -602,21 +611,28 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
 
             include_decision_debug = get_env_bool("AGENT_DEBUG_DECISION_SUMMARY", False) is True
 
-            sanitized_error = (
-                redact_sensitive_info(state.get("error")) if state.get("error") else None
-            )
             error_metadata = state.get("error_metadata")
+            response_error_code = _canonical_response_error_code(
+                error=state.get("error"),
+                error_category=state.get("error_category"),
+                error_metadata=error_metadata,
+            )
+            sanitized_error = (
+                sanitize_error_message(
+                    state.get("error"),
+                    error_code=response_error_code,
+                    fallback="Request failed.",
+                )
+                if state.get("error")
+                else None
+            )
 
             return AgentRunResponse(
                 sql=state.get("current_sql"),
                 result=state.get("query_result"),
                 response=response_text,
                 error=sanitized_error,
-                error_code=_canonical_response_error_code(
-                    error=sanitized_error,
-                    error_category=state.get("error_category"),
-                    error_metadata=error_metadata,
-                ),
+                error_code=response_error_code,
                 from_cache=state.get("from_cache", False),
                 cache_similarity=state.get("cache_similarity"),
                 interaction_id=state.get("interaction_id"),
@@ -712,10 +728,8 @@ async def run_agent(request: AgentRunRequest) -> AgentRunResponse:
             trace_id=None,
         )
     except Exception as exc:
-        from common.sanitization.text import redact_sensitive_info as _redact
-
         return AgentRunResponse(
-            error=_redact(str(exc)),
+            error=sanitize_exception(exc, error_code=ErrorCode.INTERNAL_ERROR.value),
             error_code=ErrorCode.INTERNAL_ERROR.value,
             trace_id=None,
         )
@@ -835,17 +849,43 @@ async def run_agent_stream(request: AgentRunRequest) -> StreamingResponse:
                             payload = event["data"]
 
                             if payload.get("error"):
-                                payload["error"] = redact_sensitive_info(payload["error"])
+                                payload_error_code = _canonical_response_error_code(
+                                    error=payload.get("error"),
+                                    error_category=payload.get("error_category")
+                                    or payload.get("category"),
+                                    error_metadata=payload.get("error_metadata"),
+                                )
+                                payload["error"] = sanitize_error_message(
+                                    payload.get("error"),
+                                    error_code=payload_error_code,
+                                    fallback="Request failed.",
+                                )
+                                if payload_error_code and not payload.get("error_code"):
+                                    payload["error_code"] = payload_error_code
 
                             result_data = json.dumps(payload, default=str)
                             yield (f"event: result\ndata: {result_data}\n\n")
 
                 except asyncio.TimeoutError:
-                    err = json.dumps({"error": "Request timed out."})
+                    err = json.dumps(
+                        {
+                            "error": sanitize_error_message(
+                                "Request timed out.",
+                                error_code=ErrorCode.DB_TIMEOUT.value,
+                            ),
+                            "error_code": ErrorCode.DB_TIMEOUT.value,
+                        }
+                    )
                     yield f"event: error\ndata: {err}\n\n"
                 except Exception as exc:
-                    sanitized = redact_sensitive_info(str(exc))
-                    err = json.dumps({"error": sanitized})
+                    err = json.dumps(
+                        {
+                            "error": sanitize_exception(
+                                exc, error_code=ErrorCode.INTERNAL_ERROR.value
+                            ),
+                            "error_code": ErrorCode.INTERNAL_ERROR.value,
+                        }
+                    )
                     yield f"event: error\ndata: {err}\n\n"
 
         except TenantConcurrencyLimitExceeded:
@@ -858,7 +898,12 @@ async def run_agent_stream(request: AgentRunRequest) -> StreamingResponse:
             )
             yield f"event: error\ndata: {err}\n\n"
         except Exception as e:
-            err = json.dumps({"error": str(e)})
+            err = json.dumps(
+                {
+                    "error": sanitize_exception(e, error_code=ErrorCode.INTERNAL_ERROR.value),
+                    "error_code": ErrorCode.INTERNAL_ERROR.value,
+                }
+            )
             yield f"event: error\ndata: {err}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

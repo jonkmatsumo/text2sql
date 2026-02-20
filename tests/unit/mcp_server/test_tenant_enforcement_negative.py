@@ -33,6 +33,6 @@ async def test_unsupported_provider_rejects_before_any_dal_execution(provider: s
 
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-    assert result["error"]["message"] == f"Tenant isolation not supported for provider {provider}"
+    assert result["error"]["message"] == "Tenant isolation is not supported for this provider."
     mock_validate_sql_ast.assert_not_called()
     mock_connection.assert_not_called()
