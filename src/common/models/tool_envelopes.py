@@ -47,6 +47,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     request_id: Optional[str] = Field(
         None, description="Request identifier propagated for cross-layer correlation"
     )
+    trace_id: Optional[str] = Field(
+        None, description="Trace identifier propagated for cross-layer correlation"
+    )
 
     # Capability negotiation fields
     capability_required: Optional[str] = None
@@ -263,6 +266,9 @@ class GenericToolMetadata(BaseModel):
     snapshot_id: Optional[str] = Field(None, description="Schema snapshot ID for lineage tracking")
     request_id: Optional[str] = Field(
         None, description="Request identifier propagated for cross-layer correlation"
+    )
+    trace_id: Optional[str] = Field(
+        None, description="Trace identifier propagated for cross-layer correlation"
     )
 
     @model_validator(mode="before")

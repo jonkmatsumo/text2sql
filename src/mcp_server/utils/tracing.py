@@ -110,6 +110,20 @@ def _normalize_request_id(value: Any) -> str | None:
     return normalized or None
 
 
+def _current_trace_id(span: Any) -> str | None:
+    """Return active span trace_id as canonical hex string, when available."""
+    try:
+        span_context = span.get_span_context()
+    except Exception:
+        return None
+    if span_context is None or not getattr(span_context, "is_valid", False):
+        return None
+    trace_id = getattr(span_context, "trace_id", 0)
+    if not isinstance(trace_id, int) or trace_id <= 0:
+        return None
+    return format(trace_id, "032x")
+
+
 def _extract_envelope_error_category(response: Any) -> str | None:
     """Extract envelope-level error category from response payload, if present."""
     payload: dict[str, Any] | None = None
@@ -180,9 +194,9 @@ def _inject_tool_version(response: Any, tool_name: str) -> Any:
     return response
 
 
-def _inject_request_id(response: Any, request_id: str | None) -> Any:
-    """Inject request_id into envelope metadata for cross-layer correlation."""
-    if not request_id:
+def _inject_metadata_field(response: Any, *, field_name: str, field_value: str | None) -> Any:
+    """Inject a metadata field into common envelope payload shapes."""
+    if not field_name or not field_value:
         return response
 
     def _apply_to_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -190,7 +204,7 @@ def _inject_request_id(response: Any, request_id: str | None) -> Any:
         if not isinstance(metadata, dict):
             metadata = {}
             payload["metadata"] = metadata
-        metadata["request_id"] = request_id
+        metadata[field_name] = field_value
         return payload
 
     if isinstance(response, dict):
@@ -223,6 +237,16 @@ def _inject_request_id(response: Any, request_id: str | None) -> Any:
         return payload
 
     return response
+
+
+def _inject_request_id(response: Any, request_id: str | None) -> Any:
+    """Inject request_id into envelope metadata for cross-layer correlation."""
+    return _inject_metadata_field(response, field_name="request_id", field_value=request_id)
+
+
+def _inject_trace_id(response: Any, trace_id: str | None) -> Any:
+    """Inject trace_id into envelope metadata for cross-layer correlation."""
+    return _inject_metadata_field(response, field_name="trace_id", field_value=trace_id)
 
 
 def _normalize_requested_tool_version(value: Any) -> tuple[str | None, str | None]:
@@ -282,6 +306,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                 kind=trace.SpanKind.SERVER,
                 context=parent_context,
             ) as span:
+                trace_id = _current_trace_id(span)
                 requested_tool_version = kwargs.pop("requested_tool_version", None)
                 supported_tool_version = get_tool_version(tool_name)
                 normalized_version, version_parse_error = _normalize_requested_tool_version(
@@ -295,6 +320,8 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
                     span.set_attribute("mcp.tool.requested_version", str(requested_tool_version))
                 if request_id is not None:
                     span.set_attribute("mcp.request_id", request_id)
+                if trace_id is not None:
+                    span.set_attribute("mcp.trace_id", trace_id)
                 mcp_metrics.add_counter(
                     "mcp.tool.calls_total",
                     description="Count of MCP tool invocations by tool name",
@@ -447,6 +474,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
 
                     actual_response = _inject_tool_version(actual_response, tool_name)
                     actual_response = _inject_request_id(actual_response, request_id)
+                    actual_response = _inject_trace_id(actual_response, trace_id)
                     resp_size = len(str(actual_response).encode("utf-8"))
 
                     # 3. Record response attributes

@@ -39,13 +39,16 @@ async def test_trace_tool_propagates_request_id_to_span_and_envelope():
 
     spans = exporter.get_finished_spans()
     span = next(finished for finished in spans if finished.name == "mcp.tool.list_tables")
+    expected_trace_id = format(span.context.trace_id, "032x")
     assert span.attributes["mcp.request_id"] == "req-abc-123"
+    assert span.attributes["mcp.trace_id"] == expected_trace_id
+    assert response["metadata"]["trace_id"] == expected_trace_id
 
 
 @pytest.mark.asyncio
 async def test_trace_tool_injects_request_id_for_json_string_envelopes():
     """JSON-string envelopes should retain additive metadata.request_id injection."""
-    tracer, _exporter = _in_memory_tracer()
+    tracer, exporter = _in_memory_tracer()
 
     async def handler():
         return json.dumps({"result": {"ok": True}, "metadata": {"provider": "postgres"}})
@@ -56,6 +59,9 @@ async def test_trace_tool_injects_request_id_for_json_string_envelopes():
 
     payload = json.loads(response)
     assert payload["metadata"]["request_id"] == "req-json-1"
+    spans = exporter.get_finished_spans()
+    span = next(finished for finished in spans if finished.name == "mcp.tool.list_tables")
+    assert payload["metadata"]["trace_id"] == format(span.context.trace_id, "032x")
 
 
 def test_tool_context_uses_request_id_from_request_scope():
