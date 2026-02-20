@@ -37,9 +37,12 @@ async def handler(
     Returns:
         JSON string with recommended examples and fallback status.
     """
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.validation import require_tenant_id, validate_limit
 
     # 1. Validate inputs
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
     if err := validate_limit(limit, TOOL_NAME):

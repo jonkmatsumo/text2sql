@@ -373,6 +373,7 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
     Returns:
         JSON string containing nodes and relationships of the subgraph.
     """
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.errors import build_error_metadata
     from mcp_server.utils.validation import (
         DEFAULT_MAX_INPUT_BYTES,
@@ -380,6 +381,8 @@ async def handler(query: str, tenant_id: int = None, snapshot_id: Optional[str] 
         validate_string_length,
     )
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     if err := require_tenant_id(tenant_id, TOOL_NAME):
         return err
 

@@ -29,8 +29,11 @@ async def handler(terms: list[str], tenant_id: int) -> str:
     import time
 
     from common.models.tool_envelopes import GenericToolMetadata, ToolResponseEnvelope
+    from mcp_server.utils.auth import validate_role
     from mcp_server.utils.validation import require_tenant_id
 
+    if err := validate_role("SQL_USER_ROLE", TOOL_NAME, tenant_id=tenant_id):
+        return err
     start_time = time.monotonic()
 
     if err := require_tenant_id(tenant_id, TOOL_NAME):
