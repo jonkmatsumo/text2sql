@@ -21,6 +21,11 @@ class EvaluationCaseResult(BaseModel):
     generated_tables: List[str] = Field(default_factory=list)
     expected_tables: List[str] = Field(default_factory=list)
     parse_errors: List[str] = Field(default_factory=list)
+    # Metrics V2 Fields
+    structural_score_v2: Optional[float] = None
+    value_aware_score: Optional[float] = None
+    v2_subscores: Optional[Dict[str, float]] = None
+    metrics_version: str = "v1"
 
     # Deprecated fields (use exact_match instead of is_correct)
     is_correct: bool  # @deprecated: use exact_match
@@ -47,6 +52,9 @@ class EvaluationSummary(BaseModel):
     avg_structural_score: float = 0.0
     min_structural_score: float = 0.0
     dataset_source: Optional[str] = None
+    # Metrics V2 Aggregations
+    avg_structural_score_v2: Optional[float] = None
+    metrics_version: str = "v1"
 
     # High-level metrics
     total_cases: int

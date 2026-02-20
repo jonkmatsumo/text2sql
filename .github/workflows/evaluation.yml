@@ -11,9 +11,18 @@ on:
         options:
           - synthetic
           - pagila
+      metrics_version:
+        description: "Metrics version"
+        required: true
+        default: "v1"
+        type: choice
+        options:
+          - v1
+          - v2
 
 env:
   DATASET_MODE: ${{ github.event.inputs.dataset_mode || 'synthetic' }}
+  METRICS_VERSION: ${{ github.event.inputs.metrics_version || 'v1' }}
 
 jobs:
   evaluate:
@@ -44,7 +53,7 @@ jobs:
           DATASET_MODE: ${{ env.DATASET_MODE }}
         run: |
           cd agent
-          uv run python3 scripts/evals/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run
+          uv run python3 scripts/evals/run_evaluation.py --golden-only --dataset ${{ env.DATASET_MODE }} --run-id ci-run --metrics-version ${{ env.METRICS_VERSION }}
 
       - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v6
@@ -64,10 +73,15 @@ jobs:
           fi
 
           EM_RATE=$(jq -r '.exact_match_rate' $SUMMARY_PATH)
-          AVG_STRUCT=$(jq -r '.avg_structural_score' $SUMMARY_PATH)
+
+          if [ "${{ env.METRICS_VERSION }}" = "v2" ]; then
+            AVG_STRUCT=$(jq -r '.avg_structural_score_v2' $SUMMARY_PATH)
+          else
+            AVG_STRUCT=$(jq -r '.avg_structural_score' $SUMMARY_PATH)
+          fi
 
           echo "Exact Match Rate: $EM_RATE"
-          echo "Avg Structural Score: $AVG_STRUCT"
+          echo "Avg Structural Score (${{ env.METRICS_VERSION }}): $AVG_STRUCT"
 
           # 1. Hard Gating (Static Thresholds)
           if (( $(echo "$EM_RATE < 0.50" | bc -l) )); then
@@ -88,10 +102,17 @@ jobs:
             ESTABLISHED=$(jq -r '.baseline_established // false' $BASELINE_PATH)
             if [ "$ESTABLISHED" = "true" ]; then
               BASE_EM=$(jq -r '.exact_match_rate' $BASELINE_PATH)
-              BASE_STRUCT=$(jq -r '.avg_structural_score' $BASELINE_PATH)
+
+              # Use version-aware baseline comparison
+              BASE_VERSION=$(jq -r '.metrics_version // "v1"' $BASELINE_PATH)
+              if [ "$BASE_VERSION" = "v2" ]; then
+                BASE_STRUCT=$(jq -r '.avg_structural_score_v2' $BASELINE_PATH)
+              else
+                BASE_STRUCT=$(jq -r '.avg_structural_score' $BASELINE_PATH)
+              fi
 
               echo "Baseline EM: $BASE_EM"
-              echo "Baseline Avg Structural: $BASE_STRUCT"
+              echo "Baseline Avg Structural ($BASE_VERSION): $BASE_STRUCT"
 
               # FAIL if exact_match_rate drop > 0.05
               EM_DROP=$(echo "$BASE_EM - $EM_RATE" | bc -l)

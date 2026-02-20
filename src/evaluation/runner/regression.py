@@ -14,6 +14,9 @@ class RegressionThresholds(BaseModel):
     latency_p95_increase_max: float = Field(
         0.20, description="Max allowed relative increase in p95 latency (e.g. 0.20 = 20%)"
     )
+    structural_score_drop_max: float = Field(
+        0.05, description="Max allowed absolute drop in structural score (e.g. 0.05)"
+    )
 
 
 class RegressionReport(BaseModel):
@@ -26,6 +29,8 @@ class RegressionReport(BaseModel):
     base_accuracy: float
     curr_latency: float
     base_latency: float
+    curr_structural_score: float
+    base_structural_score: float
 
 
 class RegressionDetector:
@@ -47,6 +52,12 @@ class RegressionDetector:
                 base_accuracy=0.0,
                 curr_latency=current.p95_latency_ms,
                 base_latency=0.0,
+                curr_structural_score=(
+                    current.avg_structural_score_v2
+                    if current.config.metrics_version == "v2"
+                    else current.avg_structural_score
+                ),
+                base_structural_score=0.0,
             )
 
         details = []
@@ -76,6 +87,26 @@ class RegressionDetector:
                     f"(Threshold: {self.thresholds.latency_p95_increase_max:.2%})"
                 )
 
+        # Check Structural Score (Version Aware)
+        curr_struct = (
+            current.avg_structural_score_v2
+            if current.config.metrics_version == "v2"
+            else current.avg_structural_score
+        )
+        base_struct = (
+            baseline.avg_structural_score_v2
+            if baseline.config.metrics_version == "v2"
+            else baseline.avg_structural_score
+        )
+
+        struct_drop = base_struct - curr_struct
+        if struct_drop > self.thresholds.structural_score_drop_max:
+            is_regression = True
+            details.append(
+                f"Structural Score dropped by {struct_drop:.3f} "
+                f"(Threshold: {self.thresholds.structural_score_drop_max:.3f})"
+            )
+
         return RegressionReport(
             is_regression=is_regression,
             details=details,
@@ -84,4 +115,6 @@ class RegressionDetector:
             base_accuracy=baseline.accuracy,
             curr_latency=current.p95_latency_ms,
             base_latency=baseline.p95_latency_ms,
+            curr_structural_score=curr_struct,
+            base_structural_score=base_struct,
         )
