@@ -144,8 +144,27 @@ class MCPToolWrapper:
 
         # Config is accepted for LangGraph compatibility but not used by MCP
         # Telemetry wrapping is handled by tools.py _wrap_tool()
+        outbound_input = dict(input)
         try:
-            result = await self._invoke_fn(input)
+            from agent.telemetry import telemetry
+
+            trace_carrier: dict[str, str] = {}
+            telemetry.inject_context(trace_carrier)
+            traceparent = trace_carrier.get("traceparent")
+            if traceparent:
+                outbound_input["_trace_context"] = {
+                    "traceparent": traceparent,
+                    **(
+                        {"tracestate": trace_carrier["tracestate"]}
+                        if trace_carrier.get("tracestate")
+                        else {}
+                    ),
+                }
+        except Exception:
+            logger.debug("Failed to inject MCP trace context for tool '%s'", self.name)
+
+        try:
+            result = await self._invoke_fn(outbound_input)
         except RunBudgetExceededError as exc:
             return self._budget_error_response(exc, run_id=run_id)
 

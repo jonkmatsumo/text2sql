@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 
-from opentelemetry import trace
+from opentelemetry import propagate, trace
 from opentelemetry.trace import Status, StatusCode
 
 from common.config.env import get_env_str
@@ -82,6 +82,23 @@ def _extract_truncation_signal(response: Any) -> tuple[bool, bool]:
         return False, False
 
     return False, False
+
+
+def _extract_trace_context(payload: Any) -> dict[str, str]:
+    """Extract W3C trace carrier values from reserved tool kwargs."""
+    if not isinstance(payload, dict):
+        return {}
+
+    carrier: dict[str, str] = {}
+    traceparent = payload.get("traceparent")
+    tracestate = payload.get("tracestate")
+
+    if isinstance(traceparent, str) and traceparent.strip():
+        carrier["traceparent"] = traceparent.strip()
+    if isinstance(tracestate, str) and tracestate.strip():
+        carrier["tracestate"] = tracestate.strip()
+
+    return carrier
 
 
 def _extract_envelope_error_category(response: Any) -> str | None:
@@ -187,6 +204,11 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
 
             # Get a tracer
             tracer = trace.get_tracer("mcp.server")
+            trace_context_payload = kwargs.pop("_trace_context", None)
+            parent_context = None
+            trace_carrier = _extract_trace_context(trace_context_payload)
+            if trace_carrier:
+                parent_context = propagate.extract(trace_carrier)
 
             # Check if tracing is actually enabled/configured
             # This is a heuristic: if we get a NoOpSpan, maybe tracing is off.
@@ -199,6 +221,7 @@ def trace_tool(tool_name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable
             with tracer.start_as_current_span(
                 span_name,
                 kind=trace.SpanKind.SERVER,
+                context=parent_context,
             ) as span:
                 requested_tool_version = kwargs.pop("requested_tool_version", None)
                 supported_tool_version = get_tool_version(tool_name)
