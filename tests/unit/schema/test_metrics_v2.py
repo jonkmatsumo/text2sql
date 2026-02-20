@@ -1,6 +1,6 @@
 import pytest
 
-from src.schema.evaluation.metrics_v2 import MetricSuiteV2
+from schema.evaluation.metrics_v2 import MetricSuiteV2
 
 
 def test_metric_suite_v2_basic():

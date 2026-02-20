@@ -2,7 +2,7 @@ from datetime import date
 
 import sqlglot
 
-from src.schema.evaluation.metrics_v2_extractors import (
+from schema.evaluation.metrics_v2_extractors import (
     extract_date_predicates,
     extract_equality_predicates,
     extract_in_lists,

@@ -1,7 +1,7 @@
 import pytest
 import sqlglot
 
-from src.schema.evaluation.metrics_v2_subscores import (
+from schema.evaluation.metrics_v2_subscores import (
     date_range_similarity,
     equality_value_match,
     limit_distance_score,
