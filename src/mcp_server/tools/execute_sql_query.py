@@ -828,100 +828,113 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
-    if tenant_id is not None and tenant_enforcement_mode == "sql_rewrite":
-        from common.sql.tenant_sql_rewriter import (
-            TenantSQLRewriteError,
-            load_tenant_rewrite_settings,
-            rewrite_tenant_scoped_sql,
+    if tenant_id is not None:
+        from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+        from common.sql.tenant_sql_rewriter import load_tenant_rewrite_settings
+
+        rewrite_settings = load_tenant_rewrite_settings()
+        policy = TenantEnforcementPolicy(
+            provider=provider,
+            mode=tenant_enforcement_mode,
+            strict=rewrite_settings.strict_mode,
+            max_targets=rewrite_settings.max_targets,
+            max_params=rewrite_settings.max_params,
+            max_ast_nodes=rewrite_settings.max_ast_nodes,
+            hard_timeout_ms=rewrite_settings.hard_timeout_ms,
         )
 
-        tenant_column = _tenant_column_name()
-        global_table_allowlist = _tenant_global_table_allowlist()
-        rewrite_settings = load_tenant_rewrite_settings()
-        rewrite_warn_ms = rewrite_settings.warn_ms
-        rewrite_hard_timeout_ms = rewrite_settings.hard_timeout_ms
-        rewrite_started = time.perf_counter()
-        rewrite_result = None
-        try:
-            rewrite_result = rewrite_tenant_scoped_sql(
-                effective_sql_query,
-                provider=provider,
-                tenant_id=tenant_id,
-                tenant_column=tenant_column,
-                global_table_allowlist=global_table_allowlist,
+        if policy.decide_enforcement():
+            from common.sql.tenant_sql_rewriter import (
+                TenantSQLRewriteError,
+                rewrite_tenant_scoped_sql,
             )
-        except TenantSQLRewriteError as e:
-            rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
-            _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
-            normalized_reason = (e.reason_code or "").strip().upper()
-            if normalized_reason == "NO_PREDICATES_PRODUCED":
-                tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                    tenant_enforcement_applied=False,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    tenant_rewrite_outcome="SKIPPED_NOT_REQUIRED",
+
+            tenant_column = _tenant_column_name()
+            global_table_allowlist = _tenant_global_table_allowlist()
+            rewrite_warn_ms = rewrite_settings.warn_ms
+            rewrite_hard_timeout_ms = rewrite_settings.hard_timeout_ms
+            rewrite_started = time.perf_counter()
+            rewrite_result = None
+            try:
+                rewrite_result = rewrite_tenant_scoped_sql(
+                    effective_sql_query,
+                    provider=provider,
+                    tenant_id=tenant_id,
+                    tenant_column=tenant_column,
+                    global_table_allowlist=global_table_allowlist,
                 )
-                rewrite_result = None
+            except TenantSQLRewriteError as e:
+                rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
+                _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
+                normalized_reason = (e.reason_code or "").strip().upper()
+                if normalized_reason == "NO_PREDICATES_PRODUCED":
+                    tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
+                        tenant_enforcement_applied=False,
+                        tenant_enforcement_mode=tenant_enforcement_mode,
+                        tenant_rewrite_outcome="SKIPPED_NOT_REQUIRED",
+                    )
+                    rewrite_result = None
+                else:
+                    _record_tenant_rewrite_failure_reason(e.reason_code)
+                    return _tenant_enforcement_unsupported_response(
+                        provider,
+                        tenant_enforcement_mode=tenant_enforcement_mode,
+                        reason_code=e.reason_code,
+                    )
             else:
-                _record_tenant_rewrite_failure_reason(e.reason_code)
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code=e.reason_code,
-                )
-        else:
-            rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
-            _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
-            if rewrite_duration_ms > rewrite_hard_timeout_ms:
-                _record_tenant_rewrite_failure_reason("REWRITE_TIMEOUT")
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code="REWRITE_TIMEOUT",
-                )
+                rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
+                _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
+                if rewrite_duration_ms > rewrite_hard_timeout_ms:
+                    _record_tenant_rewrite_failure_reason("REWRITE_TIMEOUT")
+                    return _tenant_enforcement_unsupported_response(
+                        provider,
+                        tenant_enforcement_mode=tenant_enforcement_mode,
+                        reason_code="REWRITE_TIMEOUT",
+                    )
 
-        if rewrite_result is not None:
-            table_columns = await _load_table_columns_for_rewrite(
-                rewrite_result.tables_rewritten,
-                tenant_id,
-            )
-            missing_schema_tables, missing_tenant_column_tables = (
-                _tenant_scope_schema_validation_failures(
+            if rewrite_result is not None:
+                table_columns = await _load_table_columns_for_rewrite(
                     rewrite_result.tables_rewritten,
-                    table_columns,
-                    tenant_column,
+                    tenant_id,
                 )
-            )
-            if missing_schema_tables or missing_tenant_column_tables:
-                schema_reason_code = (
-                    "SCHEMA_TENANT_COLUMN_MISSING"
-                    if missing_tenant_column_tables
-                    else "SCHEMA_METADATA_MISSING"
+                missing_schema_tables, missing_tenant_column_tables = (
+                    _tenant_scope_schema_validation_failures(
+                        rewrite_result.tables_rewritten,
+                        table_columns,
+                        tenant_column,
+                    )
                 )
-                _record_tenant_rewrite_failure_reason(schema_reason_code)
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code=schema_reason_code,
-                )
+                if missing_schema_tables or missing_tenant_column_tables:
+                    schema_reason_code = (
+                        "SCHEMA_TENANT_COLUMN_MISSING"
+                        if missing_tenant_column_tables
+                        else "SCHEMA_METADATA_MISSING"
+                    )
+                    _record_tenant_rewrite_failure_reason(schema_reason_code)
+                    return _tenant_enforcement_unsupported_response(
+                        provider,
+                        tenant_enforcement_mode=tenant_enforcement_mode,
+                        reason_code=schema_reason_code,
+                    )
 
-            _record_tenant_rewrite_success_metadata(
-                target_count=rewrite_result.target_count,
-                param_count=len(rewrite_result.params),
-                scope_depth=rewrite_result.scope_depth,
-                has_cte=rewrite_result.has_cte,
-                has_subquery=rewrite_result.has_subquery,
-            )
-            tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                tenant_enforcement_applied=bool(rewrite_result.tenant_predicates_added > 0),
-                tenant_enforcement_mode=tenant_enforcement_mode,
-                tenant_rewrite_outcome=(
-                    "APPLIED"
-                    if rewrite_result.tenant_predicates_added > 0
-                    else "SKIPPED_NOT_REQUIRED"
-                ),
-            )
-            effective_sql_query = rewrite_result.rewritten_sql
-            effective_params.extend(rewrite_result.params)
+                _record_tenant_rewrite_success_metadata(
+                    target_count=rewrite_result.target_count,
+                    param_count=len(rewrite_result.params),
+                    scope_depth=rewrite_result.scope_depth,
+                    has_cte=rewrite_result.has_cte,
+                    has_subquery=rewrite_result.has_subquery,
+                )
+                tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
+                    tenant_enforcement_applied=bool(rewrite_result.tenant_predicates_added > 0),
+                    tenant_enforcement_mode=tenant_enforcement_mode,
+                    tenant_rewrite_outcome=(
+                        "APPLIED"
+                        if rewrite_result.tenant_predicates_added > 0
+                        else "SKIPPED_NOT_REQUIRED"
+                    ),
+                )
+                effective_sql_query = rewrite_result.rewritten_sql
+                effective_params.extend(rewrite_result.params)
 
     def _unsupported_capability_response(
         required_capability: str,
