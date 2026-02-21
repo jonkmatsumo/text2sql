@@ -165,6 +165,7 @@ async def test_sql_rewrite_rejects_when_no_table_predicate_can_be_added():
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_no_predicates_produced"
     mock_connection.assert_not_called()
 
 
@@ -203,6 +204,10 @@ async def test_sql_rewrite_rejects_when_schema_lacks_tenant_column():
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "tenant_rewrite_schema_tenant_column_missing"
+    )
     mock_connection.assert_not_called()
 
 
@@ -233,6 +238,9 @@ async def test_sql_rewrite_rejects_when_schema_metadata_is_unavailable():
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert (
+        result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_schema_metadata_missing"
+    )
     mock_connection.assert_not_called()
 
 

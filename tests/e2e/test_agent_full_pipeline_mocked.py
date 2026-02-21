@@ -792,6 +792,7 @@ async def test_full_pipeline_sqlite_tenant_rewrite_missing_column_join_leg_rejec
             provider_name="sqlite",
             supports_tenant_enforcement=True,
             tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
         ),
     )
     monkeypatch.setattr(
@@ -1072,6 +1073,7 @@ async def test_full_pipeline_sqlite_tenant_rewrite_subquery_correlated_reject(mo
             provider_name="sqlite",
             supports_tenant_enforcement=True,
             tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
         ),
     )
 
@@ -1152,3 +1154,231 @@ async def test_full_pipeline_sqlite_tenant_rewrite_subquery_missing_column_rejec
     assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
     assert observed["connection_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_shadowing_success(monkeypatch):
+    """Deeply nested subquery with shadowing should succeed."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["sql"] = sql
+                observed["params"] = list(params)
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {"orders": ["id", "tenant_id"], "customers": ["id", "tenant_id"]}
+        ),
+    )
+
+    state = build_app_input(
+        question="Shadowing",
+        from_cache=True,
+        current_sql=(
+            "SELECT * FROM orders o WHERE EXISTS " "(SELECT 1 FROM customers o WHERE o.id = 1)"
+        ),
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+    assert result["error"] is None
+    sql = str(observed.get("sql", ""))
+    assert "o.tenant_id = ?" in sql
+    assert sql.count("o.tenant_id = ?") == 2
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_ambiguous_unqualified_reject(
+    monkeypatch,
+):
+    """Ambiguous unqualified identifier should reject."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"ignored": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+
+    state = build_app_input(
+        question="Ambiguous",
+        from_cache=True,
+        current_sql="SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    error_text = str(result.get("error") or "").lower()
+    assert "tenant isolation is not supported" in error_text
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_qualified_outer_reject(monkeypatch):
+    """Qualified outer alias reference should reject."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"ignored": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+
+    state = build_app_input(
+        question="Qualified Outer",
+        from_cache=True,
+        current_sql=(
+            "SELECT * FROM orders o WHERE EXISTS " "(SELECT 1 FROM customers c WHERE c.id = o.id)"
+        ),
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    error_text = str(result.get("error") or "").lower()
+    assert "tenant isolation is not supported" in error_text
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_subquery_scalar_agg_reject(
+    monkeypatch,
+):
+    """Scalar agg should reject if Phase 2 is skipped."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"ignored": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+
+    state = build_app_input(
+        question="Scalar Agg",
+        from_cache=True,
+        current_sql="SELECT * FROM orders WHERE amount = (SELECT MAX(amount) FROM customers)",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    error_text = str(result.get("error") or "").lower()
+    assert "tenant isolation is not supported" in error_text

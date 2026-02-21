@@ -50,6 +50,7 @@ class RewriteTarget:
     scope_select: exp.Select
     cte_name: str | None = None
     appearance_index: int = 0
+    scope_index: int = 0
 
     @property
     def effective_name(self) -> str:
@@ -131,10 +132,16 @@ def rewrite_tenant_scoped_sql(
 
     # 2. Sort targets for determinism
     # Sort key: (cte_name_or_empty, table_effective_name, table_physical_name,
-    # appearance_index)
+    # scope_index, appearance_index)
     sorted_targets = sorted(
         targets,
-        key=lambda t: (t.cte_name or "", t.effective_name, t.physical_name, t.appearance_index),
+        key=lambda t: (
+            t.cte_name or "",
+            t.effective_name,
+            t.physical_name,
+            t.scope_index,
+            t.appearance_index,
+        ),
     )
 
     # 3. Apply rewrites in sorted order
@@ -155,11 +162,10 @@ def rewrite_tenant_scoped_sql(
             target.cte_name or "",
             target.effective_name,
             target.physical_name,
+            target.scope_index,
             target.appearance_index,
         )
         if target_key in rewritten_target_keys:
-            # This shouldn't happen with sorted_targets from current collector,
-            # but we guard against it for future robustness.
             continue
 
         table_keys = _table_keys(target.table)
@@ -249,6 +255,7 @@ def _collect_all_rewrite_targets(
     targets: list[RewriteTarget] = []
 
     # 1. Collect from CTEs
+    scope_idx = 0
     if classification == CTEClassification.SAFE_SIMPLE_CTE:
         with_ = expression.args.get("with_")
         if with_:
@@ -258,8 +265,10 @@ def _collect_all_rewrite_targets(
                         _get_targets_in_select(
                             cte.this,
                             cte_name=cte.alias_or_name.lower() if cte.alias_or_name else None,
+                            scope_index=scope_idx,
                         )
                     )
+                    scope_idx += 1
 
     # 2. Collect from final SELECT and all its nested subqueries
     with_ = expression.args.get("with_")
@@ -272,13 +281,14 @@ def _collect_all_rewrite_targets(
                     break
         if is_cte_body:
             continue
-        targets.extend(_get_targets_in_select(select))
+        targets.extend(_get_targets_in_select(select, scope_index=scope_idx))
+        scope_idx += 1
 
     return targets
 
 
 def _get_targets_in_select(
-    expression: exp.Select, cte_name: str | None = None
+    expression: exp.Select, cte_name: str | None = None, scope_index: int = 0
 ) -> list[RewriteTarget]:
     targets: list[RewriteTarget] = []
     appearance_index = 0
@@ -293,6 +303,7 @@ def _get_targets_in_select(
                     scope_select=expression,
                     cte_name=cte_name,
                     appearance_index=appearance_index,
+                    scope_index=scope_index,
                 )
             )
             appearance_index += 1
@@ -312,6 +323,7 @@ def _get_targets_in_select(
                     scope_select=expression,
                     cte_name=cte_name,
                     appearance_index=appearance_index,
+                    scope_index=scope_index,
                 )
             )
             appearance_index += 1
@@ -378,6 +390,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
             "Tenant rewrite supports SELECT statements only.", reason_code="NOT_SELECT_STATEMENT"
         )
 
+    classification = None
     if expression.args.get("with_") is not None:
         classification = classify_cte_query(expression)
         if classification == CTEClassification.UNSUPPORTED_CTE:
@@ -385,7 +398,6 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
                 "Tenant rewrite v1 does not support unsupported CTEs.",
                 reason_code="CTE_UNSUPPORTED_SHAPE",
             )
-        return classification
 
     if any(True for _ in expression.find_all(exp.Window)):
         raise TenantSQLRewriteError(
@@ -426,7 +438,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
                 reason_code="SUBQUERY_UNSUPPORTED",
             )
 
-    return None
+    return classification
 
 
 def classify_subquery(expression: exp.Expression) -> SubqueryClassification:
@@ -443,7 +455,67 @@ def classify_subquery(expression: exp.Expression) -> SubqueryClassification:
     if _has_nested_select(expression):
         return SubqueryClassification.UNSUPPORTED_SUBQUERY
 
+    if _is_scalar_aggregate_subquery(expression) and not _is_safe_scalar_aggregate_subquery(
+        expression
+    ):
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
     return SubqueryClassification.SAFE_SIMPLE_SUBQUERY
+
+
+def _is_scalar_aggregate_subquery(expression: exp.Select) -> bool:
+    projections = expression.expressions or []
+    if not projections:
+        return False
+    return any(_projection_contains_aggregate(projection) for projection in projections)
+
+
+def _projection_contains_aggregate(expression: exp.Expression) -> bool:
+    candidate = expression.this if isinstance(expression, exp.Alias) else expression
+    if isinstance(candidate, exp.AggFunc):
+        return True
+    return any(isinstance(node, exp.AggFunc) for node in candidate.find_all(exp.AggFunc))
+
+
+def _is_safe_scalar_aggregate_subquery(expression: exp.Select) -> bool:
+    projections = expression.expressions or []
+    if len(projections) != 1:
+        return False
+
+    if not _projection_contains_aggregate(projections[0]):
+        return False
+
+    if expression.args.get("group") is not None:
+        return False
+    if expression.args.get("having") is not None:
+        return False
+    if expression.args.get("distinct") is not None:
+        return False
+
+    limit = expression.args.get("limit")
+    limit_value = _literal_limit_value(limit)
+    if limit is not None and (limit_value is None or limit_value > 1):
+        return False
+
+    if expression.args.get("order") is not None and limit_value != 1:
+        return False
+
+    return True
+
+
+def _literal_limit_value(limit: exp.Expression | None) -> int | None:
+    if not isinstance(limit, exp.Limit):
+        return None
+    expression = limit.args.get("expression")
+    if not isinstance(expression, exp.Literal) or not expression.is_int:
+        return None
+    try:
+        value = int(expression.this)
+    except Exception:
+        return None
+    if value < 0:
+        return None
+    return value
 
 
 def classify_cte_query(expression: exp.Expression) -> CTEClassification:
@@ -545,28 +617,60 @@ def _has_nested_from_subquery(expression: exp.Select) -> bool:
     return False
 
 
+def _get_defined_names(select: exp.Select) -> set[str]:
+    names: set[str] = set()
+    for table in _top_level_tables(select):
+        alias = (table.alias_or_name or "").strip().lower()
+        if alias:
+            names.add(alias)
+        physical = (table.name or "").strip().lower()
+        if physical:
+            names.add(physical)
+    return names
+
+
+def _get_cte_names(select: exp.Select) -> set[str]:
+    with_ = select.args.get("with_")
+    if not with_:
+        return set()
+    return {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+
+
 def _has_correlated_subquery(expression: exp.Select) -> bool:
-    outer_aliases = _top_level_table_aliases(expression)
-    if not outer_aliases:
+    outer_visible_names = _get_defined_names(expression) | _get_cte_names(expression)
+    if not outer_visible_names:
         return False
+
+    with_ = expression.args.get("with_")
 
     for select in expression.find_all(exp.Select):
         if select is expression:
             continue
+
+        is_cte_body = False
+        if with_:
+            for cte in with_.expressions:
+                if select is cte.this:
+                    is_cte_body = True
+                    break
+        if is_cte_body:
+            continue
+
+        inner_defined_names = _get_defined_names(select) | _get_cte_names(select)
+        has_ambiguous_names = bool(inner_defined_names & outer_visible_names)
+
         for column in select.find_all(exp.Column):
-            table_name = (column.table or "").strip().lower()
-            if table_name and table_name in outer_aliases:
-                return True
+            col_table = (column.table or "").strip().lower()
+            if col_table:
+                if col_table in inner_defined_names:
+                    continue
+                if col_table in outer_visible_names:
+                    return True
+            else:
+                if has_ambiguous_names:
+                    return True
+
     return False
-
-
-def _top_level_table_aliases(expression: exp.Select) -> set[str]:
-    aliases: set[str] = set()
-    for table in _top_level_tables(expression):
-        alias_or_name = (table.alias_or_name or table.name or "").strip().lower()
-        if alias_or_name:
-            aliases.add(alias_or_name)
-    return aliases
 
 
 def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
@@ -609,6 +713,7 @@ def _assert_completeness(
             target.cte_name or "",
             target.effective_name,
             target.physical_name,
+            target.scope_index,
             target.appearance_index,
         )
         if target_key not in rewritten_target_keys:

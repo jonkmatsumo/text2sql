@@ -404,7 +404,15 @@ class TestExecuteSqlQuery:
             assert (
                 data["error"]["message"] == "Tenant isolation is not supported for this provider."
             )
+            assert (
+                data["error"]["details_safe"]["reason_code"]
+                == "tenant_rewrite_param_limit_exceeded"
+            )
 
-            mock_span.set_attribute.assert_called_with(
+            mock_span.set_attribute.assert_any_call(
                 "tenant_rewrite.failure_reason", "PARAM_LIMIT_EXCEEDED"
+            )
+            mock_span.set_attribute.assert_any_call(
+                "tenant_rewrite.failure_reason_code",
+                "tenant_rewrite_param_limit_exceeded",
             )
