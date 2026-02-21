@@ -221,3 +221,17 @@ def test_rewrite_fails_if_table_missing_from_targets():
     # We can't easily trigger this via public API if the code is correct,
     # but we've asserted the logic in the implementation.
     pass
+
+
+def test_rewrite_cte_with_outer_where_conditions():
+    """Verify outer SELECT on a CTE can have a WHERE clause without extra predicates."""
+    sql = "WITH cte1 AS (SELECT * FROM orders) SELECT * FROM cte1 WHERE cte1.status = 'open'"
+    result = rewrite_tenant_scoped_sql(
+        sql,
+        provider="sqlite",
+        tenant_id=1,
+        table_columns={"orders": ["id", "tenant_id", "status"]},
+    )
+    assert result.tenant_predicates_added == 1
+    assert "cte1.tenant_id" not in result.rewritten_sql
+    assert "orders.tenant_id = ?" in result.rewritten_sql
