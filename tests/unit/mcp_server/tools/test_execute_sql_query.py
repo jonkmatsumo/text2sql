@@ -665,3 +665,148 @@ class TestExecuteSqlQuery:
             data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_subquery_unsupported"
         )
         assert "sql" not in data["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_strict_true_rejects_ambiguous_case(
+        self, monkeypatch
+    ):
+        """Strict mode must reject ambiguous unqualified identifiers."""
+        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "true")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"]
+            == "tenant_rewrite_correlated_subquery_unsupported"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_strict_false_still_rejects_outer_reference(
+        self, monkeypatch
+    ):
+        """Relaxed mode should still reject explicit qualified outer references."""
+        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"]
+            == "tenant_rewrite_correlated_subquery_unsupported"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_ast_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """AST complexity rejections should map to REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
+        mock_connection = MagicMock()
+        sql = "SELECT * FROM orders o WHERE " + " AND ".join(
+            f"o.id > {index}" for index in range(100)
+        )
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(sql, tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_ast_complexity_exceeded"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_target_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """Target-limit failures should return canonical REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("TENANT_REWRITE_MAX_TARGETS", "1")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_target_limit_exceeded"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_param_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """Param-limit failures should return canonical REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("TENANT_REWRITE_MAX_PARAMS", "1")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_param_limit_exceeded"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()

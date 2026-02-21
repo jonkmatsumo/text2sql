@@ -183,6 +183,28 @@ def test_rewrite_strict_mode_off_allows_single_from_unqualified_case(monkeypatch
     assert result.tenant_predicates_added == 2
 
 
+def test_rewrite_strict_mode_true_rejects_ambiguous_unqualified(monkeypatch):
+    """Strict mode should fail closed on ambiguous unqualified inner references."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "true")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)"
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "CORRELATED_SUBQUERY_UNSUPPORTED"
+
+
+def test_rewrite_strict_mode_off_still_rejects_qualified_outer_reference(monkeypatch):
+    """Relaxed mode should not allow explicit qualified outer references in subqueries."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)"
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "CORRELATED_SUBQUERY_UNSUPPORTED"
+
+
 def test_rewrite_rejects_ast_complexity_exceeded(monkeypatch):
     """AST guard should fail closed before deep rewrite traversal."""
     monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
