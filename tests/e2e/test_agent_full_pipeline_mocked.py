@@ -1505,6 +1505,10 @@ async def test_full_pipeline_sqlite_tenant_rewrite_disabled_toggle_reports_rejec
 
     assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    error_text = str(result.get("error") or "").lower()
+    assert error_text == "tenant isolation is not supported for this provider."
+    assert "select" not in error_text
+    assert "orders" not in error_text
     assert observed["connection_called"] is False
     tool_response = observed["tool_response"] or {}
     assert tool_response["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
@@ -1572,6 +1576,10 @@ async def test_full_pipeline_sqlite_tenant_rewrite_low_ast_cap_reports_rejected_
 
     assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    error_text = str(result.get("error") or "").lower()
+    assert error_text == "tenant isolation is not supported for this provider."
+    assert "select" not in error_text
+    assert "orders" not in error_text
     assert observed["connection_called"] is False
     tool_response = observed["tool_response"] or {}
     assert tool_response["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
