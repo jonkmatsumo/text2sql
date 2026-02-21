@@ -170,3 +170,51 @@ def test_rewrite_still_scopes_non_global_tables_when_allowlist_is_present():
     assert result.params == [7]
     assert result.tenant_predicates_added == 1
     assert result.tables_rewritten == ["orders"]
+
+
+def test_rewrite_determinism_stable_ordering():
+    """Verify that multiple tables across CTEs yield deterministic param ordering."""
+    sql = """
+    WITH cte_b AS (SELECT * FROM table_b),
+         cte_a AS (SELECT * FROM table_a)
+    SELECT * FROM cte_a JOIN cte_b JOIN table_c
+    """
+    # Sorted order should be: table_a (in cte_a), table_b (in cte_b),
+    # table_c (in final select)
+    # cte_name sort: "", "cte_a", "cte_b"
+    # Actually wait, my sort key is:
+    # (cte_name or "", effective_name, physical_name, appearance_index)
+    # "" (final select) comes first.
+    # "cte_a" comes second.
+    # "cte_b" comes third.
+
+    # Final select: table_c
+    # cte_a: table_a
+    # cte_b: table_b
+
+    # Let's adjust expected to match my sorting rule.
+    # ( "", "table_c", ... )
+    # ( "cte_a", "table_a", ... )
+    # ( "cte_b", "table_b", ... )
+
+    result1 = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=100)
+    result2 = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=100)
+
+    assert result1.rewritten_sql == result2.rewritten_sql
+    assert result1.params == result2.params
+    assert result1.tables_rewritten == ["table_c", "table_a", "table_b"]
+    assert result1.tenant_predicates_added == 3
+
+
+def test_rewrite_determinism_same_table_multiple_times():
+    """Verify that the same table used multiple times has stable ordering via appearance_index."""
+    sql = "SELECT * FROM orders o1 JOIN orders o2 ON o1.id = o2.id"
+    # effective names: o1, o2
+    # both in final select ("")
+    # order: o1, o2
+
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=5)
+    assert result.tables_rewritten == ["orders", "orders"]
+    # Check that placeholders are in the right order in the generated SQL
+    # sqlglot might generate something like WHERE o1.tenant_id = ? AND o2.tenant_id = ?
+    assert "o1.tenant_id = ? AND o2.tenant_id = ?" in result.rewritten_sql

@@ -27,6 +27,26 @@ class CTEClassification(Enum):
 
 
 @dataclass(frozen=True)
+class RewriteTarget:
+    """A specific table node eligible for tenant rewrite within a scope."""
+
+    table: exp.Table
+    scope_select: exp.Select
+    cte_name: str | None = None
+    appearance_index: int = 0
+
+    @property
+    def effective_name(self) -> str:
+        """Return the effective table name (alias or table name)."""
+        return (self.table.alias_or_name or "").lower()
+
+    @property
+    def physical_name(self) -> str:
+        """Return the physical base table name."""
+        return (self.table.name or "").lower()
+
+
+@dataclass(frozen=True)
 class TenantSQLRewriteResult:
     """Result payload for deterministic tenant rewrite operations."""
 
@@ -76,97 +96,31 @@ def rewrite_tenant_scoped_sql(
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
 
-    total_rewritten_tables: list[str] = []
-    total_predicates_count = 0
+    # 1. Collect all rewrite targets across all scopes
+    targets = _collect_all_rewrite_targets(expression, classification)
 
-    if classification == CTEClassification.SAFE_SIMPLE_CTE:
-        with_ = expression.args.get("with_")
-        assert with_ is not None
-        cte_names = {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
-
-        # 1. Injection in CTE bodies
-        for cte in with_.expressions:
-            assert isinstance(cte.this, exp.Select)
-            rewritten, count = _inject_into_select(
-                cte.this,
-                tenant_id,
-                tenant_column_name,
-                allowlist,
-                normalized_columns,
-                cte_names,
-            )
-            total_rewritten_tables.extend(rewritten)
-            total_predicates_count += count
-
-        # 2. Injection in final SELECT
-        rewritten, count = _inject_into_select(
-            expression,
-            tenant_id,
-            tenant_column_name,
-            allowlist,
-            normalized_columns,
-            cte_names,
-        )
-        total_rewritten_tables.extend(rewritten)
-        total_predicates_count += count
-    else:
-        # Simple non-CTE path
-        rewritten, count = _inject_into_select(
-            expression,
-            tenant_id,
-            tenant_column_name,
-            allowlist,
-            normalized_columns,
-            set(),
-        )
-        total_rewritten_tables.extend(rewritten)
-        total_predicates_count += count
-
-    if total_predicates_count == 0:
-        # We don't check rewrite_targets here anymore as it's handled inside helper
-        # If no predicates were added, but there were targets, it means they were allowlisted.
-        # However, the original code had:
-        # if not predicates: if not rewrite_targets: raise ... else return result
-        # I'll keep that logic by checking if we have any targets at all.
-        all_targets = _rewrite_target_tables(expression)
-        if classification == CTEClassification.SAFE_SIMPLE_CTE:
-            with_ = expression.args.get("with_")
-            for cte in with_.expressions:
-                all_targets.extend(_rewrite_target_tables(cte.this))
-
-        if not all_targets:
-            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
-
-        return TenantSQLRewriteResult(
-            rewritten_sql=expression.sql(dialect=dialect),
-            params=[],
-            tables_rewritten=[],
-            tenant_predicates_added=0,
-        )
-
-    return TenantSQLRewriteResult(
-        rewritten_sql=expression.sql(dialect=dialect),
-        params=[tenant_id] * total_predicates_count,
-        tables_rewritten=total_rewritten_tables,
-        tenant_predicates_added=total_predicates_count,
+    # 2. Sort targets for determinism
+    # Sort key: (cte_name_or_empty, table_effective_name, table_physical_name,
+    # appearance_index)
+    sorted_targets = sorted(
+        targets,
+        key=lambda t: (t.cte_name or "", t.effective_name, t.physical_name, t.appearance_index),
     )
 
-
-def _inject_into_select(
-    expression: exp.Select,
-    tenant_id: int,
-    tenant_column_name: str,
-    allowlist: set[str],
-    normalized_columns: dict[str, set[str]],
-    cte_names: set[str],
-) -> tuple[list[str], int]:
-    """Inject tenant predicates into a single Select expression."""
-    rewrite_targets = _rewrite_target_tables(expression)
+    # 3. Apply rewrites in sorted order
     rewritten_tables: list[str] = []
-    predicates: list[exp.Expression] = []
+    total_predicates_count = 0
 
-    for table in rewrite_targets:
-        table_keys = _table_keys(table)
+    # CTE names to avoid rewriting CTE references
+    with_ = expression.args.get("with_")
+    cte_names = (
+        {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+        if with_
+        else set()
+    )
+
+    for target in sorted_targets:
+        table_keys = _table_keys(target.table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
 
@@ -181,35 +135,111 @@ def _inject_into_select(
         if columns is not None and tenant_column_name.lower() not in columns:
             raise TenantSQLRewriteError("Tenant column missing for table rewrite.")
 
-        reference = (table.alias_or_name or table.name or "").strip()
+        reference = (target.table.alias_or_name or target.table.name or "").strip()
         if not reference:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table alias.")
 
-        rewritten_tables.append(table_keys[0])
-        predicates.append(
-            exp.EQ(
-                this=exp.column(tenant_column_name, table=reference),
-                expression=exp.Placeholder(),
+        # Inject predicate into the target's scope_select
+        predicate = exp.EQ(
+            this=exp.column(tenant_column_name, table=reference),
+            expression=exp.Placeholder(),
+        )
+
+        existing_where = target.scope_select.args.get("where")
+        if existing_where is None:
+            target.scope_select.set("where", exp.Where(this=predicate))
+        else:
+            target.scope_select.set(
+                "where",
+                exp.Where(this=exp.and_(existing_where.this, predicate)),
             )
+
+        rewritten_tables.append(table_keys[0])
+        total_predicates_count += 1
+
+    if total_predicates_count == 0:
+        if not targets:
+            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+
+        return TenantSQLRewriteResult(
+            rewritten_sql=expression.sql(dialect=dialect),
+            params=[],
+            tables_rewritten=[],
+            tenant_predicates_added=0,
         )
 
-    if not predicates:
-        return [], 0
+    return TenantSQLRewriteResult(
+        rewritten_sql=expression.sql(dialect=dialect),
+        params=[tenant_id] * total_predicates_count,
+        tables_rewritten=rewritten_tables,
+        tenant_predicates_added=total_predicates_count,
+    )
 
-    combined_predicate = predicates[0]
-    for predicate in predicates[1:]:
-        combined_predicate = exp.and_(combined_predicate, predicate)
 
-    existing_where = expression.args.get("where")
-    if existing_where is None:
-        expression.set("where", exp.Where(this=combined_predicate))
-    else:
-        expression.set(
-            "where",
-            exp.Where(this=exp.and_(existing_where.this, combined_predicate)),
-        )
+def _collect_all_rewrite_targets(
+    expression: exp.Select, classification: CTEClassification | None
+) -> list[RewriteTarget]:
+    targets: list[RewriteTarget] = []
 
-    return rewritten_tables, len(predicates)
+    # 1. Collect from CTEs
+    if classification == CTEClassification.SAFE_SIMPLE_CTE:
+        with_ = expression.args.get("with_")
+        if with_:
+            for cte in with_.expressions:
+                if isinstance(cte.this, exp.Select):
+                    targets.extend(
+                        _get_targets_in_select(
+                            cte.this,
+                            cte_name=cte.alias_or_name.lower() if cte.alias_or_name else None,
+                        )
+                    )
+
+    # 2. Collect from final SELECT
+    targets.extend(_get_targets_in_select(expression))
+
+    return targets
+
+
+def _get_targets_in_select(
+    expression: exp.Select, cte_name: str | None = None
+) -> list[RewriteTarget]:
+    targets: list[RewriteTarget] = []
+    appearance_index = 0
+
+    from_clause = expression.args.get("from_")
+    if isinstance(from_clause, exp.From):
+        from_this = from_clause.args.get("this")
+        if isinstance(from_this, exp.Table):
+            targets.append(
+                RewriteTarget(
+                    table=from_this,
+                    scope_select=expression,
+                    cte_name=cte_name,
+                    appearance_index=appearance_index,
+                )
+            )
+            appearance_index += 1
+        elif from_this is not None:
+            # Already checked by eligibility gate usually, but be safe
+            pass
+
+    joins = expression.args.get("joins") or []
+    for join in joins:
+        if not isinstance(join, exp.Join):
+            continue
+        join_this = join.args.get("this")
+        if isinstance(join_this, exp.Table):
+            targets.append(
+                RewriteTarget(
+                    table=join_this,
+                    scope_select=expression,
+                    cte_name=cte_name,
+                    appearance_index=appearance_index,
+                )
+            )
+            appearance_index += 1
+
+    return targets
 
 
 def _normalize_table_columns(
@@ -430,34 +460,5 @@ def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
         join_this = join.args.get("this")
         if isinstance(join_this, exp.Table):
             tables.append(join_this)
-
-    return tables
-
-
-def _rewrite_target_tables(expression: exp.Select) -> list[exp.Table]:
-    """Return tenant-scopeable base tables for rewrite or fail closed."""
-    tables: list[exp.Table] = []
-
-    from_clause = expression.args.get("from_")
-    if isinstance(from_clause, exp.From):
-        from_this = from_clause.args.get("this")
-        if isinstance(from_this, exp.Table):
-            tables.append(from_this)
-        elif from_this is not None:
-            raise TenantSQLRewriteError(
-                "Tenant rewrite v1 does not support non-table FROM sources."
-            )
-
-    joins = expression.args.get("joins") or []
-    for join in joins:
-        if not isinstance(join, exp.Join):
-            continue
-        join_this = join.args.get("this")
-        if isinstance(join_this, exp.Table):
-            tables.append(join_this)
-        elif join_this is not None:
-            raise TenantSQLRewriteError(
-                "Tenant rewrite v1 does not support non-table JOIN sources."
-            )
 
     return tables
