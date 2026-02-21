@@ -35,6 +35,13 @@ class CTEClassification(Enum):
     UNSUPPORTED_CTE = "UNSUPPORTED_CTE"
 
 
+class SubqueryClassification(Enum):
+    """Classification of subquery safety for tenant rewrite."""
+
+    SAFE_SIMPLE_SUBQUERY = "SAFE_SIMPLE_SUBQUERY"
+    UNSUPPORTED_SUBQUERY = "UNSUPPORTED_SUBQUERY"
+
+
 @dataclass(frozen=True)
 class RewriteTarget:
     """A specific table node eligible for tenant rewrite within a scope."""
@@ -132,7 +139,7 @@ def rewrite_tenant_scoped_sql(
 
     # 3. Apply rewrites in sorted order
     rewritten_tables: list[str] = []
-    rewritten_table_ids: set[int] = set()
+    rewritten_target_keys: set[tuple] = set()
     total_predicates_count = 0
 
     # CTE names to avoid rewriting CTE references
@@ -144,8 +151,13 @@ def rewrite_tenant_scoped_sql(
     )
 
     for target in sorted_targets:
-        table_node_id = id(target.table)
-        if table_node_id in rewritten_table_ids:
+        target_key = (
+            target.cte_name or "",
+            target.effective_name,
+            target.physical_name,
+            target.appearance_index,
+        )
+        if target_key in rewritten_target_keys:
             # This shouldn't happen with sorted_targets from current collector,
             # but we guard against it for future robustness.
             continue
@@ -194,17 +206,16 @@ def rewrite_tenant_scoped_sql(
         if existing_where is None:
             target.scope_select.set("where", exp.Where(this=predicate))
         else:
-            target.scope_select.set(
-                "where",
-                exp.Where(this=exp.and_(existing_where.this, predicate)),
-            )
+            existing_condition = existing_where.this
+            existing_condition.pop()
+            existing_where.set("this", exp.and_(existing_condition, predicate))
 
         rewritten_tables.append(table_keys[0])
-        rewritten_table_ids.add(table_node_id)
+        rewritten_target_keys.add(target_key)
         total_predicates_count += 1
 
     # 4. Post-condition check: Ensure every eligible table reference has a predicate
-    _assert_completeness(expression, classification, cte_names, allowlist, rewritten_table_ids)
+    _assert_completeness(expression, classification, cte_names, allowlist, rewritten_target_keys)
 
     if total_predicates_count == 0:
         if not targets:
@@ -250,8 +261,18 @@ def _collect_all_rewrite_targets(
                         )
                     )
 
-    # 2. Collect from final SELECT
-    targets.extend(_get_targets_in_select(expression))
+    # 2. Collect from final SELECT and all its nested subqueries
+    with_ = expression.args.get("with_")
+    for select in expression.find_all(exp.Select):
+        is_cte_body = False
+        if with_:
+            for cte in with_.expressions:
+                if select is cte.this:
+                    is_cte_body = True
+                    break
+        if is_cte_body:
+            continue
+        targets.extend(_get_targets_in_select(select))
 
     return targets
 
@@ -384,12 +405,45 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
             reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
         )
 
-    if _has_nested_select(expression):
-        raise TenantSQLRewriteError(
-            "Tenant rewrite v1 does not support subqueries.", reason_code="SUBQUERY_UNSUPPORTED"
-        )
+    with_ = expression.args.get("with_")
+    for select in expression.find_all(exp.Select):
+        if select is expression:
+            continue
+
+        # Skip CTE definitions themselves, as they are checked by classify_cte_query
+        is_cte_body = False
+        if with_:
+            for cte in with_.expressions:
+                if select is cte.this:
+                    is_cte_body = True
+                    break
+        if is_cte_body:
+            continue
+
+        if classify_subquery(select) == SubqueryClassification.UNSUPPORTED_SUBQUERY:
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support this subquery shape.",
+                reason_code="SUBQUERY_UNSUPPORTED",
+            )
 
     return None
+
+
+def classify_subquery(expression: exp.Expression) -> SubqueryClassification:
+    """Classify if a subquery is safe for conservative tenant rewrite."""
+    if not isinstance(expression, exp.Select):
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
+    if expression.args.get("with_") is not None:
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
+    if _contains_set_operation(expression):
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
+    if _has_nested_select(expression):
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
+    return SubqueryClassification.SAFE_SIMPLE_SUBQUERY
 
 
 def classify_cte_query(expression: exp.Expression) -> CTEClassification:
@@ -420,8 +474,11 @@ def classify_cte_query(expression: exp.Expression) -> CTEClassification:
         if _contains_set_operation(this):
             return CTEClassification.UNSUPPORTED_CTE
 
-        if _has_nested_select(this):
-            return CTEClassification.UNSUPPORTED_CTE
+        for node in this.find_all(exp.Select):
+            if node is this:
+                continue
+            if classify_subquery(node) == SubqueryClassification.UNSUPPORTED_SUBQUERY:
+                return CTEClassification.UNSUPPORTED_CTE
 
         # Ensure CTE body is a simple SELECT.
         # v1.1: Allow CTEs to reference previously defined CTEs.
@@ -449,15 +506,15 @@ def classify_cte_query(expression: exp.Expression) -> CTEClassification:
     for node in expression.find_all(exp.Select):
         if node is expression:
             continue
-        # If this select is NOT one of the CTE definition bodies, then it's an unsupported
-        # nested select.
+        # If this select is NOT one of the CTE definition bodies, check if it's safe.
         is_cte_body = False
         for cte in with_.expressions:
             if node is cte.this:
                 is_cte_body = True
                 break
         if not is_cte_body:
-            return CTEClassification.UNSUPPORTED_CTE
+            if classify_subquery(node) == SubqueryClassification.UNSUPPORTED_SUBQUERY:
+                return CTEClassification.UNSUPPORTED_CTE
 
     # 3. Final query SELECT FROM base tables or CTE names only
     # _top_level_tables finds Table nodes in FROM and JOIN.
@@ -537,7 +594,7 @@ def _assert_completeness(
     classification: CTEClassification | None,
     cte_names: set[str],
     allowlist: set[str],
-    rewritten_table_ids: set[int],
+    rewritten_target_keys: set[tuple],
 ) -> None:
     """Ensure every eligible base table node has been rewritten."""
     all_targets = _collect_all_rewrite_targets(expression, classification)
@@ -548,7 +605,14 @@ def _assert_completeness(
         if any(key in allowlist for key in table_keys):
             continue
 
-        if id(target.table) not in rewritten_table_ids:
+        target_key = (
+            target.cte_name or "",
+            target.effective_name,
+            target.physical_name,
+            target.appearance_index,
+        )
+        if target_key not in rewritten_target_keys:
             raise TenantSQLRewriteError(
-                "Tenant predicate injection incomplete.", reason_code="COMPLETENESS_FAILED"
+                f"Tenant predicate injection incomplete for table: {target.effective_name}",
+                reason_code="COMPLETENESS_FAILED",
             )

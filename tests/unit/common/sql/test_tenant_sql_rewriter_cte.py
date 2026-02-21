@@ -56,7 +56,7 @@ from common.sql.tenant_sql_rewriter import (
                 "WITH cte1 AS (SELECT * FROM orders "
                 "WHERE id IN (SELECT order_id FROM details)) SELECT * FROM cte1"
             ),
-            CTEClassification.UNSUPPORTED_CTE,
+            CTEClassification.SAFE_SIMPLE_CTE,
         ),
         (
             "SELECT * FROM orders",  # Not a CTE query
