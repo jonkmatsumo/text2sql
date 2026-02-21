@@ -601,3 +601,71 @@ async def test_full_pipeline_sqlite_tenant_rewrite_cte(monkeypatch):
     sql = str(observed.get("sql", ""))
     assert "WITH cte1 AS (SELECT * FROM orders WHERE orders.tenant_id = ?)" in sql
     assert observed.get("params") == [1]
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_rejects_unsupported_cte(monkeypatch):
+    """Unsupported CTE shapes should fail with canonical, sanitized tenant error."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"ignored": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+
+    state = build_app_input(
+        question="Use recursive CTE",
+        from_cache=True,
+        current_sql=(
+            "WITH RECURSIVE cte1 AS (SELECT 1 UNION ALL SELECT 1 FROM cte1) " "SELECT * FROM cte1"
+        ),
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    assert observed["connection_called"] is False
+    error_text = str(result.get("error") or "").lower()
+    assert "tenant isolation is not supported" in error_text
+    assert "recursive" not in error_text
+    assert "cte1" not in error_text
