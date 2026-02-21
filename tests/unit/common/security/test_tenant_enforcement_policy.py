@@ -1,3 +1,5 @@
+import pytest
+
 from common.security.tenant_enforcement_policy import (
     TenantEnforcementPolicy,
     TenantEnforcementResult,
@@ -283,3 +285,102 @@ def test_policy_classify_sql_strict_mode_false():
     # The legacy strict mode false allows some queries that strict=True blocks.
     # Let's verify it doesn't return UNSUPPORTED_CORRELATED_SUBQUERY for this shape.
     assert shape == TenantSQLShape.SAFE_SIMPLE_SELECT
+
+
+@pytest.mark.parametrize(
+    "mode, strict_mode, reason_code, sql, expected_outcome, expected_reason",
+    [
+        (
+            "sql_rewrite",
+            False,
+            None,
+            "SELECT id FROM users",
+            "APPLIED",
+            None,
+        ),
+        (
+            "rls_session",
+            False,
+            None,
+            "SELECT id FROM users",
+            "APPLIED",
+            None,
+        ),
+        (
+            "none",
+            False,
+            None,
+            "SELECT id FROM users",
+            "SKIPPED_NOT_REQUIRED",
+            None,
+        ),
+        (
+            "sql_rewrite",
+            False,
+            "NO_PREDICATES_PRODUCED",
+            "SELECT 1",
+            "SKIPPED_NOT_REQUIRED",
+            None,
+        ),
+        (
+            "sql_rewrite",
+            False,
+            "REWRITE_TIMEOUT",
+            "SELECT id FROM users",
+            "REJECTED_TIMEOUT",
+            "REWRITE_TIMEOUT",
+        ),
+        (
+            "sql_rewrite",
+            False,
+            "TARGET_LIMIT_EXCEEDED",
+            "SELECT id FROM users",
+            "REJECTED_LIMIT",
+            "TARGET_LIMIT_EXCEEDED",
+        ),
+        (
+            "sql_rewrite",
+            False,
+            "CORRELATED_SUBQUERY_UNSUPPORTED",
+            "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)",
+            "REJECTED_UNSUPPORTED",
+            "CORRELATED_SUBQUERY_UNSUPPORTED",
+        ),
+    ],
+)
+def test_integrated_enforcement_policy_regression(
+    mode: str,
+    strict_mode: bool,
+    reason_code: str | None,
+    sql: str,
+    expected_outcome: str,
+    expected_reason: str | None,
+):
+    """Golden regression test for the TenantEnforcementPolicy mapping matrix."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode=mode,  # type: ignore
+        strict=strict_mode,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=1000,
+        hard_timeout_ms=500,
+    )
+
+    # Note: In actual execution, classify_sql would map to an initial shape exception,
+    # but the actual reason_code parameter originates from either the classifier
+    # (via exception mapping) or the rewriter internals.
+    # We simulate passing that reason_code directly down to determine_outcome.
+
+    # If it hit an error (reason_code is not None and not NO_PREDICATES_), applied is False
+    # If no error, we assume it applied for rewrite (RLS always assumes applied if it decides true)
+    applied = reason_code is None
+
+    result = policy.determine_outcome(
+        applied=applied,
+        reason_code=reason_code,
+    )
+
+    assert result.mode == mode
+    assert result.outcome == expected_outcome
+    assert result.reason_code == expected_reason
