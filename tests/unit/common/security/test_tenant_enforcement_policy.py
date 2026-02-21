@@ -248,7 +248,7 @@ def test_policy_classify_sql_complexity_exceeded():
 
 
 def test_policy_classify_sql_strict_mode_true():
-    """Test classification rejects ambiguous queries in strict mode."""
+    """Strict mode should reject ambiguous correlated shapes with stable reason mapping."""
     policy = TenantEnforcementPolicy(
         provider="sqlite",
         mode="sql_rewrite",
@@ -264,10 +264,17 @@ def test_policy_classify_sql_strict_mode_true():
         "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)"
     )
     assert shape == TenantSQLShape.UNSUPPORTED_CORRELATED_SUBQUERY
+    outcome = policy.determine_outcome(applied=False, reason_code="CORRELATED_SUBQUERY_UNSUPPORTED")
+    assert outcome.outcome == "REJECTED_UNSUPPORTED"
+    assert outcome.reason_code == "CORRELATED_SUBQUERY_UNSUPPORTED"
+    assert (
+        policy.bounded_reason_code(outcome.reason_code)
+        == "tenant_rewrite_correlated_subquery_unsupported"
+    )
 
 
 def test_policy_classify_sql_strict_mode_false():
-    """Test classification allows certain queries when strict mode is false."""
+    """Relaxed mode should allow only the narrow non-correlated inner-reference case."""
     policy = TenantEnforcementPolicy(
         provider="sqlite",
         mode="sql_rewrite",
@@ -285,6 +292,23 @@ def test_policy_classify_sql_strict_mode_false():
     # The legacy strict mode false allows some queries that strict=True blocks.
     # Let's verify it doesn't return UNSUPPORTED_CORRELATED_SUBQUERY for this shape.
     assert shape == TenantSQLShape.SAFE_SIMPLE_SELECT
+    allowed_outcome = policy.determine_outcome(applied=True, reason_code=None)
+    assert allowed_outcome.outcome == "APPLIED"
+    assert allowed_outcome.reason_code is None
+
+    explicit_outer_reference_shape = policy.classify_sql(
+        "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)"
+    )
+    assert explicit_outer_reference_shape == TenantSQLShape.UNSUPPORTED_CORRELATED_SUBQUERY
+    rejected_outcome = policy.determine_outcome(
+        applied=False,
+        reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
+    )
+    assert rejected_outcome.outcome == "REJECTED_UNSUPPORTED"
+    assert (
+        policy.bounded_reason_code(rejected_outcome.reason_code)
+        == "tenant_rewrite_correlated_subquery_unsupported"
+    )
 
 
 @pytest.mark.parametrize(

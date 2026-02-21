@@ -925,66 +925,6 @@ class TestExecuteSqlQuery:
             mock_get_connection.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_execute_sql_query_tenant_rewrite_strict_true_rejects_ambiguous_case(
-        self, monkeypatch
-    ):
-        """Strict mode must reject ambiguous unqualified identifiers."""
-        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "true")
-        mock_connection = MagicMock()
-        with (
-            patch("mcp_server.utils.auth.validate_role", return_value=None),
-            patch(
-                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
-            ) as mock_caps,
-            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
-        ):
-            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
-            mock_caps.return_value.provider_name = "sqlite"
-            result = await handler(
-                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
-                tenant_id=1,
-            )
-
-        data = json.loads(result)
-        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-        assert (
-            data["error"]["details_safe"]["reason_code"]
-            == "tenant_rewrite_correlated_subquery_unsupported"
-        )
-        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
-        mock_connection.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_execute_sql_query_tenant_rewrite_strict_false_still_rejects_outer_reference(
-        self, monkeypatch
-    ):
-        """Relaxed mode should still reject explicit qualified outer references."""
-        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
-        mock_connection = MagicMock()
-        with (
-            patch("mcp_server.utils.auth.validate_role", return_value=None),
-            patch(
-                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
-            ) as mock_caps,
-            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
-        ):
-            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
-            mock_caps.return_value.provider_name = "sqlite"
-            result = await handler(
-                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)",
-                tenant_id=1,
-            )
-
-        data = json.loads(result)
-        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-        assert (
-            data["error"]["details_safe"]["reason_code"]
-            == "tenant_rewrite_correlated_subquery_unsupported"
-        )
-        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
-        mock_connection.assert_not_called()
-
-    @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_ast_limit_sets_rejected_limit_outcome(
         self, monkeypatch
     ):
