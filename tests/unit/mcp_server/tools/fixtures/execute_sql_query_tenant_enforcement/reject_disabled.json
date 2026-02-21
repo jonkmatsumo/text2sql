@@ -1,0 +1,9 @@
+{
+  "metadata": {
+    "tenant_enforcement_applied": false,
+    "tenant_enforcement_mode": "sql_rewrite",
+    "tenant_rewrite_outcome": "REJECTED_DISABLED",
+    "tenant_rewrite_reason_code": "tenant_rewrite_rewrite_disabled"
+  },
+  "error_code": "TENANT_ENFORCEMENT_UNSUPPORTED"
+}

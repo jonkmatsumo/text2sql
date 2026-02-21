@@ -2,12 +2,26 @@
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
 
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
+
+_TENANT_CONTRACT_FIXTURE_DIR = (
+    Path(__file__).resolve().parent / "fixtures" / "execute_sql_query_tenant_enforcement"
+)
+_TENANT_MODE_ENUM = {"sql_rewrite", "rls_session", "none"}
+_TENANT_OUTCOME_ENUM = {
+    "APPLIED",
+    "SKIPPED_NOT_REQUIRED",
+    "REJECTED_UNSUPPORTED",
+    "REJECTED_DISABLED",
+    "REJECTED_LIMIT",
+    "REJECTED_TIMEOUT",
+}
 
 
 class TestExecuteSqlQuery:
@@ -871,3 +885,175 @@ class TestExecuteSqlQuery:
         assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_param_limit_exceeded"
         assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
         mock_connection.assert_not_called()
+
+    @staticmethod
+    def _load_tenant_contract_fixture(name: str) -> dict:
+        fixture_path = _TENANT_CONTRACT_FIXTURE_DIR / name
+        return json.loads(fixture_path.read_text())
+
+    @staticmethod
+    def _assert_tenant_contract_payload(
+        payload: dict,
+        *,
+        fixture: dict,
+        source_sql: str,
+    ) -> None:
+        metadata = payload["metadata"]
+        fixture_metadata = fixture["metadata"]
+        expected_error_code = fixture.get("error_code")
+
+        assert payload["schema_version"] == "1.0"
+        assert "rows" in payload
+        assert "metadata" in payload
+        assert metadata["tool_version"] == "v1"
+        assert "rows_returned" in metadata
+        assert "is_truncated" in metadata
+        assert "provider" in metadata
+        assert metadata["tenant_enforcement_mode"] in _TENANT_MODE_ENUM
+        assert metadata["tenant_rewrite_outcome"] in _TENANT_OUTCOME_ENUM
+        assert isinstance(metadata["tenant_enforcement_applied"], bool)
+
+        for field_name, expected in fixture_metadata.items():
+            assert metadata.get(field_name) == expected
+
+        reason_code = metadata.get("tenant_rewrite_reason_code")
+        if reason_code is not None:
+            assert isinstance(reason_code, str)
+            assert reason_code.islower()
+            assert " " not in reason_code
+
+        if expected_error_code is None:
+            assert payload.get("error") is None
+        else:
+            assert payload["error"]["error_code"] == expected_error_code
+
+        metadata_blob = json.dumps(metadata, sort_keys=True).lower()
+        assert source_sql.strip().lower() not in metadata_blob
+        assert "select * from" not in metadata_blob
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("fixture_name", "scenario_name"),
+        [
+            ("success_rewrite_applied.json", "rewrite_applied"),
+            ("success_skip_not_required.json", "skip_not_required"),
+            ("reject_disabled.json", "reject_disabled"),
+            ("reject_unsupported_shape.json", "reject_unsupported_shape"),
+        ],
+    )
+    async def test_execute_sql_query_tenant_enforcement_contract_fixture_snapshots(
+        self,
+        fixture_name: str,
+        scenario_name: str,
+    ):
+        """Tenant enforcement metadata must stay backward compatible and bounded."""
+        from common.models.tool_envelopes import ExecuteSQLQueryResponseEnvelope
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, TenantSQLRewriteResult
+
+        fixture = self._load_tenant_contract_fixture(fixture_name)
+
+        if scenario_name == "rewrite_applied":
+            source_sql = "SELECT * FROM orders"
+            mock_conn = AsyncMock()
+            mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+            mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_conn.__aexit__ = AsyncMock(return_value=False)
+            mock_store = MagicMock()
+            mock_store.get_table_definition = AsyncMock(
+                return_value=json.dumps(
+                    {
+                        "table_name": "orders",
+                        "columns": [{"name": "id"}, {"name": "tenant_id"}],
+                        "foreign_keys": [],
+                    }
+                )
+            )
+
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    return_value=TenantSQLRewriteResult(
+                        rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
+                        params=[1],
+                        tables_rewritten=["orders"],
+                        tenant_predicates_added=1,
+                    ),
+                ),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+                    return_value=mock_store,
+                ),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_connection",
+                    return_value=mock_conn,
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "skip_not_required":
+            source_sql = "SELECT 1 AS ok"
+            mock_conn = AsyncMock()
+            mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+            mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_conn.__aexit__ = AsyncMock(return_value=False)
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_connection",
+                    return_value=mock_conn,
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "reject_disabled":
+            source_sql = "SELECT * FROM orders"
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    side_effect=TenantSQLRewriteError(
+                        "rewrite disabled", reason_code="REWRITE_DISABLED"
+                    ),
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "reject_unsupported_shape":
+            source_sql = "SELECT * FROM orders WHERE EXISTS (SELECT 1 FROM customers c)"
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    side_effect=TenantSQLRewriteError(
+                        "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                    ),
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        else:  # pragma: no cover
+            raise AssertionError(f"Unknown scenario: {scenario_name}")
+
+        ExecuteSQLQueryResponseEnvelope.model_validate(payload)
+        self._assert_tenant_contract_payload(payload, fixture=fixture, source_sql=source_sql)

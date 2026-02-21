@@ -1,0 +1,8 @@
+{
+  "metadata": {
+    "tenant_enforcement_applied": true,
+    "tenant_enforcement_mode": "sql_rewrite",
+    "tenant_rewrite_outcome": "APPLIED"
+  },
+  "error_code": null
+}
