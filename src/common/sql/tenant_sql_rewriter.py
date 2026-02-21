@@ -22,6 +22,11 @@ MAX_TENANT_REWRITE_PARAMS = int(os.environ.get("MAX_TENANT_REWRITE_PARAMS", "50"
 class TenantSQLRewriteError(ValueError):
     """Raised when tenant rewrite cannot be applied safely."""
 
+    def __init__(self, message: str, reason_code: str | None = None) -> None:
+        """Initialize error with detailed message and internal reason code."""
+        super().__init__(message)
+        self.reason_code = reason_code or "UNKNOWN_ERROR"
+
 
 class CTEClassification(Enum):
     """Classification of CTE query safety for tenant rewrite."""
@@ -78,20 +83,28 @@ def rewrite_tenant_scoped_sql(
     """
     normalized_provider = (provider or "").strip().lower()
     if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
-        raise TenantSQLRewriteError("Provider does not support tenant SQL rewrite.")
+        raise TenantSQLRewriteError(
+            "Provider does not support tenant SQL rewrite.", reason_code="PROVIDER_UNSUPPORTED"
+        )
 
     tenant_column_name = (tenant_column or "").strip()
     if not tenant_column_name:
-        raise TenantSQLRewriteError("Tenant column name is required.")
+        raise TenantSQLRewriteError(
+            "Tenant column name is required.", reason_code="MISSING_TENANT_COLUMN_CONFIG"
+        )
 
     dialect = normalize_sqlglot_dialect(normalized_provider)
     try:
         expressions = sqlglot.parse(sql, read=dialect)
     except Exception as exc:
-        raise TenantSQLRewriteError("SQL parse failed for tenant rewrite.") from exc
+        raise TenantSQLRewriteError(
+            "SQL parse failed for tenant rewrite.", reason_code="PARSE_ERROR"
+        ) from exc
 
     if not expressions or len(expressions) != 1 or expressions[0] is None:
-        raise TenantSQLRewriteError("Tenant rewrite requires a single SELECT statement.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite requires a single SELECT statement.", reason_code="NOT_SINGLE_SELECT"
+        )
 
     expression = expressions[0]
     classification = _assert_rewrite_eligible(expression)
@@ -105,7 +118,8 @@ def rewrite_tenant_scoped_sql(
 
     if len(targets) > MAX_TENANT_REWRITE_TARGETS:
         raise TenantSQLRewriteError(
-            f"Tenant rewrite exceeded maximum allowed targets ({MAX_TENANT_REWRITE_TARGETS})."
+            f"Tenant rewrite exceeded maximum allowed targets ({MAX_TENANT_REWRITE_TARGETS}).",
+            reason_code="TARGET_LIMIT_EXCEEDED",
         )
 
     # 2. Sort targets for determinism
@@ -138,7 +152,10 @@ def rewrite_tenant_scoped_sql(
 
         table_keys = _table_keys(target.table)
         if not table_keys:
-            raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
+            raise TenantSQLRewriteError(
+                "Tenant rewrite could not resolve table identity.",
+                reason_code="UNRESOLVABLE_TABLE_IDENTITY",
+            )
 
         # Skip if it's a CTE reference
         if any(key in cte_names for key in table_keys):
@@ -149,15 +166,22 @@ def rewrite_tenant_scoped_sql(
 
         columns = _lookup_columns_for_table(table_keys, normalized_columns)
         if columns is not None and tenant_column_name.lower() not in columns:
-            raise TenantSQLRewriteError("Tenant column missing for table rewrite.")
+            raise TenantSQLRewriteError(
+                "Tenant column missing for table rewrite.", reason_code="MISSING_TENANT_COLUMN"
+            )
 
         reference = (target.table.alias_or_name or target.table.name or "").strip()
         if not reference:
-            raise TenantSQLRewriteError("Tenant rewrite could not resolve table alias.")
+            raise TenantSQLRewriteError(
+                "Tenant rewrite could not resolve table alias.",
+                reason_code="UNRESOLVABLE_TABLE_ALIAS",
+            )
 
         if total_predicates_count >= MAX_TENANT_REWRITE_PARAMS:
             raise TenantSQLRewriteError(
-                f"Tenant rewrite exceeded maximum allowed parameters ({MAX_TENANT_REWRITE_PARAMS})."
+                "Tenant rewrite exceeded maximum allowed parameters "
+                f"({MAX_TENANT_REWRITE_PARAMS}).",
+                reason_code="PARAM_LIMIT_EXCEEDED",
             )
 
         # Inject predicate into the target's scope_select
@@ -184,7 +208,9 @@ def rewrite_tenant_scoped_sql(
 
     if total_predicates_count == 0:
         if not targets:
-            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+            raise TenantSQLRewriteError(
+                "Tenant rewrite produced no predicates.", reason_code="NO_PREDICATES_PRODUCED"
+            )
 
         return TenantSQLRewriteResult(
             rewritten_sql=expression.sql(dialect=dialect),
@@ -321,28 +347,47 @@ def _table_keys(table: exp.Table) -> list[str]:
 def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | None:
     """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
     if _contains_set_operation(expression):
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support set operations.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support set operations.",
+            reason_code="SET_OPERATIONS_UNSUPPORTED",
+        )
 
     if not isinstance(expression, exp.Select):
-        raise TenantSQLRewriteError("Tenant rewrite supports SELECT statements only.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite supports SELECT statements only.", reason_code="NOT_SELECT_STATEMENT"
+        )
 
     if expression.args.get("with_") is not None:
         classification = classify_cte_query(expression)
         if classification == CTEClassification.UNSUPPORTED_CTE:
-            raise TenantSQLRewriteError("Tenant rewrite v1 does not support unsupported CTEs.")
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support unsupported CTEs.",
+                reason_code="CTE_UNSUPPORTED_SHAPE",
+            )
         return classification
 
     if any(True for _ in expression.find_all(exp.Window)):
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support window functions.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support window functions.",
+            reason_code="WINDOW_FUNCTIONS_UNSUPPORTED",
+        )
 
     if _has_nested_from_subquery(expression):
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support nested SELECTs in FROM.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support nested SELECTs in FROM.",
+            reason_code="NESTED_FROM_UNSUPPORTED",
+        )
 
     if _has_correlated_subquery(expression):
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support correlated subqueries.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support correlated subqueries.",
+            reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
+        )
 
     if _has_nested_select(expression):
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support subqueries.")
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support subqueries.", reason_code="SUBQUERY_UNSUPPORTED"
+        )
 
     return None
 
@@ -504,4 +549,6 @@ def _assert_completeness(
             continue
 
         if id(target.table) not in rewritten_table_ids:
-            raise TenantSQLRewriteError("Tenant predicate injection incomplete.")
+            raise TenantSQLRewriteError(
+                "Tenant predicate injection incomplete.", reason_code="COMPLETENESS_FAILED"
+            )

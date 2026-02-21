@@ -372,3 +372,39 @@ class TestExecuteSqlQuery:
         assert data["error"]["provider"] == provider
         assert "Forbidden statement type" in data["error"]["message"]
         mock_get_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_failure_span(self):
+        """Test that TenantSQLRewriteError sets span attribute without leaking details."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "Internal detailed error", reason_code="PARAM_LIMIT_EXCEEDED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+            data = json.loads(result)
+            assert data["error"]["category"].upper() == "TENANT_ENFORCEMENT_UNSUPPORTED"
+            assert "Internal detailed error" not in data["error"]["message"]
+            assert (
+                data["error"]["message"] == "Tenant isolation is not supported for this provider."
+            )
+
+            mock_span.set_attribute.assert_called_with(
+                "tenant_rewrite.failure_reason", "PARAM_LIMIT_EXCEEDED"
+            )
