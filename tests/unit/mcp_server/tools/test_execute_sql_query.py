@@ -2,12 +2,26 @@
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
 import pytest
 
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
+
+_TENANT_CONTRACT_FIXTURE_DIR = (
+    Path(__file__).resolve().parent / "fixtures" / "execute_sql_query_tenant_enforcement"
+)
+_TENANT_MODE_ENUM = {"sql_rewrite", "rls_session", "none"}
+_TENANT_OUTCOME_ENUM = {
+    "APPLIED",
+    "SKIPPED_NOT_REQUIRED",
+    "REJECTED_UNSUPPORTED",
+    "REJECTED_DISABLED",
+    "REJECTED_LIMIT",
+    "REJECTED_TIMEOUT",
+}
 
 
 class TestExecuteSqlQuery:
@@ -78,6 +92,10 @@ class TestExecuteSqlQuery:
             assert data["metadata"]["provider"] == "postgres"
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
+            assert data["metadata"]["tenant_enforcement_mode"] == "rls_session"
+            assert data["metadata"]["tenant_enforcement_applied"] is True
+            assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+            assert data["metadata"].get("tenant_rewrite_reason_code") is None
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):
@@ -291,6 +309,33 @@ class TestExecuteSqlQuery:
             assert len(data["rows"]) == 1
 
     @pytest.mark.asyncio
+    async def test_execute_sql_query_none_enforcement_mode_sets_skip_metadata(self):
+        """Non-enforced mode should set SKIPPED_NOT_REQUIRED contract metadata."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"id": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "none"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler("SELECT 1 AS id", tenant_id=1)
+
+            data = json.loads(result)
+            assert data.get("error") is None
+            assert data["metadata"]["tenant_enforcement_mode"] == "none"
+            assert data["metadata"]["tenant_enforcement_applied"] is False
+            assert data["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+            assert data["metadata"].get("tenant_rewrite_reason_code") is None
+
+    @pytest.mark.asyncio
     async def test_execute_sql_query_respects_timeout_seconds(self):
         """Timeouts should return a classified timeout error."""
         mock_conn = AsyncMock()
@@ -408,6 +453,14 @@ class TestExecuteSqlQuery:
                 data["error"]["details_safe"]["reason_code"]
                 == "tenant_rewrite_param_limit_exceeded"
             )
+            assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+            assert data["metadata"]["tenant_enforcement_applied"] is False
+            assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+            assert (
+                data["metadata"]["tenant_rewrite_reason_code"]
+                == "tenant_rewrite_param_limit_exceeded"
+            )
+            assert "sql" not in data["metadata"]
 
             mock_span.set_attribute.assert_any_call(
                 "tenant_rewrite.failure_reason", "PARAM_LIMIT_EXCEEDED"
@@ -416,3 +469,683 @@ class TestExecuteSqlQuery:
                 "tenant_rewrite.failure_reason_code",
                 "tenant_rewrite_param_limit_exceeded",
             )
+            assert not any(
+                call.args and call.args[0] == "rewrite.target_count"
+                for call in mock_span.set_attribute.call_args_list
+            )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_enforcement_observability_success_attributes(self):
+        """Success response should emit bounded tenant enforcement span + metric attributes."""
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as mock_add_counter,
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", return_value=mock_conn
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "rls_session"
+            result = await handler("SELECT 1 AS ok", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["metadata"]["tenant_enforcement_mode"] == "rls_session"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.mode", "rls_session")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.outcome", "APPLIED")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.applied", True)
+        assert not any(
+            call.args and call.args[0] == "tenant.enforcement.reason_code"
+            for call in mock_span.set_attribute.call_args_list
+        )
+        mock_add_counter.assert_any_call(
+            "mcp.tenant_enforcement.outcome_total",
+            description="Count of execute_sql_query tenant enforcement outcomes",
+            attributes={
+                "tool_name": "execute_sql_query",
+                "mode": "rls_session",
+                "outcome": "APPLIED",
+                "applied": True,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_enforcement_observability_failure_attributes(self):
+        """Rejected response should emit bounded tenant enforcement reason telemetry."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as mock_add_counter,
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM orders", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.mode", "sql_rewrite")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.outcome", "REJECTED_DISABLED")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.applied", False)
+        mock_span.set_attribute.assert_any_call(
+            "tenant.enforcement.reason_code",
+            "tenant_rewrite_rewrite_disabled",
+        )
+        mock_add_counter.assert_any_call(
+            "mcp.tenant_enforcement.outcome_total",
+            description="Count of execute_sql_query tenant enforcement outcomes",
+            attributes={
+                "tool_name": "execute_sql_query",
+                "mode": "sql_rewrite",
+                "outcome": "REJECTED_DISABLED",
+                "applied": False,
+                "reason_code": "tenant_rewrite_rewrite_disabled",
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_timeout_emits_duration_and_fails_closed(self):
+        """Long rewrite duration should emit timing span data and fail with bounded reason."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_connection = MagicMock()
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["film"],
+                    tenant_predicates_added=1,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection",
+                mock_connection,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.time.perf_counter", side_effect=[10.0, 10.25]
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "TENANT_REWRITE_WARN_MS": "50",
+                    "TENANT_REWRITE_HARD_TIMEOUT_MS": "200",
+                },
+                clear=False,
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["category"].upper() == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_timeout"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_TIMEOUT"
+        assert data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_rewrite_timeout"
+        mock_connection.assert_not_called()
+        mock_span.set_attribute.assert_any_call("rewrite.duration_ms", 250.0)
+        mock_span.set_attribute.assert_any_call("tenant_rewrite.failure_reason", "REWRITE_TIMEOUT")
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_uses_shared_tenant_rewrite_settings_for_timeout(self):
+        """execute_sql_query should source rewrite timeout thresholds from shared settings."""
+        from common.sql.tenant_sql_rewriter import TenantRewriteSettings, TenantSQLRewriteResult
+
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.load_tenant_rewrite_settings",
+                return_value=TenantRewriteSettings(
+                    enabled=True,
+                    strict_mode=True,
+                    max_targets=25,
+                    max_params=50,
+                    max_ast_nodes=1000,
+                    warn_ms=5,
+                    hard_timeout_ms=10,
+                    assert_invariants=False,
+                ),
+            ) as mock_settings_loader,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["film"],
+                    tenant_predicates_added=1,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection",
+                mock_connection,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.time.perf_counter",
+                side_effect=[100.0, 100.015],
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_timeout"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_TIMEOUT"
+        mock_connection.assert_not_called()
+        mock_settings_loader.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_success_emits_explainability_metadata(self):
+        """Successful rewrite should emit bounded explainability attributes on the span."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get_connection = MagicMock(return_value=mock_conn)
+
+        mock_store = MagicMock()
+        mock_store.get_table_definition = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "table_name": "orders",
+                    "columns": [{"name": "id"}, {"name": "tenant_id"}],
+                    "foreign_keys": [],
+                }
+            )
+        )
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["orders"],
+                    tenant_predicates_added=1,
+                    target_count=1,
+                    scope_depth=2,
+                    has_cte=False,
+                    has_subquery=True,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM orders", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["rows"] == [{"ok": 1}]
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is True
+        assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+        assert data["metadata"].get("tenant_rewrite_reason_code") is None
+        assert "sql" not in data["metadata"]
+        mock_span.set_attribute.assert_any_call("rewrite.target_count", 1)
+        mock_span.set_attribute.assert_any_call("rewrite.param_count", 1)
+        mock_span.set_attribute.assert_any_call("rewrite.scope_depth", 2)
+        mock_span.set_attribute.assert_any_call("rewrite.has_cte", False)
+        mock_span.set_attribute.assert_any_call("rewrite.has_subquery", True)
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_no_eligible_targets_sets_skip_metadata(self):
+        """No-target rewrite path should skip enforcement metadata instead of rejecting."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get_connection = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler("SELECT 1 AS ok", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["rows"] == [{"ok": 1}]
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+        assert data["metadata"].get("tenant_rewrite_reason_code") is None
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_disabled_sets_rejected_disabled_outcome(self):
+        """Disabled rewrite should expose deterministic outcome and bounded reason metadata."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_disabled"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
+        assert data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_rewrite_disabled"
+        assert "sql" not in data["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_unsupported_sets_rejected_unsupported_outcome(
+        self,
+    ):
+        """Unsupported rewrite shape should expose deterministic unsupported outcome metadata."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_subquery_unsupported"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        assert (
+            data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_subquery_unsupported"
+        )
+        assert "sql" not in data["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_strict_true_rejects_ambiguous_case(
+        self, monkeypatch
+    ):
+        """Strict mode must reject ambiguous unqualified identifiers."""
+        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "true")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"]
+            == "tenant_rewrite_correlated_subquery_unsupported"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_strict_false_still_rejects_outer_reference(
+        self, monkeypatch
+    ):
+        """Relaxed mode should still reject explicit qualified outer references."""
+        monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"]
+            == "tenant_rewrite_correlated_subquery_unsupported"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_ast_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """AST complexity rejections should map to REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
+        mock_connection = MagicMock()
+        sql = "SELECT * FROM orders o WHERE " + " AND ".join(
+            f"o.id > {index}" for index in range(100)
+        )
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(sql, tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_ast_complexity_exceeded"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_target_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """Target-limit failures should return canonical REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("TENANT_REWRITE_MAX_TARGETS", "1")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert (
+            data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_target_limit_exceeded"
+        )
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_param_limit_sets_rejected_limit_outcome(
+        self, monkeypatch
+    ):
+        """Param-limit failures should return canonical REJECTED_LIMIT outcome."""
+        monkeypatch.setenv("TENANT_REWRITE_MAX_PARAMS", "1")
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_connection),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler(
+                "SELECT o.id FROM orders o JOIN customers c ON o.customer_id = c.id",
+                tenant_id=1,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_param_limit_exceeded"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+        mock_connection.assert_not_called()
+
+    @staticmethod
+    def _load_tenant_contract_fixture(name: str) -> dict:
+        fixture_path = _TENANT_CONTRACT_FIXTURE_DIR / name
+        return json.loads(fixture_path.read_text())
+
+    @staticmethod
+    def _assert_tenant_contract_payload(
+        payload: dict,
+        *,
+        fixture: dict,
+        source_sql: str,
+    ) -> None:
+        metadata = payload["metadata"]
+        fixture_metadata = fixture["metadata"]
+        expected_error_code = fixture.get("error_code")
+
+        assert payload["schema_version"] == "1.0"
+        assert "rows" in payload
+        assert "metadata" in payload
+        assert metadata["tool_version"] == "v1"
+        assert "rows_returned" in metadata
+        assert "is_truncated" in metadata
+        assert "provider" in metadata
+        assert metadata["tenant_enforcement_mode"] in _TENANT_MODE_ENUM
+        assert metadata["tenant_rewrite_outcome"] in _TENANT_OUTCOME_ENUM
+        assert isinstance(metadata["tenant_enforcement_applied"], bool)
+
+        for field_name, expected in fixture_metadata.items():
+            assert metadata.get(field_name) == expected
+
+        reason_code = metadata.get("tenant_rewrite_reason_code")
+        if reason_code is not None:
+            assert isinstance(reason_code, str)
+            assert reason_code.islower()
+            assert " " not in reason_code
+
+        if expected_error_code is None:
+            assert payload.get("error") is None
+        else:
+            assert payload["error"]["error_code"] == expected_error_code
+
+        metadata_blob = json.dumps(metadata, sort_keys=True).lower()
+        assert source_sql.strip().lower() not in metadata_blob
+        assert "select * from" not in metadata_blob
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("fixture_name", "scenario_name"),
+        [
+            ("success_rewrite_applied.json", "rewrite_applied"),
+            ("success_skip_not_required.json", "skip_not_required"),
+            ("reject_disabled.json", "reject_disabled"),
+            ("reject_unsupported_shape.json", "reject_unsupported_shape"),
+        ],
+    )
+    async def test_execute_sql_query_tenant_enforcement_contract_fixture_snapshots(
+        self,
+        fixture_name: str,
+        scenario_name: str,
+    ):
+        """Tenant enforcement metadata must stay backward compatible and bounded."""
+        from common.models.tool_envelopes import ExecuteSQLQueryResponseEnvelope
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, TenantSQLRewriteResult
+
+        fixture = self._load_tenant_contract_fixture(fixture_name)
+
+        if scenario_name == "rewrite_applied":
+            source_sql = "SELECT * FROM orders"
+            mock_conn = AsyncMock()
+            mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+            mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_conn.__aexit__ = AsyncMock(return_value=False)
+            mock_store = MagicMock()
+            mock_store.get_table_definition = AsyncMock(
+                return_value=json.dumps(
+                    {
+                        "table_name": "orders",
+                        "columns": [{"name": "id"}, {"name": "tenant_id"}],
+                        "foreign_keys": [],
+                    }
+                )
+            )
+
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    return_value=TenantSQLRewriteResult(
+                        rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
+                        params=[1],
+                        tables_rewritten=["orders"],
+                        tenant_predicates_added=1,
+                    ),
+                ),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+                    return_value=mock_store,
+                ),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_connection",
+                    return_value=mock_conn,
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "skip_not_required":
+            source_sql = "SELECT 1 AS ok"
+            mock_conn = AsyncMock()
+            mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+            mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_conn.__aexit__ = AsyncMock(return_value=False)
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_connection",
+                    return_value=mock_conn,
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "reject_disabled":
+            source_sql = "SELECT * FROM orders"
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    side_effect=TenantSQLRewriteError(
+                        "rewrite disabled", reason_code="REWRITE_DISABLED"
+                    ),
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        elif scenario_name == "reject_unsupported_shape":
+            source_sql = "SELECT * FROM orders WHERE EXISTS (SELECT 1 FROM customers c)"
+            with (
+                patch("mcp_server.utils.auth.validate_role", return_value=None),
+                patch(
+                    "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+                ) as mock_caps,
+                patch(
+                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    side_effect=TenantSQLRewriteError(
+                        "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                    ),
+                ),
+            ):
+                mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+                mock_caps.return_value.provider_name = "sqlite"
+                payload = json.loads(await handler(source_sql, tenant_id=1))
+
+        else:  # pragma: no cover
+            raise AssertionError(f"Unknown scenario: {scenario_name}")
+
+        ExecuteSQLQueryResponseEnvelope.model_validate(payload)
+        self._assert_tenant_contract_payload(payload, fixture=fixture, source_sql=source_sql)

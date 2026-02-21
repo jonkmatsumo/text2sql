@@ -10,6 +10,7 @@ from typing import Mapping, Sequence
 import sqlglot
 from sqlglot import exp
 
+from common.config.env import get_env_bool, get_env_int
 from common.sql.dialect import normalize_sqlglot_dialect
 
 SUPPORTED_SQL_REWRITE_PROVIDERS = {"sqlite", "duckdb"}
@@ -17,6 +18,37 @@ _SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
 
 MAX_TENANT_REWRITE_TARGETS = int(os.environ.get("MAX_TENANT_REWRITE_TARGETS", "25"))
 MAX_TENANT_REWRITE_PARAMS = int(os.environ.get("MAX_TENANT_REWRITE_PARAMS", "50"))
+MAX_SQL_AST_NODES = int(os.environ.get("MAX_SQL_AST_NODES", "1000"))
+
+
+@dataclass(frozen=True)
+class TenantRewriteSettings:
+    """Runtime feature controls for tenant rewrite behavior."""
+
+    enabled: bool
+    strict_mode: bool
+    max_targets: int
+    max_params: int
+    max_ast_nodes: int
+    warn_ms: int
+    hard_timeout_ms: int
+    assert_invariants: bool
+
+    @classmethod
+    def from_env(cls) -> TenantRewriteSettings:
+        """Load tenant rewrite settings from environment with fail-safe defaults."""
+        warn_ms = _safe_env_non_negative_int("TENANT_REWRITE_WARN_MS", 50)
+        hard_timeout_ms = _safe_env_non_negative_int("TENANT_REWRITE_HARD_TIMEOUT_MS", 200)
+        return cls(
+            enabled=_safe_env_bool("TENANT_REWRITE_ENABLED", True),
+            strict_mode=_safe_env_bool("TENANT_REWRITE_STRICT_MODE", True),
+            max_targets=_safe_env_int("TENANT_REWRITE_MAX_TARGETS", MAX_TENANT_REWRITE_TARGETS),
+            max_params=_safe_env_int("TENANT_REWRITE_MAX_PARAMS", MAX_TENANT_REWRITE_PARAMS),
+            max_ast_nodes=_safe_env_int("MAX_SQL_AST_NODES", MAX_SQL_AST_NODES),
+            warn_ms=warn_ms,
+            hard_timeout_ms=max(hard_timeout_ms, warn_ms),
+            assert_invariants=_safe_env_bool("TENANT_REWRITE_ASSERT_INVARIANTS", False),
+        )
 
 
 class TenantSQLRewriteError(ValueError):
@@ -71,6 +103,48 @@ class TenantSQLRewriteResult:
     params: list[int]
     tables_rewritten: list[str]
     tenant_predicates_added: int
+    target_count: int = 0
+    scope_depth: int = 1
+    has_cte: bool = False
+    has_subquery: bool = False
+
+
+def _safe_env_bool(name: str, default: bool) -> bool:
+    try:
+        value = get_env_bool(name, default=default)
+    except ValueError:
+        return default
+    return default if value is None else value
+
+
+def _safe_env_int(name: str, default: int) -> int:
+    try:
+        value = get_env_int(name, default=default)
+    except ValueError:
+        return default
+    if value is None or value < 1:
+        return default
+    return value
+
+
+def _safe_env_non_negative_int(name: str, default: int) -> int:
+    try:
+        value = get_env_int(name, default=default)
+    except ValueError:
+        return default
+    if value is None or value < 0:
+        return default
+    return value
+
+
+def load_tenant_rewrite_settings() -> TenantRewriteSettings:
+    """Load tenant rewrite settings from environment."""
+    return TenantRewriteSettings.from_env()
+
+
+def load_tenant_rewrite_config() -> TenantRewriteSettings:
+    """Backward-compatible alias for legacy imports."""
+    return load_tenant_rewrite_settings()
 
 
 def rewrite_tenant_scoped_sql(
@@ -81,6 +155,7 @@ def rewrite_tenant_scoped_sql(
     tenant_column: str = "tenant_id",
     global_table_allowlist: set[str] | None = None,
     table_columns: Mapping[str, Sequence[str]] | None = None,
+    _skip_invariant_check: bool = False,
 ) -> TenantSQLRewriteResult:
     """Rewrite SQL to enforce tenant scoping via injected predicates.
 
@@ -89,6 +164,12 @@ def rewrite_tenant_scoped_sql(
     - no nested SELECTs/subqueries
     - one predicate per non-global table in FROM/JOIN set
     """
+    settings = load_tenant_rewrite_settings()
+    if not settings.enabled:
+        raise TenantSQLRewriteError(
+            "Tenant SQL rewrite is disabled by feature flag.", reason_code="REWRITE_DISABLED"
+        )
+
     normalized_provider = (provider or "").strip().lower()
     if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
         raise TenantSQLRewriteError(
@@ -115,8 +196,18 @@ def rewrite_tenant_scoped_sql(
         )
 
     expression = expressions[0]
-    classification = _assert_rewrite_eligible(expression)
+    ast_node_count = _sql_ast_node_count(expression)
+    if ast_node_count > settings.max_ast_nodes:
+        raise TenantSQLRewriteError(
+            "Tenant rewrite AST complexity exceeded the maximum allowed node count "
+            f"({settings.max_ast_nodes}).",
+            reason_code="AST_COMPLEXITY_EXCEEDED",
+        )
+    classification = _assert_rewrite_eligible(expression, strict_mode=settings.strict_mode)
     assert isinstance(expression, exp.Select)
+    rewrite_has_cte = expression.args.get("with_") is not None
+    rewrite_has_subquery = _has_subquery(expression)
+    rewrite_scope_depth = _scope_depth(expression)
 
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
@@ -124,9 +215,9 @@ def rewrite_tenant_scoped_sql(
     # 1. Collect all rewrite targets across all scopes
     targets = _collect_all_rewrite_targets(expression, classification)
 
-    if len(targets) > MAX_TENANT_REWRITE_TARGETS:
+    if len(targets) > settings.max_targets:
         raise TenantSQLRewriteError(
-            f"Tenant rewrite exceeded maximum allowed targets ({MAX_TENANT_REWRITE_TARGETS}).",
+            f"Tenant rewrite exceeded maximum allowed targets ({settings.max_targets}).",
             reason_code="TARGET_LIMIT_EXCEEDED",
         )
 
@@ -195,10 +286,9 @@ def rewrite_tenant_scoped_sql(
                 reason_code="UNRESOLVABLE_TABLE_ALIAS",
             )
 
-        if total_predicates_count >= MAX_TENANT_REWRITE_PARAMS:
+        if total_predicates_count >= settings.max_params:
             raise TenantSQLRewriteError(
-                "Tenant rewrite exceeded maximum allowed parameters "
-                f"({MAX_TENANT_REWRITE_PARAMS}).",
+                "Tenant rewrite exceeded maximum allowed parameters " f"({settings.max_params}).",
                 reason_code="PARAM_LIMIT_EXCEEDED",
             )
 
@@ -214,7 +304,7 @@ def rewrite_tenant_scoped_sql(
         else:
             existing_condition = existing_where.this
             existing_condition.pop()
-            existing_where.set("this", exp.and_(existing_condition, predicate))
+            existing_where.set("this", exp.and_(existing_condition, predicate, copy=False))
 
         rewritten_tables.append(table_keys[0])
         rewritten_target_keys.add(target_key)
@@ -229,24 +319,58 @@ def rewrite_tenant_scoped_sql(
                 "Tenant rewrite produced no predicates.", reason_code="NO_PREDICATES_PRODUCED"
             )
 
-        return TenantSQLRewriteResult(
+        result = TenantSQLRewriteResult(
             rewritten_sql=expression.sql(dialect=dialect),
             params=[],
             tables_rewritten=[],
             tenant_predicates_added=0,
+            target_count=len(targets),
+            scope_depth=rewrite_scope_depth,
+            has_cte=rewrite_has_cte,
+            has_subquery=rewrite_has_subquery,
         )
+        if _should_run_invariant_checks(settings) and not _skip_invariant_check:
+            assert_rewrite_invariants(
+                sql,
+                result.rewritten_sql,
+                result.params,
+                provider=normalized_provider,
+                tenant_column=tenant_column_name,
+                global_table_allowlist=allowlist,
+                table_columns=normalized_columns,
+                strict_mode=settings.strict_mode,
+                tenant_id=tenant_id,
+            )
+        return result
 
     params = [tenant_id] * total_predicates_count
     assert (
         len(params) == total_predicates_count
     ), "One param per injected predicate invariant violated."
 
-    return TenantSQLRewriteResult(
+    result = TenantSQLRewriteResult(
         rewritten_sql=expression.sql(dialect=dialect),
         params=params,
         tables_rewritten=rewritten_tables,
         tenant_predicates_added=total_predicates_count,
+        target_count=len(targets),
+        scope_depth=rewrite_scope_depth,
+        has_cte=rewrite_has_cte,
+        has_subquery=rewrite_has_subquery,
     )
+    if _should_run_invariant_checks(settings) and not _skip_invariant_check:
+        assert_rewrite_invariants(
+            sql,
+            result.rewritten_sql,
+            result.params,
+            provider=normalized_provider,
+            tenant_column=tenant_column_name,
+            global_table_allowlist=allowlist,
+            table_columns=normalized_columns,
+            strict_mode=settings.strict_mode,
+            tenant_id=tenant_id,
+        )
+    return result
 
 
 def _collect_all_rewrite_targets(
@@ -377,7 +501,224 @@ def _table_keys(table: exp.Table) -> list[str]:
     return keys
 
 
-def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | None:
+def _sql_ast_node_count(expression: exp.Expression) -> int:
+    """Count AST nodes to bound rewrite traversal complexity."""
+    return sum(1 for _ in expression.walk())
+
+
+def _scope_depth(expression: exp.Select) -> int:
+    """Return max nested SELECT scope depth for rewrite diagnostics."""
+    max_depth = 1
+    for select in expression.find_all(exp.Select):
+        depth = 1
+        parent = select.parent
+        while parent is not None:
+            if isinstance(parent, exp.Select):
+                depth += 1
+            parent = parent.parent
+        if depth > max_depth:
+            max_depth = depth
+    return max_depth
+
+
+def _has_subquery(expression: exp.Select) -> bool:
+    """Return True if query contains an explicit subquery expression."""
+    return any(True for _ in expression.find_all(exp.Subquery))
+
+
+def _should_run_invariant_checks(settings: TenantRewriteSettings | None = None) -> bool:
+    """Run rewrite invariants only in debug/test modes."""
+    rewrite_settings = settings or load_tenant_rewrite_settings()
+    if rewrite_settings.assert_invariants:
+        return True
+    return bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+
+def _count_rewrite_predicates(expression: exp.Select, tenant_column: str) -> int:
+    total = 0
+    for select in expression.find_all(exp.Select):
+        total += len(_collect_tenant_predicate_references(select, tenant_column))
+    return total
+
+
+def _tenant_predicate_reference(comparison: exp.Expression, tenant_column: str) -> str | None:
+    if not isinstance(comparison, exp.EQ):
+        return None
+
+    tenant_column_normalized = tenant_column.strip().lower()
+    if not tenant_column_normalized:
+        return None
+
+    left = comparison.this
+    right = comparison.expression
+
+    if isinstance(left, exp.Column) and isinstance(right, exp.Placeholder):
+        column = left
+    elif isinstance(right, exp.Column) and isinstance(left, exp.Placeholder):
+        column = right
+    else:
+        return None
+
+    if (column.name or "").strip().lower() != tenant_column_normalized:
+        return None
+
+    reference = (column.table or "").strip().lower()
+    return reference or None
+
+
+def _collect_tenant_predicate_references(select: exp.Select, tenant_column: str) -> list[str]:
+    where = select.args.get("where")
+    if where is None:
+        return []
+    references: list[str] = []
+    for comparison in where.find_all(exp.EQ):
+        if _nearest_select_ancestor(comparison) is not select:
+            continue
+        reference = _tenant_predicate_reference(comparison, tenant_column)
+        if reference:
+            references.append(reference)
+    return references
+
+
+def _scope_has_tenant_predicate(select: exp.Select, reference: str, tenant_column: str) -> bool:
+    normalized_reference = (reference or "").strip().lower()
+    if not normalized_reference:
+        return False
+    references = _collect_tenant_predicate_references(select, tenant_column)
+    return normalized_reference in references
+
+
+def _nearest_select_ancestor(node: exp.Expression) -> exp.Select | None:
+    parent = node.parent
+    while parent is not None:
+        if isinstance(parent, exp.Select):
+            return parent
+        parent = parent.parent
+    return None
+
+
+def _assert_no_duplicate_tenant_predicates(expression: exp.Select, tenant_column: str) -> None:
+    for select in expression.find_all(exp.Select):
+        references = _collect_tenant_predicate_references(select, tenant_column)
+        duplicates = {ref for ref in references if references.count(ref) > 1}
+        if duplicates:
+            duplicate = sorted(duplicates)[0]
+            raise AssertionError(
+                "Duplicate tenant predicate detected in the same scope for "
+                f"reference '{duplicate}'."
+            )
+
+
+def _assert_predicates_within_intended_scope(expression: exp.Select, tenant_column: str) -> None:
+    for select in expression.find_all(exp.Select):
+        defined_names = _get_defined_names(select)
+        for reference in _collect_tenant_predicate_references(select, tenant_column):
+            if reference not in defined_names:
+                raise AssertionError(
+                    "Tenant predicate injected outside intended scope for "
+                    f"reference '{reference}'."
+                )
+
+
+def _assert_all_eligible_targets_rewritten(
+    expression: exp.Select,
+    *,
+    strict_mode: bool,
+    tenant_column: str,
+    global_table_allowlist: set[str],
+) -> None:
+    classification = _assert_rewrite_eligible(expression, strict_mode=strict_mode)
+    with_ = expression.args.get("with_")
+    cte_names = (
+        {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+        if with_
+        else set()
+    )
+    targets = _collect_all_rewrite_targets(expression, classification)
+    for target in targets:
+        table_keys = _table_keys(target.table)
+        if any(key in cte_names for key in table_keys):
+            continue
+        if any(key in global_table_allowlist for key in table_keys):
+            continue
+
+        reference = (target.table.alias_or_name or target.table.name or "").strip().lower()
+        if not reference:
+            raise AssertionError("Eligible rewrite target missing stable table reference.")
+
+        if not _scope_has_tenant_predicate(target.scope_select, reference, tenant_column):
+            raise AssertionError(
+                "Eligible rewrite target missing tenant predicate for " f"reference '{reference}'."
+            )
+
+
+def assert_rewrite_invariants(
+    sql: str,
+    rewritten_sql: str,
+    params: Sequence[int],
+    *,
+    provider: str = "sqlite",
+    tenant_column: str = "tenant_id",
+    global_table_allowlist: set[str] | None = None,
+    table_columns: Mapping[str, set[str]] | None = None,
+    strict_mode: bool = True,
+    tenant_id: int | None = None,
+) -> None:
+    """Assert internal invariants for tenant rewrite correctness in debug/test modes."""
+    del table_columns  # Invariants operate on SQL shape and predicate semantics only.
+
+    normalized_provider = (provider or "").strip().lower()
+    dialect = normalize_sqlglot_dialect(normalized_provider)
+    original_expressions = sqlglot.parse(sql, read=dialect)
+    rewritten_expressions = sqlglot.parse(rewritten_sql, read=dialect)
+
+    if len(original_expressions) != 1 or original_expressions[0] is None:
+        raise AssertionError("Invariant input must contain exactly one original SQL statement.")
+    if len(rewritten_expressions) != 1 or rewritten_expressions[0] is None:
+        raise AssertionError("Invariant input must contain exactly one rewritten SQL statement.")
+
+    original_expression = original_expressions[0]
+    rewritten_expression = rewritten_expressions[0]
+
+    if not isinstance(original_expression, exp.Select):
+        raise AssertionError("Invariant input original SQL must be a SELECT statement.")
+    if not isinstance(rewritten_expression, exp.Select):
+        raise AssertionError("Invariant input rewritten SQL must be a SELECT statement.")
+
+    rewrite_predicate_count = _count_rewrite_predicates(rewritten_expression, tenant_column)
+    if rewrite_predicate_count != len(params):
+        raise AssertionError(
+            "Placeholder count mismatch: "
+            f"expected {rewrite_predicate_count}, received {len(params)} params."
+        )
+
+    _assert_no_duplicate_tenant_predicates(rewritten_expression, tenant_column)
+    _assert_predicates_within_intended_scope(rewritten_expression, tenant_column)
+    _assert_all_eligible_targets_rewritten(
+        rewritten_expression,
+        strict_mode=strict_mode,
+        tenant_column=tenant_column,
+        global_table_allowlist={
+            entry.strip().lower() for entry in (global_table_allowlist or set())
+        },
+    )
+
+    deterministic_tenant_id = tenant_id if tenant_id is not None else (params[0] if params else 0)
+    second_pass = rewrite_tenant_scoped_sql(
+        sql,
+        provider=normalized_provider,
+        tenant_id=int(deterministic_tenant_id),
+        tenant_column=tenant_column,
+        global_table_allowlist=global_table_allowlist,
+        _skip_invariant_check=True,
+    )
+    if (second_pass.rewritten_sql, second_pass.params) != (rewritten_sql, list(params)):
+        raise AssertionError("Tenant rewrite second pass is not deterministic.")
+
+
+def _assert_rewrite_eligible(
+    expression: exp.Expression, *, strict_mode: bool = True
+) -> CTEClassification | None:
     """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
     if _contains_set_operation(expression):
         raise TenantSQLRewriteError(
@@ -411,7 +752,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
             reason_code="NESTED_FROM_UNSUPPORTED",
         )
 
-    if _has_correlated_subquery(expression):
+    if _has_correlated_subquery(expression, strict_mode=strict_mode):
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support correlated subqueries.",
             reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
@@ -636,7 +977,7 @@ def _get_cte_names(select: exp.Select) -> set[str]:
     return {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
 
 
-def _has_correlated_subquery(expression: exp.Select) -> bool:
+def _has_correlated_subquery(expression: exp.Select, *, strict_mode: bool) -> bool:
     outer_visible_names = _get_defined_names(expression) | _get_cte_names(expression)
     if not outer_visible_names:
         return False
@@ -659,6 +1000,8 @@ def _has_correlated_subquery(expression: exp.Select) -> bool:
         inner_defined_names = _get_defined_names(select) | _get_cte_names(select)
         has_ambiguous_names = bool(inner_defined_names & outer_visible_names)
 
+        allow_ambiguous_unqualified = not strict_mode and _is_relaxed_single_from_scope(select)
+
         for column in select.find_all(exp.Column):
             col_table = (column.table or "").strip().lower()
             if col_table:
@@ -667,10 +1010,21 @@ def _has_correlated_subquery(expression: exp.Select) -> bool:
                 if col_table in outer_visible_names:
                     return True
             else:
-                if has_ambiguous_names:
+                if has_ambiguous_names and not allow_ambiguous_unqualified:
                     return True
 
     return False
+
+
+def _is_relaxed_single_from_scope(select: exp.Select) -> bool:
+    """Return True for the narrowly safe relaxed shape when strict mode is disabled."""
+    from_clause = select.args.get("from_")
+    if not isinstance(from_clause, exp.From):
+        return False
+    if not isinstance(from_clause.args.get("this"), exp.Table):
+        return False
+    joins = select.args.get("joins") or []
+    return len(joins) == 0
 
 
 def _top_level_tables(expression: exp.Select) -> list[exp.Table]:

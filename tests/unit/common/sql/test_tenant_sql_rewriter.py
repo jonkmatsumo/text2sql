@@ -5,6 +5,8 @@ import pytest
 from common.sql.tenant_sql_rewriter import (
     MAX_TENANT_REWRITE_TARGETS,
     TenantSQLRewriteError,
+    load_tenant_rewrite_config,
+    load_tenant_rewrite_settings,
     rewrite_tenant_scoped_sql,
 )
 
@@ -108,6 +110,124 @@ def test_rewrite_rejects_correlated_subqueries():
             provider="sqlite",
             tenant_id=1,
         )
+
+
+def test_rewrite_config_defaults_preserve_current_behavior(monkeypatch):
+    """Defaults should remain enabled and strict to preserve fail-closed behavior."""
+    monkeypatch.delenv("TENANT_REWRITE_ENABLED", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_STRICT_MODE", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_MAX_TARGETS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_MAX_PARAMS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_WARN_MS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_HARD_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_ASSERT_INVARIANTS", raising=False)
+
+    config = load_tenant_rewrite_config()
+    assert config.enabled is True
+    assert config.strict_mode is True
+    assert config.warn_ms == 50
+    assert config.hard_timeout_ms == 200
+    assert config.assert_invariants is False
+
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(
+            "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_settings_from_env_are_centralized(monkeypatch):
+    """All rewrite controls should load through the shared settings object."""
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+    monkeypatch.setenv("TENANT_REWRITE_MAX_TARGETS", "17")
+    monkeypatch.setenv("TENANT_REWRITE_MAX_PARAMS", "33")
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "777")
+    monkeypatch.setenv("TENANT_REWRITE_WARN_MS", "64")
+    monkeypatch.setenv("TENANT_REWRITE_HARD_TIMEOUT_MS", "120")
+    monkeypatch.setenv("TENANT_REWRITE_ASSERT_INVARIANTS", "true")
+
+    settings = load_tenant_rewrite_settings()
+    assert settings.enabled is False
+    assert settings.strict_mode is False
+    assert settings.max_targets == 17
+    assert settings.max_params == 33
+    assert settings.max_ast_nodes == 777
+    assert settings.warn_ms == 64
+    assert settings.hard_timeout_ms == 120
+    assert settings.assert_invariants is True
+
+
+def test_rewrite_respects_feature_flag_disabled(monkeypatch):
+    """Global rewrite disable should fail fast with canonical reason code."""
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
+
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(
+            "SELECT * FROM orders",
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+    assert exc.value.reason_code == "REWRITE_DISABLED"
+
+
+def test_rewrite_strict_mode_off_allows_single_from_unqualified_case(monkeypatch):
+    """Non-strict mode allows a narrow safe subquery shape with unqualified inner refs."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)"
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert result.tenant_predicates_added == 2
+
+
+def test_rewrite_strict_mode_true_rejects_ambiguous_unqualified(monkeypatch):
+    """Strict mode should fail closed on ambiguous unqualified inner references."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "true")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)"
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "CORRELATED_SUBQUERY_UNSUPPORTED"
+
+
+def test_rewrite_strict_mode_off_still_rejects_qualified_outer_reference(monkeypatch):
+    """Relaxed mode should not allow explicit qualified outer references in subqueries."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)"
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "CORRELATED_SUBQUERY_UNSUPPORTED"
+
+
+def test_rewrite_rejects_ast_complexity_exceeded(monkeypatch):
+    """AST guard should fail closed before deep rewrite traversal."""
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
+    predicates = " AND ".join(f"o.id > {index}" for index in range(100))
+    sql = f"SELECT * FROM orders o WHERE {predicates}"
+
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "AST_COMPLEXITY_EXCEEDED"
+
+
+def test_rewrite_allows_query_under_ast_complexity_cap(monkeypatch):
+    """Complex but normal query should remain rewrite-eligible under conservative caps."""
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "400")
+    sql = (
+        "SELECT o.id FROM orders o "
+        "JOIN customers c ON o.customer_id = c.id "
+        "WHERE o.id IN (SELECT li.order_id FROM line_items li WHERE li.status = 'shipped')"
+    )
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert result.tenant_predicates_added == 3
 
 
 def test_rewrite_rejects_window_functions():

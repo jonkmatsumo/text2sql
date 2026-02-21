@@ -1331,6 +1331,265 @@ async def test_full_pipeline_sqlite_tenant_rewrite_subquery_qualified_outer_reje
 
 
 @pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_production_style_complex_query(monkeypatch):
+    """Complex production-style query should rewrite deterministically with bounded params."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed_sql: list[str] = []
+    observed_params: list[list[Any]] = []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed_sql.append(str(sql))
+                observed_params.append(list(params))
+                return [{"id": 1, "customer_name": "Ada"}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setenv("TENANT_REWRITE_ASSERT_INVARIANTS", "true")
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {
+                "orders": ["id", "tenant_id", "customer_id", "status", "created_at"],
+                "customers": ["id", "tenant_id", "name", "region_id", "active", "tier"],
+                "regions": ["id", "tenant_id", "name"],
+                "order_items": ["order_id", "tenant_id", "quantity"],
+                "promotions": ["discount", "tenant_id", "updated_at"],
+            }
+        ),
+    )
+
+    sql = (
+        "WITH recent_orders AS ("
+        "SELECT o.id, o.customer_id, o.status, o.created_at "
+        "FROM orders o "
+        "JOIN customers c ON c.id = o.customer_id "
+        "WHERE o.status IN ('open', 'processing')) "
+        "SELECT ro.id, c.name "
+        "FROM recent_orders ro "
+        "JOIN customers c ON c.id = ro.customer_id "
+        "JOIN regions r ON r.id = c.region_id "
+        "WHERE EXISTS (SELECT 1 FROM order_items oi WHERE oi.quantity > 0) "
+        "AND (SELECT MAX(p.discount) FROM promotions p ORDER BY p.updated_at LIMIT 1) >= 0 "
+        "AND (c.active = 1 AND (r.name IS NOT NULL OR c.tier = 'gold'))"
+    )
+
+    first_result = await app.ainvoke(
+        build_app_input(
+            question="Show complex production report",
+            from_cache=True,
+            current_sql=sql,
+            retry_count=99,
+        ),
+        config=unique_thread_config(),
+    )
+    second_result = await app.ainvoke(
+        build_app_input(
+            question="Show complex production report",
+            from_cache=True,
+            current_sql=sql,
+            retry_count=99,
+        ),
+        config=unique_thread_config(),
+    )
+
+    assert first_result["error"] is None
+    assert second_result["error"] is None
+    assert len(observed_sql) == 2
+    assert len(observed_params) == 2
+    assert observed_sql[0] == observed_sql[1]
+    assert observed_params[0] == observed_params[1]
+
+    rewritten_sql = observed_sql[0]
+    rewritten_params = observed_params[0]
+    assert "o.tenant_id = ?" in rewritten_sql
+    assert rewritten_sql.count("c.tenant_id = ?") >= 2
+    assert "r.tenant_id = ?" in rewritten_sql
+    assert "oi.tenant_id = ?" in rewritten_sql
+    assert "p.tenant_id = ?" in rewritten_sql
+    assert len(rewritten_params) <= 50
+    assert rewritten_sql.count("tenant_id = ?") == len(rewritten_params)
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_disabled_toggle_reports_rejected_disabled(
+    monkeypatch,
+):
+    """Disabled rewrite toggle should fail closed with deterministic contract metadata."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False, "tool_response": None}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                del sql, params
+                observed["connection_called"] = True
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        response = await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+        observed["tool_response"] = json.loads(response)
+        return response
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+
+    state = build_app_input(
+        question="Show tenant-scoped orders",
+        from_cache=True,
+        current_sql="SELECT * FROM orders",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    error_text = str(result.get("error") or "").lower()
+    assert error_text == "tenant isolation is not supported for this provider."
+    assert "select" not in error_text
+    assert "orders" not in error_text
+    assert observed["connection_called"] is False
+    tool_response = observed["tool_response"] or {}
+    assert tool_response["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
+    assert (
+        tool_response["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_rewrite_disabled"
+    )
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_low_ast_cap_reports_rejected_limit(monkeypatch):
+    """Low AST cap should fail rewrite with deterministic REJECTED_LIMIT outcome metadata."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False, "tool_response": None}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                del sql, params
+                observed["connection_called"] = True
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        response = await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+        observed["tool_response"] = json.loads(response)
+        return response
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "60")
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+
+    sql = "SELECT * FROM orders o WHERE " + " AND ".join(f"o.id > {index}" for index in range(100))
+    state = build_app_input(
+        question="Show tenant-scoped orders with deep filters",
+        from_cache=True,
+        current_sql=sql,
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    error_text = str(result.get("error") or "").lower()
+    assert error_text == "tenant isolation is not supported for this provider."
+    assert "select" not in error_text
+    assert "orders" not in error_text
+    assert observed["connection_called"] is False
+    tool_response = observed["tool_response"] or {}
+    assert tool_response["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+    assert (
+        tool_response["metadata"]["tenant_rewrite_reason_code"]
+        == "tenant_rewrite_ast_complexity_exceeded"
+    )
+
+
+@pytest.mark.asyncio
 async def test_full_pipeline_sqlite_tenant_subquery_scalar_agg_reject(
     monkeypatch,
 ):

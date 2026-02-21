@@ -145,8 +145,37 @@ async def test_duckdb_provider_rewrites_sql_and_preserves_existing_params():
 
 
 @pytest.mark.asyncio
-async def test_sql_rewrite_rejects_when_no_table_predicate_can_be_added():
-    """Table-less SELECT should fail when rewrite mode cannot inject tenant predicates."""
+async def test_sql_rewrite_skips_when_no_table_predicate_is_required():
+    """Table-less SELECT should skip rewrite with deterministic metadata."""
+    observed: dict[str, object] = {}
+    with (
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_caps("sqlite", "sql_rewrite"),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(rows=[{"ok": 1}], recorder=observed),
+        ),
+    ):
+        payload = await handler("SELECT 1", tenant_id=5)
+
+    result = json.loads(payload)
+    assert result.get("error") is None
+    assert result["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+    assert result["metadata"]["tenant_enforcement_applied"] is False
+    assert result["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+    assert result["metadata"].get("tenant_rewrite_reason_code") is None
+    assert observed.get("sql") == "SELECT 1"
+    assert observed.get("params") == []
+
+
+@pytest.mark.asyncio
+async def test_sql_rewrite_rejects_when_feature_flag_disabled(monkeypatch):
+    """Global rewrite kill-switch should return canonical bounded reason code."""
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
     mock_connection = MagicMock()
     with (
         patch("mcp_server.utils.auth.validate_role", return_value=None),
@@ -160,12 +189,41 @@ async def test_sql_rewrite_rejects_when_no_table_predicate_can_be_added():
             mock_connection,
         ),
     ):
-        payload = await handler("SELECT 1", tenant_id=5)
+        payload = await handler("SELECT * FROM orders", tenant_id=5)
 
     result = json.loads(payload)
     assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-    assert result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_no_predicates_produced"
+    assert result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_disabled"
+    mock_connection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sql_rewrite_rejects_when_ast_complexity_cap_exceeded(monkeypatch):
+    """Complexity cap should fail closed with bounded reason code."""
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
+    mock_connection = MagicMock()
+    sql = "SELECT * FROM orders o WHERE " + " AND ".join(f"o.id > {index}" for index in range(100))
+    with (
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=_caps("sqlite", "sql_rewrite"),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            mock_connection,
+        ),
+    ):
+        payload = await handler(sql, tenant_id=5)
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert (
+        result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_ast_complexity_exceeded"
+    )
     mock_connection.assert_not_called()
 
 
