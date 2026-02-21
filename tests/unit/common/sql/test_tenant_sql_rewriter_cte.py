@@ -77,8 +77,8 @@ def test_classify_cte_chained_interpretation():
     # Current implementation says NO (UNSUPPORTED) because it only allows base tables in CTE bodies.
     sql = "WITH cte1 AS (SELECT * FROM orders), cte2 AS (SELECT * FROM cte1) SELECT * FROM cte2"
     expression = sqlglot.parse_one(sql)
-    # Based on current implementation which is conservative:
-    assert classify_cte_query(expression) == CTEClassification.UNSUPPORTED_CTE
+    # v1.1 allows chained CTEs
+    assert classify_cte_query(expression) == CTEClassification.SAFE_SIMPLE_CTE
 
 
 @pytest.mark.parametrize(

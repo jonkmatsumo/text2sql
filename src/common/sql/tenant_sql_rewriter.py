@@ -347,9 +347,6 @@ def classify_cte_query(expression: exp.Expression) -> CTEClassification:
     if with_.recursive:
         return CTEClassification.UNSUPPORTED_CTE
 
-    # Track CTE names to distinguish them from base tables
-    cte_names = {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
-
     # 1. Check CTE bodies
     for cte in with_.expressions:
         this = cte.this
@@ -362,14 +359,10 @@ def classify_cte_query(expression: exp.Expression) -> CTEClassification:
         if _has_nested_select(this):
             return CTEClassification.UNSUPPORTED_CTE
 
-        # Ensure CTE body only selects from base tables (non-CTE references)
-        # Note: In simple v1, we don't support CTEs referencing other CTEs yet?
-        # The prompt says "Each CTE body is a simple SELECT over base tables".
-        # This implies we should reject if a CTE references another CTE?
-        # Let's be conservative as requested.
-        for table in this.find_all(exp.Table):
-            if table.name.lower() in cte_names:
-                return CTEClassification.UNSUPPORTED_CTE
+        # Ensure CTE body is a simple SELECT.
+        # v1.1: Allow CTEs to reference previously defined CTEs.
+        # The rewrite logic will correctly skip them if they are in cte_names.
+        pass
 
     # 2. Check the final SELECT (the expression itself without the WITH clause)
     # sqlglot expression for SELECT ... WITH ... will have the WITH in its args.
