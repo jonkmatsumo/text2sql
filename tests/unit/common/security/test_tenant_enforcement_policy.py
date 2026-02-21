@@ -1,6 +1,7 @@
 from common.security.tenant_enforcement_policy import (
     TenantEnforcementPolicy,
     TenantEnforcementResult,
+    TenantSQLShape,
 )
 
 
@@ -152,3 +153,93 @@ def test_policy_determine_outcome_sql_rewrite_unsupported():
         outcome="REJECTED_UNSUPPORTED",
         reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
     )
+
+
+def test_policy_classify_sql_safe_simple():
+    """Test classification of a simple safe SELECT."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("SELECT id FROM users WHERE status = 'active'")
+    assert shape == TenantSQLShape.SAFE_SIMPLE_SELECT
+
+
+def test_policy_classify_sql_parse_error():
+    """Test classification of invalid SQL."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("SELECT FROM WHERE")
+    assert shape == TenantSQLShape.PARSE_ERROR
+
+
+def test_policy_classify_sql_not_select():
+    """Test classification of a non-SELECT statement."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("UPDATE users SET status = 'active'")
+    assert shape == TenantSQLShape.UNSUPPORTED_STATEMENT_TYPE
+
+
+def test_policy_classify_sql_set_operation():
+    """Test classification of a UNION statement."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("SELECT id FROM a UNION SELECT id FROM b")
+    assert shape == TenantSQLShape.UNSUPPORTED_SET_OPERATION
+
+
+def test_policy_classify_sql_safe_cte():
+    """Test classification of a simple CTE."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("WITH cte AS (SELECT id FROM users) SELECT id FROM cte")
+    assert shape == TenantSQLShape.SAFE_CTE_QUERY
+
+
+def test_policy_classify_sql_complexity_exceeded():
+    """Test classification when AST node count exceeds limit."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=2,  # Very low limit
+        hard_timeout_ms=200,
+    )
+    shape = policy.classify_sql("SELECT id, name, status, role FROM users WHERE age > 21")
+    assert shape == TenantSQLShape.UNSUPPORTED_COMPLEXITY
