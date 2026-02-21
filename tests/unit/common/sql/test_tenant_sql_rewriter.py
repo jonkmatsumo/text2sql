@@ -120,11 +120,11 @@ def test_rewrite_rejects_window_functions():
         )
 
 
-def test_rewrite_rejects_ctes_by_default():
-    """Common table expressions are intentionally fail-closed in v1."""
-    with pytest.raises(TenantSQLRewriteError, match="CTEs"):
+def test_rewrite_rejects_unsupported_ctes():
+    """Unsupported common table expressions must still fail closed."""
+    with pytest.raises(TenantSQLRewriteError, match="set operations"):
         rewrite_tenant_scoped_sql(
-            "WITH scoped_orders AS (SELECT * FROM orders) SELECT * FROM scoped_orders",
+            "WITH RECURSIVE cte1 AS (SELECT 1 UNION ALL SELECT 1 FROM cte1) SELECT * FROM cte1",
             provider="sqlite",
             tenant_id=1,
         )

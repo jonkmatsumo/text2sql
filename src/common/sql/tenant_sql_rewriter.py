@@ -70,12 +70,97 @@ def rewrite_tenant_scoped_sql(
         raise TenantSQLRewriteError("Tenant rewrite requires a single SELECT statement.")
 
     expression = expressions[0]
-    _assert_rewrite_eligible(expression)
+    classification = _assert_rewrite_eligible(expression)
     assert isinstance(expression, exp.Select)
 
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
 
+    total_rewritten_tables: list[str] = []
+    total_predicates_count = 0
+
+    if classification == CTEClassification.SAFE_SIMPLE_CTE:
+        with_ = expression.args.get("with_")
+        assert with_ is not None
+        cte_names = {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+
+        # 1. Injection in CTE bodies
+        for cte in with_.expressions:
+            assert isinstance(cte.this, exp.Select)
+            rewritten, count = _inject_into_select(
+                cte.this,
+                tenant_id,
+                tenant_column_name,
+                allowlist,
+                normalized_columns,
+                cte_names,
+            )
+            total_rewritten_tables.extend(rewritten)
+            total_predicates_count += count
+
+        # 2. Injection in final SELECT
+        rewritten, count = _inject_into_select(
+            expression,
+            tenant_id,
+            tenant_column_name,
+            allowlist,
+            normalized_columns,
+            cte_names,
+        )
+        total_rewritten_tables.extend(rewritten)
+        total_predicates_count += count
+    else:
+        # Simple non-CTE path
+        rewritten, count = _inject_into_select(
+            expression,
+            tenant_id,
+            tenant_column_name,
+            allowlist,
+            normalized_columns,
+            set(),
+        )
+        total_rewritten_tables.extend(rewritten)
+        total_predicates_count += count
+
+    if total_predicates_count == 0:
+        # We don't check rewrite_targets here anymore as it's handled inside helper
+        # If no predicates were added, but there were targets, it means they were allowlisted.
+        # However, the original code had:
+        # if not predicates: if not rewrite_targets: raise ... else return result
+        # I'll keep that logic by checking if we have any targets at all.
+        all_targets = _rewrite_target_tables(expression)
+        if classification == CTEClassification.SAFE_SIMPLE_CTE:
+            with_ = expression.args.get("with_")
+            for cte in with_.expressions:
+                all_targets.extend(_rewrite_target_tables(cte.this))
+
+        if not all_targets:
+            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+
+        return TenantSQLRewriteResult(
+            rewritten_sql=expression.sql(dialect=dialect),
+            params=[],
+            tables_rewritten=[],
+            tenant_predicates_added=0,
+        )
+
+    return TenantSQLRewriteResult(
+        rewritten_sql=expression.sql(dialect=dialect),
+        params=[tenant_id] * total_predicates_count,
+        tables_rewritten=total_rewritten_tables,
+        tenant_predicates_added=total_predicates_count,
+    )
+
+
+def _inject_into_select(
+    expression: exp.Select,
+    tenant_id: int,
+    tenant_column_name: str,
+    allowlist: set[str],
+    normalized_columns: dict[str, set[str]],
+    cte_names: set[str],
+) -> tuple[list[str], int]:
+    """Inject tenant predicates into a single Select expression."""
     rewrite_targets = _rewrite_target_tables(expression)
     rewritten_tables: list[str] = []
     predicates: list[exp.Expression] = []
@@ -84,6 +169,11 @@ def rewrite_tenant_scoped_sql(
         table_keys = _table_keys(table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
+
+        # Skip if it's a CTE reference
+        if any(key in cte_names for key in table_keys):
+            continue
+
         if any(key in allowlist for key in table_keys):
             continue
 
@@ -104,14 +194,7 @@ def rewrite_tenant_scoped_sql(
         )
 
     if not predicates:
-        if not rewrite_targets:
-            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
-        return TenantSQLRewriteResult(
-            rewritten_sql=expression.sql(dialect=dialect),
-            params=[],
-            tables_rewritten=[],
-            tenant_predicates_added=0,
-        )
+        return [], 0
 
     combined_predicate = predicates[0]
     for predicate in predicates[1:]:
@@ -126,12 +209,7 @@ def rewrite_tenant_scoped_sql(
             exp.Where(this=exp.and_(existing_where.this, combined_predicate)),
         )
 
-    return TenantSQLRewriteResult(
-        rewritten_sql=expression.sql(dialect=dialect),
-        params=[tenant_id] * len(predicates),
-        tables_rewritten=rewritten_tables,
-        tenant_predicates_added=len(predicates),
-    )
+    return rewritten_tables, len(predicates)
 
 
 def _normalize_table_columns(
@@ -180,7 +258,7 @@ def _table_keys(table: exp.Table) -> list[str]:
     return keys
 
 
-def _assert_rewrite_eligible(expression: exp.Expression) -> None:
+def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | None:
     """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
     if _contains_set_operation(expression):
         raise TenantSQLRewriteError("Tenant rewrite v1 does not support set operations.")
@@ -189,7 +267,10 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> None:
         raise TenantSQLRewriteError("Tenant rewrite supports SELECT statements only.")
 
     if expression.args.get("with_") is not None:
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support CTEs.")
+        classification = classify_cte_query(expression)
+        if classification == CTEClassification.UNSUPPORTED_CTE:
+            raise TenantSQLRewriteError("Tenant rewrite v1 does not support unsupported CTEs.")
+        return classification
 
     if any(True for _ in expression.find_all(exp.Window)):
         raise TenantSQLRewriteError("Tenant rewrite v1 does not support window functions.")
@@ -202,6 +283,8 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> None:
 
     if _has_nested_select(expression):
         raise TenantSQLRewriteError("Tenant rewrite v1 does not support subqueries.")
+
+    return None
 
 
 def classify_cte_query(expression: exp.Expression) -> CTEClassification:
