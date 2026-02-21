@@ -15,6 +15,7 @@ from common.constants.reason_codes import PayloadTruncationReason
 from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
+from common.observability.metrics import mcp_metrics
 from common.sql.complexity import (
     ComplexityMetrics,
     analyze_sql_complexity,
@@ -71,6 +72,14 @@ _TENANT_REWRITE_LIMIT_REASONS = {
     "AST_COMPLEXITY_EXCEEDED",
     "PARAM_LIMIT_EXCEEDED",
     "TARGET_LIMIT_EXCEEDED",
+}
+_TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
+    "APPLIED",
+    "SKIPPED_NOT_REQUIRED",
+    "REJECTED_UNSUPPORTED",
+    "REJECTED_DISABLED",
+    "REJECTED_LIMIT",
+    "REJECTED_TIMEOUT",
 }
 
 
@@ -137,6 +146,56 @@ def _tenant_enforcement_envelope_metadata(
     if tenant_rewrite_reason_code:
         metadata["tenant_rewrite_reason_code"] = tenant_rewrite_reason_code
     return metadata
+
+
+def _tenant_enforcement_observability_fields(
+    metadata: dict[str, Any] | None,
+) -> tuple[str, str, bool, str | None]:
+    tenant_metadata = metadata if isinstance(metadata, dict) else {}
+    mode = _normalize_tenant_enforcement_mode(tenant_metadata.get("tenant_enforcement_mode"))
+    raw_outcome = str(tenant_metadata.get("tenant_rewrite_outcome") or "").strip().upper()
+    outcome = (
+        raw_outcome
+        if raw_outcome in _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST
+        else _default_tenant_outcome_for_mode(mode)
+    )
+    applied_raw = tenant_metadata.get("tenant_enforcement_applied")
+    if isinstance(applied_raw, bool):
+        applied = applied_raw
+    else:
+        applied = outcome == "APPLIED"
+
+    reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
+    bounded_reason_code: str | None = None
+    if outcome.startswith("REJECTED_") and isinstance(reason_code, str) and reason_code.strip():
+        bounded_reason_code = reason_code.strip().lower()
+    return mode, outcome, applied, bounded_reason_code
+
+
+def _record_tenant_enforcement_observability(metadata: dict[str, Any] | None) -> None:
+    mode, outcome, applied, reason_code = _tenant_enforcement_observability_fields(metadata)
+
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("tenant.enforcement.mode", mode)
+        span.set_attribute("tenant.enforcement.outcome", outcome)
+        span.set_attribute("tenant.enforcement.applied", applied)
+        if reason_code is not None:
+            span.set_attribute("tenant.enforcement.reason_code", reason_code)
+
+    metric_attributes: dict[str, Any] = {
+        "tool_name": TOOL_NAME,
+        "mode": mode,
+        "outcome": outcome,
+        "applied": applied,
+    }
+    if reason_code is not None:
+        metric_attributes["reason_code"] = reason_code
+    mcp_metrics.add_counter(
+        "mcp.tenant_enforcement.outcome_total",
+        description="Count of execute_sql_query tenant enforcement outcomes",
+        attributes=metric_attributes,
+    )
 
 
 def _record_tenant_rewrite_duration(duration_ms: float, *, warn_ms: int) -> None:
@@ -391,6 +450,8 @@ def _construct_error_response(
         )
     if details_safe:
         error_meta = error_meta.model_copy(update={"details_safe": details_safe})
+
+    _record_tenant_enforcement_observability(envelope_metadata)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -1190,6 +1251,7 @@ async def handler(
         envelope = ExecuteSQLQueryResponseEnvelope(
             rows=result_rows, columns=columns, metadata=envelope_metadata
         )
+        _record_tenant_enforcement_observability(tenant_enforcement_metadata)
 
         return envelope.model_dump_json(exclude_none=True)
 

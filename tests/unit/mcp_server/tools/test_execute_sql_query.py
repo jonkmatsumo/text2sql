@@ -475,6 +475,98 @@ class TestExecuteSqlQuery:
             )
 
     @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_enforcement_observability_success_attributes(self):
+        """Success response should emit bounded tenant enforcement span + metric attributes."""
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as mock_add_counter,
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", return_value=mock_conn
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "rls_session"
+            result = await handler("SELECT 1 AS ok", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["metadata"]["tenant_enforcement_mode"] == "rls_session"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.mode", "rls_session")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.outcome", "APPLIED")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.applied", True)
+        assert not any(
+            call.args and call.args[0] == "tenant.enforcement.reason_code"
+            for call in mock_span.set_attribute.call_args_list
+        )
+        mock_add_counter.assert_any_call(
+            "mcp.tenant_enforcement.outcome_total",
+            description="Count of execute_sql_query tenant enforcement outcomes",
+            attributes={
+                "tool_name": "execute_sql_query",
+                "mode": "rls_session",
+                "outcome": "APPLIED",
+                "applied": True,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_enforcement_observability_failure_attributes(self):
+        """Rejected response should emit bounded tenant enforcement reason telemetry."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.tools.execute_sql_query.mcp_metrics.add_counter") as mock_add_counter,
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM orders", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.mode", "sql_rewrite")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.outcome", "REJECTED_DISABLED")
+        mock_span.set_attribute.assert_any_call("tenant.enforcement.applied", False)
+        mock_span.set_attribute.assert_any_call(
+            "tenant.enforcement.reason_code",
+            "tenant_rewrite_rewrite_disabled",
+        )
+        mock_add_counter.assert_any_call(
+            "mcp.tenant_enforcement.outcome_total",
+            description="Count of execute_sql_query tenant enforcement outcomes",
+            attributes={
+                "tool_name": "execute_sql_query",
+                "mode": "sql_rewrite",
+                "outcome": "REJECTED_DISABLED",
+                "applied": False,
+                "reason_code": "tenant_rewrite_rewrite_disabled",
+            },
+        )
+
+    @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_timeout_emits_duration_and_fails_closed(self):
         """Long rewrite duration should emit timing span data and fail with bounded reason."""
         from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult
