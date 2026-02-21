@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Mapping, Sequence
 
 import sqlglot
@@ -16,6 +17,13 @@ _SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
 
 class TenantSQLRewriteError(ValueError):
     """Raised when tenant rewrite cannot be applied safely."""
+
+
+class CTEClassification(Enum):
+    """Classification of CTE query safety for tenant rewrite."""
+
+    SAFE_SIMPLE_CTE = "SAFE_SIMPLE_CTE"
+    UNSUPPORTED_CTE = "UNSUPPORTED_CTE"
 
 
 @dataclass(frozen=True)
@@ -194,6 +202,89 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> None:
 
     if _has_nested_select(expression):
         raise TenantSQLRewriteError("Tenant rewrite v1 does not support subqueries.")
+
+
+def classify_cte_query(expression: exp.Expression) -> CTEClassification:
+    """Classify if a CTE query is safe for conservative tenant rewrite.
+
+    Rules for SAFE_SIMPLE_CTE (tight and conservative):
+    - Single WITH clause (already checked by caller usually, but enforced here).
+    - No recursive WITH.
+    - Each CTE body is a simple SELECT over base tables (no nested SELECT, no set ops, etc).
+    - Final query selects FROM base tables or direct references to CTE names.
+    """
+    if not isinstance(expression, exp.Select):
+        return CTEClassification.UNSUPPORTED_CTE
+
+    with_ = expression.args.get("with_")
+    if not with_:
+        return CTEClassification.UNSUPPORTED_CTE
+
+    if with_.recursive:
+        return CTEClassification.UNSUPPORTED_CTE
+
+    # Track CTE names to distinguish them from base tables
+    cte_names = {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+
+    # 1. Check CTE bodies
+    for cte in with_.expressions:
+        this = cte.this
+        if not isinstance(this, exp.Select):
+            return CTEClassification.UNSUPPORTED_CTE
+
+        if _contains_set_operation(this):
+            return CTEClassification.UNSUPPORTED_CTE
+
+        if _has_nested_select(this):
+            return CTEClassification.UNSUPPORTED_CTE
+
+        # Ensure CTE body only selects from base tables (non-CTE references)
+        # Note: In simple v1, we don't support CTEs referencing other CTEs yet?
+        # The prompt says "Each CTE body is a simple SELECT over base tables".
+        # This implies we should reject if a CTE references another CTE?
+        # Let's be conservative as requested.
+        for table in this.find_all(exp.Table):
+            if table.name.lower() in cte_names:
+                return CTEClassification.UNSUPPORTED_CTE
+
+    # 2. Check the final SELECT (the expression itself without the WITH clause)
+    # sqlglot expression for SELECT ... WITH ... will have the WITH in its args.
+    # We need to check the SELECT body.
+    if _contains_set_operation(expression):
+        return CTEClassification.UNSUPPORTED_CTE
+
+    # We want to allow SELECT from base tables or CTE names, but no other nesting.
+    # _has_nested_select checks if find_all(exp.Select) has anything other than 'expression'.
+    # However, 'expression' is the top-level Select which *contains* the CTE bodies in its
+    # 'with' arg. We should check if there are any *other* Selects outside of the 'with'
+    # definitions.
+
+    # Check for subqueries in FROM/JOIN
+    if _has_nested_from_subquery(expression):
+        return CTEClassification.UNSUPPORTED_CTE
+
+    # Check for subqueries in SELECT/WHERE etc.
+    # We can't use _has_nested_select easily because it will find the CTE bodies.
+    for node in expression.find_all(exp.Select):
+        if node is expression:
+            continue
+        # If this select is NOT one of the CTE definition bodies, then it's an unsupported
+        # nested select.
+        is_cte_body = False
+        for cte in with_.expressions:
+            if node is cte.this:
+                is_cte_body = True
+                break
+        if not is_cte_body:
+            return CTEClassification.UNSUPPORTED_CTE
+
+    # 3. Final query SELECT FROM base tables or CTE names only
+    # _top_level_tables finds Table nodes in FROM and JOIN.
+    for table in _top_level_tables(expression):
+        # This is fine. It's either a base table or a CTE reference.
+        pass
+
+    return CTEClassification.SAFE_SIMPLE_CTE
 
 
 def _contains_set_operation(expression: exp.Expression) -> bool:
