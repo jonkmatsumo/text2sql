@@ -819,3 +819,336 @@ async def test_full_pipeline_sqlite_tenant_rewrite_missing_column_join_leg_rejec
     assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
     assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
     assert observed["connection_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_in(monkeypatch):
+    """Main query + WHERE IN subquery success."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["sql"] = sql
+                observed["params"] = list(params)
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {"orders": ["id", "tenant_id", "status"], "line_items": ["order_id", "tenant_id"]}
+        ),
+    )
+
+    state = build_app_input(
+        question="Show orders with line items",
+        from_cache=True,
+        current_sql="SELECT id FROM orders WHERE id IN (SELECT order_id FROM line_items)",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert result["error"] is None
+    sql = str(observed.get("sql", ""))
+    assert "orders.tenant_id = ?" in sql
+    assert "line_items.tenant_id = ?" in sql
+    # Because line_items appears inside the inner subquery, it gets injected
+    # and because orders is outer, it gets injected.
+    assert observed.get("params") == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_exists(monkeypatch):
+    """EXISTS subquery success."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["sql"] = sql
+                observed["params"] = list(params)
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {"orders": ["id", "tenant_id"], "line_items": ["order_id", "tenant_id"]}
+        ),
+    )
+
+    state = build_app_input(
+        question="Show orders",
+        from_cache=True,
+        current_sql=(
+            "SELECT id FROM orders WHERE EXISTS "
+            "(SELECT 1 FROM line_items WHERE line_items.status = 'open')"
+        ),
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert result["error"] is None
+    sql = str(observed.get("sql", ""))
+    assert "orders.tenant_id = ?" in sql
+    assert "line_items.tenant_id = ?" in sql
+    assert observed.get("params") == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_projection(monkeypatch):
+    """SELECT projection subquery success."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["sql"] = sql
+                observed["params"] = list(params)
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_schema_cache=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {"orders": ["id", "tenant_id"], "line_items": ["order_id", "tenant_id"]}
+        ),
+    )
+
+    state = build_app_input(
+        question="Show orders",
+        from_cache=True,
+        current_sql="SELECT id, (SELECT count(*) FROM line_items LIMIT 1) FROM orders",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert result["error"] is None
+    sql = str(observed.get("sql", ""))
+    assert "orders.tenant_id = ?" in sql
+    assert "line_items.tenant_id = ?" in sql
+    assert observed.get("params") == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_correlated_reject(monkeypatch):
+    """Correlated subqueries not bounded properly should be rejected."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"ignored": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+        ),
+    )
+
+    state = build_app_input(
+        question="Correlated",
+        from_cache=True,
+        current_sql=(
+            "SELECT * FROM orders o WHERE EXISTS "
+            "(SELECT count(*) FROM line_items WHERE order_id = o.id LIMIT 1)"
+        ),
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    assert observed["connection_called"] is False
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_sqlite_tenant_rewrite_subquery_missing_column_reject(monkeypatch):
+    """Missing tenant column inside subquery should reject."""
+    from dal.capabilities import BackendCapabilities
+    from mcp_server.tools.execute_sql_query import handler as execute_handler
+
+    observed: dict[str, Any] = {"connection_called": False}
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        class _Conn:
+            async def fetch(self, sql, *params):
+                observed["connection_called"] = True
+                return [{"id": 1}]
+
+        yield _Conn()
+
+    dal = MockDAL(response=_success_envelope([{"ignored": True}]))
+    mcp = MockMCPClient(dal=dal)
+
+    async def _execute_tool(payload: dict[str, Any]) -> str:
+        return await execute_handler(
+            sql_query=payload["sql_query"],
+            tenant_id=payload["tenant_id"],
+            params=payload.get("params"),
+        )
+
+    mcp.set_tool_response("execute_sql_query", _execute_tool)
+    install_mock_agent_runtime(monkeypatch, mcp_client=mcp)
+    monkeypatch.setattr("mcp_server.utils.auth.validate_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+        lambda: BackendCapabilities(
+            provider_name="sqlite",
+            supports_tenant_enforcement=True,
+            tenant_enforcement_mode="sql_rewrite",
+            supports_column_metadata=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_connection",
+        lambda *_args, **_kwargs: _conn_ctx(),
+    )
+    monkeypatch.setattr(
+        "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+        lambda: _metadata_store_for_tables(
+            {"orders": ["id", "tenant_id"], "line_items": ["order_id"]}
+        ),  # missing tenant_id on subquery table
+    )
+
+    state = build_app_input(
+        question="Missing tenant col",
+        from_cache=True,
+        current_sql="SELECT id FROM orders WHERE id IN (SELECT order_id FROM line_items)",
+        retry_count=99,
+    )
+    result = await app.ainvoke(state, config=unique_thread_config())
+
+    assert _value(result["error_category"]) == "TENANT_ENFORCEMENT_UNSUPPORTED"
+    assert result["error_metadata"]["error_code"] == ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value
+    assert observed["connection_called"] is False
