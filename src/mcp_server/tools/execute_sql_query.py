@@ -114,23 +114,6 @@ def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
     return "none"
 
 
-def _tenant_rewrite_outcome_for_reason(reason_code: str | None) -> str:
-    normalized = (reason_code or "").strip().upper()
-    if normalized == "REWRITE_DISABLED":
-        return "REJECTED_DISABLED"
-    if normalized == "REWRITE_TIMEOUT":
-        return "REJECTED_TIMEOUT"
-    if normalized in _TENANT_REWRITE_LIMIT_REASONS:
-        return "REJECTED_LIMIT"
-    return "REJECTED_UNSUPPORTED"
-
-
-def _default_tenant_outcome_for_mode(mode: str | None) -> str:
-    if _normalize_tenant_enforcement_mode(mode) == "rls_session":
-        return "APPLIED"
-    return "SKIPPED_NOT_REQUIRED"
-
-
 def _tenant_enforcement_envelope_metadata(
     *,
     tenant_enforcement_applied: bool,
@@ -152,23 +135,17 @@ def _tenant_enforcement_observability_fields(
     metadata: dict[str, Any] | None,
 ) -> tuple[str, str, bool, str | None]:
     tenant_metadata = metadata if isinstance(metadata, dict) else {}
-    mode = _normalize_tenant_enforcement_mode(tenant_metadata.get("tenant_enforcement_mode"))
-    raw_outcome = str(tenant_metadata.get("tenant_rewrite_outcome") or "").strip().upper()
+    mode = str(tenant_metadata.get("tenant_enforcement_mode") or "none").strip().lower()
     outcome = (
-        raw_outcome
-        if raw_outcome in _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST
-        else _default_tenant_outcome_for_mode(mode)
+        str(tenant_metadata.get("tenant_rewrite_outcome") or "SKIPPED_NOT_REQUIRED").strip().upper()
     )
-    applied_raw = tenant_metadata.get("tenant_enforcement_applied")
-    if isinstance(applied_raw, bool):
-        applied = applied_raw
-    else:
-        applied = outcome == "APPLIED"
+    applied = bool(tenant_metadata.get("tenant_enforcement_applied"))
 
     reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
     bounded_reason_code: str | None = None
-    if outcome.startswith("REJECTED_") and isinstance(reason_code, str) and reason_code.strip():
+    if isinstance(reason_code, str) and reason_code.strip():
         bounded_reason_code = reason_code.strip().lower()
+
     return mode, outcome, applied, bounded_reason_code
 
 
@@ -254,6 +231,20 @@ def _tenant_enforcement_unsupported_response(
 ) -> str:
     """Return a canonical tenant-enforcement unsupported response envelope."""
     bounded_reason_code = _bounded_tenant_rewrite_reason_code(reason_code)
+
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+
+    policy = TenantEnforcementPolicy(
+        provider=provider,
+        mode=tenant_enforcement_mode or "none",  # type: ignore
+        strict=False,
+        max_targets=0,
+        max_params=0,
+        max_ast_nodes=0,
+        hard_timeout_ms=0,
+    )
+    result = policy.determine_outcome(applied=False, reason_code=reason_code)
+
     return _construct_error_response(
         message="Tenant enforcement not supported for provider/table configuration.",
         category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
@@ -264,9 +255,9 @@ def _tenant_enforcement_unsupported_response(
             "reason_code": bounded_reason_code,
         },
         envelope_metadata=_tenant_enforcement_envelope_metadata(
-            tenant_enforcement_applied=False,
-            tenant_enforcement_mode=tenant_enforcement_mode,
-            tenant_rewrite_outcome=_tenant_rewrite_outcome_for_reason(reason_code),
+            tenant_enforcement_applied=result.applied,
+            tenant_enforcement_mode=result.mode,
+            tenant_rewrite_outcome=result.outcome,
             tenant_rewrite_reason_code=bounded_reason_code,
         ),
     )
@@ -690,16 +681,29 @@ async def handler(
 
     caps = Database.get_query_target_capabilities()
     tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
-    if isinstance(tenant_mode_raw, str):
-        tenant_enforcement_mode = tenant_mode_raw.strip().lower() or "rls_session"
-    else:
-        tenant_enforcement_mode = "rls_session"
+    tenant_enforcement_mode = (
+        tenant_mode_raw.strip().lower()
+        if isinstance(tenant_mode_raw, str) and tenant_mode_raw.strip()
+        else "rls_session"
+    )
+
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+
+    base_policy = TenantEnforcementPolicy(
+        provider=provider,
+        mode=tenant_enforcement_mode,  # type: ignore
+        strict=False,
+        max_targets=0,
+        max_params=0,
+        max_ast_nodes=0,
+        hard_timeout_ms=0,
+    )
+    initial_outcome = base_policy.determine_outcome(applied=base_policy.mode == "rls_session")
 
     tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-        tenant_enforcement_applied=_normalize_tenant_enforcement_mode(tenant_enforcement_mode)
-        == "rls_session",
-        tenant_enforcement_mode=tenant_enforcement_mode,
-        tenant_rewrite_outcome=_default_tenant_outcome_for_mode(tenant_enforcement_mode),
+        tenant_enforcement_applied=initial_outcome.applied,
+        tenant_enforcement_mode=initial_outcome.mode,
+        tenant_rewrite_outcome=initial_outcome.outcome,
     )
 
     if tenant_id is not None and tenant_enforcement_mode == "unsupported":
@@ -868,10 +872,13 @@ async def handler(
                 _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
                 normalized_reason = (e.reason_code or "").strip().upper()
                 if normalized_reason == "NO_PREDICATES_PRODUCED":
+                    outcome_result = policy.determine_outcome(
+                        applied=False, reason_code="NO_PREDICATES_PRODUCED"
+                    )
                     tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                        tenant_enforcement_applied=False,
-                        tenant_enforcement_mode=tenant_enforcement_mode,
-                        tenant_rewrite_outcome="SKIPPED_NOT_REQUIRED",
+                        tenant_enforcement_applied=outcome_result.applied,
+                        tenant_enforcement_mode=outcome_result.mode,
+                        tenant_rewrite_outcome=outcome_result.outcome,
                     )
                     rewrite_result = None
                 else:
@@ -924,14 +931,14 @@ async def handler(
                     has_cte=rewrite_result.has_cte,
                     has_subquery=rewrite_result.has_subquery,
                 )
+                outcome_result = policy.determine_outcome(
+                    applied=bool(rewrite_result.tenant_predicates_added > 0),
+                    reason_code=None,
+                )
                 tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                    tenant_enforcement_applied=bool(rewrite_result.tenant_predicates_added > 0),
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    tenant_rewrite_outcome=(
-                        "APPLIED"
-                        if rewrite_result.tenant_predicates_added > 0
-                        else "SKIPPED_NOT_REQUIRED"
-                    ),
+                    tenant_enforcement_applied=outcome_result.applied,
+                    tenant_enforcement_mode=outcome_result.mode,
+                    tenant_rewrite_outcome=outcome_result.outcome,
                 )
                 effective_sql_query = rewrite_result.rewritten_sql
                 effective_params.extend(rewrite_result.params)
