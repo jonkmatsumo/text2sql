@@ -1,6 +1,6 @@
 """Typed envelope models for tool IO."""
 
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -67,6 +67,19 @@ class ExecuteSQLQueryMetadata(BaseModel):
     cap_detected: bool = False
     cap_mitigation_applied: bool = False
     cap_mitigation_mode: Optional[str] = None
+    tenant_enforcement_applied: Optional[bool] = None
+    tenant_enforcement_mode: Optional[Literal["sql_rewrite", "rls_session", "none"]] = None
+    tenant_rewrite_outcome: Optional[
+        Literal[
+            "APPLIED",
+            "SKIPPED_NOT_REQUIRED",
+            "REJECTED_UNSUPPORTED",
+            "REJECTED_DISABLED",
+            "REJECTED_LIMIT",
+            "REJECTED_TIMEOUT",
+        ]
+    ] = None
+    tenant_rewrite_reason_code: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

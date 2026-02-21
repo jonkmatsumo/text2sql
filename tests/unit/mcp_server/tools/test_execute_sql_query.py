@@ -408,6 +408,14 @@ class TestExecuteSqlQuery:
                 data["error"]["details_safe"]["reason_code"]
                 == "tenant_rewrite_param_limit_exceeded"
             )
+            assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+            assert data["metadata"]["tenant_enforcement_applied"] is False
+            assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_LIMIT"
+            assert (
+                data["metadata"]["tenant_rewrite_reason_code"]
+                == "tenant_rewrite_param_limit_exceeded"
+            )
+            assert "sql" not in data["metadata"]
 
             mock_span.set_attribute.assert_any_call(
                 "tenant_rewrite.failure_reason", "PARAM_LIMIT_EXCEEDED"
@@ -468,6 +476,10 @@ class TestExecuteSqlQuery:
         assert data["error"]["category"].upper() == "TENANT_ENFORCEMENT_UNSUPPORTED"
         assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
         assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_timeout"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_TIMEOUT"
+        assert data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_rewrite_timeout"
         mock_connection.assert_not_called()
         mock_span.set_attribute.assert_any_call("rewrite.duration_ms", 250.0)
         mock_span.set_attribute.assert_any_call("tenant_rewrite.failure_reason", "REWRITE_TIMEOUT")
@@ -529,8 +541,75 @@ class TestExecuteSqlQuery:
         data = json.loads(result)
         assert data.get("error") is None
         assert data["rows"] == [{"ok": 1}]
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is True
+        assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+        assert data["metadata"].get("tenant_rewrite_reason_code") is None
+        assert "sql" not in data["metadata"]
         mock_span.set_attribute.assert_any_call("rewrite.target_count", 1)
         mock_span.set_attribute.assert_any_call("rewrite.param_count", 1)
         mock_span.set_attribute.assert_any_call("rewrite.scope_depth", 2)
         mock_span.set_attribute.assert_any_call("rewrite.has_cte", False)
         mock_span.set_attribute.assert_any_call("rewrite.has_subquery", True)
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_disabled_sets_rejected_disabled_outcome(self):
+        """Disabled rewrite should expose deterministic outcome and bounded reason metadata."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_disabled"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_DISABLED"
+        assert data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_rewrite_disabled"
+        assert "sql" not in data["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_unsupported_sets_rejected_unsupported_outcome(
+        self,
+    ):
+        """Unsupported rewrite shape should expose deterministic unsupported outcome metadata."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                side_effect=TenantSQLRewriteError(
+                    "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                ),
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_subquery_unsupported"
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_UNSUPPORTED"
+        assert (
+            data["metadata"]["tenant_rewrite_reason_code"] == "tenant_rewrite_subquery_unsupported"
+        )
+        assert "sql" not in data["metadata"]
