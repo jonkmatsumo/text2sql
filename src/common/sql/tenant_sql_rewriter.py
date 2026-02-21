@@ -50,6 +50,7 @@ class RewriteTarget:
     scope_select: exp.Select
     cte_name: str | None = None
     appearance_index: int = 0
+    scope_index: int = 0
 
     @property
     def effective_name(self) -> str:
@@ -131,10 +132,16 @@ def rewrite_tenant_scoped_sql(
 
     # 2. Sort targets for determinism
     # Sort key: (cte_name_or_empty, table_effective_name, table_physical_name,
-    # appearance_index)
+    # scope_index, appearance_index)
     sorted_targets = sorted(
         targets,
-        key=lambda t: (t.cte_name or "", t.effective_name, t.physical_name, t.appearance_index),
+        key=lambda t: (
+            t.cte_name or "",
+            t.effective_name,
+            t.physical_name,
+            t.scope_index,
+            t.appearance_index,
+        ),
     )
 
     # 3. Apply rewrites in sorted order
@@ -155,11 +162,10 @@ def rewrite_tenant_scoped_sql(
             target.cte_name or "",
             target.effective_name,
             target.physical_name,
+            target.scope_index,
             target.appearance_index,
         )
         if target_key in rewritten_target_keys:
-            # This shouldn't happen with sorted_targets from current collector,
-            # but we guard against it for future robustness.
             continue
 
         table_keys = _table_keys(target.table)
@@ -249,6 +255,7 @@ def _collect_all_rewrite_targets(
     targets: list[RewriteTarget] = []
 
     # 1. Collect from CTEs
+    scope_idx = 0
     if classification == CTEClassification.SAFE_SIMPLE_CTE:
         with_ = expression.args.get("with_")
         if with_:
@@ -258,8 +265,10 @@ def _collect_all_rewrite_targets(
                         _get_targets_in_select(
                             cte.this,
                             cte_name=cte.alias_or_name.lower() if cte.alias_or_name else None,
+                            scope_index=scope_idx,
                         )
                     )
+                    scope_idx += 1
 
     # 2. Collect from final SELECT and all its nested subqueries
     with_ = expression.args.get("with_")
@@ -272,13 +281,14 @@ def _collect_all_rewrite_targets(
                     break
         if is_cte_body:
             continue
-        targets.extend(_get_targets_in_select(select))
+        targets.extend(_get_targets_in_select(select, scope_index=scope_idx))
+        scope_idx += 1
 
     return targets
 
 
 def _get_targets_in_select(
-    expression: exp.Select, cte_name: str | None = None
+    expression: exp.Select, cte_name: str | None = None, scope_index: int = 0
 ) -> list[RewriteTarget]:
     targets: list[RewriteTarget] = []
     appearance_index = 0
@@ -293,6 +303,7 @@ def _get_targets_in_select(
                     scope_select=expression,
                     cte_name=cte_name,
                     appearance_index=appearance_index,
+                    scope_index=scope_index,
                 )
             )
             appearance_index += 1
@@ -312,6 +323,7 @@ def _get_targets_in_select(
                     scope_select=expression,
                     cte_name=cte_name,
                     appearance_index=appearance_index,
+                    scope_index=scope_index,
                 )
             )
             appearance_index += 1
@@ -641,6 +653,7 @@ def _assert_completeness(
             target.cte_name or "",
             target.effective_name,
             target.physical_name,
+            target.scope_index,
             target.appearance_index,
         )
         if target_key not in rewritten_target_keys:

@@ -318,3 +318,25 @@ def test_rewrite_correlation_cte_collision_ambiguous():
     )
     with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
         rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+
+def test_rewrite_completeness_subquery_join():
+    """EXISTS subquery with JOIN inside subquery is scoped fully."""
+    sql = (
+        "SELECT id FROM orders o WHERE EXISTS "
+        "(SELECT 1 FROM customers c JOIN regions r ON c.region_id = r.id WHERE c.status = 'active')"
+    )
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+    assert result.tenant_predicates_added == 3
+    assert result.tables_rewritten == ["customers", "orders", "regions"]
+
+
+def test_rewrite_completeness_multiple_subqueries_same_table():
+    """Two subqueries referencing the same base table: ensure params stable."""
+    sql = (
+        "SELECT id FROM accounts WHERE EXISTS (SELECT 1 FROM orders) "
+        "AND EXISTS (SELECT 1 FROM orders)"
+    )
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+    assert result.tenant_predicates_added == 3
+    assert result.tables_rewritten == ["accounts", "orders", "orders"]
