@@ -117,6 +117,24 @@ def _record_tenant_rewrite_duration(duration_ms: float, *, warn_ms: int) -> None
     span.set_attribute("rewrite.duration_warn_exceeded", duration_ms > warn_ms)
 
 
+def _record_tenant_rewrite_success_metadata(
+    *,
+    target_count: int,
+    param_count: int,
+    scope_depth: int,
+    has_cte: bool,
+    has_subquery: bool,
+) -> None:
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("rewrite.target_count", int(target_count))
+    span.set_attribute("rewrite.param_count", int(param_count))
+    span.set_attribute("rewrite.scope_depth", int(scope_depth))
+    span.set_attribute("rewrite.has_cte", bool(has_cte))
+    span.set_attribute("rewrite.has_subquery", bool(has_subquery))
+
+
 def _active_provider() -> str:
     """Resolve active provider identity from capabilities with a safe fallback."""
     try:
@@ -744,6 +762,13 @@ async def handler(
                 reason_code=schema_reason_code,
             )
 
+        _record_tenant_rewrite_success_metadata(
+            target_count=rewrite_result.target_count,
+            param_count=len(rewrite_result.params),
+            scope_depth=rewrite_result.scope_depth,
+            has_cte=rewrite_result.has_cte,
+            has_subquery=rewrite_result.has_subquery,
+        )
         effective_sql_query = rewrite_result.rewritten_sql
         effective_params.extend(rewrite_result.params)
 

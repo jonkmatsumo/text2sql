@@ -416,6 +416,10 @@ class TestExecuteSqlQuery:
                 "tenant_rewrite.failure_reason_code",
                 "tenant_rewrite_param_limit_exceeded",
             )
+            assert not any(
+                call.args and call.args[0] == "rewrite.target_count"
+                for call in mock_span.set_attribute.call_args_list
+            )
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_timeout_emits_duration_and_fails_closed(self):
@@ -467,3 +471,66 @@ class TestExecuteSqlQuery:
         mock_connection.assert_not_called()
         mock_span.set_attribute.assert_any_call("rewrite.duration_ms", 250.0)
         mock_span.set_attribute.assert_any_call("tenant_rewrite.failure_reason", "REWRITE_TIMEOUT")
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_success_emits_explainability_metadata(self):
+        """Successful rewrite should emit bounded explainability attributes on the span."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get_connection = MagicMock(return_value=mock_conn)
+
+        mock_store = MagicMock()
+        mock_store.get_table_definition = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "table_name": "orders",
+                    "columns": [{"name": "id"}, {"name": "tenant_id"}],
+                    "foreign_keys": [],
+                }
+            )
+        )
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["orders"],
+                    tenant_predicates_added=1,
+                    target_count=1,
+                    scope_depth=2,
+                    has_cte=False,
+                    has_subquery=True,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_metadata_store",
+                return_value=mock_store,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM orders", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["rows"] == [{"ok": 1}]
+        mock_span.set_attribute.assert_any_call("rewrite.target_count", 1)
+        mock_span.set_attribute.assert_any_call("rewrite.param_count", 1)
+        mock_span.set_attribute.assert_any_call("rewrite.scope_depth", 2)
+        mock_span.set_attribute.assert_any_call("rewrite.has_cte", False)
+        mock_span.set_attribute.assert_any_call("rewrite.has_subquery", True)

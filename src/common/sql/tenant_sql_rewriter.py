@@ -84,6 +84,10 @@ class TenantSQLRewriteResult:
     params: list[int]
     tables_rewritten: list[str]
     tenant_predicates_added: int
+    target_count: int = 0
+    scope_depth: int = 1
+    has_cte: bool = False
+    has_subquery: bool = False
 
 
 def _safe_env_bool(name: str, default: bool) -> bool:
@@ -172,6 +176,9 @@ def rewrite_tenant_scoped_sql(
         )
     classification = _assert_rewrite_eligible(expression, strict_mode=config.strict_mode)
     assert isinstance(expression, exp.Select)
+    rewrite_has_cte = expression.args.get("with_") is not None
+    rewrite_has_subquery = _has_subquery(expression)
+    rewrite_scope_depth = _scope_depth(expression)
 
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
@@ -288,6 +295,10 @@ def rewrite_tenant_scoped_sql(
             params=[],
             tables_rewritten=[],
             tenant_predicates_added=0,
+            target_count=len(targets),
+            scope_depth=rewrite_scope_depth,
+            has_cte=rewrite_has_cte,
+            has_subquery=rewrite_has_subquery,
         )
 
     params = [tenant_id] * total_predicates_count
@@ -300,6 +311,10 @@ def rewrite_tenant_scoped_sql(
         params=params,
         tables_rewritten=rewritten_tables,
         tenant_predicates_added=total_predicates_count,
+        target_count=len(targets),
+        scope_depth=rewrite_scope_depth,
+        has_cte=rewrite_has_cte,
+        has_subquery=rewrite_has_subquery,
     )
 
 
@@ -434,6 +449,26 @@ def _table_keys(table: exp.Table) -> list[str]:
 def _sql_ast_node_count(expression: exp.Expression) -> int:
     """Count AST nodes to bound rewrite traversal complexity."""
     return sum(1 for _ in expression.walk())
+
+
+def _scope_depth(expression: exp.Select) -> int:
+    """Return max nested SELECT scope depth for rewrite diagnostics."""
+    max_depth = 1
+    for select in expression.find_all(exp.Select):
+        depth = 1
+        parent = select.parent
+        while parent is not None:
+            if isinstance(parent, exp.Select):
+                depth += 1
+            parent = parent.parent
+        if depth > max_depth:
+            max_depth = depth
+    return max_depth
+
+
+def _has_subquery(expression: exp.Select) -> bool:
+    """Return True if query contains an explicit subquery expression."""
+    return any(True for _ in expression.find_all(exp.Subquery))
 
 
 def _assert_rewrite_eligible(
