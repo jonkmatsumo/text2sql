@@ -340,3 +340,19 @@ def test_rewrite_completeness_multiple_subqueries_same_table():
     result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
     assert result.tenant_predicates_added == 3
     assert result.tables_rewritten == ["accounts", "orders", "orders"]
+
+
+def test_rewrite_determinism_torture_main_and_subquery_scopes():
+    """Repeated rewrite on mixed main/IN/EXISTS scopes should be byte-for-byte deterministic."""
+    sql = (
+        "SELECT o.id FROM orders o "
+        "WHERE o.id IN (SELECT li.order_id FROM line_items li WHERE li.status = 'shipped') "
+        "AND EXISTS (SELECT 1 FROM customers c WHERE c.status = 'active')"
+    )
+
+    first = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=77)
+    second = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=77)
+
+    assert (first.rewritten_sql, first.params) == (second.rewritten_sql, second.params)
+    assert first.tenant_predicates_added == 3
+    assert first.rewritten_sql.count("tenant_id = ?") == len(first.params)
