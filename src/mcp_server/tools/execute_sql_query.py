@@ -136,17 +136,48 @@ def _tenant_enforcement_observability_fields(
 ) -> tuple[str, str, bool, str | None]:
     tenant_metadata = metadata if isinstance(metadata, dict) else {}
     mode = str(tenant_metadata.get("tenant_enforcement_mode") or "none").strip().lower()
-    outcome = (
-        str(tenant_metadata.get("tenant_rewrite_outcome") or "SKIPPED_NOT_REQUIRED").strip().upper()
+
+    # We use a base policy to enforce outcome consistency in telemetry
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+
+    policy = TenantEnforcementPolicy(
+        provider="unknown",  # Not strictly required for determining outcome here
+        mode=mode,  # type: ignore
+        strict=False,
+        max_targets=0,
+        max_params=0,
+        max_ast_nodes=0,
+        hard_timeout_ms=0,
     )
-    applied = bool(tenant_metadata.get("tenant_enforcement_applied"))
 
-    reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
-    bounded_reason_code: str | None = None
-    if isinstance(reason_code, str) and reason_code.strip():
-        bounded_reason_code = reason_code.strip().lower()
+    raw_reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
+    reason_code = (
+        raw_reason_code.strip()
+        if isinstance(raw_reason_code, str) and raw_reason_code.strip()
+        else None
+    )
 
-    return mode, outcome, applied, bounded_reason_code
+    # De-prefix the bounded reason code for the policy to understand it
+    policy_reason_code = reason_code
+    if policy_reason_code and policy_reason_code.startswith("tenant_rewrite_"):
+        policy_reason_code = policy_reason_code[len("tenant_rewrite_") :].upper()
+
+    raw_applied = bool(tenant_metadata.get("tenant_enforcement_applied"))
+
+    outcome_result = policy.determine_outcome(
+        applied=raw_applied,
+        reason_code=policy_reason_code,
+    )
+
+    bounded_reason_code = outcome_result.reason_code.lower() if outcome_result.reason_code else None
+    if bounded_reason_code and not bounded_reason_code.startswith("tenant_rewrite_"):
+        bounded_reason_code = f"tenant_rewrite_{bounded_reason_code}"
+
+    # Prefer the explicitly recorded outcome if present, else fallback to policy's derived outcome
+    recorded_outcome = (str(tenant_metadata.get("tenant_rewrite_outcome") or "")).strip().upper()
+    final_outcome = recorded_outcome if recorded_outcome else outcome_result.outcome
+
+    return outcome_result.mode, final_outcome, outcome_result.applied, bounded_reason_code
 
 
 def _record_tenant_enforcement_observability(metadata: dict[str, Any] | None) -> None:
