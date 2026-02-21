@@ -38,6 +38,54 @@ TOOL_NAME = "execute_sql_query"
 TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
 logger = logging.getLogger(__name__)
 
+_TENANT_REWRITE_REASON_ALLOWLIST = {
+    "COMPLETENESS_FAILED",
+    "CORRELATED_SUBQUERY_UNSUPPORTED",
+    "CTE_UNSUPPORTED_SHAPE",
+    "MISSING_TENANT_COLUMN",
+    "MISSING_TENANT_COLUMN_CONFIG",
+    "NESTED_FROM_UNSUPPORTED",
+    "NO_PREDICATES_PRODUCED",
+    "NOT_SELECT_STATEMENT",
+    "NOT_SINGLE_SELECT",
+    "PARAM_LIMIT_EXCEEDED",
+    "PARSE_ERROR",
+    "PROVIDER_UNSUPPORTED",
+    "SET_OPERATIONS_UNSUPPORTED",
+    "SUBQUERY_UNSUPPORTED",
+    "TARGET_LIMIT_EXCEEDED",
+    "UNRESOLVABLE_TABLE_ALIAS",
+    "UNRESOLVABLE_TABLE_IDENTITY",
+    "WINDOW_FUNCTIONS_UNSUPPORTED",
+}
+_TENANT_REWRITE_INTERNAL_REASON_ALLOWLIST = {
+    "SCHEMA_METADATA_MISSING",
+    "SCHEMA_TENANT_COLUMN_MISSING",
+    "TENANT_MODE_UNSUPPORTED",
+}
+
+
+def _bounded_tenant_rewrite_reason_code(reason_code: str | None) -> str:
+    """Return a low-cardinality tenant rewrite reason code suitable for diagnostics."""
+    normalized = (reason_code or "").strip().upper()
+    if normalized in _TENANT_REWRITE_REASON_ALLOWLIST:
+        return f"tenant_rewrite_{normalized.lower()}"
+    if normalized in _TENANT_REWRITE_INTERNAL_REASON_ALLOWLIST:
+        return f"tenant_rewrite_{normalized.lower()}"
+    return "tenant_enforcement_unsupported"
+
+
+def _record_tenant_rewrite_failure_reason(reason_code: str | None) -> None:
+    """Attach bounded tenant rewrite failure diagnostics to the active span."""
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("tenant_rewrite.failure_reason", (reason_code or "UNKNOWN").strip().upper())
+    span.set_attribute(
+        "tenant_rewrite.failure_reason_code",
+        _bounded_tenant_rewrite_reason_code(reason_code),
+    )
+
 
 def _active_provider() -> str:
     """Resolve active provider identity from capabilities with a safe fallback."""
@@ -61,7 +109,7 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
     return [build_column_meta(key, "unknown") for key in first_row.keys()]
 
 
-def _tenant_enforcement_unsupported_response(provider: str) -> str:
+def _tenant_enforcement_unsupported_response(provider: str, reason_code: str | None = None) -> str:
     """Return a canonical tenant-enforcement unsupported response envelope."""
     return _construct_error_response(
         message="Tenant enforcement not supported for provider/table configuration.",
@@ -70,7 +118,7 @@ def _tenant_enforcement_unsupported_response(provider: str) -> str:
         metadata={
             "sql_state": "TENANT_ENFORCEMENT_UNSUPPORTED",
             "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
-            "reason_code": "tenant_enforcement_unsupported",
+            "reason_code": _bounded_tenant_rewrite_reason_code(reason_code),
         },
     )
 
@@ -495,7 +543,11 @@ async def handler(
         tenant_enforcement_mode = "rls_session"
 
     if tenant_id is not None and tenant_enforcement_mode == "unsupported":
-        return _tenant_enforcement_unsupported_response(provider)
+        _record_tenant_rewrite_failure_reason("TENANT_MODE_UNSUPPORTED")
+        return _tenant_enforcement_unsupported_response(
+            provider,
+            reason_code="TENANT_MODE_UNSUPPORTED",
+        )
 
     effective_sql_query = sql_query
     effective_params = list(params or [])
@@ -623,10 +675,8 @@ async def handler(
                 global_table_allowlist=global_table_allowlist,
             )
         except TenantSQLRewriteError as e:
-            span = trace.get_current_span()
-            if span and span.is_recording():
-                span.set_attribute("tenant_rewrite.failure_reason", e.reason_code)
-            return _tenant_enforcement_unsupported_response(provider)
+            _record_tenant_rewrite_failure_reason(e.reason_code)
+            return _tenant_enforcement_unsupported_response(provider, reason_code=e.reason_code)
 
         table_columns = await _load_table_columns_for_rewrite(
             rewrite_result.tables_rewritten,
@@ -640,7 +690,16 @@ async def handler(
             )
         )
         if missing_schema_tables or missing_tenant_column_tables:
-            return _tenant_enforcement_unsupported_response(provider)
+            schema_reason_code = (
+                "SCHEMA_TENANT_COLUMN_MISSING"
+                if missing_tenant_column_tables
+                else "SCHEMA_METADATA_MISSING"
+            )
+            _record_tenant_rewrite_failure_reason(schema_reason_code)
+            return _tenant_enforcement_unsupported_response(
+                provider,
+                reason_code=schema_reason_code,
+            )
 
         effective_sql_query = rewrite_result.rewritten_sql
         effective_params.extend(rewrite_result.params)
