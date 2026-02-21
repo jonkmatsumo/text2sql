@@ -416,3 +416,54 @@ class TestExecuteSqlQuery:
                 "tenant_rewrite.failure_reason_code",
                 "tenant_rewrite_param_limit_exceeded",
             )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_timeout_emits_duration_and_fails_closed(self):
+        """Long rewrite duration should emit timing span data and fail with bounded reason."""
+        from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult
+
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_connection = MagicMock()
+
+        with (
+            patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["film"],
+                    tenant_predicates_added=1,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection",
+                mock_connection,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.time.perf_counter", side_effect=[10.0, 10.25]
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "TENANT_REWRITE_WARN_MS": "50",
+                    "TENANT_REWRITE_HARD_TIMEOUT_MS": "200",
+                },
+                clear=False,
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["category"].upper() == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_timeout"
+        mock_connection.assert_not_called()
+        mock_span.set_attribute.assert_any_call("rewrite.duration_ms", 250.0)
+        mock_span.set_attribute.assert_any_call("tenant_rewrite.failure_reason", "REWRITE_TIMEOUT")

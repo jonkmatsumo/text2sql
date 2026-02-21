@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import asyncpg
@@ -53,6 +54,7 @@ _TENANT_REWRITE_REASON_ALLOWLIST = {
     "PARSE_ERROR",
     "PROVIDER_UNSUPPORTED",
     "REWRITE_DISABLED",
+    "REWRITE_TIMEOUT",
     "SET_OPERATIONS_UNSUPPORTED",
     "SUBQUERY_UNSUPPORTED",
     "TARGET_LIMIT_EXCEEDED",
@@ -87,6 +89,32 @@ def _record_tenant_rewrite_failure_reason(reason_code: str | None) -> None:
         "tenant_rewrite.failure_reason_code",
         _bounded_tenant_rewrite_reason_code(reason_code),
     )
+
+
+def _safe_env_non_negative_int(name: str, default: int) -> int:
+    try:
+        value = get_env_int(name, default=default)
+    except ValueError:
+        return default
+    if value is None or value < 0:
+        return default
+    return value
+
+
+def _tenant_rewrite_warn_ms() -> int:
+    return _safe_env_non_negative_int("TENANT_REWRITE_WARN_MS", 50)
+
+
+def _tenant_rewrite_hard_timeout_ms() -> int:
+    return _safe_env_non_negative_int("TENANT_REWRITE_HARD_TIMEOUT_MS", 200)
+
+
+def _record_tenant_rewrite_duration(duration_ms: float, *, warn_ms: int) -> None:
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("rewrite.duration_ms", round(duration_ms, 3))
+    span.set_attribute("rewrite.duration_warn_exceeded", duration_ms > warn_ms)
 
 
 def _active_provider() -> str:
@@ -668,6 +696,9 @@ async def handler(
 
         tenant_column = _tenant_column_name()
         global_table_allowlist = _tenant_global_table_allowlist()
+        rewrite_warn_ms = _tenant_rewrite_warn_ms()
+        rewrite_hard_timeout_ms = max(_tenant_rewrite_hard_timeout_ms(), rewrite_warn_ms)
+        rewrite_started = time.perf_counter()
         try:
             rewrite_result = rewrite_tenant_scoped_sql(
                 effective_sql_query,
@@ -677,8 +708,18 @@ async def handler(
                 global_table_allowlist=global_table_allowlist,
             )
         except TenantSQLRewriteError as e:
+            rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
+            _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
             _record_tenant_rewrite_failure_reason(e.reason_code)
             return _tenant_enforcement_unsupported_response(provider, reason_code=e.reason_code)
+        rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
+        _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
+        if rewrite_duration_ms > rewrite_hard_timeout_ms:
+            _record_tenant_rewrite_failure_reason("REWRITE_TIMEOUT")
+            return _tenant_enforcement_unsupported_response(
+                provider,
+                reason_code="REWRITE_TIMEOUT",
+            )
 
         table_columns = await _load_table_columns_for_rewrite(
             rewrite_result.tables_rewritten,
