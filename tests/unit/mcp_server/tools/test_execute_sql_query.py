@@ -485,6 +485,58 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call("tenant_rewrite.failure_reason", "REWRITE_TIMEOUT")
 
     @pytest.mark.asyncio
+    async def test_execute_sql_query_uses_shared_tenant_rewrite_settings_for_timeout(self):
+        """execute_sql_query should source rewrite timeout thresholds from shared settings."""
+        from common.sql.tenant_sql_rewriter import TenantRewriteSettings, TenantSQLRewriteResult
+
+        mock_connection = MagicMock()
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "common.sql.tenant_sql_rewriter.load_tenant_rewrite_settings",
+                return_value=TenantRewriteSettings(
+                    enabled=True,
+                    strict_mode=True,
+                    max_targets=25,
+                    max_params=50,
+                    max_ast_nodes=1000,
+                    warn_ms=5,
+                    hard_timeout_ms=10,
+                    assert_invariants=False,
+                ),
+            ) as mock_settings_loader,
+            patch(
+                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                return_value=TenantSQLRewriteResult(
+                    rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
+                    params=[1],
+                    tables_rewritten=["film"],
+                    tenant_predicates_added=1,
+                ),
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection",
+                mock_connection,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.time.perf_counter",
+                side_effect=[100.0, 100.015],
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
+        assert data["error"]["details_safe"]["reason_code"] == "tenant_rewrite_rewrite_timeout"
+        assert data["metadata"]["tenant_rewrite_outcome"] == "REJECTED_TIMEOUT"
+        mock_connection.assert_not_called()
+        mock_settings_loader.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_success_emits_explainability_metadata(self):
         """Successful rewrite should emit bounded explainability attributes on the span."""
         from common.sql.tenant_sql_rewriter import TenantSQLRewriteResult

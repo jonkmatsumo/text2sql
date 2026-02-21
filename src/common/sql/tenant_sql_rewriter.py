@@ -22,7 +22,7 @@ MAX_SQL_AST_NODES = int(os.environ.get("MAX_SQL_AST_NODES", "1000"))
 
 
 @dataclass(frozen=True)
-class TenantRewriteConfig:
+class TenantRewriteSettings:
     """Runtime feature controls for tenant rewrite behavior."""
 
     enabled: bool
@@ -30,6 +30,25 @@ class TenantRewriteConfig:
     max_targets: int
     max_params: int
     max_ast_nodes: int
+    warn_ms: int
+    hard_timeout_ms: int
+    assert_invariants: bool
+
+    @classmethod
+    def from_env(cls) -> TenantRewriteSettings:
+        """Load tenant rewrite settings from environment with fail-safe defaults."""
+        warn_ms = _safe_env_non_negative_int("TENANT_REWRITE_WARN_MS", 50)
+        hard_timeout_ms = _safe_env_non_negative_int("TENANT_REWRITE_HARD_TIMEOUT_MS", 200)
+        return cls(
+            enabled=_safe_env_bool("TENANT_REWRITE_ENABLED", True),
+            strict_mode=_safe_env_bool("TENANT_REWRITE_STRICT_MODE", True),
+            max_targets=_safe_env_int("TENANT_REWRITE_MAX_TARGETS", MAX_TENANT_REWRITE_TARGETS),
+            max_params=_safe_env_int("TENANT_REWRITE_MAX_PARAMS", MAX_TENANT_REWRITE_PARAMS),
+            max_ast_nodes=_safe_env_int("MAX_SQL_AST_NODES", MAX_SQL_AST_NODES),
+            warn_ms=warn_ms,
+            hard_timeout_ms=max(hard_timeout_ms, warn_ms),
+            assert_invariants=_safe_env_bool("TENANT_REWRITE_ASSERT_INVARIANTS", False),
+        )
 
 
 class TenantSQLRewriteError(ValueError):
@@ -108,15 +127,24 @@ def _safe_env_int(name: str, default: int) -> int:
     return value
 
 
-def load_tenant_rewrite_config() -> TenantRewriteConfig:
-    """Load tenant rewrite feature flags with fail-safe defaults."""
-    return TenantRewriteConfig(
-        enabled=_safe_env_bool("TENANT_REWRITE_ENABLED", True),
-        strict_mode=_safe_env_bool("TENANT_REWRITE_STRICT_MODE", True),
-        max_targets=_safe_env_int("TENANT_REWRITE_MAX_TARGETS", MAX_TENANT_REWRITE_TARGETS),
-        max_params=_safe_env_int("TENANT_REWRITE_MAX_PARAMS", MAX_TENANT_REWRITE_PARAMS),
-        max_ast_nodes=_safe_env_int("MAX_SQL_AST_NODES", MAX_SQL_AST_NODES),
-    )
+def _safe_env_non_negative_int(name: str, default: int) -> int:
+    try:
+        value = get_env_int(name, default=default)
+    except ValueError:
+        return default
+    if value is None or value < 0:
+        return default
+    return value
+
+
+def load_tenant_rewrite_settings() -> TenantRewriteSettings:
+    """Load tenant rewrite settings from environment."""
+    return TenantRewriteSettings.from_env()
+
+
+def load_tenant_rewrite_config() -> TenantRewriteSettings:
+    """Backward-compatible alias for legacy imports."""
+    return load_tenant_rewrite_settings()
 
 
 def rewrite_tenant_scoped_sql(
@@ -136,8 +164,8 @@ def rewrite_tenant_scoped_sql(
     - no nested SELECTs/subqueries
     - one predicate per non-global table in FROM/JOIN set
     """
-    config = load_tenant_rewrite_config()
-    if not config.enabled:
+    settings = load_tenant_rewrite_settings()
+    if not settings.enabled:
         raise TenantSQLRewriteError(
             "Tenant SQL rewrite is disabled by feature flag.", reason_code="REWRITE_DISABLED"
         )
@@ -169,13 +197,13 @@ def rewrite_tenant_scoped_sql(
 
     expression = expressions[0]
     ast_node_count = _sql_ast_node_count(expression)
-    if ast_node_count > config.max_ast_nodes:
+    if ast_node_count > settings.max_ast_nodes:
         raise TenantSQLRewriteError(
             "Tenant rewrite AST complexity exceeded the maximum allowed node count "
-            f"({config.max_ast_nodes}).",
+            f"({settings.max_ast_nodes}).",
             reason_code="AST_COMPLEXITY_EXCEEDED",
         )
-    classification = _assert_rewrite_eligible(expression, strict_mode=config.strict_mode)
+    classification = _assert_rewrite_eligible(expression, strict_mode=settings.strict_mode)
     assert isinstance(expression, exp.Select)
     rewrite_has_cte = expression.args.get("with_") is not None
     rewrite_has_subquery = _has_subquery(expression)
@@ -187,9 +215,9 @@ def rewrite_tenant_scoped_sql(
     # 1. Collect all rewrite targets across all scopes
     targets = _collect_all_rewrite_targets(expression, classification)
 
-    if len(targets) > config.max_targets:
+    if len(targets) > settings.max_targets:
         raise TenantSQLRewriteError(
-            f"Tenant rewrite exceeded maximum allowed targets ({config.max_targets}).",
+            f"Tenant rewrite exceeded maximum allowed targets ({settings.max_targets}).",
             reason_code="TARGET_LIMIT_EXCEEDED",
         )
 
@@ -258,9 +286,9 @@ def rewrite_tenant_scoped_sql(
                 reason_code="UNRESOLVABLE_TABLE_ALIAS",
             )
 
-        if total_predicates_count >= config.max_params:
+        if total_predicates_count >= settings.max_params:
             raise TenantSQLRewriteError(
-                "Tenant rewrite exceeded maximum allowed parameters " f"({config.max_params}).",
+                "Tenant rewrite exceeded maximum allowed parameters " f"({settings.max_params}).",
                 reason_code="PARAM_LIMIT_EXCEEDED",
             )
 
@@ -301,7 +329,7 @@ def rewrite_tenant_scoped_sql(
             has_cte=rewrite_has_cte,
             has_subquery=rewrite_has_subquery,
         )
-        if _should_run_invariant_checks() and not _skip_invariant_check:
+        if _should_run_invariant_checks(settings) and not _skip_invariant_check:
             assert_rewrite_invariants(
                 sql,
                 result.rewritten_sql,
@@ -310,7 +338,7 @@ def rewrite_tenant_scoped_sql(
                 tenant_column=tenant_column_name,
                 global_table_allowlist=allowlist,
                 table_columns=normalized_columns,
-                strict_mode=config.strict_mode,
+                strict_mode=settings.strict_mode,
                 tenant_id=tenant_id,
             )
         return result
@@ -330,7 +358,7 @@ def rewrite_tenant_scoped_sql(
         has_cte=rewrite_has_cte,
         has_subquery=rewrite_has_subquery,
     )
-    if _should_run_invariant_checks() and not _skip_invariant_check:
+    if _should_run_invariant_checks(settings) and not _skip_invariant_check:
         assert_rewrite_invariants(
             sql,
             result.rewritten_sql,
@@ -339,7 +367,7 @@ def rewrite_tenant_scoped_sql(
             tenant_column=tenant_column_name,
             global_table_allowlist=allowlist,
             table_columns=normalized_columns,
-            strict_mode=config.strict_mode,
+            strict_mode=settings.strict_mode,
             tenant_id=tenant_id,
         )
     return result
@@ -498,9 +526,10 @@ def _has_subquery(expression: exp.Select) -> bool:
     return any(True for _ in expression.find_all(exp.Subquery))
 
 
-def _should_run_invariant_checks() -> bool:
+def _should_run_invariant_checks(settings: TenantRewriteSettings | None = None) -> bool:
     """Run rewrite invariants only in debug/test modes."""
-    if _safe_env_bool("TENANT_REWRITE_ASSERT_INVARIANTS", False):
+    rewrite_settings = settings or load_tenant_rewrite_settings()
+    if rewrite_settings.assert_invariants:
         return True
     return bool(os.getenv("PYTEST_CURRENT_TEST"))
 

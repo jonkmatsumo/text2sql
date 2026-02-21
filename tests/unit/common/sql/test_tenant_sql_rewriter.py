@@ -6,6 +6,7 @@ from common.sql.tenant_sql_rewriter import (
     MAX_TENANT_REWRITE_TARGETS,
     TenantSQLRewriteError,
     load_tenant_rewrite_config,
+    load_tenant_rewrite_settings,
     rewrite_tenant_scoped_sql,
 )
 
@@ -117,10 +118,16 @@ def test_rewrite_config_defaults_preserve_current_behavior(monkeypatch):
     monkeypatch.delenv("TENANT_REWRITE_STRICT_MODE", raising=False)
     monkeypatch.delenv("TENANT_REWRITE_MAX_TARGETS", raising=False)
     monkeypatch.delenv("TENANT_REWRITE_MAX_PARAMS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_WARN_MS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_HARD_TIMEOUT_MS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_ASSERT_INVARIANTS", raising=False)
 
     config = load_tenant_rewrite_config()
     assert config.enabled is True
     assert config.strict_mode is True
+    assert config.warn_ms == 50
+    assert config.hard_timeout_ms == 200
+    assert config.assert_invariants is False
 
     with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
         rewrite_tenant_scoped_sql(
@@ -128,6 +135,28 @@ def test_rewrite_config_defaults_preserve_current_behavior(monkeypatch):
             provider="sqlite",
             tenant_id=1,
         )
+
+
+def test_rewrite_settings_from_env_are_centralized(monkeypatch):
+    """All rewrite controls should load through the shared settings object."""
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+    monkeypatch.setenv("TENANT_REWRITE_MAX_TARGETS", "17")
+    monkeypatch.setenv("TENANT_REWRITE_MAX_PARAMS", "33")
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "777")
+    monkeypatch.setenv("TENANT_REWRITE_WARN_MS", "64")
+    monkeypatch.setenv("TENANT_REWRITE_HARD_TIMEOUT_MS", "120")
+    monkeypatch.setenv("TENANT_REWRITE_ASSERT_INVARIANTS", "true")
+
+    settings = load_tenant_rewrite_settings()
+    assert settings.enabled is False
+    assert settings.strict_mode is False
+    assert settings.max_targets == 17
+    assert settings.max_params == 33
+    assert settings.max_ast_nodes == 777
+    assert settings.warn_ms == 64
+    assert settings.hard_timeout_ms == 120
+    assert settings.assert_invariants is True
 
 
 def test_rewrite_respects_feature_flag_disabled(monkeypatch):

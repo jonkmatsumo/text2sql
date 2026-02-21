@@ -133,24 +133,6 @@ def _tenant_enforcement_envelope_metadata(
     return metadata
 
 
-def _safe_env_non_negative_int(name: str, default: int) -> int:
-    try:
-        value = get_env_int(name, default=default)
-    except ValueError:
-        return default
-    if value is None or value < 0:
-        return default
-    return value
-
-
-def _tenant_rewrite_warn_ms() -> int:
-    return _safe_env_non_negative_int("TENANT_REWRITE_WARN_MS", 50)
-
-
-def _tenant_rewrite_hard_timeout_ms() -> int:
-    return _safe_env_non_negative_int("TENANT_REWRITE_HARD_TIMEOUT_MS", 200)
-
-
 def _record_tenant_rewrite_duration(duration_ms: float, *, warn_ms: int) -> None:
     span = trace.get_current_span()
     if span is None or not span.is_recording():
@@ -780,12 +762,17 @@ async def handler(
         )
 
     if tenant_id is not None and tenant_enforcement_mode == "sql_rewrite":
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+        from common.sql.tenant_sql_rewriter import (
+            TenantSQLRewriteError,
+            load_tenant_rewrite_settings,
+            rewrite_tenant_scoped_sql,
+        )
 
         tenant_column = _tenant_column_name()
         global_table_allowlist = _tenant_global_table_allowlist()
-        rewrite_warn_ms = _tenant_rewrite_warn_ms()
-        rewrite_hard_timeout_ms = max(_tenant_rewrite_hard_timeout_ms(), rewrite_warn_ms)
+        rewrite_settings = load_tenant_rewrite_settings()
+        rewrite_warn_ms = rewrite_settings.warn_ms
+        rewrite_hard_timeout_ms = rewrite_settings.hard_timeout_ms
         rewrite_started = time.perf_counter()
         try:
             rewrite_result = rewrite_tenant_scoped_sql(
