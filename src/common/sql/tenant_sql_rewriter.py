@@ -455,7 +455,67 @@ def classify_subquery(expression: exp.Expression) -> SubqueryClassification:
     if _has_nested_select(expression):
         return SubqueryClassification.UNSUPPORTED_SUBQUERY
 
+    if _is_scalar_aggregate_subquery(expression) and not _is_safe_scalar_aggregate_subquery(
+        expression
+    ):
+        return SubqueryClassification.UNSUPPORTED_SUBQUERY
+
     return SubqueryClassification.SAFE_SIMPLE_SUBQUERY
+
+
+def _is_scalar_aggregate_subquery(expression: exp.Select) -> bool:
+    projections = expression.expressions or []
+    if not projections:
+        return False
+    return any(_projection_contains_aggregate(projection) for projection in projections)
+
+
+def _projection_contains_aggregate(expression: exp.Expression) -> bool:
+    candidate = expression.this if isinstance(expression, exp.Alias) else expression
+    if isinstance(candidate, exp.AggFunc):
+        return True
+    return any(isinstance(node, exp.AggFunc) for node in candidate.find_all(exp.AggFunc))
+
+
+def _is_safe_scalar_aggregate_subquery(expression: exp.Select) -> bool:
+    projections = expression.expressions or []
+    if len(projections) != 1:
+        return False
+
+    if not _projection_contains_aggregate(projections[0]):
+        return False
+
+    if expression.args.get("group") is not None:
+        return False
+    if expression.args.get("having") is not None:
+        return False
+    if expression.args.get("distinct") is not None:
+        return False
+
+    limit = expression.args.get("limit")
+    limit_value = _literal_limit_value(limit)
+    if limit is not None and (limit_value is None or limit_value > 1):
+        return False
+
+    if expression.args.get("order") is not None and limit_value != 1:
+        return False
+
+    return True
+
+
+def _literal_limit_value(limit: exp.Expression | None) -> int | None:
+    if not isinstance(limit, exp.Limit):
+        return None
+    expression = limit.args.get("expression")
+    if not isinstance(expression, exp.Literal) or not expression.is_int:
+        return None
+    try:
+        value = int(expression.this)
+    except Exception:
+        return None
+    if value < 0:
+        return None
+    return value
 
 
 def classify_cte_query(expression: exp.Expression) -> CTEClassification:
