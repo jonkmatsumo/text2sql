@@ -2,7 +2,11 @@
 
 import pytest
 
-from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+from common.sql.tenant_sql_rewriter import (
+    MAX_TENANT_REWRITE_TARGETS,
+    TenantSQLRewriteError,
+    rewrite_tenant_scoped_sql,
+)
 
 
 @pytest.mark.parametrize(
@@ -120,11 +124,11 @@ def test_rewrite_rejects_window_functions():
         )
 
 
-def test_rewrite_rejects_ctes_by_default():
-    """Common table expressions are intentionally fail-closed in v1."""
-    with pytest.raises(TenantSQLRewriteError, match="CTEs"):
+def test_rewrite_rejects_unsupported_ctes():
+    """Unsupported common table expressions must still fail closed."""
+    with pytest.raises(TenantSQLRewriteError, match="set operations"):
         rewrite_tenant_scoped_sql(
-            "WITH scoped_orders AS (SELECT * FROM orders) SELECT * FROM scoped_orders",
+            "WITH RECURSIVE cte1 AS (SELECT 1 UNION ALL SELECT 1 FROM cte1) SELECT * FROM cte1",
             provider="sqlite",
             tenant_id=1,
         )
@@ -170,3 +174,116 @@ def test_rewrite_still_scopes_non_global_tables_when_allowlist_is_present():
     assert result.params == [7]
     assert result.tenant_predicates_added == 1
     assert result.tables_rewritten == ["orders"]
+
+
+def test_rewrite_determinism_stable_ordering():
+    """Verify that multiple tables across CTEs yield deterministic param ordering."""
+    sql = """
+    WITH cte_b AS (SELECT * FROM table_b),
+         cte_a AS (SELECT * FROM table_a)
+    SELECT * FROM cte_a JOIN cte_b JOIN table_c
+    """
+    # Sorted order should be: table_a (in cte_a), table_b (in cte_b),
+    # table_c (in final select)
+    # cte_name sort: "", "cte_a", "cte_b"
+    # Actually wait, my sort key is:
+    # (cte_name or "", effective_name, physical_name, appearance_index)
+    # "" (final select) comes first.
+    # "cte_a" comes second.
+    # "cte_b" comes third.
+
+    # Final select: table_c
+    # cte_a: table_a
+    # cte_b: table_b
+
+    # Let's adjust expected to match my sorting rule.
+    # ( "", "table_c", ... )
+    # ( "cte_a", "table_a", ... )
+    # ( "cte_b", "table_b", ... )
+
+    result1 = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=100)
+    result2 = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=100)
+
+    assert result1.rewritten_sql == result2.rewritten_sql
+    assert result1.params == result2.params
+    assert result1.tables_rewritten == ["table_c", "table_a", "table_b"]
+    assert result1.tenant_predicates_added == 3
+
+
+def test_rewrite_determinism_same_table_multiple_times():
+    """Verify that the same table used multiple times has stable ordering via appearance_index."""
+    sql = "SELECT * FROM orders o1 JOIN orders o2 ON o1.id = o2.id"
+    # effective names: o1, o2
+    # both in final select ("")
+    # order: o1, o2
+
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=5)
+    assert result.tables_rewritten == ["orders", "orders"]
+    # Check that placeholders are in the right order in the generated SQL
+    # sqlglot might generate something like WHERE o1.tenant_id = ? AND o2.tenant_id = ?
+    assert "o1.tenant_id = ? AND o2.tenant_id = ?" in result.rewritten_sql
+
+
+def test_rewrite_target_limit_boundary():
+    """Verify that hitting the exact target limit succeeds."""
+    joins = " ".join(
+        f"JOIN orders o{i} ON o.id = o{i}.id" for i in range(1, MAX_TENANT_REWRITE_TARGETS)
+    )
+    sql = f"SELECT * FROM orders o {joins}"
+
+    result = rewrite_tenant_scoped_sql(
+        sql,
+        provider="sqlite",
+        tenant_id=1,
+    )
+    assert result.tenant_predicates_added == MAX_TENANT_REWRITE_TARGETS
+
+
+def test_rewrite_target_limit_exceeded():
+    """Verify that exceeding the target limit fails closed."""
+    joins = " ".join(
+        f"JOIN orders o{i} ON o.id = o{i}.id" for i in range(1, MAX_TENANT_REWRITE_TARGETS + 1)
+    )
+    sql = f"SELECT * FROM orders o {joins}"
+
+    with pytest.raises(
+        TenantSQLRewriteError, match="Tenant rewrite exceeded maximum allowed targets"
+    ):
+        rewrite_tenant_scoped_sql(
+            sql,
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_param_limit_exceeded():
+    """Verify that exceeding the parameter limit fails closed."""
+    from common.sql import tenant_sql_rewriter
+
+    original_max = tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS
+    tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS = 2
+
+    try:
+        sql = (
+            "SELECT * FROM orders o1 "
+            "JOIN orders o2 ON o1.id = o2.id "
+            "JOIN orders o3 ON o1.id = o3.id"
+        )
+        with pytest.raises(
+            TenantSQLRewriteError, match="Tenant rewrite exceeded maximum allowed parameters"
+        ):
+            rewrite_tenant_scoped_sql(
+                sql,
+                provider="sqlite",
+                tenant_id=1,
+            )
+    finally:
+        tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS = original_max
+
+
+def test_rewrite_single_node_dedup():
+    """Assert de-dup works inside a single scope (no double injection)."""
+    sql = "SELECT * FROM orders"
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+    assert result.tenant_predicates_added == 1
+    assert result.rewritten_sql.count("tenant_id = ?") == 1

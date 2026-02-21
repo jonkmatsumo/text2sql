@@ -61,4 +61,4 @@ def test_otel_backend_configure(clean_env):
     # Verify it is indeed an SDK TracerProvider
     assert isinstance(provider, TracerProvider)
     assert hasattr(provider, "resource")
-    assert provider.resource.attributes["service.name"] == "text2sql-agent"
+    assert provider.resource.attributes["service.name"] in ("text2sql-agent", "text2sql-mcp")

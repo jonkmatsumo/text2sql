@@ -622,7 +622,10 @@ async def handler(
                 tenant_column=tenant_column,
                 global_table_allowlist=global_table_allowlist,
             )
-        except TenantSQLRewriteError:
+        except TenantSQLRewriteError as e:
+            span = trace.get_current_span()
+            if span and span.is_recording():
+                span.set_attribute("tenant_rewrite.failure_reason", e.reason_code)
             return _tenant_enforcement_unsupported_response(provider)
 
         table_columns = await _load_table_columns_for_rewrite(
