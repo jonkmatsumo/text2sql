@@ -78,6 +78,10 @@ class TestExecuteSqlQuery:
             assert data["metadata"]["provider"] == "postgres"
             assert data["metadata"]["is_truncated"] is False
             assert data["metadata"]["rows_returned"] == 1
+            assert data["metadata"]["tenant_enforcement_mode"] == "rls_session"
+            assert data["metadata"]["tenant_enforcement_applied"] is True
+            assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
+            assert data["metadata"].get("tenant_rewrite_reason_code") is None
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):
@@ -289,6 +293,33 @@ class TestExecuteSqlQuery:
             mock_conn.fetch.assert_called_once_with("SELECT * FROM film WHERE film_id = $1", 1)
             data = json.loads(result)
             assert len(data["rows"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_none_enforcement_mode_sets_skip_metadata(self):
+        """Non-enforced mode should set SKIPPED_NOT_REQUIRED contract metadata."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"id": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "none"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler("SELECT 1 AS id", tenant_id=1)
+
+            data = json.loads(result)
+            assert data.get("error") is None
+            assert data["metadata"]["tenant_enforcement_mode"] == "none"
+            assert data["metadata"]["tenant_enforcement_applied"] is False
+            assert data["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+            assert data["metadata"].get("tenant_rewrite_reason_code") is None
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_respects_timeout_seconds(self):
@@ -603,6 +634,36 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call("rewrite.scope_depth", 2)
         mock_span.set_attribute.assert_any_call("rewrite.has_cte", False)
         mock_span.set_attribute.assert_any_call("rewrite.has_subquery", True)
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_tenant_rewrite_no_eligible_targets_sets_skip_metadata(self):
+        """No-target rewrite path should skip enforcement metadata instead of rejecting."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get_connection = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler("SELECT 1 AS ok", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["rows"] == [{"ok": 1}]
+        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+        assert data["metadata"]["tenant_enforcement_applied"] is False
+        assert data["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+        assert data["metadata"].get("tenant_rewrite_reason_code") is None
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_disabled_sets_rejected_disabled_outcome(self):

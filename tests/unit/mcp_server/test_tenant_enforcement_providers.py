@@ -145,9 +145,9 @@ async def test_duckdb_provider_rewrites_sql_and_preserves_existing_params():
 
 
 @pytest.mark.asyncio
-async def test_sql_rewrite_rejects_when_no_table_predicate_can_be_added():
-    """Table-less SELECT should fail when rewrite mode cannot inject tenant predicates."""
-    mock_connection = MagicMock()
+async def test_sql_rewrite_skips_when_no_table_predicate_is_required():
+    """Table-less SELECT should skip rewrite with deterministic metadata."""
+    observed: dict[str, object] = {}
     with (
         patch("mcp_server.utils.auth.validate_role", return_value=None),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql"),
@@ -157,16 +157,19 @@ async def test_sql_rewrite_rejects_when_no_table_predicate_can_be_added():
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            mock_connection,
+            return_value=_conn_ctx(rows=[{"ok": 1}], recorder=observed),
         ),
     ):
         payload = await handler("SELECT 1", tenant_id=5)
 
     result = json.loads(payload)
-    assert result["error"]["category"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-    assert result["error"]["error_code"] == "TENANT_ENFORCEMENT_UNSUPPORTED"
-    assert result["error"]["details_safe"]["reason_code"] == "tenant_rewrite_no_predicates_produced"
-    mock_connection.assert_not_called()
+    assert result.get("error") is None
+    assert result["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
+    assert result["metadata"]["tenant_enforcement_applied"] is False
+    assert result["metadata"]["tenant_rewrite_outcome"] == "SKIPPED_NOT_REQUIRED"
+    assert result["metadata"].get("tenant_rewrite_reason_code") is None
+    assert observed.get("sql") == "SELECT 1"
+    assert observed.get("params") == []
 
 
 @pytest.mark.asyncio
