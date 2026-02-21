@@ -5,6 +5,7 @@ import pytest
 from common.sql.tenant_sql_rewriter import (
     MAX_TENANT_REWRITE_TARGETS,
     TenantSQLRewriteError,
+    load_tenant_rewrite_config,
     rewrite_tenant_scoped_sql,
 )
 
@@ -108,6 +109,49 @@ def test_rewrite_rejects_correlated_subqueries():
             provider="sqlite",
             tenant_id=1,
         )
+
+
+def test_rewrite_config_defaults_preserve_current_behavior(monkeypatch):
+    """Defaults should remain enabled and strict to preserve fail-closed behavior."""
+    monkeypatch.delenv("TENANT_REWRITE_ENABLED", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_STRICT_MODE", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_MAX_TARGETS", raising=False)
+    monkeypatch.delenv("TENANT_REWRITE_MAX_PARAMS", raising=False)
+
+    config = load_tenant_rewrite_config()
+    assert config.enabled is True
+    assert config.strict_mode is True
+
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(
+            "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)",
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_respects_feature_flag_disabled(monkeypatch):
+    """Global rewrite disable should fail fast with canonical reason code."""
+    monkeypatch.setenv("TENANT_REWRITE_ENABLED", "false")
+
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(
+            "SELECT * FROM orders",
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+    assert exc.value.reason_code == "REWRITE_DISABLED"
+
+
+def test_rewrite_strict_mode_off_allows_single_from_unqualified_case(monkeypatch):
+    """Non-strict mode allows a narrow safe subquery shape with unqualified inner refs."""
+    monkeypatch.setenv("TENANT_REWRITE_STRICT_MODE", "false")
+
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)"
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert result.tenant_predicates_added == 2
 
 
 def test_rewrite_rejects_window_functions():

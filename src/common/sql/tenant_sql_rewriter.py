@@ -10,6 +10,7 @@ from typing import Mapping, Sequence
 import sqlglot
 from sqlglot import exp
 
+from common.config.env import get_env_bool, get_env_int
 from common.sql.dialect import normalize_sqlglot_dialect
 
 SUPPORTED_SQL_REWRITE_PROVIDERS = {"sqlite", "duckdb"}
@@ -17,6 +18,16 @@ _SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
 
 MAX_TENANT_REWRITE_TARGETS = int(os.environ.get("MAX_TENANT_REWRITE_TARGETS", "25"))
 MAX_TENANT_REWRITE_PARAMS = int(os.environ.get("MAX_TENANT_REWRITE_PARAMS", "50"))
+
+
+@dataclass(frozen=True)
+class TenantRewriteConfig:
+    """Runtime feature controls for tenant rewrite behavior."""
+
+    enabled: bool
+    strict_mode: bool
+    max_targets: int
+    max_params: int
 
 
 class TenantSQLRewriteError(ValueError):
@@ -73,6 +84,34 @@ class TenantSQLRewriteResult:
     tenant_predicates_added: int
 
 
+def _safe_env_bool(name: str, default: bool) -> bool:
+    try:
+        value = get_env_bool(name, default=default)
+    except ValueError:
+        return default
+    return default if value is None else value
+
+
+def _safe_env_int(name: str, default: int) -> int:
+    try:
+        value = get_env_int(name, default=default)
+    except ValueError:
+        return default
+    if value is None or value < 1:
+        return default
+    return value
+
+
+def load_tenant_rewrite_config() -> TenantRewriteConfig:
+    """Load tenant rewrite feature flags with fail-safe defaults."""
+    return TenantRewriteConfig(
+        enabled=_safe_env_bool("TENANT_REWRITE_ENABLED", True),
+        strict_mode=_safe_env_bool("TENANT_REWRITE_STRICT_MODE", True),
+        max_targets=_safe_env_int("TENANT_REWRITE_MAX_TARGETS", MAX_TENANT_REWRITE_TARGETS),
+        max_params=_safe_env_int("TENANT_REWRITE_MAX_PARAMS", MAX_TENANT_REWRITE_PARAMS),
+    )
+
+
 def rewrite_tenant_scoped_sql(
     sql: str,
     *,
@@ -89,6 +128,12 @@ def rewrite_tenant_scoped_sql(
     - no nested SELECTs/subqueries
     - one predicate per non-global table in FROM/JOIN set
     """
+    config = load_tenant_rewrite_config()
+    if not config.enabled:
+        raise TenantSQLRewriteError(
+            "Tenant SQL rewrite is disabled by feature flag.", reason_code="REWRITE_DISABLED"
+        )
+
     normalized_provider = (provider or "").strip().lower()
     if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
         raise TenantSQLRewriteError(
@@ -115,7 +160,7 @@ def rewrite_tenant_scoped_sql(
         )
 
     expression = expressions[0]
-    classification = _assert_rewrite_eligible(expression)
+    classification = _assert_rewrite_eligible(expression, strict_mode=config.strict_mode)
     assert isinstance(expression, exp.Select)
 
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
@@ -124,9 +169,9 @@ def rewrite_tenant_scoped_sql(
     # 1. Collect all rewrite targets across all scopes
     targets = _collect_all_rewrite_targets(expression, classification)
 
-    if len(targets) > MAX_TENANT_REWRITE_TARGETS:
+    if len(targets) > config.max_targets:
         raise TenantSQLRewriteError(
-            f"Tenant rewrite exceeded maximum allowed targets ({MAX_TENANT_REWRITE_TARGETS}).",
+            f"Tenant rewrite exceeded maximum allowed targets ({config.max_targets}).",
             reason_code="TARGET_LIMIT_EXCEEDED",
         )
 
@@ -195,10 +240,9 @@ def rewrite_tenant_scoped_sql(
                 reason_code="UNRESOLVABLE_TABLE_ALIAS",
             )
 
-        if total_predicates_count >= MAX_TENANT_REWRITE_PARAMS:
+        if total_predicates_count >= config.max_params:
             raise TenantSQLRewriteError(
-                "Tenant rewrite exceeded maximum allowed parameters "
-                f"({MAX_TENANT_REWRITE_PARAMS}).",
+                "Tenant rewrite exceeded maximum allowed parameters " f"({config.max_params}).",
                 reason_code="PARAM_LIMIT_EXCEEDED",
             )
 
@@ -377,7 +421,9 @@ def _table_keys(table: exp.Table) -> list[str]:
     return keys
 
 
-def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | None:
+def _assert_rewrite_eligible(
+    expression: exp.Expression, *, strict_mode: bool = True
+) -> CTEClassification | None:
     """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
     if _contains_set_operation(expression):
         raise TenantSQLRewriteError(
@@ -411,7 +457,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
             reason_code="NESTED_FROM_UNSUPPORTED",
         )
 
-    if _has_correlated_subquery(expression):
+    if _has_correlated_subquery(expression, strict_mode=strict_mode):
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support correlated subqueries.",
             reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
@@ -636,7 +682,7 @@ def _get_cte_names(select: exp.Select) -> set[str]:
     return {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
 
 
-def _has_correlated_subquery(expression: exp.Select) -> bool:
+def _has_correlated_subquery(expression: exp.Select, *, strict_mode: bool) -> bool:
     outer_visible_names = _get_defined_names(expression) | _get_cte_names(expression)
     if not outer_visible_names:
         return False
@@ -659,6 +705,8 @@ def _has_correlated_subquery(expression: exp.Select) -> bool:
         inner_defined_names = _get_defined_names(select) | _get_cte_names(select)
         has_ambiguous_names = bool(inner_defined_names & outer_visible_names)
 
+        allow_ambiguous_unqualified = not strict_mode and _is_relaxed_single_from_scope(select)
+
         for column in select.find_all(exp.Column):
             col_table = (column.table or "").strip().lower()
             if col_table:
@@ -667,10 +715,21 @@ def _has_correlated_subquery(expression: exp.Select) -> bool:
                 if col_table in outer_visible_names:
                     return True
             else:
-                if has_ambiguous_names:
+                if has_ambiguous_names and not allow_ambiguous_unqualified:
                     return True
 
     return False
+
+
+def _is_relaxed_single_from_scope(select: exp.Select) -> bool:
+    """Return True for the narrowly safe relaxed shape when strict mode is disabled."""
+    from_clause = select.args.get("from_")
+    if not isinstance(from_clause, exp.From):
+        return False
+    if not isinstance(from_clause.args.get("this"), exp.Table):
+        return False
+    joins = select.args.get("joins") or []
+    return len(joins) == 0
 
 
 def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
