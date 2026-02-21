@@ -11,6 +11,7 @@ from sqlglot import exp
 from common.sql.dialect import normalize_sqlglot_dialect
 
 SUPPORTED_SQL_REWRITE_PROVIDERS = {"sqlite", "duckdb"}
+_SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
 
 
 class TenantSQLRewriteError(ValueError):
@@ -61,20 +62,17 @@ def rewrite_tenant_scoped_sql(
         raise TenantSQLRewriteError("Tenant rewrite requires a single SELECT statement.")
 
     expression = expressions[0]
-    if not isinstance(expression, exp.Select):
-        raise TenantSQLRewriteError("Tenant rewrite supports SELECT statements only.")
-
-    select_nodes = list(expression.find_all(exp.Select))
-    if len(select_nodes) != 1:
-        raise TenantSQLRewriteError("Tenant rewrite v1 does not support nested SELECTs.")
+    _assert_rewrite_eligible(expression)
+    assert isinstance(expression, exp.Select)
 
     allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
     normalized_columns = _normalize_table_columns(table_columns)
 
+    rewrite_targets = _rewrite_target_tables(expression)
     rewritten_tables: list[str] = []
     predicates: list[exp.Expression] = []
 
-    for table in expression.find_all(exp.Table):
+    for table in rewrite_targets:
         table_keys = _table_keys(table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
@@ -98,7 +96,14 @@ def rewrite_tenant_scoped_sql(
         )
 
     if not predicates:
-        raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+        if not rewrite_targets:
+            raise TenantSQLRewriteError("Tenant rewrite produced no predicates.")
+        return TenantSQLRewriteResult(
+            rewritten_sql=expression.sql(dialect=dialect),
+            params=[],
+            tables_rewritten=[],
+            tenant_predicates_added=0,
+        )
 
     combined_predicate = predicates[0]
     for predicate in predicates[1:]:
@@ -165,3 +170,120 @@ def _table_keys(table: exp.Table) -> list[str]:
         else:
             keys.insert(0, f"{catalog}.{table_name}")
     return keys
+
+
+def _assert_rewrite_eligible(expression: exp.Expression) -> None:
+    """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
+    if _contains_set_operation(expression):
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support set operations.")
+
+    if not isinstance(expression, exp.Select):
+        raise TenantSQLRewriteError("Tenant rewrite supports SELECT statements only.")
+
+    if expression.args.get("with_") is not None:
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support CTEs.")
+
+    if any(True for _ in expression.find_all(exp.Window)):
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support window functions.")
+
+    if _has_nested_from_subquery(expression):
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support nested SELECTs in FROM.")
+
+    if _has_correlated_subquery(expression):
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support correlated subqueries.")
+
+    if _has_nested_select(expression):
+        raise TenantSQLRewriteError("Tenant rewrite v1 does not support subqueries.")
+
+
+def _contains_set_operation(expression: exp.Expression) -> bool:
+    if isinstance(expression, _SET_OPERATION_TYPES):
+        return True
+    return any(True for _ in expression.find_all(exp.SetOperation))
+
+
+def _has_nested_select(expression: exp.Select) -> bool:
+    for select in expression.find_all(exp.Select):
+        if select is not expression:
+            return True
+    return False
+
+
+def _has_nested_from_subquery(expression: exp.Select) -> bool:
+    for subquery in expression.find_all(exp.Subquery):
+        if isinstance(subquery.parent, (exp.From, exp.Join)):
+            return True
+    return False
+
+
+def _has_correlated_subquery(expression: exp.Select) -> bool:
+    outer_aliases = _top_level_table_aliases(expression)
+    if not outer_aliases:
+        return False
+
+    for select in expression.find_all(exp.Select):
+        if select is expression:
+            continue
+        for column in select.find_all(exp.Column):
+            table_name = (column.table or "").strip().lower()
+            if table_name and table_name in outer_aliases:
+                return True
+    return False
+
+
+def _top_level_table_aliases(expression: exp.Select) -> set[str]:
+    aliases: set[str] = set()
+    for table in _top_level_tables(expression):
+        alias_or_name = (table.alias_or_name or table.name or "").strip().lower()
+        if alias_or_name:
+            aliases.add(alias_or_name)
+    return aliases
+
+
+def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
+    tables: list[exp.Table] = []
+
+    from_clause = expression.args.get("from_")
+    if isinstance(from_clause, exp.From):
+        from_this = from_clause.args.get("this")
+        if isinstance(from_this, exp.Table):
+            tables.append(from_this)
+
+    joins = expression.args.get("joins") or []
+    for join in joins:
+        if not isinstance(join, exp.Join):
+            continue
+        join_this = join.args.get("this")
+        if isinstance(join_this, exp.Table):
+            tables.append(join_this)
+
+    return tables
+
+
+def _rewrite_target_tables(expression: exp.Select) -> list[exp.Table]:
+    """Return tenant-scopeable base tables for rewrite or fail closed."""
+    tables: list[exp.Table] = []
+
+    from_clause = expression.args.get("from_")
+    if isinstance(from_clause, exp.From):
+        from_this = from_clause.args.get("this")
+        if isinstance(from_this, exp.Table):
+            tables.append(from_this)
+        elif from_this is not None:
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support non-table FROM sources."
+            )
+
+    joins = expression.args.get("joins") or []
+    for join in joins:
+        if not isinstance(join, exp.Join):
+            continue
+        join_this = join.args.get("this")
+        if isinstance(join_this, exp.Table):
+            tables.append(join_this)
+        elif join_this is not None:
+            raise TenantSQLRewriteError(
+                "Tenant rewrite v1 does not support non-table JOIN sources."
+            )
+
+    return tables

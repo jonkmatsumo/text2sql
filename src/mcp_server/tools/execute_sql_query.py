@@ -81,10 +81,13 @@ def _tenant_column_name() -> str:
 
 
 def _tenant_global_table_allowlist() -> set[str]:
-    raw = (get_env_str("TENANT_GLOBAL_TABLES", "") or "").strip()
-    if not raw:
-        return set()
-    return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
+    entries: set[str] = set()
+    for env_key in ("GLOBAL_TABLE_ALLOWLIST", "TENANT_GLOBAL_TABLES"):
+        raw = (get_env_str(env_key, "") or "").strip()
+        if not raw:
+            continue
+        entries.update({entry.strip().lower() for entry in raw.split(",") if entry.strip()})
+    return entries
 
 
 def _extract_columns_from_table_definition(definition_payload: str) -> Optional[set[str]]:
@@ -109,7 +112,10 @@ async def _load_table_columns_for_rewrite(
     table_names: Sequence[str],
     tenant_id: int,
 ) -> dict[str, set[str]]:
-    """Best-effort table column lookup from metadata store."""
+    """Load table columns from metadata store for tenant rewrite validation."""
+    if not table_names:
+        return {}
+
     try:
         store = Database.get_metadata_store()
     except Exception:
@@ -142,16 +148,18 @@ async def _load_table_columns_for_rewrite(
     return table_columns
 
 
-def _missing_tenant_column_tables(
+def _tenant_scope_schema_validation_failures(
     table_names: Sequence[str],
     table_columns: dict[str, set[str]],
     tenant_column: str,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """Return tables missing schema metadata and missing tenant column."""
     tenant_column_normalized = tenant_column.strip().lower()
     if not tenant_column_normalized:
-        return []
+        return [], []
 
-    missing: list[str] = []
+    missing_schema: list[str] = []
+    missing_tenant_column: list[str] = []
     for table_name in table_names:
         normalized = (table_name or "").strip().lower()
         if not normalized:
@@ -159,9 +167,12 @@ def _missing_tenant_column_tables(
         columns = table_columns.get(normalized)
         if columns is None:
             columns = table_columns.get(normalized.split(".")[-1])
-        if columns is not None and tenant_column_normalized not in columns:
-            missing.append(normalized)
-    return missing
+        if columns is None:
+            missing_schema.append(normalized)
+            continue
+        if tenant_column_normalized not in columns:
+            missing_tenant_column.append(normalized)
+    return missing_schema, missing_tenant_column
 
 
 def _resolve_row_limit(conn: object) -> int:
@@ -614,19 +625,18 @@ async def handler(
         except TenantSQLRewriteError:
             return _tenant_enforcement_unsupported_response(provider)
 
-        if rewrite_result.tenant_predicates_added <= 0:
-            return _tenant_enforcement_unsupported_response(provider)
-
         table_columns = await _load_table_columns_for_rewrite(
             rewrite_result.tables_rewritten,
             tenant_id,
         )
-        missing_tenant_column_tables = _missing_tenant_column_tables(
-            rewrite_result.tables_rewritten,
-            table_columns,
-            tenant_column,
+        missing_schema_tables, missing_tenant_column_tables = (
+            _tenant_scope_schema_validation_failures(
+                rewrite_result.tables_rewritten,
+                table_columns,
+                tenant_column,
+            )
         )
-        if missing_tenant_column_tables:
+        if missing_schema_tables or missing_tenant_column_tables:
             return _tenant_enforcement_unsupported_response(provider)
 
         effective_sql_query = rewrite_result.rewritten_sql
