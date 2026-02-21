@@ -243,3 +243,43 @@ def test_policy_classify_sql_complexity_exceeded():
     )
     shape = policy.classify_sql("SELECT id, name, status, role FROM users WHERE age > 21")
     assert shape == TenantSQLShape.UNSUPPORTED_COMPLEXITY
+
+
+def test_policy_classify_sql_strict_mode_true():
+    """Test classification rejects ambiguous queries in strict mode."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+
+    # Just a simple correlated subquery to test the flag:
+    shape = policy.classify_sql(
+        "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)"
+    )
+    assert shape == TenantSQLShape.UNSUPPORTED_CORRELATED_SUBQUERY
+
+
+def test_policy_classify_sql_strict_mode_false():
+    """Test classification allows certain queries when strict mode is false."""
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",
+        mode="sql_rewrite",
+        strict=False,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=100,
+        hard_timeout_ms=200,
+    )
+
+    # With strict=False, an unqualified column in a subquery with only one table in scope
+    # is NOT assumed to be correlated.
+    sql = "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders)"
+    shape = policy.classify_sql(sql)
+    # The legacy strict mode false allows some queries that strict=True blocks.
+    # Let's verify it doesn't return UNSUPPORTED_CORRELATED_SUBQUERY for this shape.
+    assert shape == TenantSQLShape.SAFE_SIMPLE_SELECT
