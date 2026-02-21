@@ -2,7 +2,11 @@
 
 import pytest
 
-from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+from common.sql.tenant_sql_rewriter import (
+    MAX_TENANT_REWRITE_TARGETS,
+    TenantSQLRewriteError,
+    rewrite_tenant_scoped_sql,
+)
 
 
 @pytest.mark.parametrize(
@@ -218,3 +222,68 @@ def test_rewrite_determinism_same_table_multiple_times():
     # Check that placeholders are in the right order in the generated SQL
     # sqlglot might generate something like WHERE o1.tenant_id = ? AND o2.tenant_id = ?
     assert "o1.tenant_id = ? AND o2.tenant_id = ?" in result.rewritten_sql
+
+
+def test_rewrite_target_limit_boundary():
+    """Verify that hitting the exact target limit succeeds."""
+    joins = " ".join(
+        f"JOIN orders o{i} ON o.id = o{i}.id" for i in range(1, MAX_TENANT_REWRITE_TARGETS)
+    )
+    sql = f"SELECT * FROM orders o {joins}"
+
+    result = rewrite_tenant_scoped_sql(
+        sql,
+        provider="sqlite",
+        tenant_id=1,
+    )
+    assert result.tenant_predicates_added == MAX_TENANT_REWRITE_TARGETS
+
+
+def test_rewrite_target_limit_exceeded():
+    """Verify that exceeding the target limit fails closed."""
+    joins = " ".join(
+        f"JOIN orders o{i} ON o.id = o{i}.id" for i in range(1, MAX_TENANT_REWRITE_TARGETS + 1)
+    )
+    sql = f"SELECT * FROM orders o {joins}"
+
+    with pytest.raises(
+        TenantSQLRewriteError, match="Tenant rewrite exceeded maximum allowed targets"
+    ):
+        rewrite_tenant_scoped_sql(
+            sql,
+            provider="sqlite",
+            tenant_id=1,
+        )
+
+
+def test_rewrite_param_limit_exceeded():
+    """Verify that exceeding the parameter limit fails closed."""
+    from common.sql import tenant_sql_rewriter
+
+    original_max = tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS
+    tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS = 2
+
+    try:
+        sql = (
+            "SELECT * FROM orders o1 "
+            "JOIN orders o2 ON o1.id = o2.id "
+            "JOIN orders o3 ON o1.id = o3.id"
+        )
+        with pytest.raises(
+            TenantSQLRewriteError, match="Tenant rewrite exceeded maximum allowed parameters"
+        ):
+            rewrite_tenant_scoped_sql(
+                sql,
+                provider="sqlite",
+                tenant_id=1,
+            )
+    finally:
+        tenant_sql_rewriter.MAX_TENANT_REWRITE_PARAMS = original_max
+
+
+def test_rewrite_single_node_dedup():
+    """Assert de-dup works inside a single scope (no double injection)."""
+    sql = "SELECT * FROM orders"
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+    assert result.tenant_predicates_added == 1
+    assert result.rewritten_sql.count("tenant_id = ?") == 1

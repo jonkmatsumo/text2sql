@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping, Sequence
@@ -13,6 +14,9 @@ from common.sql.dialect import normalize_sqlglot_dialect
 
 SUPPORTED_SQL_REWRITE_PROVIDERS = {"sqlite", "duckdb"}
 _SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
+
+MAX_TENANT_REWRITE_TARGETS = int(os.environ.get("MAX_TENANT_REWRITE_TARGETS", "25"))
+MAX_TENANT_REWRITE_PARAMS = int(os.environ.get("MAX_TENANT_REWRITE_PARAMS", "50"))
 
 
 class TenantSQLRewriteError(ValueError):
@@ -99,6 +103,11 @@ def rewrite_tenant_scoped_sql(
     # 1. Collect all rewrite targets across all scopes
     targets = _collect_all_rewrite_targets(expression, classification)
 
+    if len(targets) > MAX_TENANT_REWRITE_TARGETS:
+        raise TenantSQLRewriteError(
+            f"Tenant rewrite exceeded maximum allowed targets ({MAX_TENANT_REWRITE_TARGETS})."
+        )
+
     # 2. Sort targets for determinism
     # Sort key: (cte_name_or_empty, table_effective_name, table_physical_name,
     # appearance_index)
@@ -146,6 +155,11 @@ def rewrite_tenant_scoped_sql(
         if not reference:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table alias.")
 
+        if total_predicates_count >= MAX_TENANT_REWRITE_PARAMS:
+            raise TenantSQLRewriteError(
+                f"Tenant rewrite exceeded maximum allowed parameters ({MAX_TENANT_REWRITE_PARAMS})."
+            )
+
         # Inject predicate into the target's scope_select
         predicate = exp.EQ(
             this=exp.column(tenant_column_name, table=reference),
@@ -179,9 +193,14 @@ def rewrite_tenant_scoped_sql(
             tenant_predicates_added=0,
         )
 
+    params = [tenant_id] * total_predicates_count
+    assert (
+        len(params) == total_predicates_count
+    ), "One param per injected predicate invariant violated."
+
     return TenantSQLRewriteResult(
         rewritten_sql=expression.sql(dialect=dialect),
-        params=[tenant_id] * total_predicates_count,
+        params=params,
         tables_rewritten=rewritten_tables,
         tenant_predicates_added=total_predicates_count,
     )
