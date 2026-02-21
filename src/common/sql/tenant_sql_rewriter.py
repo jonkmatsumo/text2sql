@@ -109,6 +109,7 @@ def rewrite_tenant_scoped_sql(
 
     # 3. Apply rewrites in sorted order
     rewritten_tables: list[str] = []
+    rewritten_table_ids: set[int] = set()
     total_predicates_count = 0
 
     # CTE names to avoid rewriting CTE references
@@ -120,6 +121,12 @@ def rewrite_tenant_scoped_sql(
     )
 
     for target in sorted_targets:
+        table_node_id = id(target.table)
+        if table_node_id in rewritten_table_ids:
+            # This shouldn't happen with sorted_targets from current collector,
+            # but we guard against it for future robustness.
+            continue
+
         table_keys = _table_keys(target.table)
         if not table_keys:
             raise TenantSQLRewriteError("Tenant rewrite could not resolve table identity.")
@@ -155,7 +162,11 @@ def rewrite_tenant_scoped_sql(
             )
 
         rewritten_tables.append(table_keys[0])
+        rewritten_table_ids.add(table_node_id)
         total_predicates_count += 1
+
+    # 4. Post-condition check: Ensure every eligible table reference has a predicate
+    _assert_completeness(expression, classification, cte_names, allowlist, rewritten_table_ids)
 
     if total_predicates_count == 0:
         if not targets:
@@ -462,3 +473,23 @@ def _top_level_tables(expression: exp.Select) -> list[exp.Table]:
             tables.append(join_this)
 
     return tables
+
+
+def _assert_completeness(
+    expression: exp.Select,
+    classification: CTEClassification | None,
+    cte_names: set[str],
+    allowlist: set[str],
+    rewritten_table_ids: set[int],
+) -> None:
+    """Ensure every eligible base table node has been rewritten."""
+    all_targets = _collect_all_rewrite_targets(expression, classification)
+    for target in all_targets:
+        table_keys = _table_keys(target.table)
+        if any(key in cte_names for key in table_keys):
+            continue
+        if any(key in allowlist for key in table_keys):
+            continue
+
+        if id(target.table) not in rewritten_table_ids:
+            raise TenantSQLRewriteError("Tenant predicate injection incomplete.")
