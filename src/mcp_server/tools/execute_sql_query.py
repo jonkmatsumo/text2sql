@@ -234,33 +234,6 @@ async def _load_table_columns_for_rewrite(
     return table_columns
 
 
-def _tenant_scope_schema_validation_failures(
-    table_names: Sequence[str],
-    table_columns: dict[str, set[str]],
-    tenant_column: str,
-) -> tuple[list[str], list[str]]:
-    """Return tables missing schema metadata and missing tenant column."""
-    tenant_column_normalized = tenant_column.strip().lower()
-    if not tenant_column_normalized:
-        return [], []
-
-    missing_schema: list[str] = []
-    missing_tenant_column: list[str] = []
-    for table_name in table_names:
-        normalized = (table_name or "").strip().lower()
-        if not normalized:
-            continue
-        columns = table_columns.get(normalized)
-        if columns is None:
-            columns = table_columns.get(normalized.split(".")[-1])
-        if columns is None:
-            missing_schema.append(normalized)
-            continue
-        if tenant_column_normalized not in columns:
-            missing_tenant_column.append(normalized)
-    return missing_schema, missing_tenant_column
-
-
 def _resolve_row_limit(conn: object) -> int:
     max_rows = getattr(conn, "max_rows", None)
     if not max_rows:
