@@ -18,6 +18,7 @@ _SET_OPERATION_TYPES = (exp.Union, exp.Intersect, exp.Except)
 
 MAX_TENANT_REWRITE_TARGETS = int(os.environ.get("MAX_TENANT_REWRITE_TARGETS", "25"))
 MAX_TENANT_REWRITE_PARAMS = int(os.environ.get("MAX_TENANT_REWRITE_PARAMS", "50"))
+MAX_SQL_AST_NODES = int(os.environ.get("MAX_SQL_AST_NODES", "1000"))
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class TenantRewriteConfig:
     strict_mode: bool
     max_targets: int
     max_params: int
+    max_ast_nodes: int
 
 
 class TenantSQLRewriteError(ValueError):
@@ -109,6 +111,7 @@ def load_tenant_rewrite_config() -> TenantRewriteConfig:
         strict_mode=_safe_env_bool("TENANT_REWRITE_STRICT_MODE", True),
         max_targets=_safe_env_int("TENANT_REWRITE_MAX_TARGETS", MAX_TENANT_REWRITE_TARGETS),
         max_params=_safe_env_int("TENANT_REWRITE_MAX_PARAMS", MAX_TENANT_REWRITE_PARAMS),
+        max_ast_nodes=_safe_env_int("MAX_SQL_AST_NODES", MAX_SQL_AST_NODES),
     )
 
 
@@ -160,6 +163,13 @@ def rewrite_tenant_scoped_sql(
         )
 
     expression = expressions[0]
+    ast_node_count = _sql_ast_node_count(expression)
+    if ast_node_count > config.max_ast_nodes:
+        raise TenantSQLRewriteError(
+            "Tenant rewrite AST complexity exceeded the maximum allowed node count "
+            f"({config.max_ast_nodes}).",
+            reason_code="AST_COMPLEXITY_EXCEEDED",
+        )
     classification = _assert_rewrite_eligible(expression, strict_mode=config.strict_mode)
     assert isinstance(expression, exp.Select)
 
@@ -419,6 +429,11 @@ def _table_keys(table: exp.Table) -> list[str]:
         else:
             keys.insert(0, f"{catalog}.{table_name}")
     return keys
+
+
+def _sql_ast_node_count(expression: exp.Expression) -> int:
+    """Count AST nodes to bound rewrite traversal complexity."""
+    return sum(1 for _ in expression.walk())
 
 
 def _assert_rewrite_eligible(

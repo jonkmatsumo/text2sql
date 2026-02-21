@@ -39,6 +39,7 @@ TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
 logger = logging.getLogger(__name__)
 
 _TENANT_REWRITE_REASON_ALLOWLIST = {
+    "AST_COMPLEXITY_EXCEEDED",
     "COMPLETENESS_FAILED",
     "CORRELATED_SUBQUERY_UNSUPPORTED",
     "CTE_UNSUPPORTED_SHAPE",

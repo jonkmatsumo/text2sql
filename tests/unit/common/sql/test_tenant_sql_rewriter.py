@@ -154,6 +154,31 @@ def test_rewrite_strict_mode_off_allows_single_from_unqualified_case(monkeypatch
     assert result.tenant_predicates_added == 2
 
 
+def test_rewrite_rejects_ast_complexity_exceeded(monkeypatch):
+    """AST guard should fail closed before deep rewrite traversal."""
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "80")
+    predicates = " AND ".join(f"o.id > {index}" for index in range(100))
+    sql = f"SELECT * FROM orders o WHERE {predicates}"
+
+    with pytest.raises(TenantSQLRewriteError) as exc:
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert exc.value.reason_code == "AST_COMPLEXITY_EXCEEDED"
+
+
+def test_rewrite_allows_query_under_ast_complexity_cap(monkeypatch):
+    """Complex but normal query should remain rewrite-eligible under conservative caps."""
+    monkeypatch.setenv("MAX_SQL_AST_NODES", "400")
+    sql = (
+        "SELECT o.id FROM orders o "
+        "JOIN customers c ON o.customer_id = c.id "
+        "WHERE o.id IN (SELECT li.order_id FROM line_items li WHERE li.status = 'shipped')"
+    )
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+    assert result.tenant_predicates_added == 3
+
+
 def test_rewrite_rejects_window_functions():
     """Window functions are rejected until the rewriter can scope them safely."""
     with pytest.raises(TenantSQLRewriteError, match="window functions"):
