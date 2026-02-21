@@ -378,6 +378,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
             "Tenant rewrite supports SELECT statements only.", reason_code="NOT_SELECT_STATEMENT"
         )
 
+    classification = None
     if expression.args.get("with_") is not None:
         classification = classify_cte_query(expression)
         if classification == CTEClassification.UNSUPPORTED_CTE:
@@ -385,7 +386,6 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
                 "Tenant rewrite v1 does not support unsupported CTEs.",
                 reason_code="CTE_UNSUPPORTED_SHAPE",
             )
-        return classification
 
     if any(True for _ in expression.find_all(exp.Window)):
         raise TenantSQLRewriteError(
@@ -426,7 +426,7 @@ def _assert_rewrite_eligible(expression: exp.Expression) -> CTEClassification | 
                 reason_code="SUBQUERY_UNSUPPORTED",
             )
 
-    return None
+    return classification
 
 
 def classify_subquery(expression: exp.Expression) -> SubqueryClassification:
@@ -545,28 +545,60 @@ def _has_nested_from_subquery(expression: exp.Select) -> bool:
     return False
 
 
+def _get_defined_names(select: exp.Select) -> set[str]:
+    names: set[str] = set()
+    for table in _top_level_tables(select):
+        alias = (table.alias_or_name or "").strip().lower()
+        if alias:
+            names.add(alias)
+        physical = (table.name or "").strip().lower()
+        if physical:
+            names.add(physical)
+    return names
+
+
+def _get_cte_names(select: exp.Select) -> set[str]:
+    with_ = select.args.get("with_")
+    if not with_:
+        return set()
+    return {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+
+
 def _has_correlated_subquery(expression: exp.Select) -> bool:
-    outer_aliases = _top_level_table_aliases(expression)
-    if not outer_aliases:
+    outer_visible_names = _get_defined_names(expression) | _get_cte_names(expression)
+    if not outer_visible_names:
         return False
+
+    with_ = expression.args.get("with_")
 
     for select in expression.find_all(exp.Select):
         if select is expression:
             continue
+
+        is_cte_body = False
+        if with_:
+            for cte in with_.expressions:
+                if select is cte.this:
+                    is_cte_body = True
+                    break
+        if is_cte_body:
+            continue
+
+        inner_defined_names = _get_defined_names(select) | _get_cte_names(select)
+        has_ambiguous_names = bool(inner_defined_names & outer_visible_names)
+
         for column in select.find_all(exp.Column):
-            table_name = (column.table or "").strip().lower()
-            if table_name and table_name in outer_aliases:
-                return True
+            col_table = (column.table or "").strip().lower()
+            if col_table:
+                if col_table in inner_defined_names:
+                    continue
+                if col_table in outer_visible_names:
+                    return True
+            else:
+                if has_ambiguous_names:
+                    return True
+
     return False
-
-
-def _top_level_table_aliases(expression: exp.Select) -> set[str]:
-    aliases: set[str] = set()
-    for table in _top_level_tables(expression):
-        alias_or_name = (table.alias_or_name or table.name or "").strip().lower()
-        if alias_or_name:
-            aliases.add(alias_or_name)
-    return aliases
 
 
 def _top_level_tables(expression: exp.Select) -> list[exp.Table]:

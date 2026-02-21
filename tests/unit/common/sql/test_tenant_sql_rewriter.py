@@ -287,3 +287,34 @@ def test_rewrite_single_node_dedup():
     result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
     assert result.tenant_predicates_added == 1
     assert result.rewritten_sql.count("tenant_id = ?") == 1
+
+
+def test_rewrite_correlation_shadowing():
+    """Outer alias shadowed by inner alias. All refs qualify to inner."""
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE o.id = 1)"
+    result = rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+    assert result.tenant_predicates_added == 2
+
+
+def test_rewrite_correlation_ambiguous_unqualified():
+    """Both scopes have `o` available. Unqualified column `id` -> reject as ambiguous."""
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers o WHERE id = 1)"
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+
+def test_rewrite_correlation_qualified_outer_ref():
+    """Qualified outer alias reference inside subquery without inner `o` -> reject as correlated."""
+    sql = "SELECT * FROM orders o WHERE EXISTS (SELECT 1 FROM customers c WHERE c.id = o.id)"
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
+
+
+def test_rewrite_correlation_cte_collision_ambiguous():
+    """CTE name collision with base table name in subquery, used unqualified."""
+    sql = (
+        "WITH t AS (SELECT * FROM archived) "
+        "SELECT * FROM users WHERE EXISTS (SELECT 1 FROM customers t WHERE id = 1)"
+    )
+    with pytest.raises(TenantSQLRewriteError, match="correlated subqueries"):
+        rewrite_tenant_scoped_sql(sql, provider="sqlite", tenant_id=1)
