@@ -433,6 +433,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
 
             result = await handler("SELECT * FROM film", tenant_id=1)
 
@@ -608,6 +609,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
             result = await handler("SELECT * FROM film", tenant_id=1)
 
         data = json.loads(result)
@@ -665,6 +667,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
             result = await handler("SELECT * FROM film", tenant_id=1)
 
         data = json.loads(result)
@@ -726,6 +729,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
             result = await handler("SELECT * FROM orders", tenant_id=1)
 
         data = json.loads(result)
@@ -797,6 +801,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
             result = await handler("SELECT * FROM film", tenant_id=1)
 
         data = json.loads(result)
@@ -829,6 +834,7 @@ class TestExecuteSqlQuery:
             ),
         ):
             mock_caps.return_value.tenant_enforcement_mode = "sql_rewrite"
+            mock_caps.return_value.provider_name = "sqlite"
             result = await handler("SELECT * FROM film", tenant_id=1)
 
         data = json.loads(result)
