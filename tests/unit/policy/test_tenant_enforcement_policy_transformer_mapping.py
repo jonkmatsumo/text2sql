@@ -7,6 +7,7 @@ import pytest
 from common.sql.tenant_sql_rewriter import (
     RewriteFailure,
     RewriteRequest,
+    TenantRewriteFailureReason,
     TransformerErrorKind,
     transform_tenant_scoped_sql,
 )
@@ -24,7 +25,8 @@ async def test_policy_maps_transformer_param_limit_to_rejected_limit(
     with patch(
         "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
         return_value=transformer_failure(
-            kind=TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
+            kind=TransformerErrorKind.SUBQUERY_UNSUPPORTED,
+            reason_code=TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED,
             message="Exceeded parameter budget.",
         ),
     ) as mock_transform:
@@ -66,3 +68,4 @@ def test_transformer_rejects_invalid_request_shape_with_bounded_failure_kind():
     )
     assert isinstance(failure, RewriteFailure)
     assert failure.kind == TransformerErrorKind.INVALID_REQUEST
+    assert failure.reason_code == TenantRewriteFailureReason.UNSUPPORTED_SHAPE

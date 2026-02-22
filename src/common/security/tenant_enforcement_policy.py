@@ -420,7 +420,9 @@ class TenantEnforcementPolicy:
             CTEClassification,
             RewriteFailure,
             RewriteRequest,
+            TenantRewriteFailureReason,
             TenantSQLTransformerError,
+            TransformerErrorKind,
             transform_tenant_scoped_sql,
         )
 
@@ -445,12 +447,53 @@ class TenantEnforcementPolicy:
                 )
             )
         except TenantSQLTransformerError as exc:
-            transformer_result = RewriteFailure(kind=exc.kind, message=str(exc))
+            fallback_failure_reason_map = {
+                TransformerErrorKind.AST_COMPLEXITY_EXCEEDED: (
+                    TenantRewriteFailureReason.AST_COMPLEXITY_EXCEEDED
+                ),
+                TransformerErrorKind.COMPLETENESS_FAILED: (
+                    TenantRewriteFailureReason.COMPLETENESS_FAILED
+                ),
+                TransformerErrorKind.MISSING_TENANT_COLUMN: (
+                    TenantRewriteFailureReason.MISSING_TENANT_COLUMN
+                ),
+                TransformerErrorKind.MISSING_TENANT_COLUMN_CONFIG: (
+                    TenantRewriteFailureReason.MISSING_TENANT_COLUMN
+                ),
+                TransformerErrorKind.NO_PREDICATES_PRODUCED: (
+                    TenantRewriteFailureReason.NO_PREDICATES_PRODUCED
+                ),
+                TransformerErrorKind.PARAM_LIMIT_EXCEEDED: (
+                    TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED
+                ),
+                TransformerErrorKind.PLACEHOLDER_PARAM_MISMATCH: (
+                    TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED
+                ),
+                TransformerErrorKind.PARSE_ERROR: TenantRewriteFailureReason.PARSE_FAILED,
+                TransformerErrorKind.PROVIDER_UNSUPPORTED: (
+                    TenantRewriteFailureReason.DIALECT_UNSUPPORTED
+                ),
+                TransformerErrorKind.REWRITTEN_SQL_INVALID: TenantRewriteFailureReason.PARSE_FAILED,
+                TransformerErrorKind.TARGET_LIMIT_EXCEEDED: (
+                    TenantRewriteFailureReason.TARGET_LIMIT_EXCEEDED
+                ),
+            }
+            transformer_result = RewriteFailure(
+                kind=exc.kind,
+                reason_code=fallback_failure_reason_map.get(
+                    exc.kind,
+                    TenantRewriteFailureReason.UNSUPPORTED_SHAPE,
+                ),
+                message=str(exc),
+            )
 
         if isinstance(transformer_result, RewriteFailure):
             rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
             telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
-            normalized_reason = self._reason_code_for_transformer_kind(transformer_result.kind)
+            normalized_reason = self._reason_code_for_rewrite_failure(transformer_result)
+            telemetry_attrs["tenant_rewrite.failure_reason_category"] = (
+                self._normalized_rewrite_failure_category(transformer_result.reason_code)
+            )
             if normalized_reason == "NO_PREDICATES_PRODUCED":
                 result = self.determine_outcome(applied=False, reason_code=normalized_reason)
                 return self._build_decision(
@@ -717,10 +760,36 @@ class TenantEnforcementPolicy:
         normalized = (reason_code or "").strip().upper()
         return normalized if normalized else None
 
-    def _reason_code_for_transformer_kind(self, kind: object) -> str:
-        value = getattr(kind, "value", kind)
+    def _reason_code_for_rewrite_failure(self, failure: object) -> str:
+        reason_code = getattr(failure, "reason_code", None)
+        reason_raw = getattr(reason_code, "value", reason_code)
+        normalized_reason = self._normalized_reason_code(str(reason_raw))
+        if normalized_reason == "MISSING_TENANT_COLUMN":
+            return "MISSING_TENANT_COLUMN"
+        if normalized_reason == "TARGET_LIMIT_EXCEEDED":
+            return "TARGET_LIMIT_EXCEEDED"
+        if normalized_reason == "PARAM_LIMIT_EXCEEDED":
+            return "PARAM_LIMIT_EXCEEDED"
+        if normalized_reason == "AST_COMPLEXITY_EXCEEDED":
+            return "AST_COMPLEXITY_EXCEEDED"
+        if normalized_reason == "COMPLETENESS_FAILED":
+            return "COMPLETENESS_FAILED"
+        if normalized_reason == "DIALECT_UNSUPPORTED":
+            return "PROVIDER_UNSUPPORTED"
+        if normalized_reason == "PARSE_FAILED":
+            return "PARSE_ERROR"
+        if normalized_reason == "NO_PREDICATES_PRODUCED":
+            return "NO_PREDICATES_PRODUCED"
+        if normalized_reason == "UNSUPPORTED_SHAPE":
+            return "SUBQUERY_UNSUPPORTED"
+        return "UNKNOWN_ERROR"
+
+    def _normalized_rewrite_failure_category(self, reason: object) -> str:
+        value = getattr(reason, "value", reason)
         normalized = self._normalized_reason_code(str(value))
-        return normalized or "UNKNOWN_ERROR"
+        if normalized is None:
+            return "tenant_rewrite_failure_unknown"
+        return f"tenant_rewrite_failure_{normalized.lower()}"
 
     def _classification_reason_code(self, shape: TenantSQLShape) -> str | None:
         if shape == TenantSQLShape.UNSUPPORTED_SET_OPERATION:

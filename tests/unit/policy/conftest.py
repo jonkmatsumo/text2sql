@@ -7,7 +7,11 @@ from collections.abc import Callable
 import pytest
 
 from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
-from common.sql.tenant_sql_rewriter import RewriteFailure, TransformerErrorKind
+from common.sql.tenant_sql_rewriter import (
+    RewriteFailure,
+    TenantRewriteFailureReason,
+    TransformerErrorKind,
+)
 
 
 @pytest.fixture
@@ -48,9 +52,10 @@ def transformer_failure() -> Callable[..., RewriteFailure]:
     def _factory(
         *,
         kind: TransformerErrorKind = TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
+        reason_code: TenantRewriteFailureReason = TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED,
         message: str = "Transformer failed.",
     ) -> RewriteFailure:
-        return RewriteFailure(kind=kind, message=message)
+        return RewriteFailure(kind=kind, reason_code=reason_code, message=message)
 
     return _factory
 
