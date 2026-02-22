@@ -9,20 +9,11 @@ import asyncpg
 import pytest
 
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
+from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
 
 _TENANT_CONTRACT_FIXTURE_DIR = (
     Path(__file__).resolve().parent / "fixtures" / "execute_sql_query_tenant_enforcement"
 )
-_TENANT_MODE_ENUM = {"sql_rewrite", "rls_session", "none"}
-_TENANT_OUTCOME_ENUM = {
-    "APPLIED",
-    "SKIPPED_NOT_REQUIRED",
-    "REJECTED_UNSUPPORTED",
-    "REJECTED_DISABLED",
-    "REJECTED_LIMIT",
-    "REJECTED_MISSING_TENANT",
-    "REJECTED_TIMEOUT",
-}
 
 
 class TestExecuteSqlQuery:
@@ -930,10 +921,15 @@ class TestExecuteSqlQuery:
             result = await handler("SELECT * FROM orders", tenant_id=1)
 
         data = json.loads(result)
-        assert data["metadata"]["tenant_enforcement_mode"] == "sql_rewrite"
-        assert data["metadata"]["tenant_enforcement_applied"] is applied
-        assert data["metadata"]["tenant_rewrite_outcome"] == outcome
-        assert data["metadata"].get("tenant_rewrite_reason_code") == bounded_reason_code
+        assert_tenant_enforcement_contract(
+            data,
+            {
+                "tenant_enforcement_mode": "sql_rewrite",
+                "tenant_enforcement_applied": applied,
+                "tenant_rewrite_outcome": outcome,
+                "tenant_rewrite_reason_code": bounded_reason_code,
+            },
+        )
         if should_execute:
             assert data.get("error") is None
             mock_get_connection.assert_called_once()
@@ -1051,18 +1047,10 @@ class TestExecuteSqlQuery:
         assert "rows_returned" in metadata
         assert "is_truncated" in metadata
         assert "provider" in metadata
-        assert metadata["tenant_enforcement_mode"] in _TENANT_MODE_ENUM
-        assert metadata["tenant_rewrite_outcome"] in _TENANT_OUTCOME_ENUM
-        assert isinstance(metadata["tenant_enforcement_applied"], bool)
+        assert_tenant_enforcement_contract(payload, fixture_metadata)
 
         for field_name, expected in fixture_metadata.items():
             assert metadata.get(field_name) == expected
-
-        reason_code = metadata.get("tenant_rewrite_reason_code")
-        if reason_code is not None:
-            assert isinstance(reason_code, str)
-            assert reason_code.islower()
-            assert " " not in reason_code
 
         if expected_error_code is None:
             assert payload.get("error") is None

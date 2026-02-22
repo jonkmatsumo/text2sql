@@ -5,20 +5,13 @@ import re
 
 import pytest
 
-from common.models.tool_envelopes import ExecuteSQLQueryMetadata
 from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
 from dal.capabilities import capabilities_for_provider
-
-_VALID_MODES = {"sql_rewrite", "rls_session", "none"}
-_VALID_OUTCOMES = {
-    "APPLIED",
-    "SKIPPED_NOT_REQUIRED",
-    "REJECTED_UNSUPPORTED",
-    "REJECTED_DISABLED",
-    "REJECTED_LIMIT",
-    "REJECTED_MISSING_TENANT",
-    "REJECTED_TIMEOUT",
-}
+from tests._support.tenant_enforcement_contract import (
+    VALID_TENANT_ENFORCEMENT_MODES,
+    VALID_TENANT_ENFORCEMENT_OUTCOMES,
+    assert_tenant_enforcement_contract,
+)
 
 
 def _policy(provider: str, mode: str) -> TenantEnforcementPolicy:
@@ -36,7 +29,7 @@ def _policy(provider: str, mode: str) -> TenantEnforcementPolicy:
 
 def _assert_decision_invariants(decision) -> None:
     assert decision.result.mode
-    assert decision.result.outcome in _VALID_OUTCOMES
+    assert decision.result.outcome in VALID_TENANT_ENFORCEMENT_OUTCOMES
     assert isinstance(decision.result.applied, bool)
 
     if decision.result.outcome.startswith("REJECTED_"):
@@ -44,38 +37,11 @@ def _assert_decision_invariants(decision) -> None:
     else:
         assert decision.result.reason_code is None
 
-    metadata = decision.envelope_metadata
-    assert metadata["tenant_enforcement_mode"] in _VALID_MODES
-    assert metadata["tenant_rewrite_outcome"] == decision.result.outcome
-    assert metadata["tenant_enforcement_applied"] is decision.result.applied
-
-    if decision.result.outcome.startswith("REJECTED_"):
-        reason_code = metadata.get("tenant_rewrite_reason_code")
-        assert isinstance(reason_code, str)
-        assert reason_code == decision.bounded_reason_code
-        assert reason_code == reason_code.strip().lower()
-        assert " " not in reason_code
-    else:
-        assert metadata.get("tenant_rewrite_reason_code") is None
-
-    telemetry = decision.telemetry_attributes
-    assert telemetry["tenant.enforcement.mode"] == metadata["tenant_enforcement_mode"]
-    assert telemetry["tenant.enforcement.outcome"] == metadata["tenant_rewrite_outcome"]
-    assert telemetry["tenant.enforcement.applied"] is metadata["tenant_enforcement_applied"]
-    if decision.result.outcome.startswith("REJECTED_"):
-        telemetry_reason = telemetry.get("tenant.enforcement.reason_code")
-        assert isinstance(telemetry_reason, str)
-        assert telemetry_reason == decision.bounded_reason_code
-
-    validated = ExecuteSQLQueryMetadata(
-        rows_returned=0,
-        is_truncated=False,
-        provider="sqlite",
-        **metadata,
+    assert_tenant_enforcement_contract(
+        decision.envelope_metadata,
+        decision,
+        telemetry=decision.telemetry_attributes,
     )
-    assert validated.tenant_enforcement_mode == metadata["tenant_enforcement_mode"]
-    assert validated.tenant_rewrite_outcome == metadata["tenant_rewrite_outcome"]
-    assert validated.tenant_enforcement_applied == metadata["tenant_enforcement_applied"]
 
 
 @pytest.mark.asyncio
@@ -123,8 +89,13 @@ def test_policy_drift_guard_provider_capability_coverage():
             sql="SELECT 1",
             params=[],
         )
-        assert decision.envelope_metadata["tenant_enforcement_mode"] in _VALID_MODES
-        assert decision.envelope_metadata["tenant_rewrite_outcome"] in _VALID_OUTCOMES
+        assert (
+            decision.envelope_metadata["tenant_enforcement_mode"] in VALID_TENANT_ENFORCEMENT_MODES
+        )
+        assert (
+            decision.envelope_metadata["tenant_rewrite_outcome"]
+            in VALID_TENANT_ENFORCEMENT_OUTCOMES
+        )
         assert isinstance(decision.envelope_metadata["tenant_enforcement_applied"], bool)
 
     assert covered, "No tenant-enforcement providers discovered in capabilities registry"
