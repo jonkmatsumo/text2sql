@@ -589,6 +589,7 @@ async def handler(
         max_ast_nodes=rewrite_settings.max_ast_nodes,
         hard_timeout_ms=rewrite_settings.hard_timeout_ms,
         warn_ms=rewrite_settings.warn_ms,
+        rewrite_enabled=rewrite_settings.enabled,
     )
     policy_decision = policy.default_decision(sql=sql_query, params=params)
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)

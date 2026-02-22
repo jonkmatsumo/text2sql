@@ -421,8 +421,8 @@ class TestExecuteSqlQuery:
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_failure_span(self):
-        """Test that TenantSQLRewriteError sets span attribute without leaking details."""
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+        """Test that transformer failures set bounded span attributes without leaking details."""
+        from common.sql.tenant_sql_rewriter import TenantSQLTransformerError, TransformerErrorKind
 
         mock_span = MagicMock()
         mock_span.is_recording.return_value = True
@@ -434,9 +434,10 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                side_effect=TenantSQLRewriteError(
-                    "Internal detailed error", reason_code="PARAM_LIMIT_EXCEEDED"
+                "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
+                side_effect=TenantSQLTransformerError(
+                    TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
+                    "Internal detailed error",
                 ),
             ),
         ):
@@ -524,7 +525,7 @@ class TestExecuteSqlQuery:
     @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_enforcement_observability_failure_attributes(self):
         """Rejected response should emit bounded tenant enforcement reason telemetry."""
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+        from common.sql.tenant_sql_rewriter import TenantRewriteSettings
 
         mock_span = MagicMock()
         mock_span.is_recording.return_value = True
@@ -536,9 +537,16 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                side_effect=TenantSQLRewriteError(
-                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                "common.sql.tenant_sql_rewriter.load_tenant_rewrite_settings",
+                return_value=TenantRewriteSettings(
+                    enabled=False,
+                    strict_mode=True,
+                    max_targets=25,
+                    max_params=50,
+                    max_ast_nodes=1000,
+                    warn_ms=50,
+                    hard_timeout_ms=200,
+                    assert_invariants=False,
                 ),
             ),
         ):
@@ -583,7 +591,7 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
                 return_value=TenantSQLRewriteResult(
                     rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
                     params=[1],
@@ -648,7 +656,7 @@ class TestExecuteSqlQuery:
                 ),
             ) as mock_settings_loader,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
                 return_value=TenantSQLRewriteResult(
                     rewritten_sql="SELECT * FROM film WHERE film.tenant_id = ?",
                     params=[1],
@@ -706,7 +714,7 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
                 return_value=TenantSQLRewriteResult(
                     rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
                     params=[1],
@@ -776,7 +784,7 @@ class TestExecuteSqlQuery:
     @pytest.mark.asyncio
     async def test_execute_sql_query_tenant_rewrite_disabled_sets_rejected_disabled_outcome(self):
         """Disabled rewrite should expose deterministic outcome and bounded reason metadata."""
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+        from common.sql.tenant_sql_rewriter import TenantRewriteSettings
 
         with (
             patch("mcp_server.utils.auth.validate_role", return_value=None),
@@ -784,9 +792,16 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                side_effect=TenantSQLRewriteError(
-                    "rewrite disabled", reason_code="REWRITE_DISABLED"
+                "common.sql.tenant_sql_rewriter.load_tenant_rewrite_settings",
+                return_value=TenantRewriteSettings(
+                    enabled=False,
+                    strict_mode=True,
+                    max_targets=25,
+                    max_params=50,
+                    max_ast_nodes=1000,
+                    warn_ms=50,
+                    hard_timeout_ms=200,
+                    assert_invariants=False,
                 ),
             ),
         ):
@@ -807,7 +822,7 @@ class TestExecuteSqlQuery:
         self,
     ):
         """Unsupported rewrite shape should expose deterministic unsupported outcome metadata."""
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError
+        from common.sql.tenant_sql_rewriter import TenantSQLTransformerError, TransformerErrorKind
 
         with (
             patch("mcp_server.utils.auth.validate_role", return_value=None),
@@ -815,9 +830,10 @@ class TestExecuteSqlQuery:
                 "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
             ) as mock_caps,
             patch(
-                "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                side_effect=TenantSQLRewriteError(
-                    "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
+                side_effect=TenantSQLTransformerError(
+                    TransformerErrorKind.SUBQUERY_UNSUPPORTED,
+                    "unsupported subquery shape",
                 ),
             ),
         ):
@@ -1074,7 +1090,12 @@ class TestExecuteSqlQuery:
     ):
         """Tenant enforcement metadata must stay backward compatible and bounded."""
         from common.models.tool_envelopes import ExecuteSQLQueryResponseEnvelope
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, TenantSQLRewriteResult
+        from common.sql.tenant_sql_rewriter import (
+            TenantRewriteSettings,
+            TenantSQLRewriteResult,
+            TenantSQLTransformerError,
+            TransformerErrorKind,
+        )
 
         fixture = self._load_tenant_contract_fixture(fixture_name)
 
@@ -1101,7 +1122,7 @@ class TestExecuteSqlQuery:
                     "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
                 ) as mock_caps,
                 patch(
-                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+                    "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
                     return_value=TenantSQLRewriteResult(
                         rewritten_sql="SELECT * FROM orders WHERE orders.tenant_id = ?",
                         params=[1],
@@ -1150,9 +1171,16 @@ class TestExecuteSqlQuery:
                     "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
                 ) as mock_caps,
                 patch(
-                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                    side_effect=TenantSQLRewriteError(
-                        "rewrite disabled", reason_code="REWRITE_DISABLED"
+                    "common.sql.tenant_sql_rewriter.load_tenant_rewrite_settings",
+                    return_value=TenantRewriteSettings(
+                        enabled=False,
+                        strict_mode=True,
+                        max_targets=25,
+                        max_params=50,
+                        max_ast_nodes=1000,
+                        warn_ms=50,
+                        hard_timeout_ms=200,
+                        assert_invariants=False,
                     ),
                 ),
             ):
@@ -1168,9 +1196,10 @@ class TestExecuteSqlQuery:
                     "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
                 ) as mock_caps,
                 patch(
-                    "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
-                    side_effect=TenantSQLRewriteError(
-                        "unsupported subquery shape", reason_code="SUBQUERY_UNSUPPORTED"
+                    "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
+                    side_effect=TenantSQLTransformerError(
+                        TransformerErrorKind.SUBQUERY_UNSUPPORTED,
+                        "unsupported subquery shape",
                     ),
                 ),
             ):

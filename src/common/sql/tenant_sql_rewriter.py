@@ -74,6 +74,35 @@ class SubqueryClassification(Enum):
     UNSUPPORTED_SUBQUERY = "UNSUPPORTED_SUBQUERY"
 
 
+class TransformerErrorKind(str, Enum):
+    """Transformer-local bounded failure kinds for pure rewrite operations."""
+
+    AST_COMPLEXITY_EXCEEDED = "AST_COMPLEXITY_EXCEEDED"
+    COMPLETENESS_FAILED = "COMPLETENESS_FAILED"
+    CTE_UNSUPPORTED_SHAPE = "CTE_UNSUPPORTED_SHAPE"
+    MISSING_TENANT_COLUMN = "MISSING_TENANT_COLUMN"
+    MISSING_TENANT_COLUMN_CONFIG = "MISSING_TENANT_COLUMN_CONFIG"
+    NOT_SELECT_STATEMENT = "NOT_SELECT_STATEMENT"
+    NOT_SINGLE_SELECT = "NOT_SINGLE_SELECT"
+    NO_PREDICATES_PRODUCED = "NO_PREDICATES_PRODUCED"
+    PARAM_LIMIT_EXCEEDED = "PARAM_LIMIT_EXCEEDED"
+    PARSE_ERROR = "PARSE_ERROR"
+    PROVIDER_UNSUPPORTED = "PROVIDER_UNSUPPORTED"
+    SUBQUERY_UNSUPPORTED = "SUBQUERY_UNSUPPORTED"
+    TARGET_LIMIT_EXCEEDED = "TARGET_LIMIT_EXCEEDED"
+    UNRESOLVABLE_TABLE_ALIAS = "UNRESOLVABLE_TABLE_ALIAS"
+    UNRESOLVABLE_TABLE_IDENTITY = "UNRESOLVABLE_TABLE_IDENTITY"
+
+
+class TenantSQLTransformerError(ValueError):
+    """Raised when the pure SQL tenant transformer cannot safely transform input SQL."""
+
+    def __init__(self, kind: TransformerErrorKind, message: str) -> None:
+        """Capture a bounded transformer error kind with a safe diagnostic message."""
+        super().__init__(message)
+        self.kind = kind
+
+
 @dataclass(frozen=True)
 class RewriteTarget:
     """A specific table node eligible for tenant rewrite within a scope."""
@@ -145,6 +174,242 @@ def load_tenant_rewrite_settings() -> TenantRewriteSettings:
 def load_tenant_rewrite_config() -> TenantRewriteSettings:
     """Backward-compatible alias for legacy imports."""
     return load_tenant_rewrite_settings()
+
+
+def transform_tenant_scoped_sql(
+    sql: str,
+    *,
+    provider: str,
+    tenant_id: int,
+    tenant_column: str = "tenant_id",
+    global_table_allowlist: set[str] | None = None,
+    table_columns: Mapping[str, Sequence[str]] | None = None,
+    max_targets: int,
+    max_params: int,
+    max_ast_nodes: int,
+    cte_classification: CTEClassification | None = None,
+    assert_invariants: bool = False,
+    _skip_invariant_check: bool = False,
+) -> TenantSQLRewriteResult:
+    """Pure tenant SQL transformer with no environment reads or policy mapping."""
+    normalized_provider = (provider or "").strip().lower()
+    if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.PROVIDER_UNSUPPORTED,
+            "Provider does not support tenant SQL rewrite.",
+        )
+
+    tenant_column_name = (tenant_column or "").strip()
+    if not tenant_column_name:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.MISSING_TENANT_COLUMN_CONFIG,
+            "Tenant column name is required.",
+        )
+
+    dialect = normalize_sqlglot_dialect(normalized_provider)
+    try:
+        expressions = sqlglot.parse(sql, read=dialect)
+    except Exception as exc:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.PARSE_ERROR,
+            "SQL parse failed for tenant rewrite.",
+        ) from exc
+
+    if not expressions or len(expressions) != 1 or expressions[0] is None:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.NOT_SINGLE_SELECT,
+            "Tenant rewrite requires a single SELECT statement.",
+        )
+
+    expression = expressions[0]
+    if not isinstance(expression, exp.Select):
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.NOT_SELECT_STATEMENT,
+            "Tenant rewrite supports SELECT statements only.",
+        )
+
+    ast_node_count = _sql_ast_node_count(expression)
+    if ast_node_count > max_ast_nodes:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.AST_COMPLEXITY_EXCEEDED,
+            (
+                "Tenant rewrite AST complexity exceeded the maximum allowed node count "
+                f"({max_ast_nodes})."
+            ),
+        )
+
+    classification = cte_classification
+    if expression.args.get("with_") is not None and classification is None:
+        classification = classify_cte_query(expression)
+        if classification == CTEClassification.UNSUPPORTED_CTE:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.CTE_UNSUPPORTED_SHAPE,
+                "Tenant rewrite v1 does not support unsupported CTEs.",
+            )
+
+    rewrite_has_cte = expression.args.get("with_") is not None
+    rewrite_has_subquery = _has_subquery(expression)
+    rewrite_scope_depth = _scope_depth(expression)
+
+    allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
+    normalized_columns = _normalize_table_columns(table_columns)
+
+    targets = _collect_all_rewrite_targets(expression, classification)
+    if len(targets) > max_targets:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.TARGET_LIMIT_EXCEEDED,
+            f"Tenant rewrite exceeded maximum allowed targets ({max_targets}).",
+        )
+
+    sorted_targets = sorted(
+        targets,
+        key=lambda t: (
+            t.cte_name or "",
+            t.effective_name,
+            t.physical_name,
+            t.scope_index,
+            t.appearance_index,
+        ),
+    )
+
+    rewritten_tables: list[str] = []
+    rewritten_target_keys: set[tuple] = set()
+    total_predicates_count = 0
+
+    with_ = expression.args.get("with_")
+    cte_names = (
+        {cte.alias_or_name.lower() for cte in with_.expressions if cte.alias_or_name}
+        if with_
+        else set()
+    )
+
+    for target in sorted_targets:
+        target_key = (
+            target.cte_name or "",
+            target.effective_name,
+            target.physical_name,
+            target.scope_index,
+            target.appearance_index,
+        )
+        if target_key in rewritten_target_keys:
+            continue
+
+        table_keys = _table_keys(target.table)
+        if not table_keys:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.UNRESOLVABLE_TABLE_IDENTITY,
+                "Tenant rewrite could not resolve table identity.",
+            )
+
+        if any(key in cte_names for key in table_keys):
+            continue
+        if any(key in allowlist for key in table_keys):
+            continue
+
+        columns = _lookup_columns_for_table(table_keys, normalized_columns)
+        if columns is not None and tenant_column_name.lower() not in columns:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.MISSING_TENANT_COLUMN,
+                "Tenant column missing for table rewrite.",
+            )
+
+        reference = (target.table.alias_or_name or target.table.name or "").strip()
+        if not reference:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.UNRESOLVABLE_TABLE_ALIAS,
+                "Tenant rewrite could not resolve table alias.",
+            )
+
+        if total_predicates_count >= max_params:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
+                f"Tenant rewrite exceeded maximum allowed parameters ({max_params}).",
+            )
+
+        predicate = exp.EQ(
+            this=exp.column(tenant_column_name, table=reference),
+            expression=exp.Placeholder(),
+        )
+
+        existing_where = target.scope_select.args.get("where")
+        if existing_where is None:
+            target.scope_select.set("where", exp.Where(this=predicate))
+        else:
+            existing_condition = existing_where.this
+            existing_condition.pop()
+            existing_where.set("this", exp.and_(existing_condition, predicate, copy=False))
+
+        rewritten_tables.append(table_keys[0])
+        rewritten_target_keys.add(target_key)
+        total_predicates_count += 1
+
+    try:
+        _assert_completeness(
+            expression, classification, cte_names, allowlist, rewritten_target_keys
+        )
+    except TenantSQLRewriteError as exc:
+        raise TenantSQLTransformerError(
+            TransformerErrorKind.COMPLETENESS_FAILED,
+            str(exc),
+        ) from exc
+
+    if total_predicates_count == 0:
+        if not targets:
+            raise TenantSQLTransformerError(
+                TransformerErrorKind.NO_PREDICATES_PRODUCED,
+                "Tenant rewrite produced no predicates.",
+            )
+
+        result = TenantSQLRewriteResult(
+            rewritten_sql=expression.sql(dialect=dialect),
+            params=[],
+            tables_rewritten=[],
+            tenant_predicates_added=0,
+            target_count=len(targets),
+            scope_depth=rewrite_scope_depth,
+            has_cte=rewrite_has_cte,
+            has_subquery=rewrite_has_subquery,
+        )
+        if assert_invariants and not _skip_invariant_check:
+            assert_rewrite_invariants(
+                sql,
+                result.rewritten_sql,
+                result.params,
+                provider=normalized_provider,
+                tenant_column=tenant_column_name,
+                global_table_allowlist=allowlist,
+                table_columns=normalized_columns,
+                strict_mode=True,
+                tenant_id=tenant_id,
+            )
+        return result
+
+    params = [tenant_id] * total_predicates_count
+    assert len(params) == total_predicates_count
+
+    result = TenantSQLRewriteResult(
+        rewritten_sql=expression.sql(dialect=dialect),
+        params=params,
+        tables_rewritten=rewritten_tables,
+        tenant_predicates_added=total_predicates_count,
+        target_count=len(targets),
+        scope_depth=rewrite_scope_depth,
+        has_cte=rewrite_has_cte,
+        has_subquery=rewrite_has_subquery,
+    )
+    if assert_invariants and not _skip_invariant_check:
+        assert_rewrite_invariants(
+            sql,
+            result.rewritten_sql,
+            result.params,
+            provider=normalized_provider,
+            tenant_column=tenant_column_name,
+            global_table_allowlist=allowlist,
+            table_columns=normalized_columns,
+            strict_mode=True,
+            tenant_id=tenant_id,
+        )
+    return result
 
 
 def rewrite_tenant_scoped_sql(

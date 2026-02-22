@@ -180,6 +180,7 @@ class TenantEnforcementPolicy:
     max_ast_nodes: int
     hard_timeout_ms: int
     warn_ms: int = 50
+    rewrite_enabled: bool = True
 
     def decide_enforcement(self) -> bool:
         """Evaluate if enforcement should occur through SQL rewrite."""
@@ -343,6 +344,15 @@ class TenantEnforcementPolicy:
                 would_apply_rewrite=False,
             )
 
+        if not self.rewrite_enabled:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="REWRITE_DISABLED",
+                tenant_required=False,
+                would_apply_rewrite=False,
+            )
+
         if simulate:
             simulated_telemetry = {"tenant.policy.simulated": True}
             classification_reason_code = self._classification_reason_code(
@@ -395,22 +405,45 @@ class TenantEnforcementPolicy:
                 extra_telemetry=simulated_telemetry,
             )
 
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+        shape = self.classify_sql(sql, provider=self.provider)
+        classification_reason_code = self._classification_reason_code(shape)
+        if classification_reason_code is not None:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code=classification_reason_code,
+                tenant_required=False,
+                would_apply_rewrite=False,
+            )
+
+        from common.sql.tenant_sql_rewriter import (
+            CTEClassification,
+            TenantSQLTransformerError,
+            transform_tenant_scoped_sql,
+        )
 
         rewrite_tenant_id = tenant_id if tenant_id is not None else 0
+        cte_classification = (
+            CTEClassification.SAFE_SIMPLE_CTE if shape == TenantSQLShape.SAFE_CTE_QUERY else None
+        )
         rewrite_started = time.perf_counter()
         try:
-            rewrite_result = rewrite_tenant_scoped_sql(
+            rewrite_result = transform_tenant_scoped_sql(
                 sql,
                 provider=self.provider,
                 tenant_id=rewrite_tenant_id,
                 tenant_column=tenant_column,
                 global_table_allowlist=global_table_allowlist,
+                max_targets=self.max_targets,
+                max_params=self.max_params,
+                max_ast_nodes=self.max_ast_nodes,
+                cte_classification=cte_classification,
+                assert_invariants=False,
             )
-        except TenantSQLRewriteError as exc:
+        except TenantSQLTransformerError as exc:
             rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
             telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
-            normalized_reason = self._normalized_reason_code(exc.reason_code)
+            normalized_reason = self._reason_code_for_transformer_kind(exc.kind)
             if normalized_reason == "NO_PREDICATES_PRODUCED":
                 result = self.determine_outcome(applied=False, reason_code=normalized_reason)
                 return self._build_decision(
@@ -434,7 +467,7 @@ class TenantEnforcementPolicy:
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
-                reason_code=normalized_reason or "UNKNOWN_ERROR",
+                reason_code=normalized_reason,
                 tenant_required=False,
                 would_apply_rewrite=False,
                 extra_telemetry=telemetry_attrs,
@@ -675,6 +708,11 @@ class TenantEnforcementPolicy:
     def _normalized_reason_code(self, reason_code: str | None) -> str | None:
         normalized = (reason_code or "").strip().upper()
         return normalized if normalized else None
+
+    def _reason_code_for_transformer_kind(self, kind: object) -> str:
+        value = getattr(kind, "value", kind)
+        normalized = self._normalized_reason_code(str(value))
+        return normalized or "UNKNOWN_ERROR"
 
     def _classification_reason_code(self, shape: TenantSQLShape) -> str | None:
         if shape == TenantSQLShape.UNSUPPORTED_SET_OPERATION:

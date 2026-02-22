@@ -26,7 +26,7 @@ async def test_simulation_mode_reports_applied_without_rewrite_execution():
     policy = _policy()
     sql = "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id"
     with patch(
-        "common.sql.tenant_sql_rewriter.rewrite_tenant_scoped_sql",
+        "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
         side_effect=AssertionError("simulate=True should not call rewrite"),
     ):
         decision = await policy.evaluate(
