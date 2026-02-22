@@ -20,6 +20,7 @@ _TENANT_OUTCOME_ENUM = {
     "REJECTED_UNSUPPORTED",
     "REJECTED_DISABLED",
     "REJECTED_LIMIT",
+    "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
 
@@ -891,6 +892,7 @@ class TestExecuteSqlQuery:
             telemetry_attributes={},
             metric_attributes={},
             bounded_reason_code=bounded_reason_code,
+            tenant_required=applied,
         )
 
         with (

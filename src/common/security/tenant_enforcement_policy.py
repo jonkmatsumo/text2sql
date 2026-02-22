@@ -25,6 +25,7 @@ _TENANT_REWRITE_REASON_ALLOWLIST = {
     "REWRITE_TIMEOUT",
     "SET_OPERATIONS_UNSUPPORTED",
     "SUBQUERY_UNSUPPORTED",
+    "TENANT_ID_REQUIRED",
     "TARGET_LIMIT_EXCEEDED",
     "TENANT_MODE_UNSUPPORTED",
     "UNRESOLVABLE_TABLE_ALIAS",
@@ -47,6 +48,7 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_UNSUPPORTED",
     "REJECTED_DISABLED",
     "REJECTED_LIMIT",
+    "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
 
@@ -162,6 +164,7 @@ class PolicyDecision:
     telemetry_attributes: dict[str, Any]
     metric_attributes: dict[str, Any]
     bounded_reason_code: Optional[str]
+    tenant_required: bool
 
 
 @dataclass(frozen=True)
@@ -199,6 +202,14 @@ class TenantEnforcementPolicy:
         """Resolve the final enforcement outcome mapped from the internal reason_code."""
         normalized_mode = self._normalized_mode_raw()
         normalized_reason = self._normalized_reason_code(reason_code)
+
+        if normalized_reason == "TENANT_ID_REQUIRED":
+            return TenantEnforcementResult(
+                applied=False,
+                mode="none" if normalized_mode == "unsupported" else normalized_mode,
+                outcome="REJECTED_MISSING_TENANT",
+                reason_code="TENANT_ID_REQUIRED",
+            )
 
         if normalized_mode == "unsupported":
             return TenantEnforcementResult(
@@ -259,6 +270,7 @@ class TenantEnforcementPolicy:
                 sql_to_execute=sql,
                 params_to_bind=list(params or []),
                 should_execute=False,
+                tenant_required=False,
             )
 
         result = self.determine_outcome(applied=normalized_mode == "rls_session", reason_code=None)
@@ -267,13 +279,14 @@ class TenantEnforcementPolicy:
             sql_to_execute=sql,
             params_to_bind=list(params or []),
             should_execute=True,
+            tenant_required=normalized_mode == "rls_session",
         )
 
     async def evaluate(
         self,
         *,
         sql: str,
-        tenant_id: int,
+        tenant_id: int | None,
         params: Sequence[Any] | None = None,
         tenant_column: str = "tenant_id",
         global_table_allowlist: set[str] | None = None,
@@ -290,9 +303,10 @@ class TenantEnforcementPolicy:
                 sql=sql,
                 params=current_params,
                 reason_code="TENANT_MODE_UNSUPPORTED",
+                tenant_required=False,
             )
 
-        if not self.decide_enforcement():
+        if normalized_mode == "none":
             result = self.determine_outcome(
                 applied=normalized_mode == "rls_session", reason_code=None
             )
@@ -301,16 +315,35 @@ class TenantEnforcementPolicy:
                 sql_to_execute=sql,
                 params_to_bind=current_params,
                 should_execute=True,
+                tenant_required=False,
+            )
+
+        if normalized_mode == "rls_session":
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                )
+            result = self.determine_outcome(applied=True, reason_code=None)
+            return self._build_decision(
+                result=result,
+                sql_to_execute=sql,
+                params_to_bind=current_params,
+                should_execute=True,
+                tenant_required=True,
             )
 
         from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
 
+        rewrite_tenant_id = tenant_id if tenant_id is not None else 0
         rewrite_started = time.perf_counter()
         try:
             rewrite_result = rewrite_tenant_scoped_sql(
                 sql,
                 provider=self.provider,
-                tenant_id=tenant_id,
+                tenant_id=rewrite_tenant_id,
                 tenant_column=tenant_column,
                 global_table_allowlist=global_table_allowlist,
             )
@@ -325,26 +358,59 @@ class TenantEnforcementPolicy:
                     sql_to_execute=sql,
                     params_to_bind=current_params,
                     should_execute=True,
+                    tenant_required=False,
+                    extra_telemetry=telemetry_attrs,
+                )
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
                     extra_telemetry=telemetry_attrs,
                 )
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
                 reason_code=normalized_reason or "UNKNOWN_ERROR",
+                tenant_required=False,
                 extra_telemetry=telemetry_attrs,
             )
 
         rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
         telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
         if rewrite_duration_ms > self.hard_timeout_ms:
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                    extra_telemetry=telemetry_attrs,
+                )
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
                 reason_code="REWRITE_TIMEOUT",
+                tenant_required=False,
                 extra_telemetry=telemetry_attrs,
             )
 
-        if schema_snapshot_loader is not None and rewrite_result.tables_rewritten:
+        tenant_required = bool(rewrite_result.tenant_predicates_added > 0)
+        if tenant_id is None and tenant_required:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="TENANT_ID_REQUIRED",
+                tenant_required=True,
+                extra_telemetry=telemetry_attrs,
+            )
+
+        if (
+            schema_snapshot_loader is not None
+            and rewrite_result.tables_rewritten
+            and tenant_id is not None
+        ):
             table_columns = await schema_snapshot_loader(rewrite_result.tables_rewritten, tenant_id)
             missing_schema_tables, missing_tenant_column_tables = self._schema_validation_failures(
                 rewrite_result.tables_rewritten,
@@ -361,6 +427,7 @@ class TenantEnforcementPolicy:
                     sql=sql,
                     params=current_params,
                     reason_code=schema_reason_code,
+                    tenant_required=tenant_required,
                     extra_telemetry=telemetry_attrs,
                 )
 
@@ -375,7 +442,7 @@ class TenantEnforcementPolicy:
         )
 
         result = self.determine_outcome(
-            applied=bool(rewrite_result.tenant_predicates_added > 0),
+            applied=tenant_required,
             reason_code=None,
         )
         current_params.extend(rewrite_result.params)
@@ -384,6 +451,7 @@ class TenantEnforcementPolicy:
             sql_to_execute=rewrite_result.rewritten_sql,
             params_to_bind=current_params,
             should_execute=True,
+            tenant_required=tenant_required,
             extra_telemetry=telemetry_attrs,
         )
 
@@ -404,6 +472,7 @@ class TenantEnforcementPolicy:
         sql: str,
         params: Sequence[Any],
         reason_code: str,
+        tenant_required: bool,
         extra_telemetry: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         result = self.determine_outcome(applied=False, reason_code=reason_code)
@@ -419,6 +488,7 @@ class TenantEnforcementPolicy:
             params_to_bind=list(params),
             should_execute=False,
             bounded_reason_override=bounded_reason,
+            tenant_required=tenant_required,
             extra_telemetry=telemetry_attrs,
         )
 
@@ -429,6 +499,7 @@ class TenantEnforcementPolicy:
         sql_to_execute: str,
         params_to_bind: list[Any],
         should_execute: bool,
+        tenant_required: bool,
         bounded_reason_override: str | None = None,
         extra_telemetry: dict[str, Any] | None = None,
     ) -> PolicyDecision:
@@ -474,6 +545,7 @@ class TenantEnforcementPolicy:
             telemetry_attributes=telemetry_attrs,
             metric_attributes=metric_attributes,
             bounded_reason_code=bounded_reason,
+            tenant_required=tenant_required,
         )
 
     def _rewrite_duration_attributes(self, rewrite_duration_ms: float) -> dict[str, Any]:

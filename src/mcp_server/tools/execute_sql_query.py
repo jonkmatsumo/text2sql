@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
 import asyncpg
@@ -46,6 +47,7 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_UNSUPPORTED",
     "REJECTED_DISABLED",
     "REJECTED_LIMIT",
+    "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
 
@@ -143,6 +145,18 @@ def _tenant_enforcement_unsupported_response(
     policy_decision: PolicyDecision,
 ) -> str:
     """Return a canonical tenant-enforcement unsupported response envelope."""
+    if policy_decision.result.outcome == "REJECTED_MISSING_TENANT":
+        return _construct_error_response(
+            message=f"Tenant ID is required for {TOOL_NAME}.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={
+                "sql_state": "MISSING_TENANT_ID",
+                "reason_code": policy_decision.bounded_reason_code,
+            },
+            envelope_metadata=policy_decision.envelope_metadata,
+        )
+
     bounded_reason_code = policy_decision.bounded_reason_code or "tenant_enforcement_unsupported"
     message = "Tenant enforcement not supported for provider/table configuration."
     if bounded_reason_code == "tenant_rewrite_tenant_mode_unsupported":
@@ -514,7 +528,7 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
 
 async def handler(
     sql_query: str,
-    tenant_id: int,
+    tenant_id: Optional[int],
     params: Optional[List[Any]] = None,
     include_columns: bool = True,
     timeout_seconds: Optional[float] = None,
@@ -544,13 +558,17 @@ async def handler(
         return err
 
     # 5. Execute Query
-    from mcp_server.utils.validation import require_tenant_id
-
-    # 0. Enforce Tenant ID
-    if err := require_tenant_id(tenant_id, TOOL_NAME):
-        return err
-
-    caps = Database.get_query_target_capabilities()
+    try:
+        caps = Database.get_query_target_capabilities()
+    except Exception:
+        caps = SimpleNamespace(
+            provider_name=provider,
+            tenant_enforcement_mode="rls_session",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+        )
     tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
     tenant_enforcement_mode = (
         tenant_mode_raw.strip().lower()
@@ -700,24 +718,23 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
-    if tenant_id is not None:
-        policy_decision = await policy.evaluate(
-            sql=effective_sql_query,
-            tenant_id=tenant_id,
-            params=effective_params,
-            tenant_column=_tenant_column_name(),
-            global_table_allowlist=_tenant_global_table_allowlist(),
-            schema_snapshot_loader=_load_table_columns_for_rewrite,
+    policy_decision = await policy.evaluate(
+        sql=effective_sql_query,
+        tenant_id=tenant_id,
+        params=effective_params,
+        tenant_column=_tenant_column_name(),
+        global_table_allowlist=_tenant_global_table_allowlist(),
+        schema_snapshot_loader=_load_table_columns_for_rewrite,
+    )
+    _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
+    tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
+    effective_sql_query = policy_decision.sql_to_execute
+    effective_params = list(policy_decision.params_to_bind)
+    if not policy_decision.should_execute:
+        return _tenant_enforcement_unsupported_response(
+            provider,
+            policy_decision=policy_decision,
         )
-        _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
-        tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
-        effective_sql_query = policy_decision.sql_to_execute
-        effective_params = list(policy_decision.params_to_bind)
-        if not policy_decision.should_execute:
-            return _tenant_enforcement_unsupported_response(
-                provider,
-                policy_decision=policy_decision,
-            )
 
     def _unsupported_capability_response(
         required_capability: str,

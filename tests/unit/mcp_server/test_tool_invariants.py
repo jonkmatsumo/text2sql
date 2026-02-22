@@ -67,7 +67,11 @@ def test_tool_invariants(tool_name, handler):
             "get_semantic_definitions",
             "list_approved_examples",
         ]
-        if tool_name not in metadata_tools:
+        if tool_name == "execute_sql_query":
+            assert (
+                "evaluate" in call_names
+            ), "Tool 'execute_sql_query' MUST delegate tenant_id requirement to policy.evaluate()"
+        elif tool_name not in metadata_tools:
             assert (
                 "require_tenant_id" in call_names
             ), f"Tool '{tool_name}' MUST call require_tenant_id()"

@@ -76,6 +76,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "REJECTED_UNSUPPORTED",
             "REJECTED_DISABLED",
             "REJECTED_LIMIT",
+            "REJECTED_MISSING_TENANT",
             "REJECTED_TIMEOUT",
         ]
     ] = None
