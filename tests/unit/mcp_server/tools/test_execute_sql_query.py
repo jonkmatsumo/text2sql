@@ -893,6 +893,7 @@ class TestExecuteSqlQuery:
             metric_attributes={},
             bounded_reason_code=bounded_reason_code,
             tenant_required=applied,
+            would_apply_rewrite=applied,
         )
 
         with (
