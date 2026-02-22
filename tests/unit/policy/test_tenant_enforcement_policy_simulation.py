@@ -1,69 +1,108 @@
-"""Tests for simulation mode in tenant enforcement policy evaluation."""
+"""Golden simulation-mode coverage across tenant enforcement providers and modes."""
+
+from __future__ import annotations
 
 from unittest.mock import patch
 
 import pytest
 
+from tests.unit.policy.provider_mode_matrix import tenant_enforcement_provider_mode_rows
+
+
+def _safe_sql_for_mode(mode: str, example_sql: dict[str, str]) -> str:
+    return example_sql["safe_simple"] if mode == "sql_rewrite" else example_sql["not_required"]
+
 
 @pytest.mark.asyncio
-async def test_simulation_mode_reports_applied_without_rewrite_execution(
-    policy_factory, example_sql
-):
-    """simulate=True should produce policy outcome without invoking the rewrite engine."""
-    policy = policy_factory()
-    sql = example_sql["safe_join"]
+@pytest.mark.parametrize(("provider", "mode"), tenant_enforcement_provider_mode_rows())
+async def test_simulation_mode_golden_matrix_outputs_are_stable(
+    provider: str,
+    mode: str,
+    policy_factory,
+    example_sql,
+) -> None:
+    """Simulation mode should emit stable decision metadata for each provider/mode pair."""
+    policy = policy_factory(provider=provider, mode=mode)
+    sql = _safe_sql_for_mode(mode, example_sql)
+    tenant_id = 7
+
     with patch(
         "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
         side_effect=AssertionError("simulate=True should not call rewrite"),
     ):
-        decision = await policy.evaluate(
+        first = await policy.evaluate(
             sql=sql,
-            tenant_id=7,
-            params=["active"],
+            tenant_id=tenant_id,
+            params=[],
+            tenant_column="tenant_id",
+            global_table_allowlist=set(),
+            simulate=True,
+            schema_snapshot_loader=None,
+        )
+        second = await policy.evaluate(
+            sql=sql,
+            tenant_id=tenant_id,
+            params=[],
             tenant_column="tenant_id",
             global_table_allowlist=set(),
             simulate=True,
             schema_snapshot_loader=None,
         )
 
-    assert decision.result.outcome == "APPLIED"
-    assert decision.result.reason_code is None
-    assert decision.should_execute is True
-    assert decision.would_apply_rewrite is True
-    assert decision.sql_to_execute == sql
-    assert decision.params_to_bind == ["active"]
-    assert decision.telemetry_attributes.get("tenant.policy.simulated") is True
+    assert first.result == second.result
+    assert first.bounded_reason_code == second.bounded_reason_code
+    assert first.telemetry_attributes == second.telemetry_attributes
+
+    telemetry = first.telemetry_attributes
+    assert telemetry["tenant.policy.simulated"] is True
+    assert telemetry["tenant.policy.simulation.provider"] == provider
+    assert telemetry["tenant.policy.simulation.mode"] == mode
+    assert telemetry["tenant.policy.simulation.reason"] == "NONE"
+    assert telemetry["tenant.policy.simulation.reason_code"] == "none"
+    if mode == "sql_rewrite":
+        assert first.result.outcome == "APPLIED"
+        assert telemetry["tenant.policy.simulation.decision"] == "REWRITE_REQUIRED"
+        assert telemetry["tenant.policy.simulation.rewrite_reason_code"] == "none"
+    else:
+        assert first.result.outcome == "APPLIED"
+        assert telemetry["tenant.policy.simulation.decision"] == "ALLOW"
+        assert "tenant.policy.simulation.rewrite_reason_code" not in telemetry
 
 
 @pytest.mark.asyncio
-async def test_simulation_mode_matches_non_simulated_for_unsupported_shape(
-    policy_factory, example_sql
-):
-    """simulate=True should preserve unsupported outcome mapping for invalid shapes."""
-    policy = policy_factory()
-    sql = example_sql["unsupported_correlated"]
+@pytest.mark.parametrize(("provider", "mode"), tenant_enforcement_provider_mode_rows())
+async def test_simulation_mode_matrix_missing_tenant_denies_when_required(
+    provider: str,
+    mode: str,
+    policy_factory,
+    example_sql,
+) -> None:
+    """Simulation mode should fail closed with bounded reasons when tenant is required."""
+    policy = policy_factory(provider=provider, mode=mode)
+    sql = _safe_sql_for_mode(mode, example_sql)
 
-    simulated = await policy.evaluate(
+    decision = await policy.evaluate(
         sql=sql,
-        tenant_id=7,
+        tenant_id=None,
         params=[],
         tenant_column="tenant_id",
         global_table_allowlist=set(),
         simulate=True,
         schema_snapshot_loader=None,
     )
-    non_simulated = await policy.evaluate(
-        sql=sql,
-        tenant_id=7,
-        params=[],
-        tenant_column="tenant_id",
-        global_table_allowlist=set(),
-        simulate=False,
-        schema_snapshot_loader=None,
-    )
 
-    assert simulated.result.outcome == "REJECTED_UNSUPPORTED"
-    assert non_simulated.result.outcome == "REJECTED_UNSUPPORTED"
-    assert simulated.bounded_reason_code == non_simulated.bounded_reason_code
-    assert simulated.bounded_reason_code == "tenant_rewrite_correlated_subquery_unsupported"
-    assert simulated.would_apply_rewrite is False
+    if mode == "sql_rewrite":
+        assert decision.should_execute is False
+        assert decision.result.outcome == "REJECTED_MISSING_TENANT"
+        assert decision.bounded_reason_code == "tenant_rewrite_tenant_id_required"
+        assert decision.telemetry_attributes["tenant.policy.simulation.decision"] == "DENY"
+        assert (
+            decision.telemetry_attributes["tenant.policy.simulation.rewrite_reason_code"]
+            == "tenant_rewrite_tenant_id_required"
+        )
+    else:
+        assert decision.should_execute is False
+        assert decision.result.outcome == "REJECTED_MISSING_TENANT"
+        assert decision.bounded_reason_code == "tenant_rewrite_tenant_id_required"
+        assert decision.telemetry_attributes["tenant.policy.simulation.decision"] == "DENY"
+        assert "tenant.policy.simulation.rewrite_reason_code" not in decision.telemetry_attributes

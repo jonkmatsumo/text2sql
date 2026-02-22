@@ -302,6 +302,7 @@ class TenantEnforcementPolicy:
         """Evaluate tenant enforcement and return a single execution decision payload."""
         normalized_mode = self._normalized_mode_raw()
         current_params = list(params or [])
+        simulation_telemetry = {"tenant.policy.simulated": True} if simulate else None
 
         if normalized_mode == "unsupported":
             return self._reject_decision(
@@ -310,6 +311,7 @@ class TenantEnforcementPolicy:
                 reason_code="TENANT_MODE_UNSUPPORTED",
                 tenant_required=False,
                 would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
         if normalized_mode == "none":
@@ -323,6 +325,7 @@ class TenantEnforcementPolicy:
                 should_execute=True,
                 tenant_required=False,
                 would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
         if normalized_mode == "rls_session":
@@ -333,6 +336,7 @@ class TenantEnforcementPolicy:
                     reason_code="TENANT_ID_REQUIRED",
                     tenant_required=True,
                     would_apply_rewrite=False,
+                    extra_telemetry=simulation_telemetry,
                 )
             result = self.determine_outcome(applied=True, reason_code=None)
             return self._build_decision(
@@ -342,6 +346,7 @@ class TenantEnforcementPolicy:
                 should_execute=True,
                 tenant_required=True,
                 would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
         if not self.rewrite_enabled:
@@ -351,27 +356,31 @@ class TenantEnforcementPolicy:
                 reason_code="REWRITE_DISABLED",
                 tenant_required=False,
                 would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
         from common.sql.tenant_sql_rewriter import SUPPORTED_SQL_REWRITE_PROVIDERS
 
         normalized_provider = (self.provider or "").strip().lower()
         if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
+            unsupported_provider_telemetry = {
+                "tenant_rewrite.failure_reason_category": (
+                    "tenant_rewrite_failure_dialect_unsupported"
+                )
+            }
+            if simulation_telemetry:
+                unsupported_provider_telemetry.update(simulation_telemetry)
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
                 reason_code="PROVIDER_UNSUPPORTED",
                 tenant_required=False,
                 would_apply_rewrite=False,
-                extra_telemetry={
-                    "tenant_rewrite.failure_reason_category": (
-                        "tenant_rewrite_failure_dialect_unsupported"
-                    )
-                },
+                extra_telemetry=unsupported_provider_telemetry,
             )
 
         if simulate:
-            simulated_telemetry = {"tenant.policy.simulated": True}
+            simulated_telemetry = dict(simulation_telemetry or {})
             classification_reason_code = self._classification_reason_code(
                 self.classify_sql(sql, provider=self.provider)
             )
@@ -699,6 +708,27 @@ class TenantEnforcementPolicy:
             telemetry_attrs["tenant.enforcement.reason_code"] = bounded_reason
         if extra_telemetry:
             telemetry_attrs.update(extra_telemetry)
+        if telemetry_attrs.get("tenant.policy.simulated") is True:
+            simulation_reason = self._normalized_reason_code(result.reason_code) or "NONE"
+            simulation_reason_code = bounded_reason or "none"
+            telemetry_attrs.update(
+                {
+                    "tenant.policy.simulation.decision": self._simulation_decision(
+                        should_execute=should_execute,
+                        would_apply_rewrite=would_apply_rewrite,
+                    ),
+                    "tenant.policy.simulation.reason": simulation_reason,
+                    "tenant.policy.simulation.reason_code": simulation_reason_code,
+                    "tenant.policy.simulation.provider": (
+                        (self.provider or "").strip().lower() or "unknown"
+                    ),
+                    "tenant.policy.simulation.mode": mode,
+                }
+            )
+            if mode == "sql_rewrite":
+                telemetry_attrs["tenant.policy.simulation.rewrite_reason_code"] = (
+                    simulation_reason_code
+                )
 
         metric_attributes: dict[str, Any] = {
             "mode": mode,
@@ -726,6 +756,13 @@ class TenantEnforcementPolicy:
             "rewrite.duration_ms": round(rewrite_duration_ms, 3),
             "rewrite.duration_warn_exceeded": rewrite_duration_ms > self.warn_ms,
         }
+
+    def _simulation_decision(self, *, should_execute: bool, would_apply_rewrite: bool) -> str:
+        if not should_execute:
+            return "DENY"
+        if would_apply_rewrite:
+            return "REWRITE_REQUIRED"
+        return "ALLOW"
 
     def _schema_validation_failures(
         self,
