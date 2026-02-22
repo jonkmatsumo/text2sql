@@ -5,26 +5,12 @@ import re
 
 import pytest
 
-from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
 from dal.capabilities import capabilities_for_provider
 from tests._support.tenant_enforcement_contract import (
     VALID_TENANT_ENFORCEMENT_MODES,
     VALID_TENANT_ENFORCEMENT_OUTCOMES,
     assert_tenant_enforcement_contract,
 )
-
-
-def _policy(provider: str, mode: str) -> TenantEnforcementPolicy:
-    return TenantEnforcementPolicy(
-        provider=provider,
-        mode=mode,
-        strict=True,
-        max_targets=25,
-        max_params=50,
-        max_ast_nodes=1000,
-        hard_timeout_ms=200,
-        warn_ms=50,
-    )
 
 
 def _assert_decision_invariants(decision) -> None:
@@ -57,10 +43,14 @@ def _assert_decision_invariants(decision) -> None:
     ],
 )
 async def test_policy_drift_guard_mode_result_invariants(
-    provider: str, mode: str, sql: str, tenant_id: int | None
+    provider: str,
+    mode: str,
+    sql: str,
+    tenant_id: int | None,
+    policy_factory,
 ):
     """Policy decision payload should preserve invariant envelope and telemetry contracts."""
-    decision = await _policy(provider, mode).evaluate(
+    decision = await policy_factory(provider=provider, mode=mode).evaluate(
         sql=sql,
         tenant_id=tenant_id,
         params=[],
@@ -71,7 +61,7 @@ async def test_policy_drift_guard_mode_result_invariants(
     _assert_decision_invariants(decision)
 
 
-def test_policy_drift_guard_provider_capability_coverage():
+def test_policy_drift_guard_provider_capability_coverage(policy_factory):
     """Providers advertising tenant enforcement must map to policy-covered modes."""
     source = inspect.getsource(capabilities_for_provider)
     provider_names = set(re.findall(r'normalized == "([a-z0-9_]+)"', source))
@@ -85,7 +75,10 @@ def test_policy_drift_guard_provider_capability_coverage():
         covered.add(provider)
         assert caps.tenant_enforcement_mode in {"sql_rewrite", "rls_session"}
 
-        decision = _policy(provider, caps.tenant_enforcement_mode).default_decision(
+        decision = policy_factory(
+            provider=provider,
+            mode=caps.tenant_enforcement_mode,
+        ).default_decision(
             sql="SELECT 1",
             params=[],
         )

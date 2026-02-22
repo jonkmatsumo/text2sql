@@ -7,22 +7,8 @@ import re
 
 import pytest
 
-from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
 from dal.capabilities import capabilities_for_provider
 from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
-
-
-def _policy(provider: str, mode: str) -> TenantEnforcementPolicy:
-    return TenantEnforcementPolicy(
-        provider=provider,
-        mode=mode,
-        strict=True,
-        max_targets=25,
-        max_params=50,
-        max_ast_nodes=1000,
-        hard_timeout_ms=200,
-        warn_ms=50,
-    )
 
 
 def _tenant_enforcement_provider_modes() -> list[tuple[str, str]]:
@@ -48,11 +34,16 @@ def _safe_outcome_for_mode(mode: str) -> str:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("provider", "mode"), _tenant_enforcement_provider_modes())
-async def test_policy_conformance_provider_mode(provider: str, mode: str) -> None:
+async def test_policy_conformance_provider_mode(
+    provider: str,
+    mode: str,
+    policy_factory,
+    example_sql,
+) -> None:
     """Each provider/mode pair must satisfy core policy conformance scenarios."""
-    policy = _policy(provider, mode)
+    policy = policy_factory(provider=provider, mode=mode)
 
-    safe_sql = "SELECT * FROM orders" if mode == "sql_rewrite" else "SELECT 1 AS ok"
+    safe_sql = example_sql["safe_simple"] if mode == "sql_rewrite" else example_sql["not_required"]
     missing_tenant_decision = await policy.evaluate(
         sql=safe_sql,
         tenant_id=None,
@@ -84,12 +75,8 @@ async def test_policy_conformance_provider_mode(provider: str, mode: str) -> Non
     )
 
     if mode == "sql_rewrite":
-        unsupported_sql = (
-            "SELECT u.id FROM users u "
-            "WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)"
-        )
         unsupported_decision = await policy.evaluate(
-            sql=unsupported_sql,
+            sql=example_sql["unsupported_correlated"],
             tenant_id=7,
             params=[],
             tenant_column="tenant_id",

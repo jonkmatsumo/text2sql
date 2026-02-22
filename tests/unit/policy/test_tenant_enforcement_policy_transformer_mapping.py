@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import pytest
 
-from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
 from common.sql.tenant_sql_rewriter import (
     RewriteFailure,
     RewriteRequest,
@@ -14,28 +13,23 @@ from common.sql.tenant_sql_rewriter import (
 
 
 @pytest.mark.asyncio
-async def test_policy_maps_transformer_param_limit_to_rejected_limit():
+async def test_policy_maps_transformer_param_limit_to_rejected_limit(
+    policy_factory,
+    transformer_failure,
+    example_sql,
+):
     """Transformer param limit should map to REJECTED_LIMIT with bounded reason code."""
-    policy = TenantEnforcementPolicy(
-        provider="sqlite",
-        mode="sql_rewrite",
-        strict=True,
-        max_targets=25,
-        max_params=50,
-        max_ast_nodes=1000,
-        hard_timeout_ms=200,
-        warn_ms=50,
-    )
+    policy = policy_factory()
 
     with patch(
         "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
-        return_value=RewriteFailure(
+        return_value=transformer_failure(
             kind=TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
             message="Exceeded parameter budget.",
         ),
     ) as mock_transform:
         decision = await policy.evaluate(
-            sql="SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id",
+            sql=example_sql["safe_join"],
             tenant_id=7,
             params=[],
             tenant_column="tenant_id",

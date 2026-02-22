@@ -4,27 +4,14 @@ from unittest.mock import patch
 
 import pytest
 
-from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
-
-
-def _policy() -> TenantEnforcementPolicy:
-    return TenantEnforcementPolicy(
-        provider="sqlite",
-        mode="sql_rewrite",
-        strict=True,
-        max_targets=25,
-        max_params=50,
-        max_ast_nodes=1000,
-        hard_timeout_ms=200,
-        warn_ms=50,
-    )
-
 
 @pytest.mark.asyncio
-async def test_simulation_mode_reports_applied_without_rewrite_execution():
+async def test_simulation_mode_reports_applied_without_rewrite_execution(
+    policy_factory, example_sql
+):
     """simulate=True should produce policy outcome without invoking the rewrite engine."""
-    policy = _policy()
-    sql = "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id"
+    policy = policy_factory()
+    sql = example_sql["safe_join"]
     with patch(
         "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
         side_effect=AssertionError("simulate=True should not call rewrite"),
@@ -49,10 +36,12 @@ async def test_simulation_mode_reports_applied_without_rewrite_execution():
 
 
 @pytest.mark.asyncio
-async def test_simulation_mode_matches_non_simulated_for_unsupported_shape():
+async def test_simulation_mode_matches_non_simulated_for_unsupported_shape(
+    policy_factory, example_sql
+):
     """simulate=True should preserve unsupported outcome mapping for invalid shapes."""
-    policy = _policy()
-    sql = "SELECT u.id FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)"
+    policy = policy_factory()
+    sql = example_sql["unsupported_correlated"]
 
     simulated = await policy.evaluate(
         sql=sql,

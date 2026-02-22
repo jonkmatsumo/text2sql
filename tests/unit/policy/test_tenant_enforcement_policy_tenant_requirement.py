@@ -2,29 +2,14 @@
 
 import pytest
 
-from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
-
-
-def _sql_rewrite_policy() -> TenantEnforcementPolicy:
-    return TenantEnforcementPolicy(
-        provider="sqlite",
-        mode="sql_rewrite",
-        strict=True,
-        max_targets=25,
-        max_params=50,
-        max_ast_nodes=1000,
-        hard_timeout_ms=200,
-        warn_ms=50,
-    )
-
 
 @pytest.mark.asyncio
-async def test_policy_rejects_missing_tenant_when_rewrite_is_required():
+async def test_policy_rejects_missing_tenant_when_rewrite_is_required(policy_factory, example_sql):
     """Missing tenant_id must be rejected when rewrite enforcement would apply."""
-    policy = _sql_rewrite_policy()
+    policy = policy_factory()
 
     decision = await policy.evaluate(
-        sql="SELECT * FROM orders",
+        sql=example_sql["safe_simple"],
         tenant_id=None,
         params=[],
         tenant_column="tenant_id",
@@ -45,12 +30,14 @@ async def test_policy_rejects_missing_tenant_when_rewrite_is_required():
 
 
 @pytest.mark.asyncio
-async def test_policy_skips_when_missing_tenant_but_enforcement_not_required():
+async def test_policy_skips_when_missing_tenant_but_enforcement_not_required(
+    policy_factory, example_sql
+):
     """Missing tenant_id should be allowed when enforcement is not required."""
-    policy = _sql_rewrite_policy()
+    policy = policy_factory()
 
     decision = await policy.evaluate(
-        sql="SELECT 1 AS ok",
+        sql=example_sql["not_required"],
         tenant_id=None,
         params=[],
         tenant_column="tenant_id",
