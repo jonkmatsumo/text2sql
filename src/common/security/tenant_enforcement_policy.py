@@ -353,6 +353,23 @@ class TenantEnforcementPolicy:
                 would_apply_rewrite=False,
             )
 
+        from common.sql.tenant_sql_rewriter import SUPPORTED_SQL_REWRITE_PROVIDERS
+
+        normalized_provider = (self.provider or "").strip().lower()
+        if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="PROVIDER_UNSUPPORTED",
+                tenant_required=False,
+                would_apply_rewrite=False,
+                extra_telemetry={
+                    "tenant_rewrite.failure_reason_category": (
+                        "tenant_rewrite_failure_dialect_unsupported"
+                    )
+                },
+            )
+
         if simulate:
             simulated_telemetry = {"tenant.policy.simulated": True}
             classification_reason_code = self._classification_reason_code(
@@ -742,7 +759,7 @@ class TenantEnforcementPolicy:
             return normalized
         if normalized == "unsupported":
             return "unsupported"
-        return "none"
+        return "unsupported"
 
     def _normalize_mode_for_envelope(self, mode: str | None) -> str:
         normalized = (mode or "").strip().lower()
