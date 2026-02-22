@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Mapping, Sequence
 
@@ -288,6 +288,15 @@ def _build_rewrite_failure(
     )
 
 
+def _canonicalize_rewritten_sql(expression: exp.Expression, *, dialect: str) -> str:
+    rendered = expression.sql(dialect=dialect, pretty=False)
+    try:
+        canonical = sqlglot.parse_one(rendered, read=dialect)
+    except Exception:
+        return rendered
+    return canonical.sql(dialect=dialect, pretty=False)
+
+
 def transform_tenant_scoped_sql(request: RewriteRequest) -> RewriteSuccess | RewriteFailure:
     """Pure tenant SQL transformer with typed request and bounded result/failure output."""
     validation_failure = _validate_transform_request(request)
@@ -556,6 +565,12 @@ def _transform_tenant_scoped_sql_impl(request: RewriteRequest) -> RewriteSuccess
                 TransformerErrorKind.UNRESOLVABLE_TABLE_ALIAS,
                 "Tenant rewrite could not resolve table alias.",
             )
+        normalized_reference = reference.lower()
+        if _scope_has_tenant_predicate(
+            target.scope_select, normalized_reference, tenant_column_name
+        ):
+            rewritten_target_keys.add(target_key)
+            continue
 
         if total_predicates_count >= max_params:
             raise TenantSQLTransformerError(
@@ -598,7 +613,7 @@ def _transform_tenant_scoped_sql_impl(request: RewriteRequest) -> RewriteSuccess
             )
 
         result = RewriteSuccess(
-            rewritten_sql=expression.sql(dialect=dialect),
+            rewritten_sql=_canonicalize_rewritten_sql(expression, dialect=dialect),
             params=[],
             tables_rewritten=[],
             tenant_predicates_added=0,
@@ -625,7 +640,7 @@ def _transform_tenant_scoped_sql_impl(request: RewriteRequest) -> RewriteSuccess
     assert len(params) == total_predicates_count
 
     result = RewriteSuccess(
-        rewritten_sql=expression.sql(dialect=dialect),
+        rewritten_sql=_canonicalize_rewritten_sql(expression, dialect=dialect),
         params=params,
         tables_rewritten=rewritten_tables,
         tenant_predicates_added=total_predicates_count,
@@ -1216,6 +1231,20 @@ def assert_rewrite_invariants(
     )
     if (second_pass.rewritten_sql, second_pass.params) != (rewritten_sql, list(params)):
         raise AssertionError("Tenant rewrite second pass is not deterministic.")
+
+
+def assert_transform_idempotence(request: RewriteRequest) -> None:
+    """Assert transform idempotence for deterministic rewrite-supported SQL shapes."""
+    first = transform_tenant_scoped_sql(request)
+    if isinstance(first, RewriteFailure):
+        raise AssertionError(f"Initial transform failed: {first.reason_code.value}")
+    second = transform_tenant_scoped_sql(replace(request, sql=first.rewritten_sql))
+    if isinstance(second, RewriteFailure):
+        raise AssertionError(f"Second transform failed: {second.reason_code.value}")
+    if second.rewritten_sql != first.rewritten_sql:
+        raise AssertionError("Transformer second pass produced different rewritten SQL.")
+    if second.params:
+        raise AssertionError("Transformer second pass injected additional tenant params.")
 
 
 def _assert_rewrite_eligible(
