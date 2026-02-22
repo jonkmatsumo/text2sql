@@ -5,7 +5,12 @@ from unittest.mock import patch
 import pytest
 
 from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
-from common.sql.tenant_sql_rewriter import TenantSQLTransformerError, TransformerErrorKind
+from common.sql.tenant_sql_rewriter import (
+    RewriteFailure,
+    RewriteRequest,
+    TransformerErrorKind,
+    transform_tenant_scoped_sql,
+)
 
 
 @pytest.mark.asyncio
@@ -24,11 +29,11 @@ async def test_policy_maps_transformer_param_limit_to_rejected_limit():
 
     with patch(
         "common.sql.tenant_sql_rewriter.transform_tenant_scoped_sql",
-        side_effect=TenantSQLTransformerError(
-            TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
-            "Exceeded parameter budget.",
+        return_value=RewriteFailure(
+            kind=TransformerErrorKind.PARAM_LIMIT_EXCEEDED,
+            message="Exceeded parameter budget.",
         ),
-    ):
+    ) as mock_transform:
         decision = await policy.evaluate(
             sql="SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id",
             tenant_id=7,
@@ -37,6 +42,13 @@ async def test_policy_maps_transformer_param_limit_to_rejected_limit():
             global_table_allowlist=set(),
             schema_snapshot_loader=None,
         )
+
+    mock_transform.assert_called_once()
+    rewrite_request = mock_transform.call_args.args[0]
+    assert isinstance(rewrite_request, RewriteRequest)
+    assert rewrite_request.provider == "sqlite"
+    assert rewrite_request.tenant_id == 7
+    assert rewrite_request.max_params == 50
 
     assert decision.should_execute is False
     assert decision.result.outcome == "REJECTED_LIMIT"
@@ -47,3 +59,16 @@ async def test_policy_maps_transformer_param_limit_to_rejected_limit():
         decision.envelope_metadata["tenant_rewrite_reason_code"]
         == "tenant_rewrite_param_limit_exceeded"
     )
+
+
+def test_transformer_rejects_invalid_request_shape_with_bounded_failure_kind():
+    """Invalid request payloads should return bounded INVALID_REQUEST failures."""
+    failure = transform_tenant_scoped_sql(
+        RewriteRequest(
+            sql="SELECT * FROM orders",
+            provider="sqlite",
+            tenant_id=None,  # type: ignore[arg-type]
+        )
+    )
+    assert isinstance(failure, RewriteFailure)
+    assert failure.kind == TransformerErrorKind.INVALID_REQUEST

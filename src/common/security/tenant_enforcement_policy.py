@@ -418,6 +418,8 @@ class TenantEnforcementPolicy:
 
         from common.sql.tenant_sql_rewriter import (
             CTEClassification,
+            RewriteFailure,
+            RewriteRequest,
             TenantSQLTransformerError,
             transform_tenant_scoped_sql,
         )
@@ -428,22 +430,27 @@ class TenantEnforcementPolicy:
         )
         rewrite_started = time.perf_counter()
         try:
-            rewrite_result = transform_tenant_scoped_sql(
-                sql,
-                provider=self.provider,
-                tenant_id=rewrite_tenant_id,
-                tenant_column=tenant_column,
-                global_table_allowlist=global_table_allowlist,
-                max_targets=self.max_targets,
-                max_params=self.max_params,
-                max_ast_nodes=self.max_ast_nodes,
-                cte_classification=cte_classification,
-                assert_invariants=False,
+            transformer_result = transform_tenant_scoped_sql(
+                RewriteRequest(
+                    sql=sql,
+                    provider=self.provider,
+                    tenant_id=rewrite_tenant_id,
+                    tenant_column=tenant_column,
+                    global_table_allowlist=frozenset(global_table_allowlist or set()),
+                    max_targets=self.max_targets,
+                    max_params=self.max_params,
+                    max_ast_nodes=self.max_ast_nodes,
+                    cte_classification=cte_classification,
+                    assert_invariants=False,
+                )
             )
         except TenantSQLTransformerError as exc:
+            transformer_result = RewriteFailure(kind=exc.kind, message=str(exc))
+
+        if isinstance(transformer_result, RewriteFailure):
             rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
             telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
-            normalized_reason = self._reason_code_for_transformer_kind(exc.kind)
+            normalized_reason = self._reason_code_for_transformer_kind(transformer_result.kind)
             if normalized_reason == "NO_PREDICATES_PRODUCED":
                 result = self.determine_outcome(applied=False, reason_code=normalized_reason)
                 return self._build_decision(
@@ -472,6 +479,7 @@ class TenantEnforcementPolicy:
                 would_apply_rewrite=False,
                 extra_telemetry=telemetry_attrs,
             )
+        rewrite_result = transformer_result
 
         rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
         telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
