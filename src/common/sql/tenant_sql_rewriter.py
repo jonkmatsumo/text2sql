@@ -720,66 +720,58 @@ def _assert_rewrite_eligible(
     expression: exp.Expression, *, strict_mode: bool = True
 ) -> CTEClassification | None:
     """Reject SQL shapes that cannot be scoped deterministically by the v1 rewriter."""
-    if _contains_set_operation(expression):
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy, TenantSQLShape
+
+    policy = TenantEnforcementPolicy(
+        provider="sqlite",  # Provider doesn't matter for pure AST checks here
+        mode="sql_rewrite",
+        strict=strict_mode,
+        max_targets=MAX_TENANT_REWRITE_TARGETS,
+        max_params=MAX_TENANT_REWRITE_PARAMS,
+        max_ast_nodes=MAX_SQL_AST_NODES,  # Ensure it doesn't fail on complexity inside classify_sql
+        hard_timeout_ms=1000,
+    )
+
+    classification_shape = policy.classify_sql(expression.sql(dialect="sqlite"), provider="sqlite")
+
+    if classification_shape == TenantSQLShape.UNSUPPORTED_SET_OPERATION:
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support set operations.",
             reason_code="SET_OPERATIONS_UNSUPPORTED",
         )
-
-    if not isinstance(expression, exp.Select):
+    if classification_shape == TenantSQLShape.UNSUPPORTED_STATEMENT_TYPE:
         raise TenantSQLRewriteError(
             "Tenant rewrite supports SELECT statements only.", reason_code="NOT_SELECT_STATEMENT"
         )
-
-    classification = None
-    if expression.args.get("with_") is not None:
-        classification = classify_cte_query(expression)
-        if classification == CTEClassification.UNSUPPORTED_CTE:
-            raise TenantSQLRewriteError(
-                "Tenant rewrite v1 does not support unsupported CTEs.",
-                reason_code="CTE_UNSUPPORTED_SHAPE",
-            )
-
-    if any(True for _ in expression.find_all(exp.Window)):
+    if classification_shape == TenantSQLShape.UNSUPPORTED_CTE:
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support unsupported CTEs.",
+            reason_code="CTE_UNSUPPORTED_SHAPE",
+        )
+    if classification_shape == TenantSQLShape.UNSUPPORTED_WINDOW_FUNCTION:
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support window functions.",
             reason_code="WINDOW_FUNCTIONS_UNSUPPORTED",
         )
-
-    if _has_nested_from_subquery(expression):
+    if classification_shape == TenantSQLShape.UNSUPPORTED_NESTED_FROM:
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support nested SELECTs in FROM.",
             reason_code="NESTED_FROM_UNSUPPORTED",
         )
-
-    if _has_correlated_subquery(expression, strict_mode=strict_mode):
+    if classification_shape == TenantSQLShape.UNSUPPORTED_CORRELATED_SUBQUERY:
         raise TenantSQLRewriteError(
             "Tenant rewrite v1 does not support correlated subqueries.",
             reason_code="CORRELATED_SUBQUERY_UNSUPPORTED",
         )
+    if classification_shape == TenantSQLShape.UNSUPPORTED_SUBQUERY:
+        raise TenantSQLRewriteError(
+            "Tenant rewrite v1 does not support this subquery shape.",
+            reason_code="SUBQUERY_UNSUPPORTED",
+        )
+    if classification_shape == TenantSQLShape.SAFE_CTE_QUERY:
+        return CTEClassification.SAFE_SIMPLE_CTE
 
-    with_ = expression.args.get("with_")
-    for select in expression.find_all(exp.Select):
-        if select is expression:
-            continue
-
-        # Skip CTE definitions themselves, as they are checked by classify_cte_query
-        is_cte_body = False
-        if with_:
-            for cte in with_.expressions:
-                if select is cte.this:
-                    is_cte_body = True
-                    break
-        if is_cte_body:
-            continue
-
-        if classify_subquery(select) == SubqueryClassification.UNSUPPORTED_SUBQUERY:
-            raise TenantSQLRewriteError(
-                "Tenant rewrite v1 does not support this subquery shape.",
-                reason_code="SUBQUERY_UNSUPPORTED",
-            )
-
-    return classification
+    return None
 
 
 def classify_subquery(expression: exp.Expression) -> SubqueryClassification:

@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import asyncpg
@@ -16,6 +15,7 @@ from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
 from common.models.tool_envelopes import ExecuteSQLQueryMetadata, ExecuteSQLQueryResponseEnvelope
 from common.observability.metrics import mcp_metrics
+from common.security.tenant_enforcement_policy import PolicyDecision
 from common.sql.complexity import (
     ComplexityMetrics,
     analyze_sql_complexity,
@@ -40,39 +40,6 @@ TOOL_NAME = "execute_sql_query"
 TOOL_DESCRIPTION = "Execute a validated SQL query against the target database."
 logger = logging.getLogger(__name__)
 
-_TENANT_REWRITE_REASON_ALLOWLIST = {
-    "AST_COMPLEXITY_EXCEEDED",
-    "COMPLETENESS_FAILED",
-    "CORRELATED_SUBQUERY_UNSUPPORTED",
-    "CTE_UNSUPPORTED_SHAPE",
-    "MISSING_TENANT_COLUMN",
-    "MISSING_TENANT_COLUMN_CONFIG",
-    "NESTED_FROM_UNSUPPORTED",
-    "NO_PREDICATES_PRODUCED",
-    "NOT_SELECT_STATEMENT",
-    "NOT_SINGLE_SELECT",
-    "PARAM_LIMIT_EXCEEDED",
-    "PARSE_ERROR",
-    "PROVIDER_UNSUPPORTED",
-    "REWRITE_DISABLED",
-    "REWRITE_TIMEOUT",
-    "SET_OPERATIONS_UNSUPPORTED",
-    "SUBQUERY_UNSUPPORTED",
-    "TARGET_LIMIT_EXCEEDED",
-    "UNRESOLVABLE_TABLE_ALIAS",
-    "UNRESOLVABLE_TABLE_IDENTITY",
-    "WINDOW_FUNCTIONS_UNSUPPORTED",
-}
-_TENANT_REWRITE_INTERNAL_REASON_ALLOWLIST = {
-    "SCHEMA_METADATA_MISSING",
-    "SCHEMA_TENANT_COLUMN_MISSING",
-    "TENANT_MODE_UNSUPPORTED",
-}
-_TENANT_REWRITE_LIMIT_REASONS = {
-    "AST_COMPLEXITY_EXCEEDED",
-    "PARAM_LIMIT_EXCEEDED",
-    "TARGET_LIMIT_EXCEEDED",
-}
 _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "APPLIED",
     "SKIPPED_NOT_REQUIRED",
@@ -81,28 +48,6 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_LIMIT",
     "REJECTED_TIMEOUT",
 }
-
-
-def _bounded_tenant_rewrite_reason_code(reason_code: str | None) -> str:
-    """Return a low-cardinality tenant rewrite reason code suitable for diagnostics."""
-    normalized = (reason_code or "").strip().upper()
-    if normalized in _TENANT_REWRITE_REASON_ALLOWLIST:
-        return f"tenant_rewrite_{normalized.lower()}"
-    if normalized in _TENANT_REWRITE_INTERNAL_REASON_ALLOWLIST:
-        return f"tenant_rewrite_{normalized.lower()}"
-    return "tenant_enforcement_unsupported"
-
-
-def _record_tenant_rewrite_failure_reason(reason_code: str | None) -> None:
-    """Attach bounded tenant rewrite failure diagnostics to the active span."""
-    span = trace.get_current_span()
-    if span is None or not span.is_recording():
-        return
-    span.set_attribute("tenant_rewrite.failure_reason", (reason_code or "UNKNOWN").strip().upper())
-    span.set_attribute(
-        "tenant_rewrite.failure_reason_code",
-        _bounded_tenant_rewrite_reason_code(reason_code),
-    )
 
 
 def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
@@ -114,40 +59,6 @@ def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
     return "none"
 
 
-def _tenant_rewrite_outcome_for_reason(reason_code: str | None) -> str:
-    normalized = (reason_code or "").strip().upper()
-    if normalized == "REWRITE_DISABLED":
-        return "REJECTED_DISABLED"
-    if normalized == "REWRITE_TIMEOUT":
-        return "REJECTED_TIMEOUT"
-    if normalized in _TENANT_REWRITE_LIMIT_REASONS:
-        return "REJECTED_LIMIT"
-    return "REJECTED_UNSUPPORTED"
-
-
-def _default_tenant_outcome_for_mode(mode: str | None) -> str:
-    if _normalize_tenant_enforcement_mode(mode) == "rls_session":
-        return "APPLIED"
-    return "SKIPPED_NOT_REQUIRED"
-
-
-def _tenant_enforcement_envelope_metadata(
-    *,
-    tenant_enforcement_applied: bool,
-    tenant_enforcement_mode: str | None,
-    tenant_rewrite_outcome: str,
-    tenant_rewrite_reason_code: str | None = None,
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
-        "tenant_enforcement_applied": bool(tenant_enforcement_applied),
-        "tenant_enforcement_mode": _normalize_tenant_enforcement_mode(tenant_enforcement_mode),
-        "tenant_rewrite_outcome": tenant_rewrite_outcome,
-    }
-    if tenant_rewrite_reason_code:
-        metadata["tenant_rewrite_reason_code"] = tenant_rewrite_reason_code
-    return metadata
-
-
 def _tenant_enforcement_observability_fields(
     metadata: dict[str, Any] | None,
 ) -> tuple[str, str, bool, str | None]:
@@ -157,19 +68,16 @@ def _tenant_enforcement_observability_fields(
     outcome = (
         raw_outcome
         if raw_outcome in _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST
-        else _default_tenant_outcome_for_mode(mode)
+        else "REJECTED_UNSUPPORTED"
     )
-    applied_raw = tenant_metadata.get("tenant_enforcement_applied")
-    if isinstance(applied_raw, bool):
-        applied = applied_raw
-    else:
-        applied = outcome == "APPLIED"
-
-    reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
-    bounded_reason_code: str | None = None
-    if outcome.startswith("REJECTED_") and isinstance(reason_code, str) and reason_code.strip():
-        bounded_reason_code = reason_code.strip().lower()
-    return mode, outcome, applied, bounded_reason_code
+    applied = bool(tenant_metadata.get("tenant_enforcement_applied"))
+    raw_reason_code = tenant_metadata.get("tenant_rewrite_reason_code")
+    reason_code = (
+        raw_reason_code.strip()
+        if isinstance(raw_reason_code, str) and raw_reason_code.strip()
+        else None
+    )
+    return mode, outcome, applied, reason_code
 
 
 def _record_tenant_enforcement_observability(metadata: dict[str, Any] | None) -> None:
@@ -198,30 +106,13 @@ def _record_tenant_enforcement_observability(metadata: dict[str, Any] | None) ->
     )
 
 
-def _record_tenant_rewrite_duration(duration_ms: float, *, warn_ms: int) -> None:
+def _record_policy_decision_telemetry(attributes: dict[str, Any]) -> None:
+    """Attach policy-provided telemetry attributes to the active span."""
     span = trace.get_current_span()
     if span is None or not span.is_recording():
         return
-    span.set_attribute("rewrite.duration_ms", round(duration_ms, 3))
-    span.set_attribute("rewrite.duration_warn_exceeded", duration_ms > warn_ms)
-
-
-def _record_tenant_rewrite_success_metadata(
-    *,
-    target_count: int,
-    param_count: int,
-    scope_depth: int,
-    has_cte: bool,
-    has_subquery: bool,
-) -> None:
-    span = trace.get_current_span()
-    if span is None or not span.is_recording():
-        return
-    span.set_attribute("rewrite.target_count", int(target_count))
-    span.set_attribute("rewrite.param_count", int(param_count))
-    span.set_attribute("rewrite.scope_depth", int(scope_depth))
-    span.set_attribute("rewrite.has_cte", bool(has_cte))
-    span.set_attribute("rewrite.has_subquery", bool(has_subquery))
+    for key, value in attributes.items():
+        span.set_attribute(key, value)
 
 
 def _active_provider() -> str:
@@ -249,13 +140,16 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
 def _tenant_enforcement_unsupported_response(
     provider: str,
     *,
-    reason_code: str | None = None,
-    tenant_enforcement_mode: str | None = None,
+    policy_decision: PolicyDecision,
 ) -> str:
     """Return a canonical tenant-enforcement unsupported response envelope."""
-    bounded_reason_code = _bounded_tenant_rewrite_reason_code(reason_code)
+    bounded_reason_code = policy_decision.bounded_reason_code or "tenant_enforcement_unsupported"
+    message = "Tenant enforcement not supported for provider/table configuration."
+    if bounded_reason_code == "tenant_rewrite_tenant_mode_unsupported":
+        message = "Tenant isolation is not supported for this provider."
+
     return _construct_error_response(
-        message="Tenant enforcement not supported for provider/table configuration.",
+        message=message,
         category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
         provider=provider,
         metadata={
@@ -263,12 +157,7 @@ def _tenant_enforcement_unsupported_response(
             "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
             "reason_code": bounded_reason_code,
         },
-        envelope_metadata=_tenant_enforcement_envelope_metadata(
-            tenant_enforcement_applied=False,
-            tenant_enforcement_mode=tenant_enforcement_mode,
-            tenant_rewrite_outcome=_tenant_rewrite_outcome_for_reason(reason_code),
-            tenant_rewrite_reason_code=bounded_reason_code,
-        ),
+        envelope_metadata=policy_decision.envelope_metadata,
     )
 
 
@@ -343,33 +232,6 @@ async def _load_table_columns_for_rewrite(
             break
 
     return table_columns
-
-
-def _tenant_scope_schema_validation_failures(
-    table_names: Sequence[str],
-    table_columns: dict[str, set[str]],
-    tenant_column: str,
-) -> tuple[list[str], list[str]]:
-    """Return tables missing schema metadata and missing tenant column."""
-    tenant_column_normalized = tenant_column.strip().lower()
-    if not tenant_column_normalized:
-        return [], []
-
-    missing_schema: list[str] = []
-    missing_tenant_column: list[str] = []
-    for table_name in table_names:
-        normalized = (table_name or "").strip().lower()
-        if not normalized:
-            continue
-        columns = table_columns.get(normalized)
-        if columns is None:
-            columns = table_columns.get(normalized.split(".")[-1])
-        if columns is None:
-            missing_schema.append(normalized)
-            continue
-        if tenant_column_normalized not in columns:
-            missing_tenant_column.append(normalized)
-    return missing_schema, missing_tenant_column
 
 
 def _resolve_row_limit(conn: object) -> int:
@@ -690,28 +552,38 @@ async def handler(
 
     caps = Database.get_query_target_capabilities()
     tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
-    if isinstance(tenant_mode_raw, str):
-        tenant_enforcement_mode = tenant_mode_raw.strip().lower() or "rls_session"
-    else:
-        tenant_enforcement_mode = "rls_session"
-
-    tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-        tenant_enforcement_applied=_normalize_tenant_enforcement_mode(tenant_enforcement_mode)
-        == "rls_session",
-        tenant_enforcement_mode=tenant_enforcement_mode,
-        tenant_rewrite_outcome=_default_tenant_outcome_for_mode(tenant_enforcement_mode),
+    tenant_enforcement_mode = (
+        tenant_mode_raw.strip().lower()
+        if isinstance(tenant_mode_raw, str) and tenant_mode_raw.strip()
+        else "rls_session"
     )
 
-    if tenant_id is not None and tenant_enforcement_mode == "unsupported":
-        _record_tenant_rewrite_failure_reason("TENANT_MODE_UNSUPPORTED")
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+    from common.sql.tenant_sql_rewriter import load_tenant_rewrite_settings
+
+    rewrite_settings = load_tenant_rewrite_settings()
+    policy = TenantEnforcementPolicy(
+        provider=provider,
+        mode=tenant_enforcement_mode,
+        strict=rewrite_settings.strict_mode,
+        max_targets=rewrite_settings.max_targets,
+        max_params=rewrite_settings.max_params,
+        max_ast_nodes=rewrite_settings.max_ast_nodes,
+        hard_timeout_ms=rewrite_settings.hard_timeout_ms,
+        warn_ms=rewrite_settings.warn_ms,
+    )
+    policy_decision = policy.default_decision(sql=sql_query, params=params)
+    tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
+
+    if tenant_id is not None and not policy_decision.should_execute:
+        _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
         return _tenant_enforcement_unsupported_response(
             provider,
-            tenant_enforcement_mode=tenant_enforcement_mode,
-            reason_code="TENANT_MODE_UNSUPPORTED",
+            policy_decision=policy_decision,
         )
 
-    effective_sql_query = sql_query
-    effective_params = list(params or [])
+    effective_sql_query = policy_decision.sql_to_execute
+    effective_params = list(policy_decision.params_to_bind)
 
     # 1. SQL Length Check
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
@@ -828,100 +700,24 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
-    if tenant_id is not None and tenant_enforcement_mode == "sql_rewrite":
-        from common.sql.tenant_sql_rewriter import (
-            TenantSQLRewriteError,
-            load_tenant_rewrite_settings,
-            rewrite_tenant_scoped_sql,
+    if tenant_id is not None:
+        policy_decision = await policy.evaluate(
+            sql=effective_sql_query,
+            tenant_id=tenant_id,
+            params=effective_params,
+            tenant_column=_tenant_column_name(),
+            global_table_allowlist=_tenant_global_table_allowlist(),
+            schema_snapshot_loader=_load_table_columns_for_rewrite,
         )
-
-        tenant_column = _tenant_column_name()
-        global_table_allowlist = _tenant_global_table_allowlist()
-        rewrite_settings = load_tenant_rewrite_settings()
-        rewrite_warn_ms = rewrite_settings.warn_ms
-        rewrite_hard_timeout_ms = rewrite_settings.hard_timeout_ms
-        rewrite_started = time.perf_counter()
-        rewrite_result = None
-        try:
-            rewrite_result = rewrite_tenant_scoped_sql(
-                effective_sql_query,
-                provider=provider,
-                tenant_id=tenant_id,
-                tenant_column=tenant_column,
-                global_table_allowlist=global_table_allowlist,
+        _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
+        tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
+        effective_sql_query = policy_decision.sql_to_execute
+        effective_params = list(policy_decision.params_to_bind)
+        if not policy_decision.should_execute:
+            return _tenant_enforcement_unsupported_response(
+                provider,
+                policy_decision=policy_decision,
             )
-        except TenantSQLRewriteError as e:
-            rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
-            _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
-            normalized_reason = (e.reason_code or "").strip().upper()
-            if normalized_reason == "NO_PREDICATES_PRODUCED":
-                tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                    tenant_enforcement_applied=False,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    tenant_rewrite_outcome="SKIPPED_NOT_REQUIRED",
-                )
-                rewrite_result = None
-            else:
-                _record_tenant_rewrite_failure_reason(e.reason_code)
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code=e.reason_code,
-                )
-        else:
-            rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
-            _record_tenant_rewrite_duration(rewrite_duration_ms, warn_ms=rewrite_warn_ms)
-            if rewrite_duration_ms > rewrite_hard_timeout_ms:
-                _record_tenant_rewrite_failure_reason("REWRITE_TIMEOUT")
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code="REWRITE_TIMEOUT",
-                )
-
-        if rewrite_result is not None:
-            table_columns = await _load_table_columns_for_rewrite(
-                rewrite_result.tables_rewritten,
-                tenant_id,
-            )
-            missing_schema_tables, missing_tenant_column_tables = (
-                _tenant_scope_schema_validation_failures(
-                    rewrite_result.tables_rewritten,
-                    table_columns,
-                    tenant_column,
-                )
-            )
-            if missing_schema_tables or missing_tenant_column_tables:
-                schema_reason_code = (
-                    "SCHEMA_TENANT_COLUMN_MISSING"
-                    if missing_tenant_column_tables
-                    else "SCHEMA_METADATA_MISSING"
-                )
-                _record_tenant_rewrite_failure_reason(schema_reason_code)
-                return _tenant_enforcement_unsupported_response(
-                    provider,
-                    tenant_enforcement_mode=tenant_enforcement_mode,
-                    reason_code=schema_reason_code,
-                )
-
-            _record_tenant_rewrite_success_metadata(
-                target_count=rewrite_result.target_count,
-                param_count=len(rewrite_result.params),
-                scope_depth=rewrite_result.scope_depth,
-                has_cte=rewrite_result.has_cte,
-                has_subquery=rewrite_result.has_subquery,
-            )
-            tenant_enforcement_metadata = _tenant_enforcement_envelope_metadata(
-                tenant_enforcement_applied=bool(rewrite_result.tenant_predicates_added > 0),
-                tenant_enforcement_mode=tenant_enforcement_mode,
-                tenant_rewrite_outcome=(
-                    "APPLIED"
-                    if rewrite_result.tenant_predicates_added > 0
-                    else "SKIPPED_NOT_REQUIRED"
-                ),
-            )
-            effective_sql_query = rewrite_result.rewritten_sql
-            effective_params.extend(rewrite_result.params)
 
     def _unsupported_capability_response(
         required_capability: str,
