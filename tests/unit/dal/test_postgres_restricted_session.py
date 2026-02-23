@@ -73,7 +73,10 @@ async def test_postgres_restricted_session_disabled_by_default():
         pass
 
     assert conn.transaction_readonly is True
-    assert conn.execute_calls == []
+    assert conn.execute_calls == [
+        ("RESET ROLE", ()),
+        ("RESET ALL", ()),
+    ]
 
 
 @pytest.mark.asyncio
@@ -97,6 +100,8 @@ async def test_postgres_restricted_session_applies_expected_settings(monkeypatch
         ("SELECT set_config('lock_timeout', $1, true)", ("7000ms",)),
         ("SELECT set_config('idle_in_transaction_session_timeout', $1, true)", ("9000ms",)),
         ("SELECT set_config('search_path', $1, true)", ("public",)),
+        ("RESET ROLE", ()),
+        ("RESET ALL", ()),
     ]
 
 
@@ -111,7 +116,10 @@ async def test_postgres_restricted_session_skips_when_not_read_only(monkeypatch)
         pass
 
     assert conn.transaction_readonly is False
-    assert conn.execute_calls == []
+    assert conn.execute_calls == [
+        ("RESET ROLE", ()),
+        ("RESET ALL", ()),
+    ]
 
 
 @pytest.mark.asyncio
