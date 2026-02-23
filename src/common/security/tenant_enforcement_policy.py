@@ -25,6 +25,7 @@ _TENANT_REWRITE_REASON_ALLOWLIST = {
     "REWRITE_TIMEOUT",
     "SET_OPERATIONS_UNSUPPORTED",
     "SUBQUERY_UNSUPPORTED",
+    "TENANT_ID_REQUIRED",
     "TARGET_LIMIT_EXCEEDED",
     "TENANT_MODE_UNSUPPORTED",
     "UNRESOLVABLE_TABLE_ALIAS",
@@ -47,6 +48,7 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_UNSUPPORTED",
     "REJECTED_DISABLED",
     "REJECTED_LIMIT",
+    "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
 
@@ -162,6 +164,8 @@ class PolicyDecision:
     telemetry_attributes: dict[str, Any]
     metric_attributes: dict[str, Any]
     bounded_reason_code: Optional[str]
+    tenant_required: bool
+    would_apply_rewrite: bool
 
 
 @dataclass(frozen=True)
@@ -176,6 +180,7 @@ class TenantEnforcementPolicy:
     max_ast_nodes: int
     hard_timeout_ms: int
     warn_ms: int = 50
+    rewrite_enabled: bool = True
 
     def decide_enforcement(self) -> bool:
         """Evaluate if enforcement should occur through SQL rewrite."""
@@ -199,6 +204,14 @@ class TenantEnforcementPolicy:
         """Resolve the final enforcement outcome mapped from the internal reason_code."""
         normalized_mode = self._normalized_mode_raw()
         normalized_reason = self._normalized_reason_code(reason_code)
+
+        if normalized_reason == "TENANT_ID_REQUIRED":
+            return TenantEnforcementResult(
+                applied=False,
+                mode="none" if normalized_mode == "unsupported" else normalized_mode,
+                outcome="REJECTED_MISSING_TENANT",
+                reason_code="TENANT_ID_REQUIRED",
+            )
 
         if normalized_mode == "unsupported":
             return TenantEnforcementResult(
@@ -259,6 +272,8 @@ class TenantEnforcementPolicy:
                 sql_to_execute=sql,
                 params_to_bind=list(params or []),
                 should_execute=False,
+                tenant_required=False,
+                would_apply_rewrite=False,
             )
 
         result = self.determine_outcome(applied=normalized_mode == "rls_session", reason_code=None)
@@ -267,16 +282,19 @@ class TenantEnforcementPolicy:
             sql_to_execute=sql,
             params_to_bind=list(params or []),
             should_execute=True,
+            tenant_required=normalized_mode == "rls_session",
+            would_apply_rewrite=False,
         )
 
     async def evaluate(
         self,
         *,
         sql: str,
-        tenant_id: int,
+        tenant_id: int | None,
         params: Sequence[Any] | None = None,
         tenant_column: str = "tenant_id",
         global_table_allowlist: set[str] | None = None,
+        simulate: bool = False,
         schema_snapshot_loader: (
             Callable[[Sequence[str], int], Awaitable[Mapping[str, set[str]]]] | None
         ) = None,
@@ -284,15 +302,19 @@ class TenantEnforcementPolicy:
         """Evaluate tenant enforcement and return a single execution decision payload."""
         normalized_mode = self._normalized_mode_raw()
         current_params = list(params or [])
+        simulation_telemetry = {"tenant.policy.simulated": True} if simulate else None
 
         if normalized_mode == "unsupported":
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
                 reason_code="TENANT_MODE_UNSUPPORTED",
+                tenant_required=False,
+                would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
-        if not self.decide_enforcement():
+        if normalized_mode == "none":
             result = self.determine_outcome(
                 applied=normalized_mode == "rls_session", reason_code=None
             )
@@ -301,23 +323,203 @@ class TenantEnforcementPolicy:
                 sql_to_execute=sql,
                 params_to_bind=current_params,
                 should_execute=True,
+                tenant_required=False,
+                would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
             )
 
-        from common.sql.tenant_sql_rewriter import TenantSQLRewriteError, rewrite_tenant_scoped_sql
+        if normalized_mode == "rls_session":
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                    would_apply_rewrite=False,
+                    extra_telemetry=simulation_telemetry,
+                )
+            result = self.determine_outcome(applied=True, reason_code=None)
+            return self._build_decision(
+                result=result,
+                sql_to_execute=sql,
+                params_to_bind=current_params,
+                should_execute=True,
+                tenant_required=True,
+                would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
+            )
 
-        rewrite_started = time.perf_counter()
-        try:
-            rewrite_result = rewrite_tenant_scoped_sql(
+        if not self.rewrite_enabled:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="REWRITE_DISABLED",
+                tenant_required=False,
+                would_apply_rewrite=False,
+                extra_telemetry=simulation_telemetry,
+            )
+
+        from common.sql.tenant_sql_rewriter import SUPPORTED_SQL_REWRITE_PROVIDERS
+
+        normalized_provider = (self.provider or "").strip().lower()
+        if normalized_provider not in SUPPORTED_SQL_REWRITE_PROVIDERS:
+            unsupported_provider_telemetry = {
+                "tenant_rewrite.failure_reason_category": (
+                    "tenant_rewrite_failure_dialect_unsupported"
+                )
+            }
+            if simulation_telemetry:
+                unsupported_provider_telemetry.update(simulation_telemetry)
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="PROVIDER_UNSUPPORTED",
+                tenant_required=False,
+                would_apply_rewrite=False,
+                extra_telemetry=unsupported_provider_telemetry,
+            )
+
+        if simulate:
+            simulated_telemetry = dict(simulation_telemetry or {})
+            classification_reason_code = self._classification_reason_code(
+                self.classify_sql(sql, provider=self.provider)
+            )
+            if classification_reason_code is not None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code=classification_reason_code,
+                    tenant_required=False,
+                    would_apply_rewrite=False,
+                    extra_telemetry=simulated_telemetry,
+                )
+
+            would_apply_rewrite = self._would_apply_rewrite(
                 sql,
                 provider=self.provider,
-                tenant_id=tenant_id,
-                tenant_column=tenant_column,
                 global_table_allowlist=global_table_allowlist,
             )
-        except TenantSQLRewriteError as exc:
+            if not would_apply_rewrite:
+                result = self.determine_outcome(applied=False, reason_code="NO_PREDICATES_PRODUCED")
+                return self._build_decision(
+                    result=result,
+                    sql_to_execute=sql,
+                    params_to_bind=current_params,
+                    should_execute=True,
+                    tenant_required=False,
+                    would_apply_rewrite=False,
+                    extra_telemetry=simulated_telemetry,
+                )
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                    would_apply_rewrite=True,
+                    extra_telemetry=simulated_telemetry,
+                )
+
+            result = self.determine_outcome(applied=True, reason_code=None)
+            return self._build_decision(
+                result=result,
+                sql_to_execute=sql,
+                params_to_bind=current_params,
+                should_execute=True,
+                tenant_required=True,
+                would_apply_rewrite=True,
+                extra_telemetry=simulated_telemetry,
+            )
+
+        shape = self.classify_sql(sql, provider=self.provider)
+        classification_reason_code = self._classification_reason_code(shape)
+        if classification_reason_code is not None:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code=classification_reason_code,
+                tenant_required=False,
+                would_apply_rewrite=False,
+            )
+
+        from common.sql.tenant_sql_rewriter import (
+            CTEClassification,
+            RewriteFailure,
+            RewriteRequest,
+            TenantRewriteFailureReason,
+            TenantSQLTransformerError,
+            TransformerErrorKind,
+            transform_tenant_scoped_sql,
+        )
+
+        rewrite_tenant_id = tenant_id if tenant_id is not None else 0
+        cte_classification = (
+            CTEClassification.SAFE_SIMPLE_CTE if shape == TenantSQLShape.SAFE_CTE_QUERY else None
+        )
+        rewrite_started = time.perf_counter()
+        try:
+            transformer_result = transform_tenant_scoped_sql(
+                RewriteRequest(
+                    sql=sql,
+                    provider=self.provider,
+                    tenant_id=rewrite_tenant_id,
+                    tenant_column=tenant_column,
+                    global_table_allowlist=frozenset(global_table_allowlist or set()),
+                    max_targets=self.max_targets,
+                    max_params=self.max_params,
+                    max_ast_nodes=self.max_ast_nodes,
+                    cte_classification=cte_classification,
+                    assert_invariants=False,
+                )
+            )
+        except TenantSQLTransformerError as exc:
+            fallback_failure_reason_map = {
+                TransformerErrorKind.AST_COMPLEXITY_EXCEEDED: (
+                    TenantRewriteFailureReason.AST_COMPLEXITY_EXCEEDED
+                ),
+                TransformerErrorKind.COMPLETENESS_FAILED: (
+                    TenantRewriteFailureReason.COMPLETENESS_FAILED
+                ),
+                TransformerErrorKind.MISSING_TENANT_COLUMN: (
+                    TenantRewriteFailureReason.MISSING_TENANT_COLUMN
+                ),
+                TransformerErrorKind.MISSING_TENANT_COLUMN_CONFIG: (
+                    TenantRewriteFailureReason.MISSING_TENANT_COLUMN
+                ),
+                TransformerErrorKind.NO_PREDICATES_PRODUCED: (
+                    TenantRewriteFailureReason.NO_PREDICATES_PRODUCED
+                ),
+                TransformerErrorKind.PARAM_LIMIT_EXCEEDED: (
+                    TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED
+                ),
+                TransformerErrorKind.PLACEHOLDER_PARAM_MISMATCH: (
+                    TenantRewriteFailureReason.PARAM_LIMIT_EXCEEDED
+                ),
+                TransformerErrorKind.PARSE_ERROR: TenantRewriteFailureReason.PARSE_FAILED,
+                TransformerErrorKind.PROVIDER_UNSUPPORTED: (
+                    TenantRewriteFailureReason.DIALECT_UNSUPPORTED
+                ),
+                TransformerErrorKind.REWRITTEN_SQL_INVALID: TenantRewriteFailureReason.PARSE_FAILED,
+                TransformerErrorKind.TARGET_LIMIT_EXCEEDED: (
+                    TenantRewriteFailureReason.TARGET_LIMIT_EXCEEDED
+                ),
+            }
+            transformer_result = RewriteFailure(
+                kind=exc.kind,
+                reason_code=fallback_failure_reason_map.get(
+                    exc.kind,
+                    TenantRewriteFailureReason.UNSUPPORTED_SHAPE,
+                ),
+                message=str(exc),
+            )
+
+        if isinstance(transformer_result, RewriteFailure):
             rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
             telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
-            normalized_reason = self._normalized_reason_code(exc.reason_code)
+            normalized_reason = self._reason_code_for_rewrite_failure(transformer_result)
+            telemetry_attrs["tenant_rewrite.failure_reason_category"] = (
+                self._normalized_rewrite_failure_category(transformer_result.reason_code)
+            )
             if normalized_reason == "NO_PREDICATES_PRODUCED":
                 result = self.determine_outcome(applied=False, reason_code=normalized_reason)
                 return self._build_decision(
@@ -325,26 +527,66 @@ class TenantEnforcementPolicy:
                     sql_to_execute=sql,
                     params_to_bind=current_params,
                     should_execute=True,
+                    tenant_required=False,
+                    would_apply_rewrite=False,
+                    extra_telemetry=telemetry_attrs,
+                )
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                    would_apply_rewrite=True,
                     extra_telemetry=telemetry_attrs,
                 )
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
-                reason_code=normalized_reason or "UNKNOWN_ERROR",
+                reason_code=normalized_reason,
+                tenant_required=False,
+                would_apply_rewrite=False,
                 extra_telemetry=telemetry_attrs,
             )
+        rewrite_result = transformer_result
 
         rewrite_duration_ms = (time.perf_counter() - rewrite_started) * 1000
         telemetry_attrs = self._rewrite_duration_attributes(rewrite_duration_ms)
         if rewrite_duration_ms > self.hard_timeout_ms:
+            if tenant_id is None:
+                return self._reject_decision(
+                    sql=sql,
+                    params=current_params,
+                    reason_code="TENANT_ID_REQUIRED",
+                    tenant_required=True,
+                    would_apply_rewrite=True,
+                    extra_telemetry=telemetry_attrs,
+                )
             return self._reject_decision(
                 sql=sql,
                 params=current_params,
                 reason_code="REWRITE_TIMEOUT",
+                tenant_required=False,
+                would_apply_rewrite=False,
                 extra_telemetry=telemetry_attrs,
             )
 
-        if schema_snapshot_loader is not None and rewrite_result.tables_rewritten:
+        tenant_required = bool(rewrite_result.tenant_predicates_added > 0)
+        if tenant_id is None and tenant_required:
+            return self._reject_decision(
+                sql=sql,
+                params=current_params,
+                reason_code="TENANT_ID_REQUIRED",
+                tenant_required=True,
+                would_apply_rewrite=True,
+                extra_telemetry=telemetry_attrs,
+            )
+
+        if (
+            schema_snapshot_loader is not None
+            and rewrite_result.tables_rewritten
+            and tenant_id is not None
+        ):
             table_columns = await schema_snapshot_loader(rewrite_result.tables_rewritten, tenant_id)
             missing_schema_tables, missing_tenant_column_tables = self._schema_validation_failures(
                 rewrite_result.tables_rewritten,
@@ -361,6 +603,8 @@ class TenantEnforcementPolicy:
                     sql=sql,
                     params=current_params,
                     reason_code=schema_reason_code,
+                    tenant_required=tenant_required,
+                    would_apply_rewrite=tenant_required,
                     extra_telemetry=telemetry_attrs,
                 )
 
@@ -375,7 +619,7 @@ class TenantEnforcementPolicy:
         )
 
         result = self.determine_outcome(
-            applied=bool(rewrite_result.tenant_predicates_added > 0),
+            applied=tenant_required,
             reason_code=None,
         )
         current_params.extend(rewrite_result.params)
@@ -384,6 +628,8 @@ class TenantEnforcementPolicy:
             sql_to_execute=rewrite_result.rewritten_sql,
             params_to_bind=current_params,
             should_execute=True,
+            tenant_required=tenant_required,
+            would_apply_rewrite=tenant_required,
             extra_telemetry=telemetry_attrs,
         )
 
@@ -404,6 +650,8 @@ class TenantEnforcementPolicy:
         sql: str,
         params: Sequence[Any],
         reason_code: str,
+        tenant_required: bool,
+        would_apply_rewrite: bool,
         extra_telemetry: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         result = self.determine_outcome(applied=False, reason_code=reason_code)
@@ -419,6 +667,8 @@ class TenantEnforcementPolicy:
             params_to_bind=list(params),
             should_execute=False,
             bounded_reason_override=bounded_reason,
+            tenant_required=tenant_required,
+            would_apply_rewrite=would_apply_rewrite,
             extra_telemetry=telemetry_attrs,
         )
 
@@ -429,6 +679,8 @@ class TenantEnforcementPolicy:
         sql_to_execute: str,
         params_to_bind: list[Any],
         should_execute: bool,
+        tenant_required: bool,
+        would_apply_rewrite: bool,
         bounded_reason_override: str | None = None,
         extra_telemetry: dict[str, Any] | None = None,
     ) -> PolicyDecision:
@@ -456,6 +708,27 @@ class TenantEnforcementPolicy:
             telemetry_attrs["tenant.enforcement.reason_code"] = bounded_reason
         if extra_telemetry:
             telemetry_attrs.update(extra_telemetry)
+        if telemetry_attrs.get("tenant.policy.simulated") is True:
+            simulation_reason = self._normalized_reason_code(result.reason_code) or "NONE"
+            simulation_reason_code = bounded_reason or "none"
+            telemetry_attrs.update(
+                {
+                    "tenant.policy.simulation.decision": self._simulation_decision(
+                        should_execute=should_execute,
+                        would_apply_rewrite=would_apply_rewrite,
+                    ),
+                    "tenant.policy.simulation.reason": simulation_reason,
+                    "tenant.policy.simulation.reason_code": simulation_reason_code,
+                    "tenant.policy.simulation.provider": (
+                        (self.provider or "").strip().lower() or "unknown"
+                    ),
+                    "tenant.policy.simulation.mode": mode,
+                }
+            )
+            if mode == "sql_rewrite":
+                telemetry_attrs["tenant.policy.simulation.rewrite_reason_code"] = (
+                    simulation_reason_code
+                )
 
         metric_attributes: dict[str, Any] = {
             "mode": mode,
@@ -474,6 +747,8 @@ class TenantEnforcementPolicy:
             telemetry_attributes=telemetry_attrs,
             metric_attributes=metric_attributes,
             bounded_reason_code=bounded_reason,
+            tenant_required=tenant_required,
+            would_apply_rewrite=would_apply_rewrite,
         )
 
     def _rewrite_duration_attributes(self, rewrite_duration_ms: float) -> dict[str, Any]:
@@ -481,6 +756,13 @@ class TenantEnforcementPolicy:
             "rewrite.duration_ms": round(rewrite_duration_ms, 3),
             "rewrite.duration_warn_exceeded": rewrite_duration_ms > self.warn_ms,
         }
+
+    def _simulation_decision(self, *, should_execute: bool, would_apply_rewrite: bool) -> str:
+        if not should_execute:
+            return "DENY"
+        if would_apply_rewrite:
+            return "REWRITE_REQUIRED"
+        return "ALLOW"
 
     def _schema_validation_failures(
         self,
@@ -514,7 +796,7 @@ class TenantEnforcementPolicy:
             return normalized
         if normalized == "unsupported":
             return "unsupported"
-        return "none"
+        return "unsupported"
 
     def _normalize_mode_for_envelope(self, mode: str | None) -> str:
         normalized = (mode or "").strip().lower()
@@ -531,6 +813,100 @@ class TenantEnforcementPolicy:
     def _normalized_reason_code(self, reason_code: str | None) -> str | None:
         normalized = (reason_code or "").strip().upper()
         return normalized if normalized else None
+
+    def _reason_code_for_rewrite_failure(self, failure: object) -> str:
+        reason_code = getattr(failure, "reason_code", None)
+        reason_raw = getattr(reason_code, "value", reason_code)
+        normalized_reason = self._normalized_reason_code(str(reason_raw))
+        if normalized_reason == "MISSING_TENANT_COLUMN":
+            return "MISSING_TENANT_COLUMN"
+        if normalized_reason == "TARGET_LIMIT_EXCEEDED":
+            return "TARGET_LIMIT_EXCEEDED"
+        if normalized_reason == "PARAM_LIMIT_EXCEEDED":
+            return "PARAM_LIMIT_EXCEEDED"
+        if normalized_reason == "AST_COMPLEXITY_EXCEEDED":
+            return "AST_COMPLEXITY_EXCEEDED"
+        if normalized_reason == "COMPLETENESS_FAILED":
+            return "COMPLETENESS_FAILED"
+        if normalized_reason == "DIALECT_UNSUPPORTED":
+            return "PROVIDER_UNSUPPORTED"
+        if normalized_reason == "PARSE_FAILED":
+            return "PARSE_ERROR"
+        if normalized_reason == "NO_PREDICATES_PRODUCED":
+            return "NO_PREDICATES_PRODUCED"
+        if normalized_reason == "UNSUPPORTED_SHAPE":
+            return "SUBQUERY_UNSUPPORTED"
+        return "UNKNOWN_ERROR"
+
+    def _normalized_rewrite_failure_category(self, reason: object) -> str:
+        value = getattr(reason, "value", reason)
+        normalized = self._normalized_reason_code(str(value))
+        if normalized is None:
+            return "tenant_rewrite_failure_unknown"
+        return f"tenant_rewrite_failure_{normalized.lower()}"
+
+    def _classification_reason_code(self, shape: TenantSQLShape) -> str | None:
+        if shape == TenantSQLShape.UNSUPPORTED_SET_OPERATION:
+            return "SET_OPERATIONS_UNSUPPORTED"
+        if shape == TenantSQLShape.UNSUPPORTED_STATEMENT_TYPE:
+            return "NOT_SELECT_STATEMENT"
+        if shape == TenantSQLShape.UNSUPPORTED_CTE:
+            return "CTE_UNSUPPORTED_SHAPE"
+        if shape == TenantSQLShape.UNSUPPORTED_WINDOW_FUNCTION:
+            return "WINDOW_FUNCTIONS_UNSUPPORTED"
+        if shape == TenantSQLShape.UNSUPPORTED_NESTED_FROM:
+            return "NESTED_FROM_UNSUPPORTED"
+        if shape == TenantSQLShape.UNSUPPORTED_CORRELATED_SUBQUERY:
+            return "CORRELATED_SUBQUERY_UNSUPPORTED"
+        if shape == TenantSQLShape.UNSUPPORTED_SUBQUERY:
+            return "SUBQUERY_UNSUPPORTED"
+        if shape == TenantSQLShape.UNSUPPORTED_COMPLEXITY:
+            return "AST_COMPLEXITY_EXCEEDED"
+        if shape == TenantSQLShape.PARSE_ERROR:
+            return "PARSE_ERROR"
+        return None
+
+    def _would_apply_rewrite(
+        self,
+        sql: str,
+        *,
+        provider: str,
+        global_table_allowlist: set[str] | None,
+    ) -> bool:
+        import sqlglot
+        from sqlglot import exp
+
+        from common.sql.dialect import normalize_sqlglot_dialect
+
+        dialect = normalize_sqlglot_dialect((provider or "").strip().lower())
+        try:
+            expression = sqlglot.parse_one(sql, read=dialect)
+        except Exception:
+            return False
+        if not isinstance(expression, exp.Select):
+            return False
+
+        with_clause = expression.args.get("with_")
+        cte_names = (
+            {cte.alias_or_name.lower() for cte in with_clause.expressions if cte.alias_or_name}
+            if with_clause
+            else set()
+        )
+        allowlist = {entry.strip().lower() for entry in (global_table_allowlist or set()) if entry}
+
+        for table in expression.find_all(exp.Table):
+            alias_or_name = (table.alias_or_name or table.name or "").strip().lower()
+            physical_name = (table.name or "").strip().lower()
+            if not alias_or_name and not physical_name:
+                continue
+            candidates = {alias_or_name, physical_name}
+            candidates.discard("")
+            if candidates.intersection(cte_names):
+                continue
+            if allowlist and candidates.intersection(allowlist):
+                continue
+            return True
+        return False
 
 
 __all__ = [

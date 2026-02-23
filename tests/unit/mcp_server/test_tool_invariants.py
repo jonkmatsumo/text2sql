@@ -5,6 +5,7 @@ import os
 import pytest
 
 from mcp_server.tools import registry
+from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
 
 
 def get_all_tool_handlers():
@@ -67,7 +68,11 @@ def test_tool_invariants(tool_name, handler):
             "get_semantic_definitions",
             "list_approved_examples",
         ]
-        if tool_name not in metadata_tools:
+        if tool_name == "execute_sql_query":
+            assert (
+                "evaluate" in call_names
+            ), "Tool 'execute_sql_query' MUST delegate tenant_id requirement to policy.evaluate()"
+        elif tool_name not in metadata_tools:
             assert (
                 "require_tenant_id" in call_names
             ), f"Tool '{tool_name}' MUST call require_tenant_id()"
@@ -190,3 +195,26 @@ def test_registry_wraps_all_with_tracing():
             break
 
     assert found_register_def, "registry.py should use a register helper that applies trace_tool"
+
+
+def test_execute_sql_query_tenant_contract_helper_smoke():
+    """Shared tenant enforcement contract helper should validate policy defaults."""
+    from common.security.tenant_enforcement_policy import TenantEnforcementPolicy
+
+    policy = TenantEnforcementPolicy(
+        provider="postgres",
+        mode="rls_session",
+        strict=True,
+        max_targets=25,
+        max_params=50,
+        max_ast_nodes=1000,
+        hard_timeout_ms=200,
+        warn_ms=50,
+    )
+    decision = policy.default_decision(sql="SELECT 1", params=[])
+
+    assert_tenant_enforcement_contract(
+        decision.envelope_metadata,
+        decision,
+        telemetry=decision.telemetry_attributes,
+    )
