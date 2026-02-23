@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -50,6 +51,16 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
+
+
+@dataclass(frozen=True)
+class SQLASTValidationFailure:
+    """Structured AST validation failure with stable classification fields."""
+
+    message: str
+    reason_code: str
+    category: ErrorCategory = ErrorCategory.INVALID_REQUEST
+    error_code: str = ErrorCode.VALIDATION_ERROR.value
 
 
 def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
@@ -430,8 +441,8 @@ def _validate_sql_complexity(
     )
 
 
-def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
-    """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
+def _validate_sql_ast_failure(sql: str, provider: str) -> Optional[SQLASTValidationFailure]:
+    """Return structured SQL AST validation failure, or None when valid."""
     import sqlglot
 
     from common.sql.comments import strip_sql_comments
@@ -443,42 +454,76 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
     try:
         expressions = sqlglot.parse(stripped_sql, read=dialect)
         if not expressions:
-            return "Empty or invalid SQL query."
+            return SQLASTValidationFailure(
+                message="Empty or invalid SQL query.",
+                reason_code="invalid_sql_ast",
+            )
 
         if len(expressions) > 1:
-            return "Multi-statement queries are forbidden."
+            return SQLASTValidationFailure(
+                message="Multi-statement queries are forbidden.",
+                reason_code="multi_statement_forbidden",
+            )
 
         expression = expressions[0]
         if expression is None:
-            return "Failed to parse SQL query."
+            return SQLASTValidationFailure(
+                message="Failed to parse SQL query.",
+                reason_code="invalid_sql_ast",
+            )
 
         # Use centralized policy
         from common.policy.sql_policy import (
             ALLOWED_STATEMENT_TYPES,
-            BLOCKED_FUNCTIONS,
             classify_blocked_table_reference,
+            classify_sql_policy_violation,
         )
 
-        if expression.key not in ALLOWED_STATEMENT_TYPES:
-            allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
-            return (
-                f"Forbidden statement type: {expression.key.upper()}. "
-                f"Only {allowed_list} are allowed."
-            )
+        policy_violation = classify_sql_policy_violation(expression)
+        if policy_violation is not None:
+            if policy_violation.reason_code == "blocked_function":
+                function_name = (policy_violation.function or "UNKNOWN").upper()
+                return SQLASTValidationFailure(
+                    message=f"Forbidden function: {function_name} is not allowed.",
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
 
-        # Block dangerous functions
-        import sqlglot.expressions as exp
+            if policy_violation.reason_code == "blocked_statement":
+                statement_name = (policy_violation.statement or "UNKNOWN").upper()
+                return SQLASTValidationFailure(
+                    message=f"Forbidden statement: {statement_name} is not allowed.",
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
 
-        for node in expression.find_all(exp.Anonymous):
-            if str(node.this).lower() in BLOCKED_FUNCTIONS:
-                return f"Forbidden function: {str(node.this).upper()} is not allowed."
+            if policy_violation.reason_code == "statement_type_not_allowed":
+                allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
+                statement_name = (policy_violation.statement or expression.key).upper()
+                return SQLASTValidationFailure(
+                    message=(
+                        f"Forbidden statement type: {statement_name}. "
+                        f"Only {allowed_list} are allowed."
+                    ),
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
 
-        for node in expression.find_all(exp.Func):
-            func_name = node.sql_name().lower()
-            if func_name in BLOCKED_FUNCTIONS:
-                return f"Forbidden function: {func_name.upper()} is not allowed."
+            if policy_violation.reason_code == "readonly_violation":
+                form_name = (policy_violation.statement or "UNKNOWN").upper()
+                return SQLASTValidationFailure(
+                    message=f"Forbidden read-only violation: '{form_name}' is not allowed.",
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
 
         # Block restricted/system tables and schemas for direct MCP invocations.
+        import sqlglot.expressions as exp
+
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower() if table.name else ""
             schema_name = table.db.lower() if table.db else ""
@@ -490,15 +535,33 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
                 continue
             full_name = f"{schema_name}.{table_name}" if schema_name else table_name
             if blocked_reason == "restricted_table":
-                return f"Forbidden table: {full_name} is not allowed."
-            return f"Forbidden schema/table reference: {full_name} is not allowed."
+                return SQLASTValidationFailure(
+                    message=f"Forbidden table: {full_name} is not allowed.",
+                    reason_code=blocked_reason,
+                )
+            return SQLASTValidationFailure(
+                message=f"Forbidden schema/table reference: {full_name} is not allowed.",
+                reason_code=blocked_reason,
+            )
 
     except sqlglot.errors.ParseError as e:
-        return f"SQL Syntax Error: {e}"
+        return SQLASTValidationFailure(
+            message=f"SQL Syntax Error: {e}",
+            reason_code="invalid_sql_syntax",
+        )
     except Exception:
-        return "SQL Validation Error."
+        return SQLASTValidationFailure(
+            message="SQL Validation Error.",
+            reason_code="sql_validation_error",
+        )
 
     return None
+
+
+def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
+    """Validate SQL AST using sqlglot to ensure single-statement SELECT only."""
+    failure = _validate_sql_ast_failure(sql, provider)
+    return failure.message if failure is not None else None
 
 
 def _validate_params(params: Optional[list]) -> Optional[str]:
@@ -617,7 +680,17 @@ async def handler(
     # 2. Server-Side AST Validation
     validation_error = _validate_sql_ast(sql_query, provider)
     if validation_error:
-        if "forbidden statement type" in validation_error.lower():
+        validation_failure = _validate_sql_ast_failure(sql_query, provider)
+        if validation_failure is None:
+            validation_failure = SQLASTValidationFailure(
+                message=validation_error,
+                reason_code="sql_validation_error",
+            )
+        if validation_failure.reason_code in {
+            "statement_type_not_allowed",
+            "blocked_statement",
+            "readonly_violation",
+        }:
             emit_audit_event(
                 AuditEventType.READONLY_VIOLATION,
                 source=AuditEventSource.MCP,
@@ -625,14 +698,18 @@ async def handler(
                 error_category=ErrorCategory.INVALID_REQUEST,
                 metadata={
                     "provider": provider,
-                    "reason_code": "ast_forbidden_statement_type",
+                    "reason_code": f"ast_{validation_failure.reason_code}",
                     "decision": "reject",
                 },
             )
         return _construct_error_response(
-            validation_error,
-            category=ErrorCategory.INVALID_REQUEST,
+            validation_failure.message,
+            category=validation_failure.category,
             provider=provider,
+            metadata={
+                "reason_code": validation_failure.reason_code,
+                "error_code": validation_failure.error_code,
+            },
             envelope_metadata=tenant_enforcement_metadata,
         )
 
