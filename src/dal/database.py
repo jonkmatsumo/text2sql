@@ -14,7 +14,17 @@ from common.interfaces import (
     SchemaStore,
 )
 from common.observability.metrics import mcp_metrics
-from dal.session_guardrails import PostgresSessionGuardrailSettings
+from dal.session_guardrails import (
+    RESTRICTED_SESSION_MODE_OFF,
+    RESTRICTED_SESSION_MODE_SET_LOCAL_CONFIG,
+    SESSION_GUARDRAIL_APPLIED,
+    SESSION_GUARDRAIL_MISCONFIGURED,
+    SESSION_GUARDRAIL_SKIPPED,
+    PostgresSessionGuardrailSettings,
+    SessionGuardrailPolicyError,
+    build_session_guardrail_metadata,
+    sanitize_execution_role_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -629,7 +639,22 @@ class Database:
         settings = cls._postgres_session_guardrail_settings
         if settings is not None:
             return settings
-        return cls._load_postgres_session_guardrail_settings()
+        try:
+            return cls._load_postgres_session_guardrail_settings()
+        except ValueError as exc:
+            raise SessionGuardrailPolicyError(
+                reason_code="session_guardrail_misconfigured",
+                outcome=SESSION_GUARDRAIL_MISCONFIGURED,
+                message=str(exc),
+                envelope_metadata=build_session_guardrail_metadata(
+                    applied=False,
+                    outcome=SESSION_GUARDRAIL_MISCONFIGURED,
+                    execution_role_applied=False,
+                    execution_role_name=None,
+                    restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+                    capability_mismatch="session_guardrail_misconfigured",
+                ),
+            ) from exc
 
     @classmethod
     async def _probe_postgres_dangerous_extension_capabilities(
@@ -690,9 +715,10 @@ class Database:
         dblink_accessible: bool,
     ) -> None:
         """Emit low-cardinality telemetry and warning metrics for dblink accessibility."""
+        sanitized_execution_role = sanitize_execution_role_name(execution_role) or "unknown_role"
         span = trace.get_current_span()
         if span is not None and span.is_recording():
-            span.set_attribute("db.postgres.execution_role", execution_role)
+            span.set_attribute("db.postgres.execution_role", sanitized_execution_role)
             span.set_attribute("db.postgres.extension.dblink.installed", dblink_installed)
             span.set_attribute("db.postgres.extension.dblink.accessible", dblink_accessible)
 
@@ -705,7 +731,7 @@ class Database:
         logger.warning(
             "Postgres execution role '%s' can execute dblink extension functions. "
             "AST-level SQL guardrails may be bypassed by extension-mediated calls.",
-            execution_role,
+            sanitized_execution_role,
         )
         mcp_metrics.add_counter(
             "mcp.postgres.dangerous_extension_accessible_total",
@@ -715,7 +741,7 @@ class Database:
             ),
             attributes={
                 "provider": "postgres",
-                "execution_role": execution_role,
+                "execution_role": sanitized_execution_role,
                 "extension": "dblink",
             },
         )
@@ -726,10 +752,16 @@ class Database:
         conn: asyncpg.Connection,
         *,
         read_only: bool,
-    ) -> None:
+    ) -> dict[str, object]:
         """Apply optional Postgres-only transaction-local session hardening."""
         if not read_only:
-            return
+            return build_session_guardrail_metadata(
+                applied=False,
+                outcome=SESSION_GUARDRAIL_SKIPPED,
+                execution_role_applied=False,
+                execution_role_name=None,
+                restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+            )
 
         from common.config.env import get_env_bool, get_env_int, get_env_str
 
@@ -738,7 +770,13 @@ class Database:
         execution_role_enabled = settings.execution_role_enabled
 
         if not restricted_session_enabled and not execution_role_enabled:
-            return
+            return build_session_guardrail_metadata(
+                applied=False,
+                outcome=SESSION_GUARDRAIL_SKIPPED,
+                execution_role_applied=False,
+                execution_role_name=settings.execution_role_name,
+                restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+            )
 
         capabilities = cls.get_query_target_capabilities()
         settings.validate_capabilities(
@@ -761,7 +799,21 @@ class Database:
             )
 
         if cls._query_target_provider != "postgres":
-            return
+            return build_session_guardrail_metadata(
+                applied=False,
+                outcome=SESSION_GUARDRAIL_SKIPPED,
+                execution_role_applied=False,
+                execution_role_name=settings.execution_role_name,
+                restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+            )
+
+        metadata = build_session_guardrail_metadata(
+            applied=False,
+            outcome=SESSION_GUARDRAIL_SKIPPED,
+            execution_role_applied=False,
+            execution_role_name=settings.execution_role_name,
+            restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+        )
 
         def _timeout_value(env_name: str, default_ms: int) -> Optional[str]:
             timeout_ms = get_env_int(env_name, default_ms)
@@ -771,6 +823,13 @@ class Database:
 
         if restricted_session_enabled:
             await conn.execute("SELECT set_config('default_transaction_read_only', 'on', true)")
+            metadata = build_session_guardrail_metadata(
+                applied=True,
+                outcome=SESSION_GUARDRAIL_APPLIED,
+                execution_role_applied=bool(metadata["execution_role_applied"]),
+                execution_role_name=settings.execution_role_name,
+                restricted_session_mode=RESTRICTED_SESSION_MODE_SET_LOCAL_CONFIG,
+            )
 
             statement_timeout = _timeout_value("POSTGRES_RESTRICTED_STATEMENT_TIMEOUT_MS", 15000)
             if statement_timeout:
@@ -807,6 +866,13 @@ class Database:
             if execution_role:
                 quoted_role = cls._quote_postgres_identifier(execution_role)
                 await conn.execute(f"SET LOCAL ROLE {quoted_role}")
+                metadata = build_session_guardrail_metadata(
+                    applied=True,
+                    outcome=SESSION_GUARDRAIL_APPLIED,
+                    execution_role_applied=True,
+                    execution_role_name=execution_role,
+                    restricted_session_mode=str(metadata["restricted_session_mode"]),
+                )
 
                 cache_key = execution_role.lower()
                 dblink_installed, dblink_accessible = (
@@ -831,6 +897,8 @@ class Database:
                         "Execution role has dblink EXECUTE permissions while strict mode "
                         "is enabled."
                     )
+
+        return metadata
 
     @classmethod
     @asynccontextmanager
@@ -926,7 +994,9 @@ class Database:
                 # Start a transaction block.
                 # Everything inside here is atomic.
                 async with conn.transaction(readonly=read_only):
-                    await cls._apply_postgres_restricted_session(conn, read_only=read_only)
+                    session_guardrail_metadata = await cls._apply_postgres_restricted_session(
+                        conn, read_only=read_only
+                    )
 
                     if tenant_id is not None:
                         # set_config with is_local=True scopes the setting to this transaction.
@@ -948,12 +1018,20 @@ class Database:
                             execution_model=cls.get_query_target_capabilities().execution_model,
                             max_rows=sync_max_rows,
                             read_only=read_only,
+                            session_guardrail_metadata=session_guardrail_metadata,
                         )
                     else:
+                        try:
+                            setattr(conn, "session_guardrail_metadata", session_guardrail_metadata)
+                        except Exception:
+                            pass
                         yield conn
                     # Transaction commits/rolls back automatically here
                     # Connection is returned to pool, tenant context is cleared
             else:
+                session_guardrail_metadata = await cls._apply_postgres_restricted_session(
+                    conn, read_only=read_only
+                )
                 if tenant_id is not None:
                     await conn.execute(
                         "SELECT set_config('app.current_tenant', $1, true)", str(tenant_id)
@@ -969,8 +1047,13 @@ class Database:
                         execution_model=cls.get_query_target_capabilities().execution_model,
                         max_rows=sync_max_rows,
                         read_only=read_only,
+                        session_guardrail_metadata=session_guardrail_metadata,
                     )
                 else:
+                    try:
+                        setattr(conn, "session_guardrail_metadata", session_guardrail_metadata)
+                    except Exception:
+                        pass
                     yield conn
 
     @classmethod

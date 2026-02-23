@@ -81,6 +81,19 @@ class ExecuteSQLQueryMetadata(BaseModel):
         ]
     ] = None
     tenant_rewrite_reason_code: Optional[str] = None
+    session_guardrail_applied: Optional[bool] = None
+    session_guardrail_outcome: Optional[
+        Literal[
+            "SESSION_GUARDRAIL_APPLIED",
+            "SESSION_GUARDRAIL_SKIPPED",
+            "SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER",
+            "SESSION_GUARDRAIL_MISCONFIGURED",
+        ]
+    ] = None
+    execution_role_applied: Optional[bool] = None
+    execution_role_name: Optional[str] = None
+    restricted_session_mode: Optional[Literal["off", "set_local_config"]] = None
+    session_guardrail_capability_mismatch: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

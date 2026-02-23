@@ -169,6 +169,11 @@ class TestExecuteSqlQuery:
         data = json.loads(result)
         assert data.get("error") is None
         assert data["rows"] == [{"ok": 1}]
+        assert data["metadata"]["session_guardrail_applied"] is True
+        assert data["metadata"]["session_guardrail_outcome"] == "SESSION_GUARDRAIL_APPLIED"
+        assert data["metadata"]["execution_role_applied"] is True
+        assert data["metadata"]["execution_role_name"] == "text2sql_readonly"
+        assert data["metadata"]["restricted_session_mode"] == "set_local_config"
         assert (
             "SELECT set_config('default_transaction_read_only', 'on', true)",
             (),
@@ -178,6 +183,63 @@ class TestExecuteSqlQuery:
         role_event_index = fake_conn.events.index(("execute", 'SET LOCAL ROLE "text2sql_readonly"'))
         fetch_event_index = fake_conn.events.index(("fetch", "SELECT 1 AS ok"))
         assert role_event_index < fetch_event_index
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_session_guardrail_metadata_parity_with_span(self, monkeypatch):
+        """Session guardrail metadata should match span attributes deterministically."""
+        from dal.capabilities import capabilities_for_provider
+        from dal.database import Database
+
+        fake_conn = _ToolFakeConn()
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+
+        monkeypatch.setenv("POSTGRES_RESTRICTED_SESSION_ENABLED", "true")
+        monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+        monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+        monkeypatch.setattr(Database, "_pool", _ToolFakePool(fake_conn))
+        monkeypatch.setattr(Database, "_query_target_provider", "postgres")
+        monkeypatch.setattr(
+            Database, "_query_target_capabilities", capabilities_for_provider("postgres")
+        )
+        monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
+        monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
+        monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+        monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
+
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span
+            ),
+            patch("dal.database.trace.get_current_span", return_value=mock_span),
+        ):
+            result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        data = json.loads(result)
+        metadata = data["metadata"]
+        assert metadata["session_guardrail_applied"] is True
+        assert metadata["session_guardrail_outcome"] == "SESSION_GUARDRAIL_APPLIED"
+        assert metadata["execution_role_applied"] is True
+        assert metadata["execution_role_name"] == "text2sql_readonly"
+        assert metadata["restricted_session_mode"] == "set_local_config"
+        assert metadata.get("session_guardrail_capability_mismatch") is None
+
+        mock_span.set_attribute.assert_any_call(
+            "session.guardrail.applied", metadata["session_guardrail_applied"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "session.guardrail.outcome", metadata["session_guardrail_outcome"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "session.guardrail.execution_role_applied", metadata["execution_role_applied"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "session.guardrail.execution_role_name", metadata["execution_role_name"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "session.guardrail.restricted_session_mode", metadata["restricted_session_mode"]
+        )
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):
@@ -208,6 +270,15 @@ class TestExecuteSqlQuery:
         )
         assert data["error"]["details_safe"]["session_guardrail_outcome"] == (
             "SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER"
+        )
+        assert data["metadata"]["session_guardrail_applied"] is False
+        assert data["metadata"]["session_guardrail_outcome"] == (
+            "SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER"
+        )
+        assert data["metadata"]["execution_role_applied"] is False
+        assert data["metadata"]["restricted_session_mode"] == "off"
+        assert data["metadata"]["session_guardrail_capability_mismatch"] == (
+            "session_guardrail_restricted_session_unsupported_provider"
         )
 
     @pytest.mark.asyncio

@@ -140,9 +140,10 @@ async def test_postgres_execution_role_enabled_without_role_fails_closed(monkeyp
     Database._pool = _FakePool(conn)
     monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
 
-    with pytest.raises(ValueError, match="POSTGRES_EXECUTION_ROLE"):
+    with pytest.raises(SessionGuardrailPolicyError) as exc_info:
         async with Database.get_connection(read_only=True):
             pass
+    assert exc_info.value.outcome == "SESSION_GUARDRAIL_MISCONFIGURED"
 
 
 @pytest.mark.asyncio

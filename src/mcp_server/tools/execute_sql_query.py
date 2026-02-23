@@ -32,7 +32,12 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
-from dal.session_guardrails import SessionGuardrailPolicyError
+from dal.session_guardrails import (
+    RESTRICTED_SESSION_MODE_OFF,
+    SESSION_GUARDRAIL_SKIPPED,
+    SessionGuardrailPolicyError,
+    build_session_guardrail_metadata,
+)
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
@@ -52,6 +57,13 @@ _TENANT_ENFORCEMENT_OUTCOME_ALLOWLIST = {
     "REJECTED_MISSING_TENANT",
     "REJECTED_TIMEOUT",
 }
+_SESSION_GUARDRAIL_OUTCOME_ALLOWLIST = {
+    "SESSION_GUARDRAIL_APPLIED",
+    "SESSION_GUARDRAIL_SKIPPED",
+    "SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER",
+    "SESSION_GUARDRAIL_MISCONFIGURED",
+}
+_RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
 
 
 @dataclass(frozen=True)
@@ -120,6 +132,85 @@ def _record_tenant_enforcement_observability(metadata: dict[str, Any] | None) ->
     )
 
 
+def _session_guardrail_observability_fields(
+    metadata: dict[str, Any] | None,
+) -> tuple[bool, str, bool, str | None, str, str | None]:
+    session_metadata = metadata if isinstance(metadata, dict) else {}
+    applied = bool(session_metadata.get("session_guardrail_applied"))
+    raw_outcome = str(session_metadata.get("session_guardrail_outcome") or "").strip().upper()
+    outcome = (
+        raw_outcome
+        if raw_outcome in _SESSION_GUARDRAIL_OUTCOME_ALLOWLIST
+        else SESSION_GUARDRAIL_SKIPPED
+    )
+    execution_role_applied = bool(session_metadata.get("execution_role_applied"))
+    execution_role_name_raw = session_metadata.get("execution_role_name")
+    execution_role_name = (
+        execution_role_name_raw.strip()
+        if isinstance(execution_role_name_raw, str) and execution_role_name_raw.strip()
+        else None
+    )
+    restricted_mode_raw = str(session_metadata.get("restricted_session_mode") or "").strip().lower()
+    restricted_mode = (
+        restricted_mode_raw
+        if restricted_mode_raw in _RESTRICTED_SESSION_MODE_ALLOWLIST
+        else RESTRICTED_SESSION_MODE_OFF
+    )
+    capability_mismatch_raw = session_metadata.get("session_guardrail_capability_mismatch")
+    capability_mismatch = (
+        capability_mismatch_raw.strip()
+        if isinstance(capability_mismatch_raw, str) and capability_mismatch_raw.strip()
+        else None
+    )
+    return (
+        applied,
+        outcome,
+        execution_role_applied,
+        execution_role_name,
+        restricted_mode,
+        capability_mismatch,
+    )
+
+
+def _record_session_guardrail_observability(metadata: dict[str, Any] | None) -> None:
+    (
+        applied,
+        outcome,
+        execution_role_applied,
+        execution_role_name,
+        restricted_mode,
+        capability_mismatch,
+    ) = _session_guardrail_observability_fields(metadata)
+
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("session.guardrail.applied", applied)
+        span.set_attribute("session.guardrail.outcome", outcome)
+        span.set_attribute("session.guardrail.execution_role_applied", execution_role_applied)
+        if execution_role_name is not None:
+            span.set_attribute("session.guardrail.execution_role_name", execution_role_name)
+        span.set_attribute("session.guardrail.restricted_session_mode", restricted_mode)
+        if capability_mismatch is not None:
+            span.set_attribute("session.guardrail.capability_mismatch", capability_mismatch)
+
+    metric_attributes: dict[str, Any] = {
+        "tool_name": TOOL_NAME,
+        "applied": applied,
+        "outcome": outcome,
+        "execution_role_applied": execution_role_applied,
+        "restricted_session_mode": restricted_mode,
+    }
+    if execution_role_name is not None:
+        metric_attributes["execution_role_name"] = execution_role_name
+    if capability_mismatch is not None:
+        metric_attributes["capability_mismatch"] = capability_mismatch
+    mcp_metrics.add_counter(
+        "mcp.session_guardrail.outcome_total",
+        description="Count of execute_sql_query Postgres session guardrail outcomes",
+        attributes=metric_attributes,
+    )
+
+
 def _record_policy_decision_telemetry(attributes: dict[str, Any]) -> None:
     """Attach policy-provided telemetry attributes to the active span."""
     span = trace.get_current_span()
@@ -155,8 +246,13 @@ def _tenant_enforcement_unsupported_response(
     provider: str,
     *,
     policy_decision: PolicyDecision,
+    envelope_metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Return a canonical tenant-enforcement unsupported response envelope."""
+    merged_metadata: Dict[str, Any] = dict(policy_decision.envelope_metadata)
+    if envelope_metadata:
+        merged_metadata.update(envelope_metadata)
+
     if policy_decision.result.outcome == "REJECTED_MISSING_TENANT":
         return _construct_error_response(
             message=f"Tenant ID is required for {TOOL_NAME}.",
@@ -166,7 +262,7 @@ def _tenant_enforcement_unsupported_response(
                 "sql_state": "MISSING_TENANT_ID",
                 "reason_code": policy_decision.bounded_reason_code,
             },
-            envelope_metadata=policy_decision.envelope_metadata,
+            envelope_metadata=merged_metadata,
         )
 
     bounded_reason_code = policy_decision.bounded_reason_code or "tenant_enforcement_unsupported"
@@ -183,7 +279,7 @@ def _tenant_enforcement_unsupported_response(
             "error_code": ErrorCode.TENANT_ENFORCEMENT_UNSUPPORTED.value,
             "reason_code": bounded_reason_code,
         },
-        envelope_metadata=policy_decision.envelope_metadata,
+        envelope_metadata=merged_metadata,
     )
 
 
@@ -340,6 +436,7 @@ def _construct_error_response(
         error_meta = error_meta.model_copy(update={"details_safe": details_safe})
 
     _record_tenant_enforcement_observability(envelope_metadata)
+    _record_session_guardrail_observability(envelope_metadata)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -615,6 +712,13 @@ async def handler(
         - Capacity detection: If query triggers row/resource caps.
     """
     provider = _active_provider()
+    session_guardrail_metadata = build_session_guardrail_metadata(
+        applied=False,
+        outcome=SESSION_GUARDRAIL_SKIPPED,
+        execution_role_applied=False,
+        execution_role_name=None,
+        restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
+    )
 
     from mcp_server.utils.auth import validate_role
 
@@ -657,12 +761,14 @@ async def handler(
     )
     policy_decision = policy.default_decision(sql=sql_query, params=params)
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
+    tenant_enforcement_metadata.update(session_guardrail_metadata)
 
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
         return _tenant_enforcement_unsupported_response(
             provider,
             policy_decision=policy_decision,
+            envelope_metadata=tenant_enforcement_metadata,
         )
 
     effective_sql_query = policy_decision.sql_to_execute
@@ -807,12 +913,14 @@ async def handler(
     )
     _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
+    tenant_enforcement_metadata.update(session_guardrail_metadata)
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
         return _tenant_enforcement_unsupported_response(
             provider,
             policy_decision=policy_decision,
+            envelope_metadata=tenant_enforcement_metadata,
         )
 
     def _unsupported_capability_response(
@@ -961,6 +1069,20 @@ async def handler(
         row_limit = 0
         next_token = None
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
+            raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
+            if isinstance(raw_session_guardrail_metadata, dict):
+                session_guardrail_metadata = {
+                    key: raw_session_guardrail_metadata.get(key)
+                    for key in (
+                        "session_guardrail_applied",
+                        "session_guardrail_outcome",
+                        "execution_role_applied",
+                        "execution_role_name",
+                        "restricted_session_mode",
+                        "session_guardrail_capability_mismatch",
+                    )
+                }
+            tenant_enforcement_metadata.update(session_guardrail_metadata)
             row_limit = _resolve_row_limit(conn)
             effective_page_size = page_size
             if effective_page_size and effective_page_size > row_limit and row_limit:
@@ -1138,17 +1260,28 @@ async def handler(
             tenant_rewrite_reason_code=tenant_enforcement_metadata.get(
                 "tenant_rewrite_reason_code"
             ),
+            session_guardrail_applied=tenant_enforcement_metadata.get("session_guardrail_applied"),
+            session_guardrail_outcome=tenant_enforcement_metadata.get("session_guardrail_outcome"),
+            execution_role_applied=tenant_enforcement_metadata.get("execution_role_applied"),
+            execution_role_name=tenant_enforcement_metadata.get("execution_role_name"),
+            restricted_session_mode=tenant_enforcement_metadata.get("restricted_session_mode"),
+            session_guardrail_capability_mismatch=tenant_enforcement_metadata.get(
+                "session_guardrail_capability_mismatch"
+            ),
         )
 
         envelope = ExecuteSQLQueryResponseEnvelope(
             rows=result_rows, columns=columns, metadata=envelope_metadata
         )
         _record_tenant_enforcement_observability(tenant_enforcement_metadata)
+        _record_session_guardrail_observability(tenant_enforcement_metadata)
 
         return envelope.model_dump_json(exclude_none=True)
 
     except SessionGuardrailPolicyError as e:
         provider = _active_provider()
+        session_guardrail_metadata = dict(getattr(e, "envelope_metadata", {}) or {})
+        tenant_enforcement_metadata.update(session_guardrail_metadata)
         return _construct_error_response(
             message=str(e),
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
