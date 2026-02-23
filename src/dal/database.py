@@ -595,6 +595,11 @@ class Database:
             )
         return cls._query_target_capabilities
 
+    @staticmethod
+    def _quote_postgres_identifier(identifier: str) -> str:
+        """Return a safely quoted Postgres identifier."""
+        return '"' + identifier.replace('"', '""') + '"'
+
     @classmethod
     async def _apply_postgres_restricted_session(
         cls,
@@ -608,7 +613,12 @@ class Database:
 
         from common.config.env import get_env_bool, get_env_int, get_env_str
 
-        if not get_env_bool("POSTGRES_RESTRICTED_SESSION_ENABLED", False):
+        restricted_session_enabled = bool(
+            get_env_bool("POSTGRES_RESTRICTED_SESSION_ENABLED", False)
+        )
+        execution_role_enabled = bool(get_env_bool("POSTGRES_EXECUTION_ROLE_ENABLED", False))
+
+        if not restricted_session_enabled and not execution_role_enabled:
             return
 
         def _timeout_value(env_name: str, default_ms: int) -> Optional[str]:
@@ -617,37 +627,44 @@ class Database:
                 return None
             return f"{timeout_ms}ms"
 
-        await conn.execute("SELECT set_config('default_transaction_read_only', 'on', true)")
+        if restricted_session_enabled:
+            await conn.execute("SELECT set_config('default_transaction_read_only', 'on', true)")
 
-        statement_timeout = _timeout_value("POSTGRES_RESTRICTED_STATEMENT_TIMEOUT_MS", 15000)
-        if statement_timeout:
-            await conn.execute(
-                "SELECT set_config('statement_timeout', $1, true)",
-                statement_timeout,
-            )
+            statement_timeout = _timeout_value("POSTGRES_RESTRICTED_STATEMENT_TIMEOUT_MS", 15000)
+            if statement_timeout:
+                await conn.execute(
+                    "SELECT set_config('statement_timeout', $1, true)",
+                    statement_timeout,
+                )
 
-        lock_timeout = _timeout_value("POSTGRES_RESTRICTED_LOCK_TIMEOUT_MS", 5000)
-        if lock_timeout:
-            await conn.execute(
-                "SELECT set_config('lock_timeout', $1, true)",
-                lock_timeout,
-            )
+            lock_timeout = _timeout_value("POSTGRES_RESTRICTED_LOCK_TIMEOUT_MS", 5000)
+            if lock_timeout:
+                await conn.execute(
+                    "SELECT set_config('lock_timeout', $1, true)",
+                    lock_timeout,
+                )
 
-        idle_in_txn_timeout = _timeout_value(
-            "POSTGRES_RESTRICTED_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS", 15000
-        )
-        if idle_in_txn_timeout:
-            await conn.execute(
-                "SELECT set_config('idle_in_transaction_session_timeout', $1, true)",
-                idle_in_txn_timeout,
+            idle_in_txn_timeout = _timeout_value(
+                "POSTGRES_RESTRICTED_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS", 15000
             )
+            if idle_in_txn_timeout:
+                await conn.execute(
+                    "SELECT set_config('idle_in_transaction_session_timeout', $1, true)",
+                    idle_in_txn_timeout,
+                )
 
-        search_path = (get_env_str("POSTGRES_RESTRICTED_SEARCH_PATH", "") or "").strip()
-        if search_path:
-            await conn.execute(
-                "SELECT set_config('search_path', $1, true)",
-                search_path,
-            )
+            search_path = (get_env_str("POSTGRES_RESTRICTED_SEARCH_PATH", "") or "").strip()
+            if search_path:
+                await conn.execute(
+                    "SELECT set_config('search_path', $1, true)",
+                    search_path,
+                )
+
+        if execution_role_enabled:
+            execution_role = (get_env_str("POSTGRES_EXECUTION_ROLE", "") or "").strip()
+            if execution_role:
+                quoted_role = cls._quote_postgres_identifier(execution_role)
+                await conn.execute(f"SET LOCAL ROLE {quoted_role}")
 
     @classmethod
     @asynccontextmanager

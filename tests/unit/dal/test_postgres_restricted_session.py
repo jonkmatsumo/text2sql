@@ -9,6 +9,7 @@ from dal.database import Database
 class _FakeConn:
     def __init__(self):
         self.execute_calls = []
+        self.events = []
         self.transaction_readonly = None
 
     @asynccontextmanager
@@ -18,6 +19,11 @@ class _FakeConn:
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
+        self.events.append(("execute", sql))
+
+    async def fetch(self, sql, *args):
+        self.events.append(("fetch", sql))
+        return [{"ok": 1}]
 
 
 class _FakePool:
@@ -91,3 +97,35 @@ async def test_postgres_restricted_session_skips_when_not_read_only(monkeypatch)
 
     assert conn.transaction_readonly is False
     assert conn.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_role_set_local_role_before_query(monkeypatch):
+    """Execution role should be set at transaction start before SQL fetches."""
+    conn = _FakeConn()
+    Database._pool = _FakePool(conn)
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+
+    async with Database.get_connection(read_only=True) as wrapped_conn:
+        await wrapped_conn.fetch("SELECT 1 AS ok")
+
+    set_role_sql = 'SET LOCAL ROLE "text2sql_readonly"'
+    assert (set_role_sql, ()) in conn.execute_calls
+
+    set_role_index = conn.events.index(("execute", set_role_sql))
+    fetch_index = conn.events.index(("fetch", "SELECT 1 AS ok"))
+    assert set_role_index < fetch_index
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_role_enabled_without_role_is_noop(monkeypatch):
+    """Role switching should not be attempted when role env is empty."""
+    conn = _FakeConn()
+    Database._pool = _FakePool(conn)
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+
+    async with Database.get_connection(read_only=True):
+        pass
+
+    assert not any("SET LOCAL ROLE" in sql for sql, _ in conn.execute_calls)
