@@ -21,24 +21,44 @@ ALLOWED_STATEMENT_TYPES: Set[str] = {
 
 # Dangerous functions that should be blocked in SQL queries
 BLOCKED_FUNCTIONS: Set[str] = {
+    # System disruption / DoS / Locking
     "pg_sleep",
     "sleep",
     "usleep",
     "sys_sleep",
+    "pg_advisory_lock",
+    "pg_advisory_xact_lock",
+    "pg_advisory_lock_shared",
+    "pg_advisory_xact_lock_shared",
+    "pg_try_advisory_lock",
+    "pg_try_advisory_xact_lock",
+    "pg_try_advisory_lock_shared",
+    "pg_try_advisory_xact_lock_shared",
+    "pg_cancel_backend",
+    "pg_terminate_backend",
+    "pg_reload_conf",
+    "pg_rotate_logfile",
+    "pg_log_backend_memory_contexts",
+    # Remote execution / bypass
     "dblink",
     "dblink_exec",
+    # Server filesystem access
     "pg_read_file",
     "pg_read_binary_file",
     "pg_ls_dir",
     "pg_stat_file",
+    "pg_ls_tmpdir",
+    "pg_ls_archive_status",
+    "pg_ls_waldir",
+    "pg_ls_logicalsnapdir",
+    "pg_ls_logicalmapdir",
+    "pg_ls_replslotdir",
     "lo_import",
     "lo_export",
-    "pg_advisory_lock",
-    "pg_advisory_xact_lock",
-    "pg_cancel_backend",
-    "pg_terminate_backend",
+    # Arbitrary subquery execution wrappers
     "query_to_xml",
     "query_to_json",
+    # Config / Information leakage
     "current_setting",
     "set_config",
     "current_user",
