@@ -959,7 +959,7 @@ async def handler(
         last_truncated = False
         row_limit = 0
         next_token = None
-        async with Database.get_connection(tenant_id, read_only=True) as conn:
+        async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             row_limit = _resolve_row_limit(conn)
             effective_page_size = page_size
             if effective_page_size and effective_page_size > row_limit and row_limit:

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,42 @@ from tests._support.tenant_enforcement_contract import assert_tenant_enforcement
 _TENANT_CONTRACT_FIXTURE_DIR = (
     Path(__file__).resolve().parent / "fixtures" / "execute_sql_query_tenant_enforcement"
 )
+
+
+class _ToolFakeConn:
+    def __init__(self):
+        self.execute_calls = []
+        self.fetch_calls = []
+        self.fetchrow_calls = []
+        self.events = []
+
+    @asynccontextmanager
+    async def transaction(self, readonly=False):
+        self.events.append(("transaction", readonly))
+        yield
+
+    async def execute(self, sql, *args):
+        self.execute_calls.append((sql, args))
+        self.events.append(("execute", sql))
+
+    async def fetch(self, sql, *args):
+        self.fetch_calls.append((sql, args))
+        self.events.append(("fetch", sql))
+        return [{"ok": 1}]
+
+    async def fetchrow(self, sql, *args):
+        self.fetchrow_calls.append((sql, args))
+        self.events.append(("fetchrow", sql))
+        return {"dblink_installed": False, "dblink_accessible": False}
+
+
+class _ToolFakePool:
+    def __init__(self, conn):
+        self._conn = conn
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self._conn
 
 
 class TestExecuteSqlQuery:
@@ -88,6 +125,58 @@ class TestExecuteSqlQuery:
             assert data["metadata"]["tenant_enforcement_applied"] is True
             assert data["metadata"]["tenant_rewrite_outcome"] == "APPLIED"
             assert data["metadata"].get("tenant_rewrite_reason_code") is None
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_passes_read_only_connection_flag(self):
+        """Tool should always request read-only DAL connections."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
+            await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        mock_get.assert_called_once_with(tenant_id=1, read_only=True)
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_runs_postgres_least_privilege_hook(self, monkeypatch):
+        """Tool should traverse DAL connection path that applies restricted session + role."""
+        from dal.capabilities import capabilities_for_provider
+        from dal.database import Database
+
+        fake_conn = _ToolFakeConn()
+        monkeypatch.setenv("POSTGRES_RESTRICTED_SESSION_ENABLED", "true")
+        monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+        monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+        monkeypatch.setattr(Database, "_pool", _ToolFakePool(fake_conn))
+        monkeypatch.setattr(Database, "_query_target_provider", "postgres")
+        monkeypatch.setattr(
+            Database, "_query_target_capabilities", capabilities_for_provider("postgres")
+        )
+        monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
+        monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
+        monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+
+        with patch("mcp_server.utils.auth.validate_role", return_value=None):
+            result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["rows"] == [{"ok": 1}]
+        assert (
+            "SELECT set_config('default_transaction_read_only', 'on', true)",
+            (),
+        ) in fake_conn.execute_calls
+        assert ('SET LOCAL ROLE "text2sql_readonly"', ()) in fake_conn.execute_calls
+
+        role_event_index = fake_conn.events.index(("execute", 'SET LOCAL ROLE "text2sql_readonly"'))
+        fetch_event_index = fake_conn.events.index(("fetch", "SELECT 1 AS ok"))
+        assert role_event_index < fetch_event_index
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):
