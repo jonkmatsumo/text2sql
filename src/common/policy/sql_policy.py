@@ -116,6 +116,10 @@ _COMMAND_BLOCKLIST = frozenset(
 )
 _ALIAS_BLOCKLIST = frozenset({"DEALLOCATE", "RESET", "LISTEN", "NOTIFY"})
 
+# Stable error code constants for cross-layer classification parity.
+SQL_FORBIDDEN_FUNCTION_CODE = "SQL_FORBIDDEN_FUNCTION"
+SQL_FORBIDDEN_STATEMENT_CODE = "SQL_FORBIDDEN_STATEMENT"
+
 
 @dataclass(frozen=True)
 class SQLPolicyViolation:
@@ -181,8 +185,25 @@ def _alias_keyword(statement: exp.Alias) -> str:
     return ""
 
 
-def classify_blocked_statement(statement: exp.Expression) -> str | None:
-    """Classify explicit high-risk statements that must always be rejected."""
+def classify_blocked_statement(
+    statement: exp.Expression,
+) -> str | None:  # noqa: C901 (deliberate exhaustive match)
+    """Classify explicit high-risk statements that must always be rejected.
+
+    Returns a canonical statement label string (e.g. ``"COPY"``, ``"DO"``,
+    ``"CREATE EXTENSION"``) or *None* when the statement is not inherently
+    forbidden (further checks such as the SELECT-only allowlist still apply).
+
+    Detection order: specific typed AST nodes first (cheapest and most
+    reliable), then ``exp.Command`` fallback for statements that sqlglot
+    cannot represent natively in the target dialect.
+    """
+    # ------------------------------------------------------------------
+    # Phase 1: Strongly-typed AST node checks
+    # ------------------------------------------------------------------
+
+    # COPY … TO/FROM [FILE|PROGRAM|STDIN|STDOUT] — encompasses all variants
+    # including the dangerous COPY … TO PROGRAM and COPY … FROM PROGRAM.
     if isinstance(statement, exp.Copy):
         return "COPY"
 
@@ -200,9 +221,18 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
 
     if isinstance(statement, exp.Create):
         kind = _normalize_statement_keyword(statement.args.get("kind"))
+        if kind == "EXTENSION":
+            return "CREATE EXTENSION"
         if kind in {"FUNCTION", "PROCEDURE"}:
             return f"CREATE {kind}"
+        if kind in {"ROLE", "USER"}:
+            return f"CREATE {kind}"
 
+    # ------------------------------------------------------------------
+    # Phase 2: exp.Command fallback — catches statements sqlglot cannot
+    # represent as first-class nodes in the postgres dialect (e.g. DO,
+    # PREPARE, EXECUTE, DEALLOCATE, CALL, ALTER SYSTEM, RESET, LISTEN …)
+    # ------------------------------------------------------------------
     if isinstance(statement, exp.Command):
         keyword = _command_keyword(statement)
         if keyword in _COMMAND_BLOCKLIST:
@@ -213,17 +243,23 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
                 return "ALTER SYSTEM"
             if remainder.startswith("ROLE"):
                 return "ALTER ROLE"
+            if remainder.startswith("USER"):
+                return "ALTER USER"
         if keyword == "CREATE":
             remainder = _command_remainder(statement)
+            if remainder.startswith("EXTENSION"):
+                return "CREATE EXTENSION"
             if remainder.startswith("FUNCTION"):
                 return "CREATE FUNCTION"
             if remainder.startswith("PROCEDURE"):
                 return "CREATE PROCEDURE"
-            if remainder.startswith("EXTENSION"):
-                return "CREATE EXTENSION"
             if remainder.startswith("ROLE"):
                 return "CREATE ROLE"
+            if remainder.startswith("USER"):
+                return "CREATE USER"
 
+    # exp.Alias is used by sqlglot for some bare keyword forms that it
+    # cannot classify as commands (e.g. LISTEN chan, NOTIFY chan).
     if isinstance(statement, exp.Alias):
         keyword = _alias_keyword(statement)
         if keyword in _ALIAS_BLOCKLIST:
@@ -233,17 +269,28 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
 
 
 def classify_sql_policy_violation(statement: exp.Expression) -> SQLPolicyViolation | None:
-    """Return the first shared SQL policy violation detected in a statement AST."""
+    """Return the first shared SQL policy violation detected in a statement AST.
+
+    Classification hierarchy:
+    1. ``blocked_statement``  — explicit high-risk statement type (COPY, DO, …)
+    2. ``statement_type_not_allowed`` — any non-SELECT/WITH/set-op statement
+    3. ``blocked_function``   — function call on the denylist
+
+    Both the Agent ``PolicyEnforcer`` and the MCP ``_validate_sql_ast_failure``
+    call this routine so classification is always identical across layers.
+    """
     blocked_statement = classify_blocked_statement(statement)
     if blocked_statement:
         return SQLPolicyViolation(
             reason_code="blocked_statement",
+            error_code=SQL_FORBIDDEN_STATEMENT_CODE,
             statement=blocked_statement,
         )
 
     if statement.key not in ALLOWED_STATEMENT_TYPES:
         return SQLPolicyViolation(
             reason_code="statement_type_not_allowed",
+            error_code=SQL_FORBIDDEN_STATEMENT_CODE,
             statement=str(statement.key).upper(),
         )
 
@@ -252,6 +299,7 @@ def classify_sql_policy_violation(statement: exp.Expression) -> SQLPolicyViolati
             if function_name in BLOCKED_FUNCTIONS:
                 return SQLPolicyViolation(
                     reason_code="blocked_function",
+                    error_code=SQL_FORBIDDEN_FUNCTION_CODE,
                     function=function_name,
                 )
 

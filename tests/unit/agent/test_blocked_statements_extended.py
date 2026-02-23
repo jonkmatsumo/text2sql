@@ -3,7 +3,6 @@
 import pytest
 
 from agent.validation.policy_enforcer import PolicyEnforcer, PolicyValidationError
-from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
 from mcp_server.tools.execute_sql_query import _validate_sql_ast, _validate_sql_ast_failure
 
@@ -101,18 +100,20 @@ def test_mcp_ast_validation_blocks_session_and_privilege_side_effects(
 @pytest.mark.parametrize(("expected_reason_code", "sql"), CLASSIFICATION_CASES)
 def test_statement_classification_parity(expected_reason_code: str, sql: str) -> None:
     """Statement-policy classification should match across Agent and MCP validators."""
+    from common.policy.sql_policy import SQL_FORBIDDEN_STATEMENT_CODE
+
     with pytest.raises(PolicyValidationError) as exc_info:
         PolicyEnforcer.validate_sql(sql)
 
     policy_error = exc_info.value
     assert policy_error.reason_code == expected_reason_code
     assert policy_error.category == ErrorCategory.INVALID_REQUEST.value
-    assert policy_error.error_code == ErrorCode.VALIDATION_ERROR.value
+    assert policy_error.error_code == SQL_FORBIDDEN_STATEMENT_CODE
     assert sql.lower() not in str(policy_error).lower()
 
     mcp_failure = _validate_sql_ast_failure(sql, "postgres")
     assert mcp_failure is not None
     assert mcp_failure.reason_code == expected_reason_code
     assert mcp_failure.category == ErrorCategory.INVALID_REQUEST
-    assert mcp_failure.error_code == ErrorCode.VALIDATION_ERROR.value
+    assert mcp_failure.error_code == SQL_FORBIDDEN_STATEMENT_CODE
     assert sql.lower() not in mcp_failure.message.lower()
