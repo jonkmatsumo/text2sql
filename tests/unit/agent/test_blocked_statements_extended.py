@@ -33,6 +33,21 @@ BLOCKED_STATEMENT_CASES = [
     ("CREATE EXTENSION", "CREATE EXTENSION IF NOT EXISTS dblink"),
 ]
 
+SIDE_EFFECT_STATEMENT_CASES = [
+    ("SET", "SET ROLE some_role"),
+    ("SET", "SET search_path TO public"),
+    ("RESET", "RESET ALL"),
+    ("ALTER SYSTEM", "ALTER SYSTEM SET work_mem = '4MB'"),
+    ("ALTER ROLE", "ALTER ROLE app_user SET search_path TO public"),
+    ("CREATE ROLE", "CREATE ROLE app_user"),
+    ("GRANT", "GRANT SELECT ON users TO app_user"),
+    ("REVOKE", "REVOKE SELECT ON users FROM app_user"),
+    ("VACUUM", "VACUUM users"),
+    ("ANALYZE", "ANALYZE users"),
+    ("LISTEN", "LISTEN safety_channel"),
+    ("NOTIFY", "NOTIFY safety_channel"),
+]
+
 
 @pytest.mark.parametrize(("statement_name", "sql"), BLOCKED_STATEMENT_CASES)
 def test_policy_enforcer_blocks_high_risk_statements(statement_name: str, sql: str) -> None:
@@ -46,6 +61,29 @@ def test_policy_enforcer_blocks_high_risk_statements(statement_name: str, sql: s
 @pytest.mark.parametrize(("statement_name", "sql"), BLOCKED_STATEMENT_CASES)
 def test_mcp_ast_validation_blocks_high_risk_statements(statement_name: str, sql: str) -> None:
     """MCP-side AST validation should reject high-risk statement-level bypass vectors."""
+    error = _validate_sql_ast(sql, "postgres")
+
+    assert isinstance(error, str)
+    assert "Forbidden statement" in error
+    assert statement_name.upper() in error.upper()
+
+
+@pytest.mark.parametrize(("statement_name", "sql"), SIDE_EFFECT_STATEMENT_CASES)
+def test_policy_enforcer_blocks_session_and_privilege_side_effects(
+    statement_name: str, sql: str
+) -> None:
+    """Agent-side policy should reject session and privilege side-effect statements."""
+    with pytest.raises(ValueError, match="restricted") as exc_info:
+        PolicyEnforcer.validate_sql(sql)
+
+    assert statement_name.lower() in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(("statement_name", "sql"), SIDE_EFFECT_STATEMENT_CASES)
+def test_mcp_ast_validation_blocks_session_and_privilege_side_effects(
+    statement_name: str, sql: str
+) -> None:
+    """MCP-side validation should reject session and privilege side-effect statements."""
     error = _validate_sql_ast(sql, "postgres")
 
     assert isinstance(error, str)

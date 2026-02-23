@@ -102,8 +102,19 @@ SENSITIVE_COLUMN_NAME_PATTERNS: Set[str] = {
     "apikey",
 }
 
-_PHASE1_COMMAND_BLOCKLIST = frozenset({"DO", "PREPARE", "EXECUTE", "DEALLOCATE", "CALL"})
-_PHASE1_ALIAS_BLOCKLIST = frozenset({"DEALLOCATE"})
+_COMMAND_BLOCKLIST = frozenset(
+    {
+        "DO",
+        "PREPARE",
+        "EXECUTE",
+        "DEALLOCATE",
+        "CALL",
+        "SET",
+        "RESET",
+        "VACUUM",
+    }
+)
+_ALIAS_BLOCKLIST = frozenset({"DEALLOCATE", "RESET", "LISTEN", "NOTIFY"})
 
 
 @dataclass(frozen=True)
@@ -175,6 +186,18 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
     if isinstance(statement, exp.Copy):
         return "COPY"
 
+    if isinstance(statement, exp.Set):
+        return "SET"
+
+    if isinstance(statement, exp.Grant):
+        return "GRANT"
+
+    if isinstance(statement, exp.Revoke):
+        return "REVOKE"
+
+    if isinstance(statement, exp.Analyze):
+        return "ANALYZE"
+
     if isinstance(statement, exp.Create):
         kind = _normalize_statement_keyword(statement.args.get("kind"))
         if kind in {"FUNCTION", "PROCEDURE"}:
@@ -182,8 +205,14 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
 
     if isinstance(statement, exp.Command):
         keyword = _command_keyword(statement)
-        if keyword in _PHASE1_COMMAND_BLOCKLIST:
+        if keyword in _COMMAND_BLOCKLIST:
             return keyword
+        if keyword == "ALTER":
+            remainder = _command_remainder(statement)
+            if remainder.startswith("SYSTEM"):
+                return "ALTER SYSTEM"
+            if remainder.startswith("ROLE"):
+                return "ALTER ROLE"
         if keyword == "CREATE":
             remainder = _command_remainder(statement)
             if remainder.startswith("FUNCTION"):
@@ -192,10 +221,12 @@ def classify_blocked_statement(statement: exp.Expression) -> str | None:
                 return "CREATE PROCEDURE"
             if remainder.startswith("EXTENSION"):
                 return "CREATE EXTENSION"
+            if remainder.startswith("ROLE"):
+                return "CREATE ROLE"
 
     if isinstance(statement, exp.Alias):
         keyword = _alias_keyword(statement)
-        if keyword in _PHASE1_ALIAS_BLOCKLIST:
+        if keyword in _ALIAS_BLOCKLIST:
             return keyword
 
     return None
