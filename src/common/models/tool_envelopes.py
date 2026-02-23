@@ -94,6 +94,19 @@ class ExecuteSQLQueryMetadata(BaseModel):
     execution_role_name: Optional[str] = None
     restricted_session_mode: Optional[Literal["off", "set_local_config"]] = None
     session_guardrail_capability_mismatch: Optional[str] = None
+    sandbox_applied: Optional[bool] = None
+    sandbox_rollback: Optional[bool] = None
+    sandbox_failure_reason: Optional[
+        Literal[
+            "NONE",
+            "QUERY_ERROR",
+            "TIMEOUT",
+            "ROLE_SWITCH_FAILURE",
+            "RESET_FAILURE",
+            "STATE_DRIFT",
+            "UNKNOWN",
+        ]
+    ] = None
 
     @model_validator(mode="before")
     @classmethod

@@ -84,15 +84,19 @@ async def test_postgres_execution_sandbox_commits_on_success():
     assert sandbox.result.committed is True
     assert sandbox.result.rolled_back is False
     assert sandbox.result.state_clean is True
+    assert sandbox.result.failure_reason == "NONE"
+    assert sandbox.result.reset_role_attempted is True
+    assert sandbox.result.reset_all_attempted is True
 
 
 @pytest.mark.asyncio
 async def test_postgres_execution_sandbox_rolls_back_on_exception():
     """Sandbox should force rollback semantics on exceptions."""
     conn = _FakeConn()
+    sandbox = PostgresExecutionSandbox(conn, read_only=True)
 
     with pytest.raises(RuntimeError, match="boom"):
-        async with PostgresExecutionSandbox(conn, read_only=True):
+        async with sandbox:
             raise RuntimeError("boom")
 
     assert conn.transaction_calls == [True]
@@ -101,6 +105,8 @@ async def test_postgres_execution_sandbox_rolls_back_on_exception():
     assert conn.transactions[0].exit_args[0] is RuntimeError
     assert ("RESET ROLE", ()) in conn.execute_calls
     assert ("RESET ALL", ()) in conn.execute_calls
+    assert sandbox.result.rolled_back is True
+    assert sandbox.result.failure_reason == "QUERY_ERROR"
 
 
 @pytest.mark.asyncio
@@ -120,3 +126,17 @@ async def test_postgres_execution_sandbox_strict_state_drift_fails(monkeypatch):
     with pytest.raises(PostgresSandboxStateError, match="connection state drift"):
         async with PostgresExecutionSandbox(conn, read_only=True):
             conn.settings["role"] = "sandbox_role"
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_sandbox_timeout_classification():
+    """Timeout failures should emit deterministic TIMEOUT sandbox reason."""
+    conn = _FakeConn()
+    sandbox = PostgresExecutionSandbox(conn, read_only=True)
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        async with sandbox:
+            raise TimeoutError("timed out")
+
+    assert sandbox.result.rolled_back is True
+    assert sandbox.result.failure_reason == "TIMEOUT"
