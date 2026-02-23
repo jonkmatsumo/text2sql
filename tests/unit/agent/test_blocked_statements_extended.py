@@ -92,3 +92,76 @@ def test_high_risk_statement_rejection_is_sanitized(statement_name: str, sql: st
     mcp_failure = _validate_sql_ast_failure(sql, "postgres")
     assert mcp_failure is not None
     assert sql.lower() not in mcp_failure.message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Session/privilege side-effect statements
+# ---------------------------------------------------------------------------
+
+SIDE_EFFECT_STATEMENT_CASES = [
+    # SET / RESET — session configuration manipulation
+    ("SET", "SET ROLE some_role"),
+    ("SET", "SET search_path TO public"),
+    ("SET", "SET SESSION AUTHORIZATION bob"),
+    ("RESET", "RESET ALL"),
+    ("RESET", "RESET search_path"),
+    # ALTER SYSTEM / ALTER ROLE — server configuration and privilege escalation
+    ("ALTER SYSTEM", "ALTER SYSTEM SET work_mem = '4MB'"),
+    ("ALTER SYSTEM", "ALTER SYSTEM RESET ALL"),
+    ("ALTER ROLE", "ALTER ROLE app_user SET search_path TO public"),
+    ("ALTER ROLE", "ALTER ROLE u SUPERUSER"),
+    # CREATE ROLE / USER — privilege creation
+    ("CREATE ROLE", "CREATE ROLE app_user"),
+    ("CREATE ROLE", "CREATE ROLE admin SUPERUSER"),
+    ("CREATE USER", "CREATE USER alice WITH PASSWORD 'secret'"),
+    # GRANT / REVOKE — privilege management
+    ("GRANT", "GRANT SELECT ON users TO app_user"),
+    ("GRANT", "GRANT ALL PRIVILEGES ON DATABASE mydb TO admin"),
+    ("REVOKE", "REVOKE SELECT ON users FROM app_user"),
+    ("REVOKE", "REVOKE ALL ON SCHEMA public FROM PUBLIC"),
+    # Maintenance — non-write but still restricted
+    ("VACUUM", "VACUUM users"),
+    ("VACUUM", "VACUUM FULL ANALYZE users"),
+    ("ANALYZE", "ANALYZE users"),
+    ("ANALYZE", "ANALYZE customer"),
+    # Async messaging
+    ("LISTEN", "LISTEN safety_channel"),
+    ("NOTIFY", "NOTIFY safety_channel"),
+    ("NOTIFY", "NOTIFY safety_channel"),  # duplicate bare form for determinism
+]
+
+
+@pytest.mark.parametrize(("statement_name", "sql"), SIDE_EFFECT_STATEMENT_CASES)
+def test_policy_enforcer_blocks_session_and_privilege_side_effects(
+    statement_name: str, sql: str
+) -> None:
+    """Agent-side policy should reject session and privilege side-effect statements."""
+    with pytest.raises(ValueError, match="restricted") as exc_info:
+        PolicyEnforcer.validate_sql(sql)
+
+    assert statement_name.lower() in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(("statement_name", "sql"), SIDE_EFFECT_STATEMENT_CASES)
+def test_mcp_ast_validation_blocks_session_and_privilege_side_effects(
+    statement_name: str, sql: str
+) -> None:
+    """MCP-side validation should reject session and privilege side-effect statements."""
+    error = _validate_sql_ast(sql, "postgres")
+
+    assert isinstance(error, str)
+    assert "Forbidden statement" in error
+    assert statement_name.upper() in error.upper()
+
+
+@pytest.mark.parametrize(("statement_name", "sql"), SIDE_EFFECT_STATEMENT_CASES)
+def test_side_effect_statement_rejection_is_sanitized(statement_name: str, sql: str) -> None:
+    """Session/privilege rejection messages must not echo back the raw SQL."""
+    with pytest.raises(PolicyValidationError) as a_exc:
+        PolicyEnforcer.validate_sql(sql)
+
+    assert sql.lower() not in str(a_exc.value).lower()
+
+    mcp_failure = _validate_sql_ast_failure(sql, "postgres")
+    assert mcp_failure is not None
+    assert sql.lower() not in mcp_failure.message.lower()
