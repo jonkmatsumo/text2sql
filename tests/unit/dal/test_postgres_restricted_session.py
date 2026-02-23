@@ -51,6 +51,7 @@ def _reset_database_state():
     Database._query_target_sync_max_rows = 0
     Database._postgres_extension_capability_cache = {}
     Database._postgres_extension_warning_emitted = set()
+    Database._postgres_session_guardrail_settings = None
     yield
     Database._pool = None
     Database._query_target_provider = "postgres"
@@ -58,6 +59,7 @@ def _reset_database_state():
     Database._query_target_sync_max_rows = 0
     Database._postgres_extension_capability_cache = {}
     Database._postgres_extension_warning_emitted = set()
+    Database._postgres_session_guardrail_settings = None
 
 
 @pytest.mark.asyncio
@@ -131,16 +133,15 @@ async def test_postgres_execution_role_set_local_role_before_query(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_postgres_execution_role_enabled_without_role_is_noop(monkeypatch):
-    """Role switching should not be attempted when role env is empty."""
+async def test_postgres_execution_role_enabled_without_role_fails_closed(monkeypatch):
+    """Execution role mode without role name should fail closed."""
     conn = _FakeConn()
     Database._pool = _FakePool(conn)
     monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
 
-    async with Database.get_connection(read_only=True):
-        pass
-
-    assert not any("SET LOCAL ROLE" in sql for sql, _ in conn.execute_calls)
+    with pytest.raises(ValueError, match="POSTGRES_EXECUTION_ROLE"):
+        async with Database.get_connection(read_only=True):
+            pass
 
 
 @pytest.mark.asyncio

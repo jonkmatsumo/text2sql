@@ -14,6 +14,7 @@ from common.interfaces import (
     SchemaStore,
 )
 from common.observability.metrics import mcp_metrics
+from dal.session_guardrails import PostgresSessionGuardrailSettings
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class Database:
     supports_tenant_enforcement: bool = True
     _postgres_extension_capability_cache: dict[str, tuple[bool, bool]] = {}
     _postgres_extension_warning_emitted: set[str] = set()
+    _postgres_session_guardrail_settings: Optional[PostgresSessionGuardrailSettings] = None
 
     @classmethod
     async def init(cls):
@@ -101,6 +103,7 @@ class Database:
         cls._query_target_capabilities = capabilities_for_provider(cls._query_target_provider)
         cls._postgres_extension_capability_cache = {}
         cls._postgres_extension_warning_emitted = set()
+        cls._load_postgres_session_guardrail_settings()
 
         async def _init_query_target(runtime_config):
             if cls._query_target_provider == "sqlite":
@@ -536,6 +539,7 @@ class Database:
         cls._metadata_store = None
         cls._postgres_extension_capability_cache = {}
         cls._postgres_extension_warning_emitted = set()
+        cls._postgres_session_guardrail_settings = None
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -610,6 +614,22 @@ class Database:
     def _quote_postgres_identifier(identifier: str) -> str:
         """Return a safely quoted Postgres identifier."""
         return '"' + identifier.replace('"', '""') + '"'
+
+    @classmethod
+    def _load_postgres_session_guardrail_settings(cls) -> PostgresSessionGuardrailSettings:
+        """Resolve and validate guardrail settings at initialization time."""
+        settings = PostgresSessionGuardrailSettings.from_env()
+        settings.validate_basic(cls._query_target_provider)
+        cls._postgres_session_guardrail_settings = settings
+        return settings
+
+    @classmethod
+    def _get_postgres_session_guardrail_settings(cls) -> PostgresSessionGuardrailSettings:
+        """Return startup-resolved settings with a lazy fallback for tests."""
+        settings = cls._postgres_session_guardrail_settings
+        if settings is not None:
+            return settings
+        return cls._load_postgres_session_guardrail_settings()
 
     @classmethod
     async def _probe_postgres_dangerous_extension_capabilities(
@@ -713,10 +733,9 @@ class Database:
 
         from common.config.env import get_env_bool, get_env_int, get_env_str
 
-        restricted_session_enabled = bool(
-            get_env_bool("POSTGRES_RESTRICTED_SESSION_ENABLED", False)
-        )
-        execution_role_enabled = bool(get_env_bool("POSTGRES_EXECUTION_ROLE_ENABLED", False))
+        settings = cls._get_postgres_session_guardrail_settings()
+        restricted_session_enabled = settings.restricted_session_enabled
+        execution_role_enabled = settings.execution_role_enabled
 
         if not restricted_session_enabled and not execution_role_enabled:
             return
@@ -761,7 +780,7 @@ class Database:
                 )
 
         if execution_role_enabled:
-            execution_role = (get_env_str("POSTGRES_EXECUTION_ROLE", "") or "").strip()
+            execution_role = settings.execution_role_name
             if execution_role:
                 quoted_role = cls._quote_postgres_identifier(execution_role)
                 await conn.execute(f"SET LOCAL ROLE {quoted_role}")
