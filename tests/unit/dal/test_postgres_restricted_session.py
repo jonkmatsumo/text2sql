@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -10,6 +11,8 @@ class _FakeConn:
     def __init__(self):
         self.execute_calls = []
         self.events = []
+        self.fetchrow_calls = []
+        self.fetchrow_result = {"dblink_installed": False, "dblink_accessible": False}
         self.transaction_readonly = None
 
     @asynccontextmanager
@@ -24,6 +27,11 @@ class _FakeConn:
     async def fetch(self, sql, *args):
         self.events.append(("fetch", sql))
         return [{"ok": 1}]
+
+    async def fetchrow(self, sql, *args):
+        self.fetchrow_calls.append((sql, args))
+        self.events.append(("fetchrow", sql))
+        return self.fetchrow_result
 
 
 class _FakePool:
@@ -41,11 +49,15 @@ def _reset_database_state():
     Database._query_target_provider = "postgres"
     Database._query_target_capabilities = capabilities_for_provider("postgres")
     Database._query_target_sync_max_rows = 0
+    Database._postgres_extension_capability_cache = {}
+    Database._postgres_extension_warning_emitted = set()
     yield
     Database._pool = None
     Database._query_target_provider = "postgres"
     Database._query_target_capabilities = None
     Database._query_target_sync_max_rows = 0
+    Database._postgres_extension_capability_cache = {}
+    Database._postgres_extension_warning_emitted = set()
 
 
 @pytest.mark.asyncio
@@ -129,3 +141,45 @@ async def test_postgres_execution_role_enabled_without_role_is_noop(monkeypatch)
         pass
 
     assert not any("SET LOCAL ROLE" in sql for sql, _ in conn.execute_calls)
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_role_dblink_probe_cached(monkeypatch):
+    """Dangerous extension capability probe should be cached per execution role."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"dblink_installed": True, "dblink_accessible": False}
+    Database._pool = _FakePool(conn)
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+
+    async with Database.get_connection(read_only=True):
+        pass
+    async with Database.get_connection(read_only=True):
+        pass
+
+    assert len(conn.fetchrow_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_role_dblink_accessible_emits_warning_signal(monkeypatch):
+    """Accessible dblink should set telemetry attributes and emit warning metric."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"dblink_installed": True, "dblink_accessible": True}
+    Database._pool = _FakePool(conn)
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
+    monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    with (
+        patch("dal.database.trace.get_current_span", return_value=mock_span),
+        patch("dal.database.mcp_metrics.add_counter") as mock_counter,
+    ):
+        async with Database.get_connection(read_only=True):
+            pass
+
+    mock_span.set_attribute.assert_any_call("db.postgres.execution_role", "text2sql_readonly")
+    mock_span.set_attribute.assert_any_call("db.postgres.extension.dblink.installed", True)
+    mock_span.set_attribute.assert_any_call("db.postgres.extension.dblink.accessible", True)
+    mock_counter.assert_called_once()

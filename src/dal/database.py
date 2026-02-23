@@ -1,7 +1,9 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
+from opentelemetry import trace
 
 from common.interfaces import (
     CacheStore,
@@ -11,6 +13,9 @@ from common.interfaces import (
     SchemaIntrospector,
     SchemaStore,
 )
+from common.observability.metrics import mcp_metrics
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -27,6 +32,8 @@ class Database:
     _query_target_capabilities = None
     _query_target_sync_max_rows: int = 0
     supports_tenant_enforcement: bool = True
+    _postgres_extension_capability_cache: dict[str, tuple[bool, bool]] = {}
+    _postgres_extension_warning_emitted: set[str] = set()
 
     @classmethod
     async def init(cls):
@@ -92,6 +99,8 @@ class Database:
             cls._query_target_provider = runtime_config.provider
 
         cls._query_target_capabilities = capabilities_for_provider(cls._query_target_provider)
+        cls._postgres_extension_capability_cache = {}
+        cls._postgres_extension_warning_emitted = set()
 
         async def _init_query_target(runtime_config):
             if cls._query_target_provider == "sqlite":
@@ -525,6 +534,8 @@ class Database:
         cls._schema_store = None
         cls._schema_introspector = None
         cls._metadata_store = None
+        cls._postgres_extension_capability_cache = {}
+        cls._postgres_extension_warning_emitted = set()
 
     @classmethod
     def get_graph_store(cls) -> GraphStore:
@@ -601,6 +612,95 @@ class Database:
         return '"' + identifier.replace('"', '""') + '"'
 
     @classmethod
+    async def _probe_postgres_dangerous_extension_capabilities(
+        cls,
+        conn: asyncpg.Connection,
+        *,
+        cache_key: str,
+    ) -> tuple[bool, bool]:
+        """Return cached (installed, executable) capability for dblink extension."""
+        cached = cls._postgres_extension_capability_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        installed = False
+        accessible = False
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    EXISTS (
+                        SELECT 1
+                        FROM pg_extension
+                        WHERE extname = 'dblink'
+                    ) AS dblink_installed,
+                    EXISTS (
+                        SELECT 1
+                        FROM pg_extension ext
+                        JOIN pg_depend dep
+                            ON dep.refobjid = ext.oid
+                            AND dep.deptype = 'e'
+                        JOIN pg_proc proc
+                            ON proc.oid = dep.objid
+                        WHERE ext.extname = 'dblink'
+                            AND has_function_privilege(proc.oid, 'EXECUTE')
+                    ) AS dblink_accessible
+                """
+            )
+            if row is not None:
+                installed = bool(row["dblink_installed"])
+                accessible = bool(row["dblink_accessible"])
+        except Exception:
+            logger.debug(
+                "Failed Postgres dangerous-extension capability probe for cache key '%s'.",
+                cache_key,
+                exc_info=True,
+            )
+
+        cls._postgres_extension_capability_cache[cache_key] = (installed, accessible)
+        return installed, accessible
+
+    @classmethod
+    def _record_postgres_extension_capability_signals(
+        cls,
+        *,
+        cache_key: str,
+        execution_role: str,
+        dblink_installed: bool,
+        dblink_accessible: bool,
+    ) -> None:
+        """Emit low-cardinality telemetry and warning metrics for dblink accessibility."""
+        span = trace.get_current_span()
+        if span is not None and span.is_recording():
+            span.set_attribute("db.postgres.execution_role", execution_role)
+            span.set_attribute("db.postgres.extension.dblink.installed", dblink_installed)
+            span.set_attribute("db.postgres.extension.dblink.accessible", dblink_accessible)
+
+        if not dblink_installed or not dblink_accessible:
+            return
+        if cache_key in cls._postgres_extension_warning_emitted:
+            return
+
+        cls._postgres_extension_warning_emitted.add(cache_key)
+        logger.warning(
+            "Postgres execution role '%s' can execute dblink extension functions. "
+            "AST-level SQL guardrails may be bypassed by extension-mediated calls.",
+            execution_role,
+        )
+        mcp_metrics.add_counter(
+            "mcp.postgres.dangerous_extension_accessible_total",
+            description=(
+                "Count of sessions where dblink extension functions are executable under the "
+                "configured Postgres execution role."
+            ),
+            attributes={
+                "provider": "postgres",
+                "execution_role": execution_role,
+                "extension": "dblink",
+            },
+        )
+
+    @classmethod
     async def _apply_postgres_restricted_session(
         cls,
         conn: asyncpg.Connection,
@@ -665,6 +765,30 @@ class Database:
             if execution_role:
                 quoted_role = cls._quote_postgres_identifier(execution_role)
                 await conn.execute(f"SET LOCAL ROLE {quoted_role}")
+
+                cache_key = execution_role.lower()
+                dblink_installed, dblink_accessible = (
+                    await cls._probe_postgres_dangerous_extension_capabilities(
+                        conn,
+                        cache_key=cache_key,
+                    )
+                )
+                cls._record_postgres_extension_capability_signals(
+                    cache_key=cache_key,
+                    execution_role=execution_role,
+                    dblink_installed=dblink_installed,
+                    dblink_accessible=dblink_accessible,
+                )
+
+                if (
+                    dblink_installed
+                    and dblink_accessible
+                    and bool(get_env_bool("POSTGRES_DANGEROUS_EXTENSION_STRICT_MODE", False))
+                ):
+                    raise PermissionError(
+                        "Execution role has dblink EXECUTE permissions while strict mode "
+                        "is enabled."
+                    )
 
     @classmethod
     @asynccontextmanager
