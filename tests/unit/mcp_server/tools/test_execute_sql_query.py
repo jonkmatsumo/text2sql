@@ -28,7 +28,13 @@ class _ToolFakeConn:
     @asynccontextmanager
     async def transaction(self, readonly=False):
         self.events.append(("transaction", readonly))
-        yield
+        try:
+            yield
+        except Exception as exc:
+            self.events.append(("transaction_exit_exc", type(exc).__name__))
+            raise
+        else:
+            self.events.append(("transaction_exit_ok", True))
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
@@ -154,6 +160,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setenv("POSTGRES_RESTRICTED_SESSION_ENABLED", "true")
         monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
         monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+        monkeypatch.setenv("DAL_TRACE_QUERIES", "false")
         monkeypatch.setattr(Database, "_pool", _ToolFakePool(fake_conn))
         monkeypatch.setattr(Database, "_query_target_provider", "postgres")
         monkeypatch.setattr(
@@ -162,6 +169,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
         monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
         monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+        monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
 
         with patch("mcp_server.utils.auth.validate_role", return_value=None):
             result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
@@ -174,6 +182,9 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["execution_role_applied"] is True
         assert data["metadata"]["execution_role_name"] == "text2sql_readonly"
         assert data["metadata"]["restricted_session_mode"] == "set_local_config"
+        assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_rollback"] is False
+        assert data["metadata"]["sandbox_failure_reason"] == "NONE"
         assert (
             "SELECT set_config('default_transaction_read_only', 'on', true)",
             (),
@@ -197,6 +208,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setenv("POSTGRES_RESTRICTED_SESSION_ENABLED", "true")
         monkeypatch.setenv("POSTGRES_EXECUTION_ROLE_ENABLED", "true")
         monkeypatch.setenv("POSTGRES_EXECUTION_ROLE", "text2sql_readonly")
+        monkeypatch.setenv("DAL_TRACE_QUERIES", "false")
         monkeypatch.setattr(Database, "_pool", _ToolFakePool(fake_conn))
         monkeypatch.setattr(Database, "_query_target_provider", "postgres")
         monkeypatch.setattr(
@@ -205,6 +217,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
         monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
         monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+        monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
         monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
 
         with (
@@ -224,6 +237,9 @@ class TestExecuteSqlQuery:
         assert metadata["execution_role_name"] == "text2sql_readonly"
         assert metadata["restricted_session_mode"] == "set_local_config"
         assert metadata.get("session_guardrail_capability_mismatch") is None
+        assert metadata["sandbox_applied"] is True
+        assert metadata["sandbox_rollback"] is False
+        assert metadata["sandbox_failure_reason"] == "NONE"
 
         mock_span.set_attribute.assert_any_call(
             "session.guardrail.applied", metadata["session_guardrail_applied"]
@@ -240,6 +256,50 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call(
             "session.guardrail.restricted_session_mode", metadata["restricted_session_mode"]
         )
+        mock_span.set_attribute.assert_any_call("sandbox.applied", metadata["sandbox_applied"])
+        mock_span.set_attribute.assert_any_call("sandbox.rollback", metadata["sandbox_rollback"])
+        mock_span.set_attribute.assert_any_call(
+            "sandbox.failure_reason", metadata["sandbox_failure_reason"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_timeout_sets_sandbox_rollback_metadata(self, monkeypatch):
+        """Timeouts should force rollback and expose deterministic sandbox metadata."""
+        from dal.capabilities import capabilities_for_provider
+        from dal.database import Database
+
+        fake_conn = _ToolFakeConn()
+
+        async def _slow_fetch(sql, *args):
+            fake_conn.fetch_calls.append((sql, args))
+            fake_conn.events.append(("fetch", sql))
+            await asyncio.sleep(0.02)
+            return [{"ok": 1}]
+
+        fake_conn.fetch = _slow_fetch
+        monkeypatch.setenv("DAL_TRACE_QUERIES", "false")
+        monkeypatch.setattr(Database, "_pool", _ToolFakePool(fake_conn))
+        monkeypatch.setattr(Database, "_query_target_provider", "postgres")
+        monkeypatch.setattr(
+            Database, "_query_target_capabilities", capabilities_for_provider("postgres")
+        )
+        monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
+        monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
+        monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+
+        with patch("mcp_server.utils.auth.validate_role", return_value=None):
+            result = await handler(
+                "SELECT 1 AS ok",
+                tenant_id=1,
+                include_columns=False,
+                timeout_seconds=0.001,
+            )
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "timeout"
+        assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_rollback"] is True
+        assert data["metadata"]["sandbox_failure_reason"] == "TIMEOUT"
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):

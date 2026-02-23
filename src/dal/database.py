@@ -14,6 +14,12 @@ from common.interfaces import (
     SchemaStore,
 )
 from common.observability.metrics import mcp_metrics
+from dal.postgres_sandbox import (
+    SANDBOX_FAILURE_NONE,
+    PostgresExecutionSandbox,
+    PostgresSandboxExecutionError,
+    build_postgres_sandbox_metadata,
+)
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     RESTRICTED_SESSION_MODE_SET_LOCAL_CONFIG,
@@ -865,7 +871,13 @@ class Database:
             execution_role = settings.execution_role_name
             if execution_role:
                 quoted_role = cls._quote_postgres_identifier(execution_role)
-                await conn.execute(f"SET LOCAL ROLE {quoted_role}")
+                try:
+                    await conn.execute(f"SET LOCAL ROLE {quoted_role}")
+                except Exception as exc:
+                    raise PostgresSandboxExecutionError(
+                        "Failed to apply Postgres execution role in transaction sandbox.",
+                        failure_reason="ROLE_SWITCH_FAILURE",
+                    ) from exc
                 metadata = build_session_guardrail_metadata(
                     applied=True,
                     outcome=SESSION_GUARDRAIL_APPLIED,
@@ -990,10 +1002,36 @@ class Database:
             raise RuntimeError("Database pool not initialized. Call Database.init() first.")
 
         async with cls._pool.acquire() as conn:
+            sandbox_metadata = build_postgres_sandbox_metadata(
+                applied=False,
+                rollback=False,
+                failure_reason=SANDBOX_FAILURE_NONE,
+            )
             if cls.get_query_target_capabilities().supports_transactions:
-                # Start a transaction block.
-                # Everything inside here is atomic.
-                async with conn.transaction(readonly=read_only):
+                postgres_sandbox_enabled = True
+                if cls._query_target_provider == "postgres":
+                    postgres_sandbox_enabled = bool(
+                        cls._get_postgres_session_guardrail_settings().sandbox_enabled
+                    )
+                use_postgres_sandbox = (
+                    cls._query_target_provider == "postgres" and postgres_sandbox_enabled
+                )
+                if use_postgres_sandbox:
+                    sandbox_metadata = build_postgres_sandbox_metadata(
+                        applied=True,
+                        rollback=False,
+                        failure_reason=SANDBOX_FAILURE_NONE,
+                    )
+                transaction_scope = (
+                    PostgresExecutionSandbox(
+                        conn,
+                        read_only=read_only,
+                        metadata_sink=sandbox_metadata,
+                    )
+                    if use_postgres_sandbox
+                    else conn.transaction(readonly=read_only)
+                )
+                async with transaction_scope:
                     session_guardrail_metadata = await cls._apply_postgres_restricted_session(
                         conn, read_only=read_only
                     )
@@ -1019,10 +1057,12 @@ class Database:
                             max_rows=sync_max_rows,
                             read_only=read_only,
                             session_guardrail_metadata=session_guardrail_metadata,
+                            postgres_sandbox_metadata=sandbox_metadata,
                         )
                     else:
                         try:
                             setattr(conn, "session_guardrail_metadata", session_guardrail_metadata)
+                            setattr(conn, "postgres_sandbox_metadata", sandbox_metadata)
                         except Exception:
                             pass
                         yield conn
@@ -1048,10 +1088,12 @@ class Database:
                         max_rows=sync_max_rows,
                         read_only=read_only,
                         session_guardrail_metadata=session_guardrail_metadata,
+                        postgres_sandbox_metadata=sandbox_metadata,
                     )
                 else:
                     try:
                         setattr(conn, "session_guardrail_metadata", session_guardrail_metadata)
+                        setattr(conn, "postgres_sandbox_metadata", sandbox_metadata)
                     except Exception:
                         pass
                     yield conn

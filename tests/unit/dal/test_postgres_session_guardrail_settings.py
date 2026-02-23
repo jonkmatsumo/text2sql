@@ -20,10 +20,24 @@ def test_postgres_session_guardrail_settings_from_env_defaults(monkeypatch):
     monkeypatch.delenv("POSTGRES_RESTRICTED_SESSION_ENABLED", raising=False)
     monkeypatch.delenv("POSTGRES_EXECUTION_ROLE_ENABLED", raising=False)
     monkeypatch.delenv("POSTGRES_EXECUTION_ROLE", raising=False)
+    monkeypatch.delenv("POSTGRES_SANDBOX_ENABLED", raising=False)
     settings = PostgresSessionGuardrailSettings.from_env()
     assert settings.restricted_session_enabled is False
     assert settings.execution_role_enabled is False
     assert settings.execution_role_name is None
+    assert settings.sandbox_enabled is True
+
+
+def test_postgres_session_guardrail_settings_restricted_requires_sandbox_enabled():
+    """Restricted session mode should fail closed when sandbox mode is disabled."""
+    settings = PostgresSessionGuardrailSettings(
+        restricted_session_enabled=True,
+        execution_role_enabled=False,
+        execution_role_name=None,
+        sandbox_enabled=False,
+    )
+    with pytest.raises(ValueError, match="POSTGRES_SANDBOX_ENABLED=true"):
+        settings.validate_basic("postgres")
 
 
 def test_postgres_session_guardrail_settings_missing_execution_role_fails():
@@ -79,6 +93,7 @@ def test_database_load_postgres_session_guardrail_settings_from_env(monkeypatch)
     assert settings.restricted_session_enabled is True
     assert settings.execution_role_enabled is True
     assert settings.execution_role_name == "text2sql_readonly"
+    assert settings.sandbox_enabled is True
     assert Database._postgres_session_guardrail_settings == settings
 
 

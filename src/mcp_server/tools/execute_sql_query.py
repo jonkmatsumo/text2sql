@@ -32,6 +32,11 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
+from dal.postgres_sandbox import (
+    SANDBOX_FAILURE_NONE,
+    SANDBOX_FAILURE_REASON_ALLOWLIST,
+    build_postgres_sandbox_metadata,
+)
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     SESSION_GUARDRAIL_SKIPPED,
@@ -64,6 +69,7 @@ _SESSION_GUARDRAIL_OUTCOME_ALLOWLIST = {
     "SESSION_GUARDRAIL_MISCONFIGURED",
 }
 _RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
+_SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,12 @@ class SQLASTValidationFailure:
     reason_code: str
     category: ErrorCategory = ErrorCategory.INVALID_REQUEST
     error_code: str = ErrorCode.VALIDATION_ERROR.value
+
+
+class _SandboxExecutionTimeout(RuntimeError):
+    """Internal control-flow exception to force sandbox rollback on timeout."""
+
+    failure_reason = "TIMEOUT"
 
 
 def _normalize_tenant_enforcement_mode(mode: str | None) -> str:
@@ -208,6 +220,57 @@ def _record_session_guardrail_observability(metadata: dict[str, Any] | None) -> 
         "mcp.session_guardrail.outcome_total",
         description="Count of execute_sql_query Postgres session guardrail outcomes",
         attributes=metric_attributes,
+    )
+
+
+def _extract_postgres_sandbox_metadata(source: object) -> dict[str, Any]:
+    """Return bounded sandbox metadata from a connection or exception object."""
+    raw_metadata = getattr(source, "postgres_sandbox_metadata", None)
+    if not isinstance(raw_metadata, dict):
+        return {}
+    failure_reason_raw = str(raw_metadata.get("sandbox_failure_reason") or "").strip().upper()
+    failure_reason = (
+        failure_reason_raw
+        if failure_reason_raw in _SANDBOX_FAILURE_REASON_ALLOWLIST
+        else SANDBOX_FAILURE_NONE
+    )
+    return {
+        "sandbox_applied": bool(raw_metadata.get("sandbox_applied")),
+        "sandbox_rollback": bool(raw_metadata.get("sandbox_rollback")),
+        "sandbox_failure_reason": failure_reason,
+    }
+
+
+def _sandbox_observability_fields(metadata: dict[str, Any] | None) -> tuple[bool, bool, str]:
+    sandbox_metadata = metadata if isinstance(metadata, dict) else {}
+    applied = bool(sandbox_metadata.get("sandbox_applied"))
+    rollback = bool(sandbox_metadata.get("sandbox_rollback"))
+    failure_reason_raw = str(sandbox_metadata.get("sandbox_failure_reason") or "").strip().upper()
+    failure_reason = (
+        failure_reason_raw
+        if failure_reason_raw in _SANDBOX_FAILURE_REASON_ALLOWLIST
+        else SANDBOX_FAILURE_NONE
+    )
+    return applied, rollback, failure_reason
+
+
+def _record_sandbox_observability(metadata: dict[str, Any] | None) -> None:
+    applied, rollback, failure_reason = _sandbox_observability_fields(metadata)
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("sandbox.applied", applied)
+        span.set_attribute("sandbox.rollback", rollback)
+        span.set_attribute("sandbox.failure_reason", failure_reason)
+
+    mcp_metrics.add_counter(
+        "mcp.postgres.sandbox.outcome_total",
+        description="Count of execute_sql_query Postgres sandbox execution outcomes",
+        attributes={
+            "tool_name": TOOL_NAME,
+            "applied": applied,
+            "rollback": rollback,
+            "failure_reason": failure_reason,
+        },
     )
 
 
@@ -437,6 +500,7 @@ def _construct_error_response(
 
     _record_tenant_enforcement_observability(envelope_metadata)
     _record_session_guardrail_observability(envelope_metadata)
+    _record_sandbox_observability(envelope_metadata)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -719,6 +783,11 @@ async def handler(
         execution_role_name=None,
         restricted_session_mode=RESTRICTED_SESSION_MODE_OFF,
     )
+    sandbox_metadata = build_postgres_sandbox_metadata(
+        applied=False,
+        rollback=False,
+        failure_reason=SANDBOX_FAILURE_NONE,
+    )
 
     from mcp_server.utils.auth import validate_role
 
@@ -762,6 +831,7 @@ async def handler(
     policy_decision = policy.default_decision(sql=sql_query, params=params)
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
+    tenant_enforcement_metadata.update(sandbox_metadata)
 
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
@@ -914,6 +984,7 @@ async def handler(
     _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
+    tenant_enforcement_metadata.update(sandbox_metadata)
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
@@ -1068,6 +1139,7 @@ async def handler(
         last_truncated = False
         row_limit = 0
         next_token = None
+        conn = None
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
@@ -1083,6 +1155,7 @@ async def handler(
                     )
                 }
             tenant_enforcement_metadata.update(session_guardrail_metadata)
+            tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
             row_limit = _resolve_row_limit(conn)
             effective_page_size = page_size
             if effective_page_size and effective_page_size > row_limit and row_limit:
@@ -1157,18 +1230,16 @@ async def handler(
                 result_rows = await run_with_timeout(
                     _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
                 )
-            except asyncio.TimeoutError:
-                return _construct_error_response(
-                    "Execution timed out.",
-                    category=ErrorCategory.TIMEOUT,
-                    provider=provider,
-                    envelope_metadata=tenant_enforcement_metadata,
-                )
+            except (asyncio.TimeoutError, TimeoutError) as timeout_exc:
+                raise _SandboxExecutionTimeout("Execution timed out.") from timeout_exc
 
             raw_last_truncated = getattr(conn, "last_truncated", False)
             last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
             raw_reason = getattr(conn, "last_truncated_reason", None)
             last_truncated_reason = raw_reason if isinstance(raw_reason, str) else None
+
+        if conn is not None:
+            tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
 
         # Size Safety Valve
         safety_limit = 1000
@@ -1268,6 +1339,9 @@ async def handler(
             session_guardrail_capability_mismatch=tenant_enforcement_metadata.get(
                 "session_guardrail_capability_mismatch"
             ),
+            sandbox_applied=tenant_enforcement_metadata.get("sandbox_applied"),
+            sandbox_rollback=tenant_enforcement_metadata.get("sandbox_rollback"),
+            sandbox_failure_reason=tenant_enforcement_metadata.get("sandbox_failure_reason"),
         )
 
         envelope = ExecuteSQLQueryResponseEnvelope(
@@ -1275,13 +1349,24 @@ async def handler(
         )
         _record_tenant_enforcement_observability(tenant_enforcement_metadata)
         _record_session_guardrail_observability(tenant_enforcement_metadata)
+        _record_sandbox_observability(tenant_enforcement_metadata)
 
         return envelope.model_dump_json(exclude_none=True)
 
+    except _SandboxExecutionTimeout as e:
+        provider = _active_provider()
+        tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
+        return _construct_error_response(
+            message="Execution timed out.",
+            category=ErrorCategory.TIMEOUT,
+            provider=provider,
+            envelope_metadata=tenant_enforcement_metadata,
+        )
     except SessionGuardrailPolicyError as e:
         provider = _active_provider()
         session_guardrail_metadata = dict(getattr(e, "envelope_metadata", {}) or {})
         tenant_enforcement_metadata.update(session_guardrail_metadata)
+        tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         return _construct_error_response(
             message=str(e),
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
@@ -1294,6 +1379,7 @@ async def handler(
         )
     except asyncpg.PostgresError as e:
         provider = _active_provider()
+        tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
@@ -1307,6 +1393,7 @@ async def handler(
         )
     except Exception as e:
         provider = _active_provider()
+        tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
