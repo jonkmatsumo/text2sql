@@ -596,6 +596,60 @@ class Database:
         return cls._query_target_capabilities
 
     @classmethod
+    async def _apply_postgres_restricted_session(
+        cls,
+        conn: asyncpg.Connection,
+        *,
+        read_only: bool,
+    ) -> None:
+        """Apply optional Postgres-only transaction-local session hardening."""
+        if cls._query_target_provider != "postgres" or not read_only:
+            return
+
+        from common.config.env import get_env_bool, get_env_int, get_env_str
+
+        if not get_env_bool("POSTGRES_RESTRICTED_SESSION_ENABLED", False):
+            return
+
+        def _timeout_value(env_name: str, default_ms: int) -> Optional[str]:
+            timeout_ms = get_env_int(env_name, default_ms)
+            if timeout_ms is None or timeout_ms <= 0:
+                return None
+            return f"{timeout_ms}ms"
+
+        await conn.execute("SELECT set_config('default_transaction_read_only', 'on', true)")
+
+        statement_timeout = _timeout_value("POSTGRES_RESTRICTED_STATEMENT_TIMEOUT_MS", 15000)
+        if statement_timeout:
+            await conn.execute(
+                "SELECT set_config('statement_timeout', $1, true)",
+                statement_timeout,
+            )
+
+        lock_timeout = _timeout_value("POSTGRES_RESTRICTED_LOCK_TIMEOUT_MS", 5000)
+        if lock_timeout:
+            await conn.execute(
+                "SELECT set_config('lock_timeout', $1, true)",
+                lock_timeout,
+            )
+
+        idle_in_txn_timeout = _timeout_value(
+            "POSTGRES_RESTRICTED_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS", 15000
+        )
+        if idle_in_txn_timeout:
+            await conn.execute(
+                "SELECT set_config('idle_in_transaction_session_timeout', $1, true)",
+                idle_in_txn_timeout,
+            )
+
+        search_path = (get_env_str("POSTGRES_RESTRICTED_SEARCH_PATH", "") or "").strip()
+        if search_path:
+            await conn.execute(
+                "SELECT set_config('search_path', $1, true)",
+                search_path,
+            )
+
+    @classmethod
     @asynccontextmanager
     async def get_connection(cls, tenant_id: Optional[int] = None, read_only: bool = False):
         """Yield a query-target connection with optional tenant context.
@@ -689,6 +743,8 @@ class Database:
                 # Start a transaction block.
                 # Everything inside here is atomic.
                 async with conn.transaction(readonly=read_only):
+                    await cls._apply_postgres_restricted_session(conn, read_only=read_only)
+
                     if tenant_id is not None:
                         # set_config with is_local=True scopes the setting to this transaction.
                         # It will be automatically unset when the transaction block exits.
