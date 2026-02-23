@@ -2,8 +2,10 @@
 
 import pytest
 
-from agent.validation.policy_enforcer import PolicyEnforcer
-from mcp_server.tools.execute_sql_query import _validate_sql_ast
+from agent.validation.policy_enforcer import PolicyEnforcer, PolicyValidationError
+from common.errors.error_codes import ErrorCode
+from common.models.error_metadata import ErrorCategory
+from mcp_server.tools.execute_sql_query import _validate_sql_ast, _validate_sql_ast_failure
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +50,11 @@ SIDE_EFFECT_STATEMENT_CASES = [
     ("NOTIFY", "NOTIFY safety_channel"),
 ]
 
+CLASSIFICATION_CASES = [
+    ("blocked_statement", "COPY (SELECT 1) TO STDOUT"),
+    ("statement_type_not_allowed", "INSERT INTO users VALUES (1)"),
+]
+
 
 @pytest.mark.parametrize(("statement_name", "sql"), BLOCKED_STATEMENT_CASES)
 def test_policy_enforcer_blocks_high_risk_statements(statement_name: str, sql: str) -> None:
@@ -89,3 +96,23 @@ def test_mcp_ast_validation_blocks_session_and_privilege_side_effects(
     assert isinstance(error, str)
     assert "Forbidden statement" in error
     assert statement_name.upper() in error.upper()
+
+
+@pytest.mark.parametrize(("expected_reason_code", "sql"), CLASSIFICATION_CASES)
+def test_statement_classification_parity(expected_reason_code: str, sql: str) -> None:
+    """Statement-policy classification should match across Agent and MCP validators."""
+    with pytest.raises(PolicyValidationError) as exc_info:
+        PolicyEnforcer.validate_sql(sql)
+
+    policy_error = exc_info.value
+    assert policy_error.reason_code == expected_reason_code
+    assert policy_error.category == ErrorCategory.INVALID_REQUEST.value
+    assert policy_error.error_code == ErrorCode.VALIDATION_ERROR.value
+    assert sql.lower() not in str(policy_error).lower()
+
+    mcp_failure = _validate_sql_ast_failure(sql, "postgres")
+    assert mcp_failure is not None
+    assert mcp_failure.reason_code == expected_reason_code
+    assert mcp_failure.category == ErrorCategory.INVALID_REQUEST
+    assert mcp_failure.error_code == ErrorCode.VALIDATION_ERROR.value
+    assert sql.lower() not in mcp_failure.message.lower()

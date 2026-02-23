@@ -13,6 +13,7 @@ from sqlglot import exp
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_bool
+from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
 from common.policy.sql_policy import (
     SQLPolicyViolation,
@@ -26,6 +27,24 @@ logger = logging.getLogger(__name__)
 _TABLE_CACHE_LOCK = threading.Lock()
 _TABLE_CACHE_VALUE: Optional[Set[str]] = None
 _TABLE_CACHE_FETCHED_AT: Optional[float] = None
+
+
+class PolicyValidationError(ValueError):
+    """Structured ValueError for policy rejections with stable classification."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str,
+        category: ErrorCategory = ErrorCategory.INVALID_REQUEST,
+        error_code: str = ErrorCode.VALIDATION_ERROR.value,
+    ) -> None:
+        """Create a policy-validation error with contract classification metadata."""
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.category = category.value if isinstance(category, ErrorCategory) else str(category)
+        self.error_code = str(error_code or ErrorCode.VALIDATION_ERROR.value)
 
 
 def _get_db_url() -> str:
@@ -196,7 +215,12 @@ class PolicyEnforcer:
                     reason=policy_violation.reason_code,
                     details=cls._policy_violation_details(policy_violation),
                 )
-                raise ValueError(cls._policy_violation_message(policy_violation))
+                raise PolicyValidationError(
+                    cls._policy_violation_message(policy_violation),
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
 
             # 2. Walk the AST to check all nodes
             for node in statement.walk():
