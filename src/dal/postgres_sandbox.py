@@ -77,6 +77,7 @@ class PostgresExecutionSandboxResult:
     reset_all_attempted: bool
     state_clean: bool
     failure_reason: str
+    rollback_failed: bool
 
 
 class PostgresExecutionSandbox:
@@ -104,6 +105,7 @@ class PostgresExecutionSandbox:
             reset_all_attempted=False,
             state_clean=True,
             failure_reason=SANDBOX_FAILURE_NONE,
+            rollback_failed=False,
         )
         self._update_metadata_sink()
 
@@ -211,7 +213,11 @@ class PostgresExecutionSandbox:
         if self._transaction is None:
             return False
 
-        await self._transaction.__aexit__(exc_type, exc_val, exc_tb)
+        transaction_exit_error: Optional[BaseException] = None
+        try:
+            await self._transaction.__aexit__(exc_type, exc_val, exc_tb)
+        except Exception as tx_exit_error:
+            transaction_exit_error = tx_exit_error
         reset_role_attempted = await self._safe_execute("RESET ROLE")
         reset_all_attempted = await self._safe_execute("RESET ALL")
         state_clean, drift_keys = await self._validate_clean_state()
@@ -223,16 +229,27 @@ class PostgresExecutionSandbox:
             elif not state_clean:
                 failure_reason = SANDBOX_FAILURE_STATE_DRIFT
         self.result = PostgresExecutionSandboxResult(
-            committed=exc_type is None,
-            rolled_back=exc_type is not None,
+            committed=exc_type is None and transaction_exit_error is None,
+            rolled_back=exc_type is not None and transaction_exit_error is None,
             reset_role_attempted=reset_role_attempted,
             reset_all_attempted=reset_all_attempted,
             state_clean=state_clean,
             failure_reason=failure_reason,
+            rollback_failed=exc_type is not None and transaction_exit_error is not None,
         )
         metadata = self._result_metadata()
         self._update_metadata_sink()
         self._attach_metadata_to_exception(exc_val, metadata)
+        if transaction_exit_error is not None:
+            try:
+                setattr(exc_val, "postgres_sandbox_rollback_failed", exc_type is not None)
+                setattr(
+                    exc_val,
+                    "postgres_sandbox_rollback_error",
+                    type(transaction_exit_error).__name__,
+                )
+            except Exception:
+                pass
         if drift_keys and bool(get_env_bool("POSTGRES_SANDBOX_STRICT_STATE_CHECK", False)):
             strict_error = PostgresSandboxStateError(
                 "Postgres sandbox detected connection state drift after reset.",
@@ -240,4 +257,7 @@ class PostgresExecutionSandbox:
             )
             self._attach_metadata_to_exception(strict_error, metadata)
             raise strict_error
+        if transaction_exit_error is not None and exc_type is None:
+            self._attach_metadata_to_exception(transaction_exit_error, metadata)
+            raise transaction_exit_error
         return False

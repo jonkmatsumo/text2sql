@@ -19,7 +19,11 @@ class _FakeConn:
     @asynccontextmanager
     async def transaction(self, readonly=False):
         self.transaction_readonly = readonly
-        yield
+        self.events.append(("transaction", "begin"))
+        try:
+            yield
+        finally:
+            self.events.append(("transaction", "end"))
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
@@ -136,8 +140,10 @@ async def test_postgres_execution_role_set_local_role_before_query(monkeypatch):
     set_role_sql = 'SET LOCAL ROLE "text2sql_readonly"'
     assert (set_role_sql, ()) in conn.execute_calls
 
+    tx_begin_index = conn.events.index(("transaction", "begin"))
     set_role_index = conn.events.index(("execute", set_role_sql))
     fetch_index = conn.events.index(("fetch", "SELECT 1 AS ok"))
+    assert tx_begin_index < set_role_index
     assert set_role_index < fetch_index
 
 
