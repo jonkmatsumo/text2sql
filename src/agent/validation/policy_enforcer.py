@@ -205,7 +205,19 @@ class PolicyEnforcer:
 
         allowed_tables = cls.get_allowed_tables()
 
-        for statement in parsed:
+        # sqlglot.parse("") returns [None]; filter and treat empty result as invalid.
+        valid_statements = [s for s in parsed if s is not None]
+        if not valid_statements:
+            cls._emit_policy_rejection(
+                reason="invalid_sql_ast",
+                details={"error_type": "EmptyOrNullAST"},
+            )
+            raise PolicyValidationError(
+                "SQL query is empty or could not be parsed.",
+                reason_code="invalid_sql_ast",
+            )
+
+        for statement in valid_statements:
             sensitive_columns: set[str] = set()
 
             # 1. Enforce shared statement/function policy checks.
