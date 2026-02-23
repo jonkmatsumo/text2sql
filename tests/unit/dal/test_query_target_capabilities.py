@@ -83,6 +83,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_transactions is True
         assert caps.supports_fk_enforcement is True
         assert caps.supports_cost_estimation is False
+        assert caps.supports_restricted_session is True
+        assert caps.supports_execution_role is True
 
     def test_sqlite_capabilities(self):
         """The SQLite backend has transactions but no arrays/JSON ops."""
@@ -92,6 +94,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is False
         assert caps.supports_transactions is True
         assert caps.supports_fk_enforcement is False
+        assert caps.supports_restricted_session is False
+        assert caps.supports_execution_role is False
 
     def test_mysql_capabilities(self):
         """The MySQL backend has transactions but limited feature flags."""

@@ -23,6 +23,8 @@ class BackendCapabilities:
     supports_fk_enforcement: bool = True
     supports_cost_estimation: bool = False
     supports_schema_cache: bool = False
+    supports_execution_role: bool = False
+    supports_restricted_session: bool = False
     # Does DAL apply defensive statement-level read-only guard?
     enforces_statement_read_only: bool = False
 
@@ -73,6 +75,8 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_cancel=True,
             supports_pagination=supports_pagination,
             supports_db_readonly_session=True,
+            supports_execution_role=True,
+            supports_restricted_session=True,
         )
     if normalized == "sqlite":
         return BackendCapabilities(

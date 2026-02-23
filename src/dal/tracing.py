@@ -58,6 +58,7 @@ class TracedAsyncpgConnection:
         execution_model: str,
         max_rows: int = 0,
         read_only: bool = False,
+        session_guardrail_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize the traced connection wrapper."""
         self._conn = conn
@@ -65,6 +66,7 @@ class TracedAsyncpgConnection:
         self._execution_model = execution_model
         self._max_rows = max_rows
         self._read_only = read_only
+        self._session_guardrail_metadata = session_guardrail_metadata or {}
         self._last_truncated = False
         self._last_truncated_reason: Optional[str] = None
 
@@ -77,6 +79,11 @@ class TracedAsyncpgConnection:
     def last_truncated_reason(self) -> Optional[str]:
         """Return the reason when the last fetch was truncated."""
         return self._last_truncated_reason
+
+    @property
+    def session_guardrail_metadata(self) -> Dict[str, Any]:
+        """Return bounded session guardrail metadata attached by the DAL."""
+        return dict(self._session_guardrail_metadata)
 
     async def execute(self, sql: str, *params: Any) -> str:
         """Execute a statement with tracing when enabled."""
