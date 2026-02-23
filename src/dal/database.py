@@ -14,6 +14,7 @@ from common.interfaces import (
     SchemaStore,
 )
 from common.observability.metrics import mcp_metrics
+from dal.postgres_sandbox import PostgresExecutionSandbox
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     RESTRICTED_SESSION_MODE_SET_LOCAL_CONFIG,
@@ -991,9 +992,13 @@ class Database:
 
         async with cls._pool.acquire() as conn:
             if cls.get_query_target_capabilities().supports_transactions:
-                # Start a transaction block.
-                # Everything inside here is atomic.
-                async with conn.transaction(readonly=read_only):
+                use_postgres_sandbox = cls._query_target_provider == "postgres"
+                transaction_scope = (
+                    PostgresExecutionSandbox(conn, read_only=read_only)
+                    if use_postgres_sandbox
+                    else conn.transaction(readonly=read_only)
+                )
+                async with transaction_scope:
                     session_guardrail_metadata = await cls._apply_postgres_restricted_session(
                         conn, read_only=read_only
                     )
