@@ -119,6 +119,7 @@ _ALIAS_BLOCKLIST = frozenset({"DEALLOCATE", "RESET", "LISTEN", "NOTIFY"})
 # Stable error code constants for cross-layer classification parity.
 SQL_FORBIDDEN_FUNCTION_CODE = "SQL_FORBIDDEN_FUNCTION"
 SQL_FORBIDDEN_STATEMENT_CODE = "SQL_FORBIDDEN_STATEMENT"
+SQL_READONLY_VIOLATION = "SQL_READONLY_VIOLATION"
 
 
 @dataclass(frozen=True)
@@ -268,13 +269,70 @@ def classify_blocked_statement(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Read-only bypass detection: patterns that are syntactically SELECT-like but
+# perform mutations or acquire exclusive locks.
+# ---------------------------------------------------------------------------
+
+# CTE body node types whose presence makes a CTE "data-modifying".
+_MODIFYING_CTE_TYPES = (exp.Insert, exp.Update, exp.Delete, exp.Merge)
+
+
+def classify_readonly_bypass(statement: exp.Expression) -> str | None:  # noqa: C901
+    """Detect SELECT-adjacent forms that violate strict read-only posture.
+
+    Checks (in order):
+    1. Data-modifying CTEs — any CTE body containing INSERT/UPDATE/DELETE/MERGE
+       or a statement already classified as blocked (DO, COPY, CALL, …).
+    2. SELECT INTO — Postgres-style ``SELECT … INTO new_table …``.
+    3. Locking clauses — ``FOR UPDATE``, ``FOR SHARE``, ``FOR NO KEY UPDATE``,
+       ``FOR KEY SHARE``.
+
+    Returns a short label string describing the violation, or ``None`` when the
+    statement passes all read-only checks.
+    """
+    # 1. Data-modifying CTEs ---------------------------------------------------
+    for with_node in statement.find_all(exp.With):
+        for cte in with_node.expressions:
+            # Each CTE is an exp.CTE whose .this is the body expression.
+            body = cte.this if isinstance(cte, exp.CTE) else cte
+            if body is None:
+                continue
+            # Direct modifying node types.
+            if isinstance(body, _MODIFYING_CTE_TYPES):
+                return "MODIFYING_CTE"
+            # Recursively blocked statements (COPY, DO, CALL, …).
+            if classify_blocked_statement(body) is not None:
+                return "MODIFYING_CTE"
+            # Nested modifying nodes inside the CTE body.
+            for child in body.walk():
+                if isinstance(child, _MODIFYING_CTE_TYPES):
+                    return "MODIFYING_CTE"
+
+    # 2. SELECT INTO -----------------------------------------------------------
+    # sqlglot represents Postgres SELECT...INTO as exp.Select with an "into"
+    # argument, OR as a top-level exp.Create with SELECT source, depending on
+    # the dialect.  Cover both representations.
+    for select_node in statement.find_all(exp.Select):
+        if select_node.args.get("into"):
+            return "SELECT INTO"
+
+    # 3. Locking clauses (FOR UPDATE / FOR SHARE / …) -------------------------
+    for lock_node in statement.find_all(exp.Lock):
+        _ = lock_node  # presence alone is sufficient
+        return "LOCKING_CLAUSE"
+
+    return None
+
+
 def classify_sql_policy_violation(statement: exp.Expression) -> SQLPolicyViolation | None:
     """Return the first shared SQL policy violation detected in a statement AST.
 
     Classification hierarchy:
     1. ``blocked_statement``  — explicit high-risk statement type (COPY, DO, …)
     2. ``statement_type_not_allowed`` — any non-SELECT/WITH/set-op statement
-    3. ``blocked_function``   — function call on the denylist
+    3. ``readonly_violation``  — SELECT-adjacent forms that mutate or lock
+    4. ``blocked_function``   — function call on the denylist
 
     Both the Agent ``PolicyEnforcer`` and the MCP ``_validate_sql_ast_failure``
     call this routine so classification is always identical across layers.
@@ -292,6 +350,14 @@ def classify_sql_policy_violation(statement: exp.Expression) -> SQLPolicyViolati
             reason_code="statement_type_not_allowed",
             error_code=SQL_FORBIDDEN_STATEMENT_CODE,
             statement=str(statement.key).upper(),
+        )
+
+    readonly_bypass = classify_readonly_bypass(statement)
+    if readonly_bypass:
+        return SQLPolicyViolation(
+            reason_code="readonly_violation",
+            error_code=SQL_READONLY_VIOLATION,
+            statement=readonly_bypass,
         )
 
     for node in statement.find_all(exp.Func):

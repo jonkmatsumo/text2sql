@@ -512,6 +512,15 @@ def _validate_sql_ast_failure(sql: str, provider: str) -> Optional[SQLASTValidat
                     error_code=policy_violation.error_code,
                 )
 
+            if policy_violation.reason_code == "readonly_violation":
+                form_name = (policy_violation.statement or "UNKNOWN").upper()
+                return SQLASTValidationFailure(
+                    message=f"Forbidden read-only violation: '{form_name}' is not allowed.",
+                    reason_code=policy_violation.reason_code,
+                    category=policy_violation.category,
+                    error_code=policy_violation.error_code,
+                )
+
         # Block restricted/system tables and schemas for direct MCP invocations.
         import sqlglot.expressions as exp
 
@@ -680,6 +689,7 @@ async def handler(
         if validation_failure.reason_code in {
             "statement_type_not_allowed",
             "blocked_statement",
+            "readonly_violation",
         }:
             emit_audit_event(
                 AuditEventType.READONLY_VIOLATION,

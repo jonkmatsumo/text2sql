@@ -315,6 +315,10 @@ class PolicyEnforcer:
                 "are allowed."
             )
 
+        if violation.reason_code == "readonly_violation":
+            form_name = violation.statement or "UNKNOWN"
+            return f"Statement form not allowed: '{form_name}' violates read-only policy."
+
         return "SQL policy violation detected."
 
     @staticmethod
