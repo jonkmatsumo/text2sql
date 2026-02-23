@@ -14,7 +14,11 @@ from sqlglot import exp
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
 from common.config.env import get_env_bool
 from common.models.error_metadata import ErrorCategory
-from common.policy.sql_policy import is_sensitive_column_name
+from common.policy.sql_policy import (
+    SQLPolicyViolation,
+    classify_sql_policy_violation,
+    is_sensitive_column_name,
+)
 from common.sql.comments import strip_sql_comments
 
 logger = logging.getLogger(__name__)
@@ -169,30 +173,30 @@ class PolicyEnforcer:
         try:
             # Parse SQL to AST
             parsed = sqlglot.parse(stripped_sql)
-        except Exception as e:
-            cls._emit_policy_rejection(
-                reason="invalid_sql_syntax",
-                details={"error_type": type(e).__name__},
-            )
-            raise ValueError(f"Invalid SQL syntax: {e}")
+        except Exception:
+            try:
+                # Fallback for PostgreSQL-specific statements (e.g., DO, PREPARE).
+                parsed = sqlglot.parse(stripped_sql, read="postgres")
+            except Exception as e:
+                cls._emit_policy_rejection(
+                    reason="invalid_sql_syntax",
+                    details={"error_type": type(e).__name__},
+                )
+                raise ValueError(f"Invalid SQL syntax: {e}")
 
         allowed_tables = cls.get_allowed_tables()
 
         for statement in parsed:
             sensitive_columns: set[str] = set()
 
-            # 1. Enforce specific statement types
-            if statement.key not in cls.ALLOWED_STATEMENT_TYPES:
-                # Allow specific SET commands if needed for session config, but generally block
+            # 1. Enforce shared statement/function policy checks.
+            policy_violation = classify_sql_policy_violation(statement)
+            if policy_violation is not None:
                 cls._emit_policy_rejection(
-                    reason="statement_type_not_allowed",
-                    details={"statement_type": type(statement).__name__},
+                    reason=policy_violation.reason_code,
+                    details=cls._policy_violation_details(policy_violation),
                 )
-                raise ValueError(
-                    f"Statement type not allowed: {type(statement).__name__}. "
-                    f"Only {', '.join(sorted([t.upper() for t in cls.ALLOWED_STATEMENT_TYPES]))} "
-                    "are allowed."
-                )
+                raise ValueError(cls._policy_violation_message(policy_violation))
 
             # 2. Walk the AST to check all nodes
             for node in statement.walk():
@@ -223,24 +227,6 @@ class PolicyEnforcer:
                                 details={"table": table_name},
                             )
                             raise ValueError(f"Access to table '{table_name}' is not allowed.")
-
-                # Check for functions
-                if isinstance(node, exp.Func):
-                    # Robustly extract name(s) to check against denylist.
-                    # sqlglot uses different attributes depending on the function type.
-                    func_names: set[str] = {node.sql_name().lower()}
-                    if isinstance(node, exp.Anonymous) and node.this:
-                        func_names.add(str(node.this).lower())
-                    if hasattr(node, "name") and node.name:
-                        func_names.add(str(node.name).lower())
-
-                    for name in func_names:
-                        if name in cls.BLOCKED_FUNCTIONS:
-                            cls._emit_policy_rejection(
-                                reason="blocked_function",
-                                details={"function": name},
-                            )
-                            raise ValueError(f"Function '{name}' is restricted.")
 
                 if isinstance(node, exp.Column):
                     column_name = node.name.lower() if node.name else ""
@@ -286,3 +272,32 @@ class PolicyEnforcer:
                 **(details or {}),
             },
         )
+
+    @classmethod
+    def _policy_violation_message(cls, violation: SQLPolicyViolation) -> str:
+        if violation.reason_code == "blocked_function":
+            function_name = violation.function or "unknown"
+            return f"Function '{function_name}' is restricted."
+
+        if violation.reason_code == "blocked_statement":
+            statement_name = violation.statement or "UNKNOWN"
+            return f"Statement '{statement_name}' is restricted."
+
+        if violation.reason_code == "statement_type_not_allowed":
+            statement_name = violation.statement or "UNKNOWN"
+            return (
+                f"Statement type not allowed: {statement_name}. "
+                f"Only {', '.join(sorted([t.upper() for t in cls.ALLOWED_STATEMENT_TYPES]))} "
+                "are allowed."
+            )
+
+        return "SQL policy violation detected."
+
+    @staticmethod
+    def _policy_violation_details(violation: SQLPolicyViolation) -> dict[str, str]:
+        details: dict[str, str] = {}
+        if violation.statement:
+            details["statement"] = violation.statement
+        if violation.function:
+            details["function"] = violation.function
+        return details

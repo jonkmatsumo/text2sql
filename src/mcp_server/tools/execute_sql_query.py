@@ -455,32 +455,31 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
         # Use centralized policy
         from common.policy.sql_policy import (
             ALLOWED_STATEMENT_TYPES,
-            BLOCKED_FUNCTIONS,
             classify_blocked_table_reference,
+            classify_sql_policy_violation,
         )
 
-        if expression.key not in ALLOWED_STATEMENT_TYPES:
-            allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
-            return (
-                f"Forbidden statement type: {expression.key.upper()}. "
-                f"Only {allowed_list} are allowed."
-            )
+        policy_violation = classify_sql_policy_violation(expression)
+        if policy_violation is not None:
+            if policy_violation.reason_code == "blocked_function":
+                function_name = (policy_violation.function or "UNKNOWN").upper()
+                return f"Forbidden function: {function_name} is not allowed."
 
-        # Block dangerous functions
-        import sqlglot.expressions as exp
+            if policy_violation.reason_code == "blocked_statement":
+                statement_name = (policy_violation.statement or "UNKNOWN").upper()
+                return f"Forbidden statement: {statement_name} is not allowed."
 
-        for node in expression.find_all(exp.Func):
-            func_names: set[str] = {node.sql_name().lower()}
-            if isinstance(node, exp.Anonymous) and node.this:
-                func_names.add(str(node.this).lower())
-            if hasattr(node, "name") and node.name:
-                func_names.add(str(node.name).lower())
-
-            for name in func_names:
-                if name in BLOCKED_FUNCTIONS:
-                    return f"Forbidden function: {name.upper()} is not allowed."
+            if policy_violation.reason_code == "statement_type_not_allowed":
+                allowed_list = ", ".join(sorted([t.upper() for t in ALLOWED_STATEMENT_TYPES]))
+                statement_name = (policy_violation.statement or expression.key).upper()
+                return (
+                    f"Forbidden statement type: {statement_name}. "
+                    f"Only {allowed_list} are allowed."
+                )
 
         # Block restricted/system tables and schemas for direct MCP invocations.
+        import sqlglot.expressions as exp
+
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower() if table.name else ""
             schema_name = table.db.lower() if table.db else ""

@@ -5,9 +5,14 @@ Agent and MCP validation layers.
 """
 
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set
 
+from sqlglot import exp
+
 from common.config.env import get_env_str
+from common.errors.error_codes import ErrorCode
+from common.models.error_metadata import ErrorCategory
 
 # Statement types allowed for execution
 # Using strings for easy comparison with AST node keys or type names
@@ -97,6 +102,20 @@ SENSITIVE_COLUMN_NAME_PATTERNS: Set[str] = {
     "apikey",
 }
 
+_PHASE1_COMMAND_BLOCKLIST = frozenset({"DO", "PREPARE", "EXECUTE", "DEALLOCATE", "CALL"})
+_PHASE1_ALIAS_BLOCKLIST = frozenset({"DEALLOCATE"})
+
+
+@dataclass(frozen=True)
+class SQLPolicyViolation:
+    """Structured SQL policy rejection produced by shared AST checks."""
+
+    reason_code: str
+    category: ErrorCategory = ErrorCategory.INVALID_REQUEST
+    error_code: str = ErrorCode.VALIDATION_ERROR.value
+    statement: str | None = None
+    function: str | None = None
+
 
 def is_sensitive_column_name(column_name: str) -> bool:
     """Return True when a column name matches a sensitive marker."""
@@ -106,6 +125,106 @@ def is_sensitive_column_name(column_name: str) -> bool:
     if not normalized:
         return False
     return any(marker in normalized for marker in SENSITIVE_COLUMN_NAME_PATTERNS)
+
+
+def extract_function_names(node: exp.Func) -> tuple[str, ...]:
+    """Return deterministic candidate function names for blocklist checks."""
+    names: set[str] = set()
+
+    sql_name = node.sql_name()
+    if sql_name:
+        names.add(str(sql_name).lower())
+
+    if isinstance(node, exp.Anonymous) and node.this:
+        names.add(str(node.this).lower())
+
+    if hasattr(node, "name") and node.name:
+        names.add(str(node.name).lower())
+
+    return tuple(sorted(names))
+
+
+def _normalize_statement_keyword(raw: object) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, exp.Expression):
+        candidate = raw.sql(dialect="postgres")
+    else:
+        candidate = str(raw)
+    return candidate.strip().strip(";").upper()
+
+
+def _command_keyword(statement: exp.Command) -> str:
+    return _normalize_statement_keyword(statement.this)
+
+
+def _command_remainder(statement: exp.Command) -> str:
+    return _normalize_statement_keyword(statement.expression)
+
+
+def _alias_keyword(statement: exp.Alias) -> str:
+    if isinstance(statement.this, exp.Column):
+        return _normalize_statement_keyword(statement.this.name)
+    if isinstance(statement.this, exp.Identifier):
+        return _normalize_statement_keyword(statement.this.this)
+    return ""
+
+
+def classify_blocked_statement(statement: exp.Expression) -> str | None:
+    """Classify explicit high-risk statements that must always be rejected."""
+    if isinstance(statement, exp.Copy):
+        return "COPY"
+
+    if isinstance(statement, exp.Create):
+        kind = _normalize_statement_keyword(statement.args.get("kind"))
+        if kind in {"FUNCTION", "PROCEDURE"}:
+            return f"CREATE {kind}"
+
+    if isinstance(statement, exp.Command):
+        keyword = _command_keyword(statement)
+        if keyword in _PHASE1_COMMAND_BLOCKLIST:
+            return keyword
+        if keyword == "CREATE":
+            remainder = _command_remainder(statement)
+            if remainder.startswith("FUNCTION"):
+                return "CREATE FUNCTION"
+            if remainder.startswith("PROCEDURE"):
+                return "CREATE PROCEDURE"
+            if remainder.startswith("EXTENSION"):
+                return "CREATE EXTENSION"
+
+    if isinstance(statement, exp.Alias):
+        keyword = _alias_keyword(statement)
+        if keyword in _PHASE1_ALIAS_BLOCKLIST:
+            return keyword
+
+    return None
+
+
+def classify_sql_policy_violation(statement: exp.Expression) -> SQLPolicyViolation | None:
+    """Return the first shared SQL policy violation detected in a statement AST."""
+    blocked_statement = classify_blocked_statement(statement)
+    if blocked_statement:
+        return SQLPolicyViolation(
+            reason_code="blocked_statement",
+            statement=blocked_statement,
+        )
+
+    if statement.key not in ALLOWED_STATEMENT_TYPES:
+        return SQLPolicyViolation(
+            reason_code="statement_type_not_allowed",
+            statement=str(statement.key).upper(),
+        )
+
+    for node in statement.find_all(exp.Func):
+        for function_name in extract_function_names(node):
+            if function_name in BLOCKED_FUNCTIONS:
+                return SQLPolicyViolation(
+                    reason_code="blocked_function",
+                    function=function_name,
+                )
+
+    return None
 
 
 def _parse_csv(value: str) -> set[str]:
