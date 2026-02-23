@@ -226,26 +226,21 @@ class PolicyEnforcer:
 
                 # Check for functions
                 if isinstance(node, exp.Func):
-                    # sqlglot represents function calls as nodes inheriting from Func
-                    # The function name is usually the class name or sql_name()
-                    # For Anonymous functions, check node.name instead
-                    func_name = node.sql_name().lower()
-                    if func_name in cls.BLOCKED_FUNCTIONS:
-                        cls._emit_policy_rejection(
-                            reason="blocked_function",
-                            details={"function": func_name},
-                        )
-                        raise ValueError(f"Function '{func_name}' is restricted.")
-
-                    # Handle Anonymous functions (e.g., pg_read_file)
+                    # Robustly extract name(s) to check against denylist.
+                    # sqlglot uses different attributes depending on the function type.
+                    func_names: set[str] = {node.sql_name().lower()}
+                    if isinstance(node, exp.Anonymous) and node.this:
+                        func_names.add(str(node.this).lower())
                     if hasattr(node, "name") and node.name:
-                        actual_name = node.name.lower()
-                        if actual_name in cls.BLOCKED_FUNCTIONS:
+                        func_names.add(str(node.name).lower())
+
+                    for name in func_names:
+                        if name in cls.BLOCKED_FUNCTIONS:
                             cls._emit_policy_rejection(
                                 reason="blocked_function",
-                                details={"function": actual_name},
+                                details={"function": name},
                             )
-                            raise ValueError(f"Function '{actual_name}' is restricted.")
+                            raise ValueError(f"Function '{name}' is restricted.")
 
                 if isinstance(node, exp.Column):
                     column_name = node.name.lower() if node.name else ""

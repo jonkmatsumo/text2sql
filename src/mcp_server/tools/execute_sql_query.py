@@ -469,14 +469,16 @@ def _validate_sql_ast(sql: str, provider: str) -> Optional[str]:
         # Block dangerous functions
         import sqlglot.expressions as exp
 
-        for node in expression.find_all(exp.Anonymous):
-            if str(node.this).lower() in BLOCKED_FUNCTIONS:
-                return f"Forbidden function: {str(node.this).upper()} is not allowed."
-
         for node in expression.find_all(exp.Func):
-            func_name = node.sql_name().lower()
-            if func_name in BLOCKED_FUNCTIONS:
-                return f"Forbidden function: {func_name.upper()} is not allowed."
+            func_names: set[str] = {node.sql_name().lower()}
+            if isinstance(node, exp.Anonymous) and node.this:
+                func_names.add(str(node.this).lower())
+            if hasattr(node, "name") and node.name:
+                func_names.add(str(node.name).lower())
+
+            for name in func_names:
+                if name in BLOCKED_FUNCTIONS:
+                    return f"Forbidden function: {name.upper()} is not allowed."
 
         # Block restricted/system tables and schemas for direct MCP invocations.
         for table in expression.find_all(exp.Table):
