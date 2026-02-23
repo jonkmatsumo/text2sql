@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncpg
 import pytest
 
+from dal.session_guardrails import SessionGuardrailPolicyError
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
 from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
 
@@ -177,6 +178,37 @@ class TestExecuteSqlQuery:
         role_event_index = fake_conn.events.index(("execute", 'SET LOCAL ROLE "text2sql_readonly"'))
         fetch_event_index = fake_conn.events.index(("fetch", "SELECT 1 AS ok"))
         assert role_event_index < fetch_event_index
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):
+        """Capability mismatches should return deterministic unsupported-capability errors."""
+
+        @asynccontextmanager
+        async def _raise_guardrail_error(*args, **kwargs):
+            raise SessionGuardrailPolicyError(
+                reason_code="session_guardrail_restricted_session_unsupported_provider",
+                outcome="SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER",
+                message="Restricted session guardrails are not supported for provider 'sqlite'.",
+            )
+            yield  # pragma: no cover
+
+        with (
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection",
+                _raise_guardrail_error,
+            ),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
+            result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "unsupported_capability"
+        assert data["error"]["details_safe"]["reason_code"] == (
+            "session_guardrail_restricted_session_unsupported_provider"
+        )
+        assert data["error"]["details_safe"]["session_guardrail_outcome"] == (
+            "SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):

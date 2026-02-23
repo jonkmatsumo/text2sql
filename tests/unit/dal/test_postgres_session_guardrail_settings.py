@@ -3,7 +3,7 @@
 import pytest
 
 from dal.database import Database
-from dal.session_guardrails import PostgresSessionGuardrailSettings
+from dal.session_guardrails import PostgresSessionGuardrailSettings, SessionGuardrailPolicyError
 
 
 @pytest.fixture(autouse=True)
@@ -80,3 +80,22 @@ def test_database_load_postgres_session_guardrail_settings_from_env(monkeypatch)
     assert settings.execution_role_enabled is True
     assert settings.execution_role_name == "text2sql_readonly"
     assert Database._postgres_session_guardrail_settings == settings
+
+
+def test_postgres_session_guardrail_settings_validate_capabilities_fails_closed():
+    """Capability mismatch should raise deterministic policy exception."""
+    settings = PostgresSessionGuardrailSettings(
+        restricted_session_enabled=True,
+        execution_role_enabled=True,
+        execution_role_name="text2sql_readonly",
+    )
+
+    with pytest.raises(
+        SessionGuardrailPolicyError,
+        match="Restricted session guardrails are not supported",
+    ):
+        settings.validate_capabilities(
+            provider="sqlite",
+            supports_restricted_session=False,
+            supports_execution_role=False,
+        )

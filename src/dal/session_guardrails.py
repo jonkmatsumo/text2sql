@@ -45,3 +45,40 @@ class PostgresSessionGuardrailSettings:
             raise ValueError(
                 "POSTGRES_EXECUTION_ROLE_ENABLED=true is only supported for provider=postgres."
             )
+
+    def validate_capabilities(
+        self,
+        *,
+        provider: str,
+        supports_restricted_session: bool,
+        supports_execution_role: bool,
+    ) -> None:
+        """Fail closed when enabled guardrails are unsupported by provider capabilities."""
+        if self.restricted_session_enabled and not supports_restricted_session:
+            raise SessionGuardrailPolicyError(
+                reason_code="session_guardrail_restricted_session_unsupported_provider",
+                outcome="SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER",
+                message=(
+                    "Restricted session guardrails are not supported for provider "
+                    f"'{(provider or '').strip().lower() or 'unknown'}'."
+                ),
+            )
+        if self.execution_role_enabled and not supports_execution_role:
+            raise SessionGuardrailPolicyError(
+                reason_code="session_guardrail_execution_role_unsupported_provider",
+                outcome="SESSION_GUARDRAIL_UNSUPPORTED_PROVIDER",
+                message=(
+                    "Execution-role guardrails are not supported for provider "
+                    f"'{(provider or '').strip().lower() or 'unknown'}'."
+                ),
+            )
+
+
+class SessionGuardrailPolicyError(RuntimeError):
+    """Deterministic policy exception for session guardrail capability mismatches."""
+
+    def __init__(self, *, reason_code: str, outcome: str, message: str) -> None:
+        """Initialize a bounded session-guardrail policy exception."""
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.outcome = outcome

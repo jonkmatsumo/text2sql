@@ -5,6 +5,7 @@ import pytest
 
 from dal.capabilities import capabilities_for_provider
 from dal.database import Database
+from dal.session_guardrails import PostgresSessionGuardrailSettings, SessionGuardrailPolicyError
 
 
 class _FakeConn:
@@ -184,3 +185,29 @@ async def test_postgres_execution_role_dblink_accessible_emits_warning_signal(mo
     mock_span.set_attribute.assert_any_call("db.postgres.extension.dblink.installed", True)
     mock_span.set_attribute.assert_any_call("db.postgres.extension.dblink.accessible", True)
     mock_counter.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_postgres_restricted_session_capability_mismatch_fails_closed():
+    """Capability mismatch should raise a deterministic policy exception."""
+    conn = _FakeConn()
+    Database._pool = _FakePool(conn)
+    Database._postgres_session_guardrail_settings = PostgresSessionGuardrailSettings(
+        restricted_session_enabled=True,
+        execution_role_enabled=False,
+        execution_role_name=None,
+    )
+
+    mock_caps = MagicMock()
+    mock_caps.supports_transactions = True
+    mock_caps.execution_model = "sync"
+    mock_caps.supports_restricted_session = False
+    mock_caps.supports_execution_role = False
+    Database._query_target_capabilities = mock_caps
+
+    with pytest.raises(
+        SessionGuardrailPolicyError,
+        match="Restricted session guardrails are not supported",
+    ):
+        async with Database.get_connection(read_only=True):
+            pass

@@ -728,7 +728,7 @@ class Database:
         read_only: bool,
     ) -> None:
         """Apply optional Postgres-only transaction-local session hardening."""
-        if cls._query_target_provider != "postgres" or not read_only:
+        if not read_only:
             return
 
         from common.config.env import get_env_bool, get_env_int, get_env_str
@@ -738,6 +738,29 @@ class Database:
         execution_role_enabled = settings.execution_role_enabled
 
         if not restricted_session_enabled and not execution_role_enabled:
+            return
+
+        capabilities = cls.get_query_target_capabilities()
+        settings.validate_capabilities(
+            provider=cls._query_target_provider,
+            supports_restricted_session=bool(
+                getattr(capabilities, "supports_restricted_session", False)
+            ),
+            supports_execution_role=bool(getattr(capabilities, "supports_execution_role", False)),
+        )
+
+        span = trace.get_current_span()
+        if span is not None and span.is_recording():
+            span.set_attribute(
+                "db.postgres.guardrails.capability.supports_restricted_session",
+                bool(getattr(capabilities, "supports_restricted_session", False)),
+            )
+            span.set_attribute(
+                "db.postgres.guardrails.capability.supports_execution_role",
+                bool(getattr(capabilities, "supports_execution_role", False)),
+            )
+
+        if cls._query_target_provider != "postgres":
             return
 
         def _timeout_value(env_name: str, default_ms: int) -> Optional[str]:

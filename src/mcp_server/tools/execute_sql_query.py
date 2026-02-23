@@ -32,6 +32,7 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
+from dal.session_guardrails import SessionGuardrailPolicyError
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
@@ -1146,6 +1147,18 @@ async def handler(
 
         return envelope.model_dump_json(exclude_none=True)
 
+    except SessionGuardrailPolicyError as e:
+        provider = _active_provider()
+        return _construct_error_response(
+            message=str(e),
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            provider=provider,
+            metadata={
+                "reason_code": e.reason_code,
+                "session_guardrail_outcome": e.outcome,
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
     except asyncpg.PostgresError as e:
         provider = _active_provider()
         metadata = extract_error_metadata(provider, e)
