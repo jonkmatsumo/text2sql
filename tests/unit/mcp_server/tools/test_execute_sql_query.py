@@ -169,6 +169,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
         monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
         monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+        monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
 
         with patch("mcp_server.utils.auth.validate_role", return_value=None):
             result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
@@ -216,6 +217,7 @@ class TestExecuteSqlQuery:
         monkeypatch.setattr(Database, "_query_target_sync_max_rows", 0)
         monkeypatch.setattr(Database, "_postgres_extension_capability_cache", {})
         monkeypatch.setattr(Database, "_postgres_extension_warning_emitted", set())
+        monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
         monkeypatch.setattr(Database, "_postgres_session_guardrail_settings", None)
 
         with (

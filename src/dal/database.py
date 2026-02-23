@@ -1008,7 +1008,14 @@ class Database:
                 failure_reason=SANDBOX_FAILURE_NONE,
             )
             if cls.get_query_target_capabilities().supports_transactions:
-                use_postgres_sandbox = cls._query_target_provider == "postgres"
+                postgres_sandbox_enabled = True
+                if cls._query_target_provider == "postgres":
+                    postgres_sandbox_enabled = bool(
+                        cls._get_postgres_session_guardrail_settings().sandbox_enabled
+                    )
+                use_postgres_sandbox = (
+                    cls._query_target_provider == "postgres" and postgres_sandbox_enabled
+                )
                 if use_postgres_sandbox:
                     sandbox_metadata = build_postgres_sandbox_metadata(
                         applied=True,

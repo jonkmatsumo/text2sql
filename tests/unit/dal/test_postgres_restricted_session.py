@@ -155,6 +155,20 @@ async def test_postgres_execution_role_enabled_without_role_fails_closed(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_postgres_restricted_session_requires_sandbox_enabled(monkeypatch):
+    """Restricted session mode must fail closed when sandbox mode is disabled."""
+    conn = _FakeConn()
+    Database._pool = _FakePool(conn)
+    monkeypatch.setenv("POSTGRES_RESTRICTED_SESSION_ENABLED", "true")
+    monkeypatch.setenv("POSTGRES_SANDBOX_ENABLED", "false")
+
+    with pytest.raises(SessionGuardrailPolicyError) as exc_info:
+        async with Database.get_connection(read_only=True):
+            pass
+    assert exc_info.value.outcome == "SESSION_GUARDRAIL_MISCONFIGURED"
+
+
+@pytest.mark.asyncio
 async def test_postgres_execution_role_dblink_probe_cached(monkeypatch):
     """Dangerous extension capability probe should be cached per execution role."""
     conn = _FakeConn()
