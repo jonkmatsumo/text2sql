@@ -120,8 +120,8 @@ async def test_execute_sql_query_pagination_metadata():
 
     result = json.loads(payload)
     assert result["metadata"]["next_page_token"] == "next-token"
-    # page_size is currently not returned in new typed envelope metadata
-    # assert result["metadata"]["page_size"] == 10
+    assert result["metadata"]["page_size"] == 10
+    assert result["metadata"]["page_items_returned"] == 1
 
 
 @pytest.mark.asyncio
@@ -162,6 +162,9 @@ async def test_execute_sql_query_pagination_bounds():
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"] == "execution_pagination_page_size_invalid"
+    )
 
     with (
         patch(
@@ -181,9 +184,11 @@ async def test_execute_sql_query_pagination_bounds():
         )
 
     result = json.loads(payload)
-    # page_size assertion removed as it's not in metadata
-    # We could assert rows returned if mocked to return many, but mock returns 1.
-    # Just checking it didn't error is enough here given mock.
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_page_size_exceeds_max_rows"
+    )
 
 
 @pytest.mark.asyncio
@@ -224,6 +229,53 @@ async def test_execute_sql_query_pagination_backcompat():
     assert result["rows"] == [{"id": 2}]
     # next_page_token might be absent if None/excluded
     assert result["metadata"].get("next_page_token") is None
+    assert result["metadata"].get("page_size") is None
+    assert result["metadata"].get("page_items_returned") in (None, 1)
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_pagination_page_token_length_bounded(monkeypatch):
+    """Oversized page tokens should fail closed with deterministic classification."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch_page(self, sql, page_token, page_size, *params):
+            _ = sql, page_token, page_size, params
+            return [{"id": 1}], None
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    monkeypatch.setenv("EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", "8")
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+    ):
+        payload = await handler(
+            "SELECT 1",
+            tenant_id=1,
+            page_token="token-exceeds-limit",
+            page_size=1,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"] == "execution_pagination_page_token_too_long"
+    )
 
 
 @pytest.mark.asyncio

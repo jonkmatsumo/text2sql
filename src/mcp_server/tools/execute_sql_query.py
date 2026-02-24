@@ -79,6 +79,7 @@ _RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
 _SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 _SESSION_RESET_OUTCOME_ALLOWLIST = {"ok", "failed"}
 _SANDBOX_OUTCOME_ALLOWLIST = {"committed", "rolled_back", "rollback_failed"}
+_DEFAULT_PAGE_TOKEN_MAX_LENGTH = 2048
 _PARTIAL_REASON_ALLOWLIST = {
     PayloadTruncationReason.MAX_ROWS.value,
     PayloadTruncationReason.MAX_BYTES.value,
@@ -1338,6 +1339,29 @@ async def handler(
     if unsupported_response is not None:
         return unsupported_response
 
+    max_page_token_len = get_env_int(
+        "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
+    )
+    if page_token is not None:
+        normalized_page_token = page_token.strip()
+        if not normalized_page_token:
+            return _construct_error_response(
+                "Invalid page_token: must not be empty.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_page_token_invalid"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        if len(normalized_page_token) > max_page_token_len:
+            return _construct_error_response(
+                "Invalid page_token: exceeds maximum length.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_page_token_too_long"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        page_token = normalized_page_token
+
     max_page_size = (
         max(1, int(resource_limits.max_rows)) if resource_limits.enforce_row_limit else 1000
     )
@@ -1347,10 +1371,17 @@ async def handler(
                 "Invalid page_size: must be greater than zero.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
+                metadata={"reason_code": "execution_pagination_page_size_invalid"},
                 envelope_metadata=tenant_enforcement_metadata,
             )
         if page_size > max_page_size:
-            page_size = max_page_size
+            return _construct_error_response(
+                "Invalid page_size: exceeds maximum rows per request.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_page_size_exceeds_max_rows"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
 
     if provider == "redshift":
         from dal.redshift import validate_redshift_query
@@ -1372,6 +1403,7 @@ async def handler(
         bytes_returned = 0
         execution_duration_ms = 0
         next_token = None
+        applied_page_size = page_size
         conn = None
         execution_started_at = time.monotonic()
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
@@ -1396,6 +1428,7 @@ async def handler(
                 effective_page_size = row_limit
             if effective_page_size and effective_page_size > max_page_size:
                 effective_page_size = max_page_size
+            applied_page_size = effective_page_size
 
             async def _fetch_rows():
                 nonlocal columns, next_token
@@ -1571,8 +1604,11 @@ async def handler(
             is_truncated=is_truncated,
             partial=is_truncated,
             provider=provider,
+            is_paginated=bool(applied_page_size or page_token or next_token),
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
+            page_size=applied_page_size,
+            page_items_returned=len(result_rows),
             partial_reason=partial_reason,
             items_returned=len(result_rows),
             bytes_returned=bytes_returned,

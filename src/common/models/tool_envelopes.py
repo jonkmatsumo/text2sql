@@ -38,6 +38,10 @@ class ExecuteSQLQueryMetadata(BaseModel):
     next_cursor: Optional[str] = Field(
         None, description="Standardized pagination cursor alias for next_page_token"
     )
+    page_size: Optional[int] = Field(None, description="Page size applied for this response")
+    page_items_returned: Optional[int] = Field(
+        None, description="Items returned in the current page"
+    )
     returned_count: Optional[int] = Field(
         None, description="Standardized row-count alias for rows_returned"
     )
@@ -135,6 +139,16 @@ class ExecuteSQLQueryMetadata(BaseModel):
             normalized["rows_returned"] = normalized["returned_count"]
         if normalized.get("returned_count") is None and normalized.get("rows_returned") is not None:
             normalized["returned_count"] = normalized["rows_returned"]
+        if (
+            normalized.get("rows_returned") is None
+            and normalized.get("page_items_returned") is not None
+        ):
+            normalized["rows_returned"] = normalized["page_items_returned"]
+        if (
+            normalized.get("page_items_returned") is None
+            and normalized.get("rows_returned") is not None
+        ):
+            normalized["page_items_returned"] = normalized["rows_returned"]
         if normalized.get("rows_returned") is None and normalized.get("items_returned") is not None:
             normalized["rows_returned"] = normalized["items_returned"]
         if normalized.get("items_returned") is None and normalized.get("rows_returned") is not None:
@@ -197,6 +211,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.truncated = bool(self.is_truncated)
         if self.items_returned is None:
             self.items_returned = int(self.rows_returned)
+        if self.page_items_returned is None:
+            self.page_items_returned = int(self.rows_returned)
         if self.returned_count is None:
             self.returned_count = int(self.rows_returned)
         if self.limit_applied is None and self.row_limit is not None:
