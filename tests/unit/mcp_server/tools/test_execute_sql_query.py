@@ -11,7 +11,7 @@ import pytest
 
 from common.constants.reason_codes import PayloadTruncationReason
 from dal.session_guardrails import SessionGuardrailPolicyError
-from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
+from mcp_server.tools.execute_sql_query import _PARTIAL_REASON_ALLOWLIST, TOOL_NAME, handler
 from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
 
 _TENANT_CONTRACT_FIXTURE_DIR = (
@@ -382,6 +382,65 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["sandbox_failure_reason"] == "TIMEOUT"
         assert data["metadata"]["session_reset_attempted"] is True
         assert data["metadata"]["session_reset_outcome"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_partial_metadata_parity_with_span(self, monkeypatch):
+        """Partial-result metadata should match bounded span attributes."""
+        mock_conn = AsyncMock()
+        mock_rows = [{"id": 1}, {"id": 2}, {"id": 3}]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "2")
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+        monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "100000")
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span
+            ),
+        ):
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        metadata = data["metadata"]
+        assert metadata["partial"] is True
+        assert metadata["partial"] == metadata["is_truncated"] == metadata["truncated"]
+        assert metadata["items_returned"] == metadata["rows_returned"] == metadata["returned_count"]
+        assert metadata["partial_reason"] in _PARTIAL_REASON_ALLOWLIST
+        assert isinstance(metadata["bytes_returned"], int)
+        assert isinstance(metadata["execution_duration_ms"], int)
+
+        mock_span.set_attribute.assert_any_call("db.result.partial", metadata["partial"])
+        mock_span.set_attribute.assert_any_call(
+            "db.result.partial_reason", metadata["partial_reason"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.result.items_returned", metadata["items_returned"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.result.bytes_returned", metadata["bytes_returned"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.result.execution_duration_ms", metadata["execution_duration_ms"]
+        )
+
+    def test_execute_sql_query_partial_reason_allowlist_stable(self):
+        """Partial-reason allowlist should remain bounded and stable."""
+        expected = {
+            PayloadTruncationReason.MAX_ROWS.value,
+            PayloadTruncationReason.MAX_BYTES.value,
+            PayloadTruncationReason.PROVIDER_CAP.value,
+            PayloadTruncationReason.SAFETY_LIMIT.value,
+            "timeout",
+        }
+        assert _PARTIAL_REASON_ALLOWLIST == expected
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):

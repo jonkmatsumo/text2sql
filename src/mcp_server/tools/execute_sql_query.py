@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
@@ -73,6 +74,24 @@ _RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
 _SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 _SESSION_RESET_OUTCOME_ALLOWLIST = {"ok", "failed"}
 _SANDBOX_OUTCOME_ALLOWLIST = {"committed", "rolled_back", "rollback_failed"}
+_PARTIAL_REASON_ALLOWLIST = {
+    PayloadTruncationReason.MAX_ROWS.value,
+    PayloadTruncationReason.MAX_BYTES.value,
+    PayloadTruncationReason.PROVIDER_CAP.value,
+    PayloadTruncationReason.SAFETY_LIMIT.value,
+    "timeout",
+}
+_PARTIAL_REASON_NORMALIZATION = {
+    "max_rows": PayloadTruncationReason.MAX_ROWS.value,
+    "max_bytes": PayloadTruncationReason.MAX_BYTES.value,
+    "provider_cap": PayloadTruncationReason.PROVIDER_CAP.value,
+    "safety_limit": PayloadTruncationReason.SAFETY_LIMIT.value,
+    "row_limit": PayloadTruncationReason.MAX_ROWS.value,
+    "byte_limit": PayloadTruncationReason.MAX_BYTES.value,
+    "providercap": PayloadTruncationReason.PROVIDER_CAP.value,
+    "safety": PayloadTruncationReason.SAFETY_LIMIT.value,
+    "timeout": "timeout",
+}
 
 
 @dataclass(frozen=True)
@@ -362,6 +381,33 @@ def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
             "execution_timeout_triggered": timeout_triggered,
         },
     )
+
+
+def _normalize_partial_reason(reason: str | None) -> str | None:
+    if not isinstance(reason, str):
+        return None
+    normalized = _PARTIAL_REASON_NORMALIZATION.get(reason.strip().lower())
+    if normalized in _PARTIAL_REASON_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _record_result_contract_observability(
+    *,
+    partial: bool,
+    partial_reason: str | None,
+    items_returned: int,
+    bytes_returned: int,
+    execution_duration_ms: int,
+) -> None:
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("db.result.partial", bool(partial))
+    span.set_attribute("db.result.partial_reason", partial_reason or "none")
+    span.set_attribute("db.result.items_returned", int(items_returned))
+    span.set_attribute("db.result.bytes_returned", int(bytes_returned))
+    span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
 
 def _record_policy_decision_telemetry(attributes: dict[str, Any]) -> None:
@@ -1245,7 +1291,11 @@ async def handler(
         return unsupported_response
     unsupported_response = _negotiate_if_required(
         "async_cancel",
-        bool(timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async"),
+        bool(
+            effective_timeout_seconds
+            and effective_timeout_seconds > 0
+            and caps.execution_model == "async"
+        ),
         caps.supports_cancel,
     )
     if unsupported_response is not None:
@@ -1290,8 +1340,10 @@ async def handler(
         last_truncated = False
         row_limit = 0
         bytes_returned = 0
+        execution_duration_ms = 0
         next_token = None
         conn = None
+        execution_started_at = time.monotonic()
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
@@ -1443,6 +1495,7 @@ async def handler(
         size_truncated_reason = byte_limit_result.partial_reason
         result_rows = byte_limit_result.rows
         bytes_returned = byte_limit_result.bytes_returned
+        execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -1465,7 +1518,8 @@ async def handler(
             partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value
         if partial_reason is None and is_truncated:
             partial_reason = PayloadTruncationReason.MAX_ROWS.value
-        cap_detected = partial_reason == "PROVIDER_CAP"
+        partial_reason = _normalize_partial_reason(partial_reason)
+        cap_detected = partial_reason == PayloadTruncationReason.PROVIDER_CAP.value
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
         if cap_detected and cap_mitigation_setting == "safe":
@@ -1485,11 +1539,14 @@ async def handler(
         envelope_metadata = ExecuteSQLQueryMetadata(
             rows_returned=len(result_rows),
             is_truncated=is_truncated,
+            partial=is_truncated,
             provider=provider,
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
             partial_reason=partial_reason,
+            items_returned=len(result_rows),
             bytes_returned=bytes_returned,
+            execution_duration_ms=execution_duration_ms,
             cap_detected=cap_detected,
             cap_mitigation_applied=cap_mitigation_applied,
             cap_mitigation_mode=cap_mitigation_mode,
@@ -1534,6 +1591,13 @@ async def handler(
         _record_session_guardrail_observability(tenant_enforcement_metadata)
         _record_sandbox_observability(tenant_enforcement_metadata)
         _record_timeout_observability(tenant_enforcement_metadata)
+        _record_result_contract_observability(
+            partial=is_truncated,
+            partial_reason=partial_reason,
+            items_returned=len(result_rows),
+            bytes_returned=bytes_returned,
+            execution_duration_ms=execution_duration_ms,
+        )
 
         return envelope.model_dump_json(exclude_none=True)
 

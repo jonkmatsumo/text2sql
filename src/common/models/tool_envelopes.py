@@ -28,6 +28,9 @@ class ExecuteSQLQueryMetadata(BaseModel):
     )
     is_limited: bool = Field(False, description="Whether the result was limited by LIMIT clause")
     is_paginated: bool = Field(False, description="Whether the result is part of a paginated set")
+    partial: Optional[bool] = Field(
+        None, description="Standardized partial-result alias for is_truncated"
+    )
     partial_reason: Optional[str] = Field(
         None, description="Reason for partial results (e.g. MAX_ROWS, SIZE_LIMIT)"
     )
@@ -38,9 +41,15 @@ class ExecuteSQLQueryMetadata(BaseModel):
     returned_count: Optional[int] = Field(
         None, description="Standardized row-count alias for rows_returned"
     )
+    items_returned: Optional[int] = Field(
+        None, description="Standardized item-count alias for rows_returned"
+    )
     limit_applied: Optional[int] = Field(None, description="Standardized limit alias for row_limit")
     bytes_returned: Optional[int] = Field(
         None, description="Estimated size of the payload in bytes"
+    )
+    execution_duration_ms: Optional[int] = Field(
+        None, description="Execution duration for database query handling in milliseconds"
     )
     truncation_reason: Optional[str] = Field(
         None, description="Standardized truncation reason alias for partial_reason"
@@ -125,11 +134,33 @@ class ExecuteSQLQueryMetadata(BaseModel):
             normalized["rows_returned"] = normalized["returned_count"]
         if normalized.get("returned_count") is None and normalized.get("rows_returned") is not None:
             normalized["returned_count"] = normalized["rows_returned"]
+        if normalized.get("rows_returned") is None and normalized.get("items_returned") is not None:
+            normalized["rows_returned"] = normalized["items_returned"]
+        if normalized.get("items_returned") is None and normalized.get("rows_returned") is not None:
+            normalized["items_returned"] = normalized["rows_returned"]
+        if (
+            normalized.get("items_returned") is None
+            and normalized.get("returned_count") is not None
+        ):
+            normalized["items_returned"] = normalized["returned_count"]
+        if (
+            normalized.get("returned_count") is None
+            and normalized.get("items_returned") is not None
+        ):
+            normalized["returned_count"] = normalized["items_returned"]
 
         if normalized.get("is_truncated") is None and normalized.get("truncated") is not None:
             normalized["is_truncated"] = normalized["truncated"]
         if normalized.get("truncated") is None and normalized.get("is_truncated") is not None:
             normalized["truncated"] = normalized["is_truncated"]
+        if normalized.get("is_truncated") is None and normalized.get("partial") is not None:
+            normalized["is_truncated"] = normalized["partial"]
+        if normalized.get("partial") is None and normalized.get("is_truncated") is not None:
+            normalized["partial"] = normalized["is_truncated"]
+        if normalized.get("truncated") is None and normalized.get("partial") is not None:
+            normalized["truncated"] = normalized["partial"]
+        if normalized.get("partial") is None and normalized.get("truncated") is not None:
+            normalized["partial"] = normalized["truncated"]
 
         if normalized.get("row_limit") is None and normalized.get("limit_applied") is not None:
             normalized["row_limit"] = normalized["limit_applied"]
@@ -157,8 +188,14 @@ class ExecuteSQLQueryMetadata(BaseModel):
     @model_validator(mode="after")
     def sync_standardized_fields(self) -> "ExecuteSQLQueryMetadata":
         """Fill alias fields when defaults are applied after input normalization."""
+        if self.partial is None:
+            self.partial = bool(self.is_truncated)
+        if self.is_truncated is None and self.partial is not None:
+            self.is_truncated = bool(self.partial)
         if self.truncated is None:
             self.truncated = bool(self.is_truncated)
+        if self.items_returned is None:
+            self.items_returned = int(self.rows_returned)
         if self.returned_count is None:
             self.returned_count = int(self.rows_returned)
         if self.limit_applied is None and self.row_limit is not None:

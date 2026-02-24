@@ -54,3 +54,27 @@ def test_execute_sql_query_metadata_truncation_reason_alias():
     meta2 = ExecuteSQLQueryMetadata(rows_returned=0, truncation_reason="SIZE_LIMIT")
     assert meta2.partial_reason == "SIZE_LIMIT"
     assert meta2.truncation_reason == "SIZE_LIMIT"
+
+
+def test_execute_sql_query_metadata_partial_aliases_is_truncated():
+    """Verify partial/is_truncated/truncated aliases remain synchronized."""
+    meta1 = ExecuteSQLQueryMetadata(rows_returned=1, partial=True)
+    assert meta1.partial is True
+    assert meta1.is_truncated is True
+    assert meta1.truncated is True
+
+    meta2 = ExecuteSQLQueryMetadata(rows_returned=1, is_truncated=False)
+    assert meta2.partial is False
+    assert meta2.truncated is False
+
+
+def test_execute_sql_query_metadata_items_returned_aliases():
+    """Verify items_returned stays aligned with rows_returned/returned_count."""
+    meta1 = ExecuteSQLQueryMetadata(rows_returned=3, items_returned=3)
+    assert meta1.rows_returned == 3
+    assert meta1.items_returned == 3
+    assert meta1.returned_count == 3
+
+    meta2 = ExecuteSQLQueryMetadata(returned_count=4)
+    assert meta2.rows_returned == 4
+    assert meta2.items_returned == 4

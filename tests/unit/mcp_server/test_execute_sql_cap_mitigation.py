@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from common.constants.reason_codes import PayloadTruncationReason
 from mcp_server.tools.execute_sql_query import handler
 
 
@@ -45,7 +46,7 @@ async def test_provider_cap_metadata_detected_without_mitigation():
         payload = await handler("SELECT 1", tenant_id=1)
 
     result = json.loads(payload)
-    assert result["metadata"]["partial_reason"] == "PROVIDER_CAP"
+    assert result["metadata"]["partial_reason"] == PayloadTruncationReason.PROVIDER_CAP.value
     assert result["metadata"]["cap_detected"] is True
     # We just want to make sure it's detected and reason is correct
 
