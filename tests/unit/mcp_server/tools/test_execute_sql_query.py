@@ -102,6 +102,25 @@ class TestExecuteSqlQuery:
         )
 
     @pytest.mark.asyncio
+    async def test_execute_sql_query_resource_limit_misconfiguration_fails_closed(self):
+        """Invalid resource limit config should fail closed before execution."""
+        with (
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.ExecutionResourceLimits.from_env"
+            ) as mock_from_env,
+        ):
+            mock_from_env.side_effect = ValueError("invalid limits")
+            result = await handler("SELECT 1 AS ok", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "internal"
+        assert (
+            data["error"]["details_safe"]["reason_code"]
+            == "execution_resource_limits_misconfigured"
+        )
+
+    @pytest.mark.asyncio
     async def test_execute_sql_query_valid_select(self):
         """Test executing a valid SELECT query."""
         mock_conn = AsyncMock()

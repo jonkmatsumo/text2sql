@@ -32,6 +32,7 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
+from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
     SANDBOX_FAILURE_REASON_ALLOWLIST,
@@ -840,6 +841,15 @@ async def handler(
         - Capacity detection: If query triggers row/resource caps.
     """
     provider = _active_provider()
+    try:
+        resource_limits = ExecutionResourceLimits.from_env()
+    except ValueError:
+        return _construct_error_response(
+            message="Execution resource limits are misconfigured.",
+            category=ErrorCategory.INTERNAL,
+            provider=provider,
+            metadata={"reason_code": "execution_resource_limits_misconfigured"},
+        )
     session_guardrail_metadata = build_session_guardrail_metadata(
         applied=False,
         outcome=SESSION_GUARDRAIL_SKIPPED,
@@ -1173,7 +1183,9 @@ async def handler(
     if unsupported_response is not None:
         return unsupported_response
 
-    max_page_size = 1000
+    max_page_size = (
+        max(1, int(resource_limits.max_rows)) if resource_limits.enforce_row_limit else 1000
+    )
     if page_size is not None:
         if page_size <= 0:
             return _construct_error_response(
