@@ -95,6 +95,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
     restricted_session_mode: Optional[Literal["off", "set_local_config"]] = None
     session_guardrail_capability_mismatch: Optional[str] = None
     sandbox_applied: Optional[bool] = None
+    sandbox_outcome: Optional[Literal["committed", "rolled_back", "rollback_failed"]] = None
     sandbox_rollback: Optional[bool] = None
     sandbox_failure_reason: Optional[
         Literal[
@@ -107,6 +108,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "UNKNOWN",
         ]
     ] = None
+    session_reset_attempted: Optional[bool] = None
+    session_reset_outcome: Optional[Literal["ok", "failed"]] = None
 
     @model_validator(mode="before")
     @classmethod

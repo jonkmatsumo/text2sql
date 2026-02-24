@@ -183,17 +183,52 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["execution_role_name"] == "text2sql_readonly"
         assert data["metadata"]["restricted_session_mode"] == "set_local_config"
         assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_outcome"] == "committed"
         assert data["metadata"]["sandbox_rollback"] is False
         assert data["metadata"]["sandbox_failure_reason"] == "NONE"
+        assert data["metadata"]["session_reset_attempted"] is True
+        assert data["metadata"]["session_reset_outcome"] == "ok"
         assert (
             "SELECT set_config('default_transaction_read_only', 'on', true)",
             (),
         ) in fake_conn.execute_calls
         assert ('SET LOCAL ROLE "text2sql_readonly"', ()) in fake_conn.execute_calls
+        assert ("RESET ROLE", ()) in fake_conn.execute_calls
+        assert ("RESET ALL", ()) in fake_conn.execute_calls
 
         role_event_index = fake_conn.events.index(("execute", 'SET LOCAL ROLE "text2sql_readonly"'))
         fetch_event_index = fake_conn.events.index(("fetch", "SELECT 1 AS ok"))
         assert role_event_index < fetch_event_index
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_non_postgres_provider_does_not_apply_sandbox(self):
+        """Non-Postgres providers should not apply Postgres sandbox/reset metadata."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"ok": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities"
+            ) as mock_caps,
+        ):
+            mock_caps.return_value.tenant_enforcement_mode = "none"
+            mock_caps.return_value.provider_name = "sqlite"
+            result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["metadata"]["provider"] == "sqlite"
+        assert data["metadata"]["sandbox_applied"] is False
+        assert data["metadata"]["sandbox_outcome"] == "committed"
+        assert data["metadata"]["sandbox_rollback"] is False
+        assert data["metadata"]["sandbox_failure_reason"] == "NONE"
+        assert data["metadata"]["session_reset_attempted"] is False
+        assert data["metadata"]["session_reset_outcome"] == "failed"
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_metadata_parity_with_span(self, monkeypatch):
@@ -238,8 +273,11 @@ class TestExecuteSqlQuery:
         assert metadata["restricted_session_mode"] == "set_local_config"
         assert metadata.get("session_guardrail_capability_mismatch") is None
         assert metadata["sandbox_applied"] is True
+        assert metadata["sandbox_outcome"] == "committed"
         assert metadata["sandbox_rollback"] is False
         assert metadata["sandbox_failure_reason"] == "NONE"
+        assert metadata["session_reset_attempted"] is True
+        assert metadata["session_reset_outcome"] == "ok"
 
         mock_span.set_attribute.assert_any_call(
             "session.guardrail.applied", metadata["session_guardrail_applied"]
@@ -260,6 +298,18 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call("sandbox.rollback", metadata["sandbox_rollback"])
         mock_span.set_attribute.assert_any_call(
             "sandbox.failure_reason", metadata["sandbox_failure_reason"]
+        )
+        mock_span.set_attribute.assert_any_call("db.sandbox.applied", metadata["sandbox_applied"])
+        mock_span.set_attribute.assert_any_call("db.sandbox.outcome", metadata["sandbox_outcome"])
+        assert not any(
+            call.args and call.args[0] == "db.sandbox.failure_reason"
+            for call in mock_span.set_attribute.call_args_list
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.session.reset_attempted", metadata["session_reset_attempted"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.session.reset_outcome", metadata["session_reset_outcome"]
         )
 
     @pytest.mark.asyncio
@@ -298,8 +348,11 @@ class TestExecuteSqlQuery:
         data = json.loads(result)
         assert data["error"]["category"] == "timeout"
         assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_outcome"] == "rolled_back"
         assert data["metadata"]["sandbox_rollback"] is True
         assert data["metadata"]["sandbox_failure_reason"] == "TIMEOUT"
+        assert data["metadata"]["session_reset_attempted"] is True
+        assert data["metadata"]["session_reset_outcome"] == "ok"
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):
