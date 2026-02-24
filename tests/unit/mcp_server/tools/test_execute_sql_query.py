@@ -371,6 +371,11 @@ class TestExecuteSqlQuery:
 
         data = json.loads(result)
         assert data["error"]["category"] == "timeout"
+        assert data["rows"] == []
+        assert data["metadata"]["is_truncated"] is False
+        assert data["metadata"]["partial_reason"] == "timeout"
+        assert data["metadata"]["execution_timeout_applied"] is True
+        assert data["metadata"]["execution_timeout_triggered"] is True
         assert data["metadata"]["sandbox_applied"] is True
         assert data["metadata"]["sandbox_outcome"] == "rolled_back"
         assert data["metadata"]["sandbox_rollback"] is True
@@ -807,6 +812,42 @@ class TestExecuteSqlQuery:
 
             data = json.loads(result)
             assert data["error"]["category"] == "timeout"
+            assert data["error"]["error_code"] == "DB_TIMEOUT"
+            assert data["rows"] == []
+            assert data["metadata"]["execution_timeout_applied"] is True
+            assert data["metadata"]["execution_timeout_triggered"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_applies_resource_timeout_when_unspecified(self, monkeypatch):
+        """Resource timeout limit should apply when no timeout parameter is provided."""
+        mock_conn = AsyncMock()
+        mock_conn.fetch = AsyncMock(return_value=[{"id": 1}])
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+        monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "25")
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+        observed: dict[str, float] = {}
+
+        async def _capture_timeout(operation, timeout_seconds, cancel=None, **_kwargs):
+            _ = cancel
+            observed["timeout_seconds"] = timeout_seconds
+            return await operation()
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+            patch(
+                "mcp_server.tools.execute_sql_query.run_with_timeout", side_effect=_capture_timeout
+            ),
+        ):
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data.get("error") is None
+        assert data["metadata"]["execution_timeout_applied"] is True
+        assert data["metadata"]["execution_timeout_triggered"] is False
+        assert observed["timeout_seconds"] == pytest.approx(0.025, rel=1e-3)
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_max_length_exceeded(self):

@@ -339,6 +339,31 @@ def _record_sandbox_observability(metadata: dict[str, Any] | None) -> None:
     )
 
 
+def _timeout_observability_fields(metadata: dict[str, Any] | None) -> tuple[bool, bool]:
+    timeout_metadata = metadata if isinstance(metadata, dict) else {}
+    timeout_applied = bool(timeout_metadata.get("execution_timeout_applied"))
+    timeout_triggered = bool(timeout_metadata.get("execution_timeout_triggered"))
+    return timeout_applied, timeout_triggered
+
+
+def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
+    timeout_applied, timeout_triggered = _timeout_observability_fields(metadata)
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("db.execution_timeout_applied", timeout_applied)
+        span.set_attribute("db.execution_timeout_triggered", timeout_triggered)
+
+    mcp_metrics.add_counter(
+        "mcp.execution_timeout.outcome_total",
+        description="Count of execute_sql_query timeout enforcement outcomes",
+        attributes={
+            "tool_name": TOOL_NAME,
+            "execution_timeout_applied": timeout_applied,
+            "execution_timeout_triggered": timeout_triggered,
+        },
+    )
+
+
 def _record_policy_decision_telemetry(attributes: dict[str, Any]) -> None:
     """Attach policy-provided telemetry attributes to the active span."""
     span = trace.get_current_span()
@@ -583,6 +608,7 @@ def _construct_error_response(
     _record_tenant_enforcement_observability(envelope_metadata)
     _record_session_guardrail_observability(envelope_metadata)
     _record_sandbox_observability(envelope_metadata)
+    _record_timeout_observability(envelope_metadata)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -833,6 +859,31 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
     return None
 
 
+def _resolve_effective_timeout_seconds(
+    timeout_seconds: Optional[float],
+    resource_limits: ExecutionResourceLimits,
+) -> tuple[Optional[float], bool]:
+    """Resolve effective timeout with fail-safe enforcement from resource settings."""
+    resolved_timeout: Optional[float]
+    try:
+        resolved_timeout = float(timeout_seconds) if timeout_seconds is not None else None
+    except (TypeError, ValueError):
+        resolved_timeout = None
+
+    if resolved_timeout is not None and resolved_timeout <= 0:
+        resolved_timeout = None
+
+    if resource_limits.enforce_timeout:
+        resource_timeout = max(0.001, float(resource_limits.max_execution_ms) / 1000.0)
+        if resolved_timeout is None:
+            resolved_timeout = resource_timeout
+        else:
+            resolved_timeout = min(resolved_timeout, resource_timeout)
+
+    timeout_applied = bool(resolved_timeout and resolved_timeout > 0)
+    return resolved_timeout, timeout_applied
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int],
@@ -867,6 +918,9 @@ async def handler(
             provider=provider,
             metadata={"reason_code": "execution_resource_limits_misconfigured"},
         )
+    effective_timeout_seconds, execution_timeout_applied = _resolve_effective_timeout_seconds(
+        timeout_seconds, resource_limits
+    )
     session_guardrail_metadata = build_session_guardrail_metadata(
         applied=False,
         outcome=SESSION_GUARDRAIL_SKIPPED,
@@ -923,6 +977,8 @@ async def handler(
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
+    tenant_enforcement_metadata["execution_timeout_triggered"] = False
 
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
@@ -1076,6 +1132,8 @@ async def handler(
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
+    tenant_enforcement_metadata["execution_timeout_triggered"] = False
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
@@ -1322,9 +1380,14 @@ async def handler(
 
             try:
                 result_rows = await run_with_timeout(
-                    _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
+                    _fetch_rows,
+                    effective_timeout_seconds,
+                    cancel=lambda: _cancel_best_effort(conn),
+                    provider=provider,
+                    operation_name="execute_sql_query.fetch",
                 )
             except (asyncio.TimeoutError, TimeoutError) as timeout_exc:
+                tenant_enforcement_metadata["execution_timeout_triggered"] = True
                 raise _SandboxExecutionTimeout("Execution timed out.") from timeout_exc
 
             raw_last_truncated = getattr(conn, "last_truncated", False)
@@ -1458,6 +1521,10 @@ async def handler(
             sandbox_failure_reason=tenant_enforcement_metadata.get("sandbox_failure_reason"),
             session_reset_attempted=tenant_enforcement_metadata.get("session_reset_attempted"),
             session_reset_outcome=tenant_enforcement_metadata.get("session_reset_outcome"),
+            execution_timeout_applied=tenant_enforcement_metadata.get("execution_timeout_applied"),
+            execution_timeout_triggered=tenant_enforcement_metadata.get(
+                "execution_timeout_triggered"
+            ),
         )
 
         envelope = ExecuteSQLQueryResponseEnvelope(
@@ -1466,12 +1533,15 @@ async def handler(
         _record_tenant_enforcement_observability(tenant_enforcement_metadata)
         _record_session_guardrail_observability(tenant_enforcement_metadata)
         _record_sandbox_observability(tenant_enforcement_metadata)
+        _record_timeout_observability(tenant_enforcement_metadata)
 
         return envelope.model_dump_json(exclude_none=True)
 
     except _SandboxExecutionTimeout as e:
         provider = _active_provider()
         tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
+        tenant_enforcement_metadata["execution_timeout_triggered"] = True
+        tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",
             category=ErrorCategory.TIMEOUT,
