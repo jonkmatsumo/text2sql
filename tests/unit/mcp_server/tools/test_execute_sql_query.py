@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import asyncpg
 import pytest
 
+from common.constants.reason_codes import PayloadTruncationReason
 from dal.session_guardrails import SessionGuardrailPolicyError
 from mcp_server.tools.execute_sql_query import TOOL_NAME, handler
 from tests._support.tenant_enforcement_contract import assert_tenant_enforcement_contract
@@ -501,6 +502,53 @@ class TestExecuteSqlQuery:
             assert data["metadata"]["is_truncated"] is True
             assert data["metadata"]["row_limit"] == 1000
             assert data["metadata"]["rows_returned"] == 1000
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_enforces_configured_row_cap(self, monkeypatch):
+        """Configured execution row cap should truncate results deterministically."""
+        mock_conn = AsyncMock()
+        mock_rows = [{"id": i} for i in range(6)]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+        monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "2")
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["rows"] == [{"id": 0}, {"id": 1}]
+        assert data["metadata"]["rows_returned"] == 2
+        assert data["metadata"]["is_truncated"] is True
+        assert data["metadata"]["partial_reason"] == PayloadTruncationReason.MAX_ROWS.value
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_within_configured_row_cap_is_not_partial(self, monkeypatch):
+        """Result sets under the configured row cap should remain non-partial."""
+        mock_conn = AsyncMock()
+        mock_rows = [{"id": i} for i in range(3)]
+        mock_conn.fetch = AsyncMock(return_value=mock_rows)
+        mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_conn.__aexit__ = AsyncMock(return_value=False)
+        mock_get = MagicMock(return_value=mock_conn)
+        monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "5")
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+
+        with (
+            patch("mcp_server.tools.execute_sql_query.Database.get_connection", mock_get),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
+            result = await handler("SELECT * FROM film", tenant_id=1)
+
+        data = json.loads(result)
+        assert data["rows"] == mock_rows
+        assert data["metadata"]["rows_returned"] == 3
+        assert data["metadata"]["is_truncated"] is False
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_forbidden_drop(self):

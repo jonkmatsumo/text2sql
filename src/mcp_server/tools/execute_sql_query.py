@@ -38,6 +38,7 @@ from dal.postgres_sandbox import (
     SANDBOX_FAILURE_REASON_ALLOWLIST,
     build_postgres_sandbox_metadata,
 )
+from dal.resource_containment import enforce_row_limit
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     SESSION_GUARDRAIL_SKIPPED,
@@ -485,12 +486,29 @@ async def _load_table_columns_for_rewrite(
 
 
 def _resolve_row_limit(conn: object) -> int:
-    max_rows = getattr(conn, "max_rows", None)
-    if not max_rows:
-        max_rows = getattr(conn, "_max_rows", None)
-    if not max_rows:
-        max_rows = get_sync_max_rows()
-    return int(max_rows or 0)
+    def _coerce_limit(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return 0
+            try:
+                return max(0, int(stripped))
+            except ValueError:
+                return 0
+        return 0
+
+    max_rows = _coerce_limit(getattr(conn, "max_rows", None))
+    if max_rows <= 0:
+        max_rows = _coerce_limit(getattr(conn, "_max_rows", None))
+    if max_rows <= 0:
+        max_rows = _coerce_limit(get_sync_max_rows())
+    return max_rows
 
 
 async def _cancel_best_effort(conn: object) -> None:
@@ -1317,10 +1335,28 @@ async def handler(
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
 
+        effective_row_limit = int(row_limit or 0)
+        if resource_limits.enforce_row_limit:
+            configured_row_limit = max(1, int(resource_limits.max_rows))
+            effective_row_limit = (
+                min(effective_row_limit, configured_row_limit)
+                if effective_row_limit > 0
+                else configured_row_limit
+            )
+        row_limit_result = enforce_row_limit(
+            result_rows,
+            max_rows=effective_row_limit,
+            enforce=effective_row_limit > 0,
+        )
+        result_rows = row_limit_result.rows
+        row_limit_truncated = row_limit_result.partial
+        if effective_row_limit > 0:
+            row_limit = effective_row_limit
+
         # Size Safety Valve
-        safety_limit = 1000
+        safety_limit = 0 if resource_limits.enforce_row_limit else 1000
         safety_truncated = False
-        if len(result_rows) > safety_limit:
+        if safety_limit > 0 and len(result_rows) > safety_limit:
             result_rows = result_rows[:safety_limit]
             safety_truncated = True
             row_limit = safety_limit
@@ -1356,12 +1392,20 @@ async def handler(
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
 
-        is_truncated = bool(last_truncated or safety_truncated or forced_limited or size_truncated)
+        is_truncated = bool(
+            last_truncated
+            or row_limit_truncated
+            or safety_truncated
+            or forced_limited
+            or size_truncated
+        )
         partial_reason = last_truncated_reason
         if partial_reason is None and size_truncated:
             partial_reason = PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
             partial_reason = PayloadTruncationReason.PROVIDER_CAP.value
+        if partial_reason is None and row_limit_truncated:
+            partial_reason = row_limit_result.partial_reason
         if partial_reason is None and safety_truncated:
             partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value
         if partial_reason is None and is_truncated:
