@@ -532,3 +532,103 @@ async def test_execute_sql_query_offset_pagination_rejects_limit_offset_sql():
         result["error"]["details_safe"]["reason_code"]
         == "execution_pagination_sql_contains_limit_offset"
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_byte_truncation_clears_next_token(monkeypatch):
+    """Byte truncation mid-page must clear continuation tokens."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = params
+            if "LIMIT 3 OFFSET 0" in sql:
+                return [{"blob": "x" * 64}, {"blob": "y" * 64}, {"blob": "z" * 64}]
+            return []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "90")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
+
+    result = json.loads(payload)
+    assert result["metadata"]["partial_reason"] == "max_bytes"
+    assert result["metadata"]["partial"] is True
+    assert result["metadata"].get("next_page_token") is None
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_pagination_span_parity():
+    """Pagination metadata should map deterministically to span attributes."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = params
+            if "LIMIT 3 OFFSET 0" in sql:
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+            return []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span") as mock_get_span,
+    ):
+        mock_span = mock_get_span.return_value
+        mock_span.is_recording.return_value = True
+        payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
+
+    result = json.loads(payload)
+    metadata = result["metadata"]
+    mock_span.set_attribute.assert_any_call("db.result.page_size", metadata["page_size"])
+    mock_span.set_attribute.assert_any_call(
+        "db.result.page_items_returned", metadata["page_items_returned"]
+    )
+    mock_span.set_attribute.assert_any_call(
+        "db.result.next_page_token_present", bool(metadata.get("next_page_token"))
+    )
+    mock_span.set_attribute.assert_any_call("db.result.partial", metadata["partial"])

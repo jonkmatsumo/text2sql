@@ -430,6 +430,9 @@ def _record_result_contract_observability(
     partial: bool,
     partial_reason: str | None,
     items_returned: int,
+    page_size: int | None,
+    page_items_returned: int,
+    next_page_token: str | None,
     bytes_returned: int,
     execution_duration_ms: int,
 ) -> None:
@@ -439,6 +442,10 @@ def _record_result_contract_observability(
     span.set_attribute("db.result.partial", bool(partial))
     span.set_attribute("db.result.partial_reason", partial_reason or "none")
     span.set_attribute("db.result.items_returned", int(items_returned))
+    if page_size is not None:
+        span.set_attribute("db.result.page_size", int(page_size))
+    span.set_attribute("db.result.page_items_returned", int(page_items_returned))
+    span.set_attribute("db.result.next_page_token_present", bool(next_page_token))
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
     span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
@@ -1668,6 +1675,8 @@ async def handler(
         result_rows = byte_limit_result.rows
         bytes_returned = byte_limit_result.bytes_returned
         execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
+        if size_truncated:
+            next_token = None
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -1773,6 +1782,9 @@ async def handler(
             partial=is_truncated,
             partial_reason=partial_reason,
             items_returned=len(result_rows),
+            page_size=applied_page_size,
+            page_items_returned=len(result_rows),
+            next_page_token=next_token,
             bytes_returned=bytes_returned,
             execution_duration_ms=execution_duration_ms,
         )
