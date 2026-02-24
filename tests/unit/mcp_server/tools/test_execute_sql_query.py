@@ -185,6 +185,8 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["sandbox_applied"] is True
         assert data["metadata"]["sandbox_rollback"] is False
         assert data["metadata"]["sandbox_failure_reason"] == "NONE"
+        assert data["metadata"]["session_reset_attempted"] is True
+        assert data["metadata"]["session_reset_outcome"] == "ok"
         assert (
             "SELECT set_config('default_transaction_read_only', 'on', true)",
             (),
@@ -240,6 +242,8 @@ class TestExecuteSqlQuery:
         assert metadata["sandbox_applied"] is True
         assert metadata["sandbox_rollback"] is False
         assert metadata["sandbox_failure_reason"] == "NONE"
+        assert metadata["session_reset_attempted"] is True
+        assert metadata["session_reset_outcome"] == "ok"
 
         mock_span.set_attribute.assert_any_call(
             "session.guardrail.applied", metadata["session_guardrail_applied"]
@@ -260,6 +264,12 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call("sandbox.rollback", metadata["sandbox_rollback"])
         mock_span.set_attribute.assert_any_call(
             "sandbox.failure_reason", metadata["sandbox_failure_reason"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.session.reset_attempted", metadata["session_reset_attempted"]
+        )
+        mock_span.set_attribute.assert_any_call(
+            "db.session.reset_outcome", metadata["session_reset_outcome"]
         )
 
     @pytest.mark.asyncio
@@ -300,6 +310,8 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["sandbox_applied"] is True
         assert data["metadata"]["sandbox_rollback"] is True
         assert data["metadata"]["sandbox_failure_reason"] == "TIMEOUT"
+        assert data["metadata"]["session_reset_attempted"] is True
+        assert data["metadata"]["session_reset_outcome"] == "ok"
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_session_guardrail_capability_mismatch_error(self):

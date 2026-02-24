@@ -107,6 +107,8 @@ class ExecuteSQLQueryMetadata(BaseModel):
             "UNKNOWN",
         ]
     ] = None
+    session_reset_attempted: Optional[bool] = None
+    session_reset_outcome: Optional[Literal["ok", "failed"]] = None
 
     @model_validator(mode="before")
     @classmethod

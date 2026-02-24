@@ -30,6 +30,7 @@ class _FakeConn:
         self.transactions = []
         self.transaction_exit_error = None
         self.execute_calls = []
+        self.fail_execute_for = set()
         self.fetchval_calls = []
         self.settings = {
             "role": "none",
@@ -47,6 +48,8 @@ class _FakeConn:
 
     async def execute(self, sql, *args):
         self.execute_calls.append((sql, args))
+        if sql in self.fail_execute_for:
+            raise RuntimeError(f"{sql} failed")
         if sql == "RESET ROLE":
             self.settings["role"] = "none"
         elif sql == "RESET ALL":
@@ -92,6 +95,8 @@ async def test_postgres_execution_sandbox_commits_on_success():
     assert sandbox.result.reset_role_attempted is True
     assert sandbox.result.reset_all_attempted is True
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.reset_attempted is True
+    assert sandbox.result.reset_outcome == "ok"
 
 
 @pytest.mark.asyncio
@@ -113,6 +118,8 @@ async def test_postgres_execution_sandbox_rolls_back_on_exception():
     assert sandbox.result.rolled_back is True
     assert sandbox.result.failure_reason == "QUERY_ERROR"
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.reset_attempted is True
+    assert sandbox.result.reset_outcome == "ok"
 
 
 @pytest.mark.asyncio
@@ -147,6 +154,8 @@ async def test_postgres_execution_sandbox_timeout_classification():
     assert sandbox.result.rolled_back is True
     assert sandbox.result.failure_reason == "TIMEOUT"
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.reset_attempted is True
+    assert sandbox.result.reset_outcome == "ok"
 
 
 @pytest.mark.asyncio
@@ -165,3 +174,23 @@ async def test_postgres_execution_sandbox_rollback_failure_preserves_original_er
     assert sandbox.result.committed is False
     assert sandbox.result.rolled_back is False
     assert sandbox.result.rollback_failed is True
+    assert sandbox.result.reset_attempted is True
+    assert sandbox.result.reset_outcome == "ok"
+
+
+@pytest.mark.asyncio
+async def test_postgres_execution_sandbox_reset_failure_preserves_original_error():
+    """Reset command failures should not mask the original execution exception."""
+    conn = _FakeConn()
+    conn.fail_execute_for.add("RESET ALL")
+    sandbox = PostgresExecutionSandbox(conn, read_only=True)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with sandbox:
+            raise RuntimeError("boom")
+
+    assert sandbox.result.committed is False
+    assert sandbox.result.rolled_back is True
+    assert sandbox.result.rollback_failed is False
+    assert sandbox.result.reset_attempted is True
+    assert sandbox.result.reset_outcome == "failed"

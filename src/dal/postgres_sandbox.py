@@ -40,12 +40,17 @@ def build_postgres_sandbox_metadata(
     applied: bool,
     rollback: bool,
     failure_reason: str,
+    reset_attempted: bool = False,
+    reset_outcome: str = "failed",
 ) -> dict[str, Any]:
     """Build bounded sandbox metadata shared by spans and envelopes."""
+    normalized_reset_outcome = "ok" if str(reset_outcome).strip().lower() == "ok" else "failed"
     return {
         "sandbox_applied": bool(applied),
         "sandbox_rollback": bool(rollback),
         "sandbox_failure_reason": bound_sandbox_failure_reason(failure_reason),
+        "session_reset_attempted": bool(reset_attempted),
+        "session_reset_outcome": normalized_reset_outcome,
     }
 
 
@@ -78,6 +83,8 @@ class PostgresExecutionSandboxResult:
     state_clean: bool
     failure_reason: str
     rollback_failed: bool
+    reset_attempted: bool
+    reset_outcome: str
 
 
 class PostgresExecutionSandbox:
@@ -106,6 +113,8 @@ class PostgresExecutionSandbox:
             state_clean=True,
             failure_reason=SANDBOX_FAILURE_NONE,
             rollback_failed=False,
+            reset_attempted=False,
+            reset_outcome="failed",
         )
         self._update_metadata_sink()
 
@@ -114,6 +123,8 @@ class PostgresExecutionSandbox:
             applied=True,
             rollback=self.result.rolled_back,
             failure_reason=self.result.failure_reason,
+            reset_attempted=self.result.reset_attempted,
+            reset_outcome=self.result.reset_outcome,
         )
 
     def _update_metadata_sink(self) -> None:
@@ -160,15 +171,15 @@ class PostgresExecutionSandbox:
             return None
         return str(value)
 
-    async def _safe_execute(self, sql: str) -> bool:
+    async def _safe_execute(self, sql: str) -> tuple[bool, bool]:
         execute = getattr(self._conn, "execute", None)
         if not callable(execute):
-            return False
+            return (False, False)
         try:
             await execute(sql)
-            return True
+            return (True, True)
         except Exception:
-            return False
+            return (True, False)
 
     async def _capture_baseline_state(self) -> None:
         self._baseline_role = await self._safe_fetchval("SELECT current_setting('role', true)")
@@ -218,24 +229,28 @@ class PostgresExecutionSandbox:
             await self._transaction.__aexit__(exc_type, exc_val, exc_tb)
         except Exception as tx_exit_error:
             transaction_exit_error = tx_exit_error
-        reset_role_attempted = await self._safe_execute("RESET ROLE")
-        reset_all_attempted = await self._safe_execute("RESET ALL")
+        reset_role_was_attempted, reset_role_success = await self._safe_execute("RESET ROLE")
+        reset_all_was_attempted, reset_all_success = await self._safe_execute("RESET ALL")
+        reset_attempted = reset_role_was_attempted or reset_all_was_attempted
+        reset_outcome = "ok" if reset_role_success and reset_all_success else "failed"
         state_clean, drift_keys = await self._validate_clean_state()
         self._drift_keys = drift_keys
         failure_reason = self._classify_failure_reason(exc_val)
         if failure_reason == SANDBOX_FAILURE_NONE:
-            if not reset_role_attempted or not reset_all_attempted:
+            if not reset_role_success or not reset_all_success:
                 failure_reason = SANDBOX_FAILURE_RESET_FAILURE
             elif not state_clean:
                 failure_reason = SANDBOX_FAILURE_STATE_DRIFT
         self.result = PostgresExecutionSandboxResult(
             committed=exc_type is None and transaction_exit_error is None,
             rolled_back=exc_type is not None and transaction_exit_error is None,
-            reset_role_attempted=reset_role_attempted,
-            reset_all_attempted=reset_all_attempted,
+            reset_role_attempted=reset_role_success,
+            reset_all_attempted=reset_all_success,
             state_clean=state_clean,
             failure_reason=failure_reason,
             rollback_failed=exc_type is not None and transaction_exit_error is not None,
+            reset_attempted=reset_attempted,
+            reset_outcome=reset_outcome,
         )
         metadata = self._result_metadata()
         self._update_metadata_sink()
