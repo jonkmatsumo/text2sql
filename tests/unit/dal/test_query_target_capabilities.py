@@ -85,6 +85,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_cost_estimation is False
         assert caps.supports_restricted_session is True
         assert caps.supports_execution_role is True
+        assert caps.supports_offset_pagination_wrapper is True
+        assert caps.supports_query_wrapping_subselect is True
 
     def test_sqlite_capabilities(self):
         """The SQLite backend has transactions but no arrays/JSON ops."""
@@ -138,6 +140,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_cost_estimation is True
         assert caps.supports_db_readonly_session is False
         assert caps.enforces_statement_read_only is True
+        assert caps.supports_offset_pagination_wrapper is False
+        assert caps.supports_query_wrapping_subselect is False
 
     def test_athena_capabilities(self):
         """Ensure Athena reports async execution."""
@@ -171,6 +175,8 @@ class TestProviderSpecificCapabilities:
         assert caps.supports_json_ops is True
         assert caps.supports_transactions is True
         assert caps.supports_fk_enforcement is False
+        assert caps.supports_offset_pagination_wrapper is True
+        assert caps.supports_query_wrapping_subselect is True
 
     def test_clickhouse_capabilities(self):
         """The ClickHouse backend is append-only OLAP with minimal feature support."""
