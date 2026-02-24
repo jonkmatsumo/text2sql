@@ -38,7 +38,7 @@ from dal.postgres_sandbox import (
     SANDBOX_FAILURE_REASON_ALLOWLIST,
     build_postgres_sandbox_metadata,
 )
-from dal.resource_containment import enforce_row_limit
+from dal.resource_containment import enforce_byte_limit, enforce_row_limit
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     SESSION_GUARDRAIL_SKIPPED,
@@ -48,7 +48,6 @@ from dal.session_guardrails import (
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
-from mcp_server.utils.json_budget import JSONBudget
 from mcp_server.utils.provider import resolve_provider
 
 TOOL_NAME = "execute_sql_query"
@@ -1232,6 +1231,7 @@ async def handler(
         columns = None
         last_truncated = False
         row_limit = 0
+        bytes_returned = 0
         next_token = None
         conn = None
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
@@ -1370,24 +1370,16 @@ async def handler(
             forced_limited = True
             row_limit = force_result_limit
 
-        # JSON Size Budget
-        max_bytes = get_env_int("MCP_JSON_PAYLOAD_LIMIT_BYTES", 2 * 1024 * 1024)
-        budget = JSONBudget(max_bytes)
-        safe_rows = []
-        size_truncated = False
-
-        # Approximate envelope overhead
-        # In new envelope, we have additional overhead from ErrorMetadata structure
-        # if present (none here) but also Metadata fields.
-        budget.consume({"metadata": {}, "rows": []})
-
-        for row in result_rows:
-            if not budget.consume(row):
-                size_truncated = True
-                break
-            safe_rows.append(row)
-
-        result_rows = safe_rows
+        byte_limit_result = enforce_byte_limit(
+            result_rows,
+            max_bytes=int(resource_limits.max_bytes),
+            enforce=resource_limits.enforce_byte_limit,
+            envelope_overhead={"metadata": {}, "rows": []},
+        )
+        size_truncated = byte_limit_result.partial
+        size_truncated_reason = byte_limit_result.partial_reason
+        result_rows = byte_limit_result.rows
+        bytes_returned = byte_limit_result.bytes_returned
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -1401,7 +1393,7 @@ async def handler(
         )
         partial_reason = last_truncated_reason
         if partial_reason is None and size_truncated:
-            partial_reason = PayloadTruncationReason.MAX_BYTES.value
+            partial_reason = size_truncated_reason or PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
             partial_reason = PayloadTruncationReason.PROVIDER_CAP.value
         if partial_reason is None and row_limit_truncated:
@@ -1434,6 +1426,7 @@ async def handler(
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
             partial_reason=partial_reason,
+            bytes_returned=bytes_returned,
             cap_detected=cap_detected,
             cap_mitigation_applied=cap_mitigation_applied,
             cap_mitigation_mode=cap_mitigation_mode,
