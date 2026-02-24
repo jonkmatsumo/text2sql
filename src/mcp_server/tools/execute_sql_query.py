@@ -1365,16 +1365,28 @@ async def handler(
     )
     if unsupported_response is not None:
         return unsupported_response
-    unsupported_response = _negotiate_if_required(
-        "pagination",
-        bool(page_token or page_size),
-        bool(
-            getattr(caps, "supports_pagination", False)
-            or getattr(caps, "execution_model", "sync") == "sync"
-        ),
+    supports_server_pagination = bool(getattr(caps, "supports_pagination", False))
+    supports_offset_pagination_wrapper = bool(
+        getattr(caps, "supports_offset_pagination_wrapper", False)
     )
-    if unsupported_response is not None:
-        return unsupported_response
+    supports_query_wrapping_subselect = bool(
+        getattr(caps, "supports_query_wrapping_subselect", False)
+    )
+    pagination_requested = bool(page_token or page_size)
+    if pagination_requested and not (
+        supports_server_pagination
+        or (supports_offset_pagination_wrapper and supports_query_wrapping_subselect)
+    ):
+        return _construct_error_response(
+            "Pagination is not supported for this provider.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={
+                "reason_code": "execution_pagination_unsupported_provider",
+                "required_capability": "pagination",
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
@@ -1491,7 +1503,7 @@ async def handler(
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 pagination_requested = bool(page_token or effective_page_size)
-                if pagination_requested and callable(fetch_page):
+                if pagination_requested and supports_server_pagination and callable(fetch_page):
                     if include_columns and callable(fetch_page_with_columns):
                         rows, columns, next_token = await fetch_page_with_columns(
                             effective_sql_query,
@@ -1507,12 +1519,21 @@ async def handler(
                         *effective_params,
                     )
                     return rows
-                if pagination_requested and not callable(fetch_page):
+                if pagination_requested and (
+                    not callable(fetch_page) or not supports_server_pagination
+                ):
+                    if not (
+                        supports_offset_pagination_wrapper and supports_query_wrapping_subselect
+                    ):
+                        raise OffsetPaginationTokenError(
+                            reason_code="execution_pagination_unsupported_provider",
+                            message="Pagination is not supported for this provider.",
+                        )
                     if _query_contains_limit_or_offset(effective_sql_query, provider):
                         raise OffsetPaginationTokenError(
                             reason_code="execution_pagination_sql_contains_limit_offset",
                             message=(
-                                "Pagination is not supported for SQL with " "LIMIT/OFFSET clauses."
+                                "Pagination is not supported for SQL with LIMIT/OFFSET clauses."
                             ),
                         )
                     pagination_offset = 0
@@ -1532,7 +1553,7 @@ async def handler(
                             raise OffsetPaginationTokenError(
                                 reason_code="execution_pagination_page_size_mismatch",
                                 message=(
-                                    "Pagination token limit does not match requested " "page_size."
+                                    "Pagination token limit does not match requested page_size."
                                 ),
                             )
                     if pagination_limit <= 0:

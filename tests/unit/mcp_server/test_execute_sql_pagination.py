@@ -21,6 +21,8 @@ async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
         supports_cancel=True,
         supports_pagination=False,
         execution_model="async",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
     with (
         patch(
@@ -42,11 +44,9 @@ async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
     result = json.loads(payload)
     assert "error" in result
     error_obj = result["error"]
-    assert error_obj["category"] in ["unknown", "unsupported_capability"]
-    if error_obj["category"] == "unsupported_capability":
-        details = error_obj.get("details_safe") or {}
-        required = details.get("required_capability") or details.get("capability_required")
-        assert required == "pagination"
+    assert error_obj["category"] == "invalid_request"
+    details = error_obj.get("details_safe") or {}
+    assert details.get("reason_code") == "execution_pagination_unsupported_provider"
 
 
 @pytest.mark.asyncio
@@ -58,6 +58,8 @@ async def test_execute_sql_query_pagination_suggests_fallback(monkeypatch):
         supports_cancel=True,
         supports_pagination=False,
         execution_model="async",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
     with (
         patch(
@@ -78,10 +80,9 @@ async def test_execute_sql_query_pagination_suggests_fallback(monkeypatch):
 
     result = json.loads(payload)
     error_obj = result["error"]
-    assert error_obj["category"] == "unsupported_capability"
+    assert error_obj["category"] == "invalid_request"
     details = error_obj.get("details_safe") or {}
-    assert details["fallback_applied"] is False
-    assert details["fallback_mode"] == "force_limited_results"
+    assert details["reason_code"] == "execution_pagination_unsupported_provider"
 
 
 @pytest.mark.asyncio
@@ -92,6 +93,8 @@ async def test_execute_sql_query_pagination_metadata():
         supports_cancel=True,
         supports_pagination=True,
         execution_model="sync",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
 
     class _Conn:
@@ -138,6 +141,8 @@ async def test_execute_sql_query_pagination_bounds():
         supports_cancel=True,
         supports_pagination=True,
         execution_model="sync",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
 
     class _Conn:
@@ -213,6 +218,8 @@ async def test_execute_sql_query_pagination_backcompat():
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
 
     class _Conn:
@@ -301,6 +308,8 @@ async def test_execute_sql_query_pagination_apply_mode_forces_limited_results(mo
         supports_cancel=True,
         supports_pagination=False,
         execution_model="async",
+        supports_offset_pagination_wrapper=False,
+        supports_query_wrapping_subselect=False,
     )
 
     class _Conn:
@@ -325,15 +334,11 @@ async def test_execute_sql_query_pagination_apply_mode_forces_limited_results(mo
         payload = await handler("SELECT 1", tenant_id=1, page_size=1)
 
     result = json.loads(payload)
-    assert result["rows"] == [{"id": 1}]
-    assert result["metadata"]["is_truncated"] is True
-    from common.constants.reason_codes import PayloadTruncationReason
-
-    assert result["metadata"]["partial_reason"] == PayloadTruncationReason.PROVIDER_CAP.value
-    assert result["metadata"]["capability_required"] == "pagination"
-    assert result["metadata"]["capability_supported"] is False
-    assert result["metadata"]["fallback_applied"] is True
-    assert result["metadata"]["fallback_mode"] == "force_limited_results"
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_unsupported_provider"
+    )
 
 
 @pytest.mark.asyncio
@@ -344,6 +349,8 @@ async def test_execute_sql_query_offset_pagination_token_mismatch_rejected():
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
@@ -398,6 +405,8 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
@@ -456,6 +465,8 @@ async def test_execute_sql_query_offset_pagination_wrapper_not_marked_partial():
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
@@ -498,6 +509,8 @@ async def test_execute_sql_query_offset_pagination_rejects_limit_offset_sql():
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
@@ -542,6 +555,8 @@ async def test_execute_sql_query_offset_pagination_byte_truncation_clears_next_t
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
@@ -589,6 +604,8 @@ async def test_execute_sql_query_pagination_span_parity():
         supports_cancel=True,
         supports_pagination=False,
         execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
     )
 
     class _Conn:
