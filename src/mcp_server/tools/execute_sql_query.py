@@ -34,6 +34,12 @@ from dal.capability_negotiation import (
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
 from dal.execution_resource_limits import ExecutionResourceLimits
+from dal.offset_pagination import (
+    OffsetPaginationTokenError,
+    build_query_fingerprint,
+    decode_offset_pagination_token,
+    encode_offset_pagination_token,
+)
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
     SANDBOX_FAILURE_REASON_ALLOWLIST,
@@ -80,6 +86,7 @@ _SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 _SESSION_RESET_OUTCOME_ALLOWLIST = {"ok", "failed"}
 _SANDBOX_OUTCOME_ALLOWLIST = {"committed", "rolled_back", "rollback_failed"}
 _DEFAULT_PAGE_TOKEN_MAX_LENGTH = 2048
+_DEFAULT_PAGINATION_MAX_OFFSET_PAGES = 1000
 _PARTIAL_REASON_ALLOWLIST = {
     PayloadTruncationReason.MAX_ROWS.value,
     PayloadTruncationReason.MAX_BYTES.value,
@@ -387,6 +394,26 @@ def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
             "execution_timeout_triggered": timeout_triggered,
         },
     )
+
+
+def _query_contains_limit_or_offset(sql: str, provider: str) -> bool:
+    """Return True when SQL explicitly includes LIMIT/OFFSET clauses."""
+    import sqlglot
+    import sqlglot.expressions as exp
+
+    from common.sql.comments import strip_sql_comments
+
+    normalized_sql = strip_sql_comments(sql)
+    dialect = normalize_sqlglot_dialect(provider)
+    try:
+        expressions = sqlglot.parse(normalized_sql, read=dialect)
+    except Exception:
+        # Fail closed for pagination wrapper eligibility checks.
+        return True
+    if not expressions:
+        return True
+    expression = expressions[0]
+    return expression.find(exp.Limit) is not None or expression.find(exp.Offset) is not None
 
 
 def _normalize_partial_reason(reason: str | None) -> str | None:
@@ -1334,7 +1361,10 @@ async def handler(
     unsupported_response = _negotiate_if_required(
         "pagination",
         bool(page_token or page_size),
-        caps.supports_pagination,
+        bool(
+            getattr(caps, "supports_pagination", False)
+            or getattr(caps, "execution_model", "sync") == "sync"
+        ),
     )
     if unsupported_response is not None:
         return unsupported_response
@@ -1342,6 +1372,16 @@ async def handler(
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
     )
+    max_offset_pages = max(
+        1,
+        int(
+            get_env_int(
+                "EXECUTION_PAGINATION_MAX_OFFSET_PAGES", _DEFAULT_PAGINATION_MAX_OFFSET_PAGES
+            )
+            or _DEFAULT_PAGINATION_MAX_OFFSET_PAGES
+        ),
+    )
+    pagination_token_secret = (get_env_str("EXECUTION_PAGINATION_TOKEN_SECRET", "") or "").strip()
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -1406,6 +1446,15 @@ async def handler(
         applied_page_size = page_size
         conn = None
         execution_started_at = time.monotonic()
+        query_fingerprint = build_query_fingerprint(
+            sql=effective_sql_query,
+            params=effective_params,
+            tenant_id=tenant_id,
+            provider=provider,
+            max_rows=int(resource_limits.max_rows),
+            max_bytes=int(resource_limits.max_bytes),
+            max_execution_ms=int(resource_limits.max_execution_ms),
+        )
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
@@ -1434,7 +1483,8 @@ async def handler(
                 nonlocal columns, next_token
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
-                if (page_token or effective_page_size) and callable(fetch_page):
+                pagination_requested = bool(page_token or effective_page_size)
+                if pagination_requested and callable(fetch_page):
                     if include_columns and callable(fetch_page_with_columns):
                         rows, columns, next_token = await fetch_page_with_columns(
                             effective_sql_query,
@@ -1449,6 +1499,65 @@ async def handler(
                         effective_page_size,
                         *effective_params,
                     )
+                    return rows
+                if pagination_requested and not callable(fetch_page):
+                    if _query_contains_limit_or_offset(effective_sql_query, provider):
+                        raise OffsetPaginationTokenError(
+                            reason_code="execution_pagination_sql_contains_limit_offset",
+                            message=(
+                                "Pagination is not supported for SQL with " "LIMIT/OFFSET clauses."
+                            ),
+                        )
+                    pagination_offset = 0
+                    pagination_limit = int(effective_page_size or 0)
+                    if page_token:
+                        token_payload = decode_offset_pagination_token(
+                            token=page_token,
+                            expected_fingerprint=query_fingerprint,
+                            max_length=max_page_token_len,
+                            secret=pagination_token_secret or None,
+                        )
+                        pagination_offset = token_payload.offset
+                        pagination_limit = token_payload.limit
+                        if effective_page_size is not None and int(effective_page_size) != int(
+                            token_payload.limit
+                        ):
+                            raise OffsetPaginationTokenError(
+                                reason_code="execution_pagination_page_size_mismatch",
+                                message=(
+                                    "Pagination token limit does not match requested " "page_size."
+                                ),
+                            )
+                    if pagination_limit <= 0:
+                        raise OffsetPaginationTokenError(
+                            reason_code="execution_pagination_page_size_invalid",
+                            message="Pagination requires a positive page_size.",
+                        )
+                    if pagination_offset > max_offset_pages * pagination_limit:
+                        raise OffsetPaginationTokenError(
+                            reason_code="execution_pagination_offset_exceeds_limit",
+                            message="Pagination offset exceeds configured bounds.",
+                        )
+                    wrapped_limit = pagination_limit + 1
+                    wrapped_sql = (
+                        f"SELECT * FROM ({effective_sql_query}) AS text2sql_page "
+                        f"LIMIT {wrapped_limit} OFFSET {pagination_offset}"
+                    )
+                    if effective_params:
+                        rows = await conn.fetch(wrapped_sql, *effective_params)
+                    else:
+                        rows = await conn.fetch(wrapped_sql)
+                    rows = [dict(row) for row in rows]
+                    if len(rows) > pagination_limit:
+                        rows = rows[:pagination_limit]
+                        next_token = encode_offset_pagination_token(
+                            offset=pagination_offset + pagination_limit,
+                            limit=pagination_limit,
+                            fingerprint=query_fingerprint,
+                            secret=pagination_token_secret or None,
+                        )
+                    else:
+                        next_token = None
                     return rows
                 if include_columns:
                     fetch_with_columns = getattr(conn, "fetch_with_columns", None)
@@ -1679,6 +1788,15 @@ async def handler(
             message="Execution timed out.",
             category=ErrorCategory.TIMEOUT,
             provider=provider,
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+    except OffsetPaginationTokenError as e:
+        provider = _active_provider()
+        return _construct_error_response(
+            message=str(e),
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": e.reason_code},
             envelope_metadata=tenant_enforcement_metadata,
         )
     except SessionGuardrailPolicyError as e:

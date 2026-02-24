@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
+from dal.execution_resource_limits import ExecutionResourceLimits
+from dal.offset_pagination import build_query_fingerprint, encode_offset_pagination_token
 from mcp_server.tools.execute_sql_query import handler
 
 
@@ -18,7 +20,7 @@ async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
         supports_column_metadata=True,
         supports_cancel=True,
         supports_pagination=False,
-        execution_model="sync",
+        execution_model="async",
     )
     with (
         patch(
@@ -55,7 +57,7 @@ async def test_execute_sql_query_pagination_suggests_fallback(monkeypatch):
         supports_column_metadata=True,
         supports_cancel=True,
         supports_pagination=False,
-        execution_model="sync",
+        execution_model="async",
     )
     with (
         patch(
@@ -107,6 +109,10 @@ async def test_execute_sql_query_pagination_metadata():
             return_value=caps,
         ),
         patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             return_value=_conn_ctx(),
         ),
@@ -149,6 +155,10 @@ async def test_execute_sql_query_pagination_bounds():
             return_value=caps,
         ),
         patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
             return_value=_conn_ctx(),
         ),
@@ -170,6 +180,10 @@ async def test_execute_sql_query_pagination_bounds():
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
             return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
@@ -286,7 +300,7 @@ async def test_execute_sql_query_pagination_apply_mode_forces_limited_results(mo
         supports_column_metadata=True,
         supports_cancel=True,
         supports_pagination=False,
-        execution_model="sync",
+        execution_model="async",
     )
 
     class _Conn:
@@ -320,3 +334,201 @@ async def test_execute_sql_query_pagination_apply_mode_forces_limited_results(mo
     assert result["metadata"]["capability_supported"] is False
     assert result["metadata"]["fallback_applied"] is True
     assert result["metadata"]["fallback_mode"] == "force_limited_results"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_token_mismatch_rejected():
+    """Tokens should fail when replayed against a different SQL fingerprint."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = params
+            if "LIMIT 3 OFFSET 0" in sql:
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+            return [{"id": 4}, {"id": 5}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        first_payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        token = first["metadata"]["next_page_token"]
+        second_payload = await handler(
+            "SELECT 2 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=token,
+        )
+
+    second = json.loads(second_payload)
+    assert second["error"]["category"] == "invalid_request"
+    assert (
+        second["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_page_token_fingerprint_mismatch"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypatch):
+    """Offset bounds should fail closed for deterministic token paging."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    monkeypatch.setenv("EXECUTION_PAGINATION_MAX_OFFSET_PAGES", "1")
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(offset=999, limit=2, fingerprint=fingerprint)
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_offset_exceeds_limit"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_wrapper_not_marked_partial():
+    """Page slicing for pagination should not set partial truncation semantics."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = params
+            if "LIMIT 3 OFFSET 0" in sql:
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+            return []
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler("SELECT 1 AS id", tenant_id=1, page_size=2)
+
+    result = json.loads(payload)
+    assert result["rows"] == [{"id": 1}, {"id": 2}]
+    assert result["metadata"]["partial"] is False
+    assert result["metadata"]["is_truncated"] is False
+    assert result["metadata"].get("partial_reason") is None
+    assert result["metadata"]["next_page_token"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_rejects_limit_offset_sql():
+    """Offset-wrapper mode should fail closed on SQL with LIMIT/OFFSET already present."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler("SELECT 1 AS id LIMIT 10", tenant_id=1, page_size=2)
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_sql_contains_limit_offset"
+    )
