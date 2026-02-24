@@ -183,6 +183,7 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["execution_role_name"] == "text2sql_readonly"
         assert data["metadata"]["restricted_session_mode"] == "set_local_config"
         assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_outcome"] == "committed"
         assert data["metadata"]["sandbox_rollback"] is False
         assert data["metadata"]["sandbox_failure_reason"] == "NONE"
         assert data["metadata"]["session_reset_attempted"] is True
@@ -240,6 +241,7 @@ class TestExecuteSqlQuery:
         assert metadata["restricted_session_mode"] == "set_local_config"
         assert metadata.get("session_guardrail_capability_mismatch") is None
         assert metadata["sandbox_applied"] is True
+        assert metadata["sandbox_outcome"] == "committed"
         assert metadata["sandbox_rollback"] is False
         assert metadata["sandbox_failure_reason"] == "NONE"
         assert metadata["session_reset_attempted"] is True
@@ -264,6 +266,12 @@ class TestExecuteSqlQuery:
         mock_span.set_attribute.assert_any_call("sandbox.rollback", metadata["sandbox_rollback"])
         mock_span.set_attribute.assert_any_call(
             "sandbox.failure_reason", metadata["sandbox_failure_reason"]
+        )
+        mock_span.set_attribute.assert_any_call("db.sandbox.applied", metadata["sandbox_applied"])
+        mock_span.set_attribute.assert_any_call("db.sandbox.outcome", metadata["sandbox_outcome"])
+        assert not any(
+            call.args and call.args[0] == "db.sandbox.failure_reason"
+            for call in mock_span.set_attribute.call_args_list
         )
         mock_span.set_attribute.assert_any_call(
             "db.session.reset_attempted", metadata["session_reset_attempted"]
@@ -308,6 +316,7 @@ class TestExecuteSqlQuery:
         data = json.loads(result)
         assert data["error"]["category"] == "timeout"
         assert data["metadata"]["sandbox_applied"] is True
+        assert data["metadata"]["sandbox_outcome"] == "rolled_back"
         assert data["metadata"]["sandbox_rollback"] is True
         assert data["metadata"]["sandbox_failure_reason"] == "TIMEOUT"
         assert data["metadata"]["session_reset_attempted"] is True

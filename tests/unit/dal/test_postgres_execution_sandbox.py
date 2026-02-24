@@ -95,6 +95,7 @@ async def test_postgres_execution_sandbox_commits_on_success():
     assert sandbox.result.reset_role_attempted is True
     assert sandbox.result.reset_all_attempted is True
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.sandbox_outcome == "committed"
     assert sandbox.result.reset_attempted is True
     assert sandbox.result.reset_outcome == "ok"
 
@@ -118,6 +119,7 @@ async def test_postgres_execution_sandbox_rolls_back_on_exception():
     assert sandbox.result.rolled_back is True
     assert sandbox.result.failure_reason == "QUERY_ERROR"
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.sandbox_outcome == "rolled_back"
     assert sandbox.result.reset_attempted is True
     assert sandbox.result.reset_outcome == "ok"
 
@@ -154,6 +156,7 @@ async def test_postgres_execution_sandbox_timeout_classification():
     assert sandbox.result.rolled_back is True
     assert sandbox.result.failure_reason == "TIMEOUT"
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.sandbox_outcome == "rolled_back"
     assert sandbox.result.reset_attempted is True
     assert sandbox.result.reset_outcome == "ok"
 
@@ -174,6 +177,7 @@ async def test_postgres_execution_sandbox_rollback_failure_preserves_original_er
     assert sandbox.result.committed is False
     assert sandbox.result.rolled_back is False
     assert sandbox.result.rollback_failed is True
+    assert sandbox.result.sandbox_outcome == "rollback_failed"
     assert sandbox.result.reset_attempted is True
     assert sandbox.result.reset_outcome == "ok"
 
@@ -192,5 +196,6 @@ async def test_postgres_execution_sandbox_reset_failure_preserves_original_error
     assert sandbox.result.committed is False
     assert sandbox.result.rolled_back is True
     assert sandbox.result.rollback_failed is False
+    assert sandbox.result.sandbox_outcome == "rolled_back"
     assert sandbox.result.reset_attempted is True
     assert sandbox.result.reset_outcome == "failed"

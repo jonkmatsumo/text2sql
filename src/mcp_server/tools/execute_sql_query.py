@@ -71,6 +71,7 @@ _SESSION_GUARDRAIL_OUTCOME_ALLOWLIST = {
 _RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
 _SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 _SESSION_RESET_OUTCOME_ALLOWLIST = {"ok", "failed"}
+_SANDBOX_OUTCOME_ALLOWLIST = {"committed", "rolled_back", "rollback_failed"}
 
 
 @dataclass(frozen=True)
@@ -235,12 +236,17 @@ def _extract_postgres_sandbox_metadata(source: object) -> dict[str, Any]:
         if failure_reason_raw in _SANDBOX_FAILURE_REASON_ALLOWLIST
         else SANDBOX_FAILURE_NONE
     )
+    sandbox_outcome_raw = str(raw_metadata.get("sandbox_outcome") or "").strip().lower()
+    sandbox_outcome = (
+        sandbox_outcome_raw if sandbox_outcome_raw in _SANDBOX_OUTCOME_ALLOWLIST else "committed"
+    )
     reset_outcome_raw = str(raw_metadata.get("session_reset_outcome") or "").strip().lower()
     reset_outcome = (
         reset_outcome_raw if reset_outcome_raw in _SESSION_RESET_OUTCOME_ALLOWLIST else "failed"
     )
     return {
         "sandbox_applied": bool(raw_metadata.get("sandbox_applied")),
+        "sandbox_outcome": sandbox_outcome,
         "sandbox_rollback": bool(raw_metadata.get("sandbox_rollback")),
         "sandbox_failure_reason": failure_reason,
         "session_reset_attempted": bool(raw_metadata.get("session_reset_attempted")),
@@ -248,11 +254,28 @@ def _extract_postgres_sandbox_metadata(source: object) -> dict[str, Any]:
     }
 
 
+def _bounded_db_sandbox_failure_reason(raw_reason: str) -> str | None:
+    normalized = str(raw_reason or "").strip().upper()
+    if normalized == "TIMEOUT":
+        return "timeout"
+    if normalized == "QUERY_ERROR":
+        return "execution_error"
+    if normalized == "ROLE_SWITCH_FAILURE":
+        return "role_error"
+    if normalized in {"RESET_FAILURE", "STATE_DRIFT"}:
+        return "reset_error"
+    if normalized == "UNKNOWN":
+        return "unknown"
+    return None
+
+
 def _sandbox_observability_fields(
     metadata: dict[str, Any] | None,
-) -> tuple[bool, bool, str, bool, str]:
+) -> tuple[bool, str, bool, str, str | None, bool, str]:
     sandbox_metadata = metadata if isinstance(metadata, dict) else {}
     applied = bool(sandbox_metadata.get("sandbox_applied"))
+    outcome_raw = str(sandbox_metadata.get("sandbox_outcome") or "").strip().lower()
+    outcome = outcome_raw if outcome_raw in _SANDBOX_OUTCOME_ALLOWLIST else "committed"
     rollback = bool(sandbox_metadata.get("sandbox_rollback"))
     failure_reason_raw = str(sandbox_metadata.get("sandbox_failure_reason") or "").strip().upper()
     failure_reason = (
@@ -260,23 +283,42 @@ def _sandbox_observability_fields(
         if failure_reason_raw in _SANDBOX_FAILURE_REASON_ALLOWLIST
         else SANDBOX_FAILURE_NONE
     )
+    db_failure_reason = _bounded_db_sandbox_failure_reason(failure_reason)
     reset_attempted = bool(sandbox_metadata.get("session_reset_attempted"))
     reset_outcome_raw = str(sandbox_metadata.get("session_reset_outcome") or "").strip().lower()
     reset_outcome = (
         reset_outcome_raw if reset_outcome_raw in _SESSION_RESET_OUTCOME_ALLOWLIST else "failed"
     )
-    return applied, rollback, failure_reason, reset_attempted, reset_outcome
+    return (
+        applied,
+        outcome,
+        rollback,
+        failure_reason,
+        db_failure_reason,
+        reset_attempted,
+        reset_outcome,
+    )
 
 
 def _record_sandbox_observability(metadata: dict[str, Any] | None) -> None:
-    applied, rollback, failure_reason, reset_attempted, reset_outcome = (
-        _sandbox_observability_fields(metadata)
-    )
+    (
+        applied,
+        outcome,
+        rollback,
+        failure_reason,
+        db_failure_reason,
+        reset_attempted,
+        reset_outcome,
+    ) = _sandbox_observability_fields(metadata)
     span = trace.get_current_span()
     if span is not None and span.is_recording():
         span.set_attribute("sandbox.applied", applied)
         span.set_attribute("sandbox.rollback", rollback)
         span.set_attribute("sandbox.failure_reason", failure_reason)
+        span.set_attribute("db.sandbox.applied", applied)
+        span.set_attribute("db.sandbox.outcome", outcome)
+        if outcome != "committed" and db_failure_reason is not None:
+            span.set_attribute("db.sandbox.failure_reason", db_failure_reason)
         span.set_attribute("db.session.reset_attempted", reset_attempted)
         span.set_attribute("db.session.reset_outcome", reset_outcome)
 
@@ -286,8 +328,10 @@ def _record_sandbox_observability(metadata: dict[str, Any] | None) -> None:
         attributes={
             "tool_name": TOOL_NAME,
             "applied": applied,
+            "sandbox_outcome": outcome,
             "rollback": rollback,
             "failure_reason": failure_reason,
+            "db_failure_reason": db_failure_reason or "none",
             "session_reset_attempted": reset_attempted,
             "session_reset_outcome": reset_outcome,
         },
@@ -1360,6 +1404,7 @@ async def handler(
                 "session_guardrail_capability_mismatch"
             ),
             sandbox_applied=tenant_enforcement_metadata.get("sandbox_applied"),
+            sandbox_outcome=tenant_enforcement_metadata.get("sandbox_outcome"),
             sandbox_rollback=tenant_enforcement_metadata.get("sandbox_rollback"),
             sandbox_failure_reason=tenant_enforcement_metadata.get("sandbox_failure_reason"),
             session_reset_attempted=tenant_enforcement_metadata.get("session_reset_attempted"),

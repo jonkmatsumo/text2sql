@@ -40,13 +40,18 @@ def build_postgres_sandbox_metadata(
     applied: bool,
     rollback: bool,
     failure_reason: str,
+    sandbox_outcome: str = "committed",
     reset_attempted: bool = False,
     reset_outcome: str = "failed",
 ) -> dict[str, Any]:
     """Build bounded sandbox metadata shared by spans and envelopes."""
     normalized_reset_outcome = "ok" if str(reset_outcome).strip().lower() == "ok" else "failed"
+    normalized_sandbox_outcome = str(sandbox_outcome).strip().lower()
+    if normalized_sandbox_outcome not in {"committed", "rolled_back", "rollback_failed"}:
+        normalized_sandbox_outcome = "committed"
     return {
         "sandbox_applied": bool(applied),
+        "sandbox_outcome": normalized_sandbox_outcome,
         "sandbox_rollback": bool(rollback),
         "sandbox_failure_reason": bound_sandbox_failure_reason(failure_reason),
         "session_reset_attempted": bool(reset_attempted),
@@ -83,6 +88,7 @@ class PostgresExecutionSandboxResult:
     state_clean: bool
     failure_reason: str
     rollback_failed: bool
+    sandbox_outcome: str
     reset_attempted: bool
     reset_outcome: str
 
@@ -113,6 +119,7 @@ class PostgresExecutionSandbox:
             state_clean=True,
             failure_reason=SANDBOX_FAILURE_NONE,
             rollback_failed=False,
+            sandbox_outcome="committed",
             reset_attempted=False,
             reset_outcome="failed",
         )
@@ -121,6 +128,7 @@ class PostgresExecutionSandbox:
     def _result_metadata(self) -> dict[str, Any]:
         return build_postgres_sandbox_metadata(
             applied=True,
+            sandbox_outcome=self.result.sandbox_outcome,
             rollback=self.result.rolled_back,
             failure_reason=self.result.failure_reason,
             reset_attempted=self.result.reset_attempted,
@@ -241,6 +249,15 @@ class PostgresExecutionSandbox:
                 failure_reason = SANDBOX_FAILURE_RESET_FAILURE
             elif not state_clean:
                 failure_reason = SANDBOX_FAILURE_STATE_DRIFT
+        sandbox_outcome = (
+            "rollback_failed"
+            if exc_type is not None and transaction_exit_error is not None
+            else (
+                "committed"
+                if exc_type is None and transaction_exit_error is None
+                else "rolled_back"
+            )
+        )
         self.result = PostgresExecutionSandboxResult(
             committed=exc_type is None and transaction_exit_error is None,
             rolled_back=exc_type is not None and transaction_exit_error is None,
@@ -249,6 +266,7 @@ class PostgresExecutionSandbox:
             state_clean=state_clean,
             failure_reason=failure_reason,
             rollback_failed=exc_type is not None and transaction_exit_error is not None,
+            sandbox_outcome=sandbox_outcome,
             reset_attempted=reset_attempted,
             reset_outcome=reset_outcome,
         )
