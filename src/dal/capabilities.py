@@ -25,6 +25,9 @@ class BackendCapabilities:
     supports_schema_cache: bool = False
     supports_execution_role: bool = False
     supports_restricted_session: bool = False
+    supports_row_cap: bool = True
+    supports_timeout: bool = True
+    supports_byte_cap: bool = True
     # Does DAL apply defensive statement-level read-only guard?
     enforces_statement_read_only: bool = False
 
@@ -180,4 +183,9 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_fk_enforcement=False,
             supports_schema_cache=False,
         )
-    return BackendCapabilities(provider_name=normalized or "unspecified")
+    return BackendCapabilities(
+        provider_name=normalized or "unspecified",
+        supports_row_cap=False,
+        supports_timeout=False,
+        supports_byte_cap=False,
+    )

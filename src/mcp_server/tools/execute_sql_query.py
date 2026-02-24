@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
@@ -32,10 +33,17 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
+from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.postgres_sandbox import (
     SANDBOX_FAILURE_NONE,
     SANDBOX_FAILURE_REASON_ALLOWLIST,
     build_postgres_sandbox_metadata,
+)
+from dal.resource_containment import (
+    ResourceContainmentPolicyError,
+    enforce_byte_limit,
+    enforce_row_limit,
+    validate_resource_capabilities,
 )
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
@@ -46,7 +54,6 @@ from dal.session_guardrails import (
 from dal.util.column_metadata import build_column_meta
 from dal.util.row_limits import get_sync_max_rows
 from dal.util.timeouts import run_with_timeout
-from mcp_server.utils.json_budget import JSONBudget
 from mcp_server.utils.provider import resolve_provider
 
 TOOL_NAME = "execute_sql_query"
@@ -72,6 +79,24 @@ _RESTRICTED_SESSION_MODE_ALLOWLIST = {"off", "set_local_config"}
 _SANDBOX_FAILURE_REASON_ALLOWLIST = set(SANDBOX_FAILURE_REASON_ALLOWLIST)
 _SESSION_RESET_OUTCOME_ALLOWLIST = {"ok", "failed"}
 _SANDBOX_OUTCOME_ALLOWLIST = {"committed", "rolled_back", "rollback_failed"}
+_PARTIAL_REASON_ALLOWLIST = {
+    PayloadTruncationReason.MAX_ROWS.value,
+    PayloadTruncationReason.MAX_BYTES.value,
+    PayloadTruncationReason.PROVIDER_CAP.value,
+    PayloadTruncationReason.SAFETY_LIMIT.value,
+    "timeout",
+}
+_PARTIAL_REASON_NORMALIZATION = {
+    "max_rows": PayloadTruncationReason.MAX_ROWS.value,
+    "max_bytes": PayloadTruncationReason.MAX_BYTES.value,
+    "provider_cap": PayloadTruncationReason.PROVIDER_CAP.value,
+    "safety_limit": PayloadTruncationReason.SAFETY_LIMIT.value,
+    "row_limit": PayloadTruncationReason.MAX_ROWS.value,
+    "byte_limit": PayloadTruncationReason.MAX_BYTES.value,
+    "providercap": PayloadTruncationReason.PROVIDER_CAP.value,
+    "safety": PayloadTruncationReason.SAFETY_LIMIT.value,
+    "timeout": "timeout",
+}
 
 
 @dataclass(frozen=True)
@@ -338,6 +363,58 @@ def _record_sandbox_observability(metadata: dict[str, Any] | None) -> None:
     )
 
 
+def _timeout_observability_fields(metadata: dict[str, Any] | None) -> tuple[bool, bool]:
+    timeout_metadata = metadata if isinstance(metadata, dict) else {}
+    timeout_applied = bool(timeout_metadata.get("execution_timeout_applied"))
+    timeout_triggered = bool(timeout_metadata.get("execution_timeout_triggered"))
+    return timeout_applied, timeout_triggered
+
+
+def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
+    timeout_applied, timeout_triggered = _timeout_observability_fields(metadata)
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("db.execution_timeout_applied", timeout_applied)
+        span.set_attribute("db.execution_timeout_triggered", timeout_triggered)
+
+    mcp_metrics.add_counter(
+        "mcp.execution_timeout.outcome_total",
+        description="Count of execute_sql_query timeout enforcement outcomes",
+        attributes={
+            "tool_name": TOOL_NAME,
+            "execution_timeout_applied": timeout_applied,
+            "execution_timeout_triggered": timeout_triggered,
+        },
+    )
+
+
+def _normalize_partial_reason(reason: str | None) -> str | None:
+    if not isinstance(reason, str):
+        return None
+    normalized = _PARTIAL_REASON_NORMALIZATION.get(reason.strip().lower())
+    if normalized in _PARTIAL_REASON_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _record_result_contract_observability(
+    *,
+    partial: bool,
+    partial_reason: str | None,
+    items_returned: int,
+    bytes_returned: int,
+    execution_duration_ms: int,
+) -> None:
+    span = trace.get_current_span()
+    if span is None or not span.is_recording():
+        return
+    span.set_attribute("db.result.partial", bool(partial))
+    span.set_attribute("db.result.partial_reason", partial_reason or "none")
+    span.set_attribute("db.result.items_returned", int(items_returned))
+    span.set_attribute("db.result.bytes_returned", int(bytes_returned))
+    span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
+
+
 def _record_policy_decision_telemetry(attributes: dict[str, Any]) -> None:
     """Attach policy-provided telemetry attributes to the active span."""
     span = trace.get_current_span()
@@ -484,12 +561,29 @@ async def _load_table_columns_for_rewrite(
 
 
 def _resolve_row_limit(conn: object) -> int:
-    max_rows = getattr(conn, "max_rows", None)
-    if not max_rows:
-        max_rows = getattr(conn, "_max_rows", None)
-    if not max_rows:
-        max_rows = get_sync_max_rows()
-    return int(max_rows or 0)
+    def _coerce_limit(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return 0
+            try:
+                return max(0, int(stripped))
+            except ValueError:
+                return 0
+        return 0
+
+    max_rows = _coerce_limit(getattr(conn, "max_rows", None))
+    if max_rows <= 0:
+        max_rows = _coerce_limit(getattr(conn, "_max_rows", None))
+    if max_rows <= 0:
+        max_rows = _coerce_limit(get_sync_max_rows())
+    return max_rows
 
 
 async def _cancel_best_effort(conn: object) -> None:
@@ -565,6 +659,7 @@ def _construct_error_response(
     _record_tenant_enforcement_observability(envelope_metadata)
     _record_session_guardrail_observability(envelope_metadata)
     _record_sandbox_observability(envelope_metadata)
+    _record_timeout_observability(envelope_metadata)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -815,6 +910,31 @@ def _validate_params(params: Optional[list]) -> Optional[str]:
     return None
 
 
+def _resolve_effective_timeout_seconds(
+    timeout_seconds: Optional[float],
+    resource_limits: ExecutionResourceLimits,
+) -> tuple[Optional[float], bool]:
+    """Resolve effective timeout with fail-safe enforcement from resource settings."""
+    resolved_timeout: Optional[float]
+    try:
+        resolved_timeout = float(timeout_seconds) if timeout_seconds is not None else None
+    except (TypeError, ValueError):
+        resolved_timeout = None
+
+    if resolved_timeout is not None and resolved_timeout <= 0:
+        resolved_timeout = None
+
+    if resource_limits.enforce_timeout:
+        resource_timeout = max(0.001, float(resource_limits.max_execution_ms) / 1000.0)
+        if resolved_timeout is None:
+            resolved_timeout = resource_timeout
+        else:
+            resolved_timeout = min(resolved_timeout, resource_timeout)
+
+    timeout_applied = bool(resolved_timeout and resolved_timeout > 0)
+    return resolved_timeout, timeout_applied
+
+
 async def handler(
     sql_query: str,
     tenant_id: Optional[int],
@@ -840,6 +960,18 @@ async def handler(
         - Capacity detection: If query triggers row/resource caps.
     """
     provider = _active_provider()
+    try:
+        resource_limits = ExecutionResourceLimits.from_env()
+    except ValueError:
+        return _construct_error_response(
+            message="Execution resource limits are misconfigured.",
+            category=ErrorCategory.INTERNAL,
+            provider=provider,
+            metadata={"reason_code": "execution_resource_limits_misconfigured"},
+        )
+    effective_timeout_seconds, execution_timeout_applied = _resolve_effective_timeout_seconds(
+        timeout_seconds, resource_limits
+    )
     session_guardrail_metadata = build_session_guardrail_metadata(
         applied=False,
         outcome=SESSION_GUARDRAIL_SKIPPED,
@@ -896,6 +1028,32 @@ async def handler(
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
+    tenant_enforcement_metadata["execution_timeout_triggered"] = False
+    tenant_enforcement_metadata["resource_capability_mismatch"] = None
+
+    try:
+        validate_resource_capabilities(
+            provider=provider,
+            enforce_row_limit=resource_limits.enforce_row_limit,
+            enforce_byte_limit=resource_limits.enforce_byte_limit,
+            enforce_timeout=resource_limits.enforce_timeout,
+            supports_row_cap=bool(getattr(caps, "supports_row_cap", True)),
+            supports_byte_cap=bool(getattr(caps, "supports_byte_cap", True)),
+            supports_timeout=bool(getattr(caps, "supports_timeout", True)),
+        )
+    except ResourceContainmentPolicyError as e:
+        tenant_enforcement_metadata["resource_capability_mismatch"] = e.reason_code
+        return _construct_error_response(
+            message=str(e),
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            provider=provider,
+            metadata={
+                "reason_code": e.reason_code,
+                "required_capability": e.required_capability,
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
@@ -1049,6 +1207,9 @@ async def handler(
     tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
+    tenant_enforcement_metadata["execution_timeout_triggered"] = False
+    tenant_enforcement_metadata["resource_capability_mismatch"] = None
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
@@ -1160,7 +1321,11 @@ async def handler(
         return unsupported_response
     unsupported_response = _negotiate_if_required(
         "async_cancel",
-        bool(timeout_seconds and timeout_seconds > 0 and caps.execution_model == "async"),
+        bool(
+            effective_timeout_seconds
+            and effective_timeout_seconds > 0
+            and caps.execution_model == "async"
+        ),
         caps.supports_cancel,
     )
     if unsupported_response is not None:
@@ -1173,7 +1338,9 @@ async def handler(
     if unsupported_response is not None:
         return unsupported_response
 
-    max_page_size = 1000
+    max_page_size = (
+        max(1, int(resource_limits.max_rows)) if resource_limits.enforce_row_limit else 1000
+    )
     if page_size is not None:
         if page_size <= 0:
             return _construct_error_response(
@@ -1202,8 +1369,11 @@ async def handler(
         columns = None
         last_truncated = False
         row_limit = 0
+        bytes_returned = 0
+        execution_duration_ms = 0
         next_token = None
         conn = None
+        execution_started_at = time.monotonic()
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
@@ -1292,9 +1462,14 @@ async def handler(
 
             try:
                 result_rows = await run_with_timeout(
-                    _fetch_rows, timeout_seconds, cancel=lambda: _cancel_best_effort(conn)
+                    _fetch_rows,
+                    effective_timeout_seconds,
+                    cancel=lambda: _cancel_best_effort(conn),
+                    provider=provider,
+                    operation_name="execute_sql_query.fetch",
                 )
             except (asyncio.TimeoutError, TimeoutError) as timeout_exc:
+                tenant_enforcement_metadata["execution_timeout_triggered"] = True
                 raise _SandboxExecutionTimeout("Execution timed out.") from timeout_exc
 
             raw_last_truncated = getattr(conn, "last_truncated", False)
@@ -1305,10 +1480,28 @@ async def handler(
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
 
+        effective_row_limit = int(row_limit or 0)
+        if resource_limits.enforce_row_limit:
+            configured_row_limit = max(1, int(resource_limits.max_rows))
+            effective_row_limit = (
+                min(effective_row_limit, configured_row_limit)
+                if effective_row_limit > 0
+                else configured_row_limit
+            )
+        row_limit_result = enforce_row_limit(
+            result_rows,
+            max_rows=effective_row_limit,
+            enforce=effective_row_limit > 0,
+        )
+        result_rows = row_limit_result.rows
+        row_limit_truncated = row_limit_result.partial
+        if effective_row_limit > 0:
+            row_limit = effective_row_limit
+
         # Size Safety Valve
-        safety_limit = 1000
+        safety_limit = 0 if resource_limits.enforce_row_limit else 1000
         safety_truncated = False
-        if len(result_rows) > safety_limit:
+        if safety_limit > 0 and len(result_rows) > safety_limit:
             result_rows = result_rows[:safety_limit]
             safety_truncated = True
             row_limit = safety_limit
@@ -1322,39 +1515,41 @@ async def handler(
             forced_limited = True
             row_limit = force_result_limit
 
-        # JSON Size Budget
-        max_bytes = get_env_int("MCP_JSON_PAYLOAD_LIMIT_BYTES", 2 * 1024 * 1024)
-        budget = JSONBudget(max_bytes)
-        safe_rows = []
-        size_truncated = False
-
-        # Approximate envelope overhead
-        # In new envelope, we have additional overhead from ErrorMetadata structure
-        # if present (none here) but also Metadata fields.
-        budget.consume({"metadata": {}, "rows": []})
-
-        for row in result_rows:
-            if not budget.consume(row):
-                size_truncated = True
-                break
-            safe_rows.append(row)
-
-        result_rows = safe_rows
+        byte_limit_result = enforce_byte_limit(
+            result_rows,
+            max_bytes=int(resource_limits.max_bytes),
+            enforce=resource_limits.enforce_byte_limit,
+            envelope_overhead={"metadata": {}, "rows": []},
+        )
+        size_truncated = byte_limit_result.partial
+        size_truncated_reason = byte_limit_result.partial_reason
+        result_rows = byte_limit_result.rows
+        bytes_returned = byte_limit_result.bytes_returned
+        execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
 
-        is_truncated = bool(last_truncated or safety_truncated or forced_limited or size_truncated)
+        is_truncated = bool(
+            last_truncated
+            or row_limit_truncated
+            or safety_truncated
+            or forced_limited
+            or size_truncated
+        )
         partial_reason = last_truncated_reason
         if partial_reason is None and size_truncated:
-            partial_reason = PayloadTruncationReason.MAX_BYTES.value
+            partial_reason = size_truncated_reason or PayloadTruncationReason.MAX_BYTES.value
         if partial_reason is None and forced_limited:
             partial_reason = PayloadTruncationReason.PROVIDER_CAP.value
+        if partial_reason is None and row_limit_truncated:
+            partial_reason = row_limit_result.partial_reason
         if partial_reason is None and safety_truncated:
             partial_reason = PayloadTruncationReason.SAFETY_LIMIT.value
         if partial_reason is None and is_truncated:
             partial_reason = PayloadTruncationReason.MAX_ROWS.value
-        cap_detected = partial_reason == "PROVIDER_CAP"
+        partial_reason = _normalize_partial_reason(partial_reason)
+        cap_detected = partial_reason == PayloadTruncationReason.PROVIDER_CAP.value
         cap_mitigation_applied = False
         cap_mitigation_mode = "none"
         if cap_detected and cap_mitigation_setting == "safe":
@@ -1374,10 +1569,14 @@ async def handler(
         envelope_metadata = ExecuteSQLQueryMetadata(
             rows_returned=len(result_rows),
             is_truncated=is_truncated,
+            partial=is_truncated,
             provider=provider,
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
             partial_reason=partial_reason,
+            items_returned=len(result_rows),
+            bytes_returned=bytes_returned,
+            execution_duration_ms=execution_duration_ms,
             cap_detected=cap_detected,
             cap_mitigation_applied=cap_mitigation_applied,
             cap_mitigation_mode=cap_mitigation_mode,
@@ -1409,6 +1608,13 @@ async def handler(
             sandbox_failure_reason=tenant_enforcement_metadata.get("sandbox_failure_reason"),
             session_reset_attempted=tenant_enforcement_metadata.get("session_reset_attempted"),
             session_reset_outcome=tenant_enforcement_metadata.get("session_reset_outcome"),
+            execution_timeout_applied=tenant_enforcement_metadata.get("execution_timeout_applied"),
+            execution_timeout_triggered=tenant_enforcement_metadata.get(
+                "execution_timeout_triggered"
+            ),
+            resource_capability_mismatch=tenant_enforcement_metadata.get(
+                "resource_capability_mismatch"
+            ),
         )
 
         envelope = ExecuteSQLQueryResponseEnvelope(
@@ -1417,12 +1623,22 @@ async def handler(
         _record_tenant_enforcement_observability(tenant_enforcement_metadata)
         _record_session_guardrail_observability(tenant_enforcement_metadata)
         _record_sandbox_observability(tenant_enforcement_metadata)
+        _record_timeout_observability(tenant_enforcement_metadata)
+        _record_result_contract_observability(
+            partial=is_truncated,
+            partial_reason=partial_reason,
+            items_returned=len(result_rows),
+            bytes_returned=bytes_returned,
+            execution_duration_ms=execution_duration_ms,
+        )
 
         return envelope.model_dump_json(exclude_none=True)
 
     except _SandboxExecutionTimeout as e:
         provider = _active_provider()
         tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
+        tenant_enforcement_metadata["execution_timeout_triggered"] = True
+        tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",
             category=ErrorCategory.TIMEOUT,
