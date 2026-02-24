@@ -9,6 +9,16 @@ from typing import Any, Iterable, Mapping
 from common.constants.reason_codes import PayloadTruncationReason
 
 
+class ResourceContainmentPolicyError(RuntimeError):
+    """Raised when requested containment enforcement is unsupported by provider capabilities."""
+
+    def __init__(self, *, reason_code: str, required_capability: str, message: str) -> None:
+        """Capture deterministic reason code and capability name for fail-closed errors."""
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.required_capability = required_capability
+
+
 @dataclass(frozen=True)
 class RowContainmentResult:
     """Result of hard row-limit enforcement."""
@@ -28,6 +38,47 @@ class ByteContainmentResult:
     partial_reason: str | None
     items_returned: int
     bytes_returned: int
+
+
+def validate_resource_capabilities(
+    *,
+    provider: str,
+    enforce_row_limit: bool,
+    enforce_byte_limit: bool,
+    enforce_timeout: bool,
+    supports_row_cap: bool,
+    supports_byte_cap: bool,
+    supports_timeout: bool,
+) -> None:
+    """Fail closed when configured enforcement lacks provider capability support."""
+    normalized_provider = (provider or "unspecified").strip().lower() or "unspecified"
+    if enforce_row_limit and not supports_row_cap:
+        raise ResourceContainmentPolicyError(
+            reason_code="execution_resource_row_cap_unsupported_provider",
+            required_capability="row_cap",
+            message=(
+                "Execution row-cap enforcement is not supported for provider "
+                f"'{normalized_provider}'."
+            ),
+        )
+    if enforce_byte_limit and not supports_byte_cap:
+        raise ResourceContainmentPolicyError(
+            reason_code="execution_resource_byte_cap_unsupported_provider",
+            required_capability="byte_cap",
+            message=(
+                "Execution byte-cap enforcement is not supported for provider "
+                f"'{normalized_provider}'."
+            ),
+        )
+    if enforce_timeout and not supports_timeout:
+        raise ResourceContainmentPolicyError(
+            reason_code="execution_resource_timeout_unsupported_provider",
+            required_capability="timeout",
+            message=(
+                "Execution timeout enforcement is not supported for provider "
+                f"'{normalized_provider}'."
+            ),
+        )
 
 
 def enforce_row_limit(

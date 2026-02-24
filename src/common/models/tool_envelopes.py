@@ -121,6 +121,7 @@ class ExecuteSQLQueryMetadata(BaseModel):
     session_reset_outcome: Optional[Literal["ok", "failed"]] = None
     execution_timeout_applied: Optional[bool] = None
     execution_timeout_triggered: Optional[bool] = None
+    resource_capability_mismatch: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

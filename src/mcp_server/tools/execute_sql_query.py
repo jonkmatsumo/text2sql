@@ -39,7 +39,12 @@ from dal.postgres_sandbox import (
     SANDBOX_FAILURE_REASON_ALLOWLIST,
     build_postgres_sandbox_metadata,
 )
-from dal.resource_containment import enforce_byte_limit, enforce_row_limit
+from dal.resource_containment import (
+    ResourceContainmentPolicyError,
+    enforce_byte_limit,
+    enforce_row_limit,
+    validate_resource_capabilities,
+)
 from dal.session_guardrails import (
     RESTRICTED_SESSION_MODE_OFF,
     SESSION_GUARDRAIL_SKIPPED,
@@ -1025,6 +1030,30 @@ async def handler(
     tenant_enforcement_metadata.update(sandbox_metadata)
     tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
     tenant_enforcement_metadata["execution_timeout_triggered"] = False
+    tenant_enforcement_metadata["resource_capability_mismatch"] = None
+
+    try:
+        validate_resource_capabilities(
+            provider=provider,
+            enforce_row_limit=resource_limits.enforce_row_limit,
+            enforce_byte_limit=resource_limits.enforce_byte_limit,
+            enforce_timeout=resource_limits.enforce_timeout,
+            supports_row_cap=bool(getattr(caps, "supports_row_cap", True)),
+            supports_byte_cap=bool(getattr(caps, "supports_byte_cap", True)),
+            supports_timeout=bool(getattr(caps, "supports_timeout", True)),
+        )
+    except ResourceContainmentPolicyError as e:
+        tenant_enforcement_metadata["resource_capability_mismatch"] = e.reason_code
+        return _construct_error_response(
+            message=str(e),
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            provider=provider,
+            metadata={
+                "reason_code": e.reason_code,
+                "required_capability": e.required_capability,
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
@@ -1180,6 +1209,7 @@ async def handler(
     tenant_enforcement_metadata.update(sandbox_metadata)
     tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
     tenant_enforcement_metadata["execution_timeout_triggered"] = False
+    tenant_enforcement_metadata["resource_capability_mismatch"] = None
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
@@ -1581,6 +1611,9 @@ async def handler(
             execution_timeout_applied=tenant_enforcement_metadata.get("execution_timeout_applied"),
             execution_timeout_triggered=tenant_enforcement_metadata.get(
                 "execution_timeout_triggered"
+            ),
+            resource_capability_mismatch=tenant_enforcement_metadata.get(
+                "resource_capability_mismatch"
             ),
         )
 

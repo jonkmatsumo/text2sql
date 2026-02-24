@@ -4,6 +4,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncpg
@@ -481,6 +482,45 @@ class TestExecuteSqlQuery:
         assert data["metadata"]["session_guardrail_capability_mismatch"] == (
             "session_guardrail_restricted_session_unsupported_provider"
         )
+
+    @pytest.mark.asyncio
+    async def test_execute_sql_query_resource_capability_mismatch_fails_closed(self, monkeypatch):
+        """Resource enforcement should fail closed when provider capability is missing."""
+        mock_get_connection = MagicMock()
+        monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+        caps = SimpleNamespace(
+            provider_name="sqlite",
+            tenant_enforcement_mode="none",
+            supports_column_metadata=True,
+            supports_cancel=True,
+            supports_pagination=True,
+            execution_model="sync",
+            supports_row_cap=False,
+            supports_byte_cap=True,
+            supports_timeout=True,
+        )
+
+        with (
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+                return_value=caps,
+            ),
+            patch(
+                "mcp_server.tools.execute_sql_query.Database.get_connection", mock_get_connection
+            ),
+            patch("mcp_server.utils.auth.validate_role", return_value=None),
+        ):
+            result = await handler("SELECT 1 AS ok", tenant_id=1, include_columns=False)
+
+        data = json.loads(result)
+        assert data["error"]["category"] == "unsupported_capability"
+        assert data["error"]["details_safe"]["reason_code"] == (
+            "execution_resource_row_cap_unsupported_provider"
+        )
+        assert data["metadata"]["resource_capability_mismatch"] == (
+            "execution_resource_row_cap_unsupported_provider"
+        )
+        mock_get_connection.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_execute_sql_query_include_columns_opt_in(self):
