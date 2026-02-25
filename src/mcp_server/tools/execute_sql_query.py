@@ -1249,20 +1249,44 @@ async def handler(
         )
 
     if pagination_mode == "keyset":
-        if not (
-            bool(getattr(caps, "supports_pagination", False))
-            or (
-                bool(getattr(caps, "supports_offset_pagination_wrapper", False))
-                and bool(getattr(caps, "supports_query_wrapping_subselect", False))
+        supports_keyset_fallback = bool(getattr(caps, "supports_pagination", False)) or (
+            bool(getattr(caps, "supports_offset_pagination_wrapper", False))
+            and bool(getattr(caps, "supports_query_wrapping_subselect", False))
+        )
+        supports_keyset = bool(getattr(caps, "supports_keyset", supports_keyset_fallback))
+        supports_keyset_with_containment_fallback = (
+            supports_keyset
+            and bool(getattr(caps, "supports_row_cap", True))
+            and bool(getattr(caps, "supports_byte_cap", True))
+            and bool(getattr(caps, "supports_timeout", True))
+        )
+        supports_keyset_with_containment = bool(
+            getattr(
+                caps,
+                "supports_keyset_with_containment",
+                supports_keyset_with_containment_fallback,
             )
-        ):
+        )
+
+        if not supports_keyset:
             return _construct_error_response(
-                "Pagination is not supported for this provider.",
+                "Keyset pagination is not supported for this provider.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={
                     "reason_code": "execution_pagination_unsupported_provider",
-                    "required_capability": "pagination",
+                    "required_capability": "keyset_pagination",
+                },
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        if not supports_keyset_with_containment:
+            return _construct_error_response(
+                "Keyset pagination with resource containment is not supported for this provider.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={
+                    "reason_code": "execution_pagination_unsupported_provider",
+                    "required_capability": "keyset_with_containment",
                 },
                 envelope_metadata=tenant_enforcement_metadata,
             )

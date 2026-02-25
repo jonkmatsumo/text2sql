@@ -30,6 +30,8 @@ class BackendCapabilities:
     supports_byte_cap: bool = True
     supports_offset_pagination_wrapper: bool = False
     supports_query_wrapping_subselect: bool = False
+    supports_keyset: bool = False
+    supports_keyset_with_containment: bool = False
     # Does DAL apply defensive statement-level read-only guard?
     enforces_statement_read_only: bool = False
 
@@ -84,6 +86,8 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_restricted_session=True,
             supports_offset_pagination_wrapper=True,
             supports_query_wrapping_subselect=True,
+            supports_keyset=True,
+            supports_keyset_with_containment=True,
         )
     if normalized == "sqlite":
         return BackendCapabilities(
@@ -101,6 +105,8 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_schema_cache=True,
             supports_offset_pagination_wrapper=True,
             supports_query_wrapping_subselect=True,
+            supports_keyset=True,
+            supports_keyset_with_containment=True,
         )
     if normalized == "snowflake":
         return BackendCapabilities(
@@ -179,6 +185,8 @@ def capabilities_for_provider(provider: str) -> BackendCapabilities:
             supports_schema_cache=True,
             supports_offset_pagination_wrapper=True,
             supports_query_wrapping_subselect=True,
+            supports_keyset=True,
+            supports_keyset_with_containment=True,
         )
     if normalized == "clickhouse":
         return BackendCapabilities(

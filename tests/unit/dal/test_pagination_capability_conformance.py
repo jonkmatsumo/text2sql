@@ -14,19 +14,27 @@ from mcp_server.tools.execute_sql_query import handler
 
 
 @pytest.mark.parametrize(
-    "provider, expected_server, expected_wrapper",
+    "provider, expected_server, expected_wrapper, expected_keyset, expected_keyset_containment",
     [
-        ("postgres", False, True),
-        ("sqlite", False, True),
-        ("duckdb", False, True),
-        ("bigquery", False, False),
+        ("postgres", False, True, True, True),
+        ("sqlite", False, True, True, True),
+        ("duckdb", False, True, True, True),
+        ("bigquery", False, False, False, False),
     ],
 )
-def test_pagination_capability_matrix(provider: str, expected_server: bool, expected_wrapper: bool):
+def test_pagination_capability_matrix(
+    provider: str,
+    expected_server: bool,
+    expected_wrapper: bool,
+    expected_keyset: bool,
+    expected_keyset_containment: bool,
+):
     """Provider capability matrix should expose deterministic pagination support flags."""
     caps = capabilities_for_provider(provider)
     assert bool(caps.supports_pagination) is expected_server
     assert bool(caps.supports_offset_pagination_wrapper) is expected_wrapper
+    assert bool(caps.supports_keyset) is expected_keyset
+    assert bool(caps.supports_keyset_with_containment) is expected_keyset_containment
 
 
 def test_unknown_provider_pagination_capability_defaults_fail_closed():
@@ -35,6 +43,8 @@ def test_unknown_provider_pagination_capability_defaults_fail_closed():
     assert caps.supports_pagination is False
     assert caps.supports_offset_pagination_wrapper is False
     assert caps.supports_query_wrapping_subselect is False
+    assert caps.supports_keyset is False
+    assert caps.supports_keyset_with_containment is False
 
 
 @pytest.mark.asyncio
@@ -79,3 +89,148 @@ async def test_pagination_request_unsupported_provider_fails_closed():
         result["error"]["details_safe"]["reason_code"]
         == "execution_pagination_unsupported_provider"
     )
+
+
+@pytest.mark.asyncio
+async def test_keyset_request_rejected_when_keyset_capability_missing():
+    """Keyset requests should fail closed when provider lacks keyset capability."""
+    caps = replace(
+        capabilities_for_provider("postgres"),
+        supports_keyset=False,
+        supports_keyset_with_containment=False,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_unsupported_provider"
+    )
+    assert result["error"]["details_safe"]["required_capability"] == "keyset_pagination"
+
+
+@pytest.mark.asyncio
+async def test_keyset_request_rejected_when_containment_capability_missing():
+    """Keyset requests should fail closed when containment capability is missing."""
+    caps = replace(
+        capabilities_for_provider("postgres"),
+        supports_keyset=True,
+        supports_keyset_with_containment=False,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert (
+        result["error"]["details_safe"]["reason_code"]
+        == "execution_pagination_unsupported_provider"
+    )
+    assert result["error"]["details_safe"]["required_capability"] == "keyset_with_containment"
+
+
+@pytest.mark.asyncio
+async def test_keyset_request_allows_supported_provider_capabilities():
+    """Keyset requests should proceed when keyset containment capabilities are present."""
+    caps = replace(
+        capabilities_for_provider("postgres"),
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
