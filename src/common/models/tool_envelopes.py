@@ -138,6 +138,12 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.partial_page",
         serialization_alias="pagination.keyset.partial_page",
     )
+    pagination_keyset_page_size_effective: Optional[int] = Field(
+        None,
+        description="Effective keyset page size after hard-cap enforcement",
+        validation_alias="pagination.keyset.page_size_effective",
+        serialization_alias="pagination.keyset.page_size_effective",
+    )
 
     @model_validator(mode="before")
     @classmethod

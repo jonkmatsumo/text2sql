@@ -1094,6 +1094,7 @@ async def handler(
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
     keyset_order_signature: List[str] = []
+    keyset_rewritten_select = None
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1727,7 +1728,7 @@ async def handler(
         if pagination_mode == "keyset":
             import sqlglot
 
-            from dal.keyset_pagination import apply_keyset_pagination, canonicalize_keyset_sql
+            from dal.keyset_pagination import apply_keyset_pagination
 
             try:
                 dialect = normalize_sqlglot_dialect(provider)
@@ -1743,9 +1744,7 @@ async def handler(
                         keyset_values,
                         provider=provider,
                     )
-                if page_size:
-                    rewritten_select = rewritten_select.limit(page_size + 1)
-                effective_sql_query = canonicalize_keyset_sql(rewritten_select, provider=provider)
+                keyset_rewritten_select = rewritten_select
             except Exception as e:
                 return _construct_error_response(
                     message=f"Failed to apply keyset pagination rewrite: {str(e)}",
@@ -1777,6 +1776,34 @@ async def handler(
             if effective_page_size and effective_page_size > max_page_size:
                 effective_page_size = max_page_size
             applied_page_size = effective_page_size
+            if pagination_mode == "keyset":
+                from dal.keyset_pagination import canonicalize_keyset_sql
+
+                execution_select = keyset_rewritten_select
+                if execution_select is None:
+                    import sqlglot
+
+                    dialect = normalize_sqlglot_dialect(provider)
+                    parsed_effective = sqlglot.parse_one(effective_sql_query, read=dialect)
+                    if not isinstance(parsed_effective, sqlglot.exp.Select):
+                        raise ValueError("Effective query is not a SELECT statement.")
+                    execution_select = parsed_effective
+
+                execution_select = execution_select.copy()
+                if effective_page_size:
+                    execution_select = execution_select.limit(int(effective_page_size) + 1)
+                effective_sql_query = canonicalize_keyset_sql(execution_select, provider=provider)
+                if effective_page_size is not None:
+                    effective_page_size_int = int(effective_page_size)
+                    tenant_enforcement_metadata["pagination.keyset.page_size_effective"] = (
+                        effective_page_size_int
+                    )
+                    span = trace.get_current_span()
+                    if span is not None and span.is_recording():
+                        span.set_attribute(
+                            "pagination.keyset.page_size_effective",
+                            effective_page_size_int,
+                        )
 
             async def _fetch_rows():
                 nonlocal columns, next_token
@@ -2131,7 +2158,10 @@ async def handler(
             **{
                 "pagination.keyset.partial_page": tenant_enforcement_metadata.get(
                     "pagination.keyset.partial_page"
-                )
+                ),
+                "pagination.keyset.page_size_effective": tenant_enforcement_metadata.get(
+                    "pagination.keyset.page_size_effective"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")

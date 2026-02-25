@@ -49,6 +49,7 @@ async def test_execute_sql_query_keyset_rejects_unstable_tiebreaker_created_at_o
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         payload = await handler(
@@ -118,6 +119,7 @@ async def test_execute_sql_query_keyset_rejects_random_tiebreaker():
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         payload = await handler(
@@ -356,6 +358,129 @@ async def test_execute_sql_query_keyset_first_page_applies_limit_plus_one():
         assert "LIMIT 3" in mock_conn.sql
         assert metadata["next_keyset_cursor"]
         assert metadata.get("pagination.keyset.partial_page") in {None, False}
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_effective_page_size_respects_hard_row_cap():
+    """Requested page_size above hard row cap should use effective capped size."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.max_rows = 1
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [{"id": 1}, {"id": 2}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=5)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert "LIMIT 2" in (mock_conn.sql or "")
+        assert metadata["page_size"] == 1
+        assert metadata["pagination.keyset.page_size_effective"] == 1
+        assert metadata.get("next_keyset_cursor")
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_effective_page_size_preserves_within_cap():
+    """Requested keyset page_size under hard cap should remain unchanged."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.max_rows = 10
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert "LIMIT 3" in (mock_conn.sql or "")
+        assert metadata["page_size"] == 2
+        assert metadata["pagination.keyset.page_size_effective"] == 2
+        assert metadata.get("next_keyset_cursor")
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_page_size_above_bounded_max(monkeypatch):
+    """Keyset page_size should fail closed when it exceeds the bounded max rows contract."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "2")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=3,
+        )
+        result = json.loads(payload)
+
+        assert result["error"]["category"] == "invalid_request"
+        assert (
+            result["error"]["details_safe"]["reason_code"]
+            == "execution_pagination_page_size_exceeds_max_rows"
+        )
 
 
 @pytest.mark.asyncio
