@@ -1,6 +1,6 @@
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -59,7 +59,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
         from dal.keyset_pagination import encode_keyset_cursor
 
         # Cursor from a different query/fingerprint
-        cursor = encode_keyset_cursor([50], ["id"], "old-fingerprint", secret="default-secret")
+        cursor = encode_keyset_cursor([50], ["id"], "old-fingerprint")
 
         sql = "SELECT id FROM users ORDER BY id ASC"
         payload = await handler(
@@ -103,14 +103,22 @@ async def test_execute_sql_query_keyset_rewrite_applied():
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
-        mock_conn = AsyncMock()
-        mock_conn.fetch.return_value = []
-        mock_conn.session_guardrail_metadata = {}
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return []
+
+        mock_conn = _Conn()
         mock_get_conn.return_value.__aenter__.return_value = mock_conn
 
         from dal.keyset_pagination import encode_keyset_cursor
 
-        cursor = encode_keyset_cursor([50], ["id"], "test-fingerprint", secret="default-secret")
+        cursor = encode_keyset_cursor([50], ["id"], "test-fingerprint")
 
         await handler(
             sql,
@@ -119,9 +127,50 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             keyset_cursor=cursor,
         )
 
-        assert mock_conn.fetch.called
-        args, kwargs = mock_conn.fetch.call_args
-        executed_sql = args[0]
-
+        executed_sql = mock_conn.sql
+        assert executed_sql is not None
         assert "WHERE id > 50" in executed_sql
         assert "ORDER BY id ASC" in executed_sql
+        assert "text2sql_page" not in executed_sql
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_first_page_applies_limit_plus_one():
+    """Keyset first page should over-fetch by one row for deterministic continuation."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert mock_conn.sql is not None
+        assert "LIMIT 3" in mock_conn.sql
+        assert metadata["next_keyset_cursor"]

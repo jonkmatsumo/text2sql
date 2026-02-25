@@ -194,12 +194,6 @@ class ExecuteSQLQueryMetadata(BaseModel):
             normalized["next_cursor"] = normalized["next_page_token"]
 
         if (
-            normalized.get("next_keyset_cursor") is None
-            and normalized.get("next_page_token") is not None
-            and normalized.get("pagination_mode_used") == "keyset"
-        ):
-            normalized["next_keyset_cursor"] = normalized["next_page_token"]
-        if (
             normalized.get("next_page_token") is None
             and normalized.get("next_keyset_cursor") is not None
         ):
@@ -239,12 +233,6 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.next_cursor = self.next_page_token
         if self.next_page_token is None and self.next_cursor is not None:
             self.next_page_token = self.next_cursor
-        if (
-            self.next_keyset_cursor is None
-            and self.next_page_token is not None
-            and self.pagination_mode_used == "keyset"
-        ):
-            self.next_keyset_cursor = self.next_page_token
         if self.next_page_token is None and self.next_keyset_cursor is not None:
             self.next_page_token = self.next_keyset_cursor
         if self.truncation_reason is None and self.partial_reason is not None:

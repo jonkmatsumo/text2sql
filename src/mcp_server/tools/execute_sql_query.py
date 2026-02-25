@@ -1566,13 +1566,17 @@ async def handler(
             max_bytes=int(resource_limits.max_bytes),
             max_execution_ms=int(resource_limits.max_execution_ms),
         )
+        keyset_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
+        keyset_token_secret = keyset_token_secret_raw or None
+
         if pagination_mode == "keyset" and keyset_cursor:
             from dal.keyset_pagination import decode_keyset_cursor
 
-            secret = get_env_str("MCP_PAGINATION_TOKEN_SECRET", "default-secret")
             try:
                 keyset_values = decode_keyset_cursor(
-                    keyset_cursor, expected_fingerprint=query_fingerprint, secret=secret
+                    keyset_cursor,
+                    expected_fingerprint=query_fingerprint,
+                    secret=keyset_token_secret,
                 )
             except ValueError as e:
                 return _construct_error_response(
@@ -1592,7 +1596,7 @@ async def handler(
                     envelope_metadata=tenant_enforcement_metadata,
                 )
 
-        if pagination_mode == "keyset" and keyset_values:
+        if pagination_mode == "keyset":
             import sqlglot
 
             from dal.keyset_pagination import apply_keyset_pagination
@@ -1603,12 +1607,14 @@ async def handler(
                 if not isinstance(parsed_effective, sqlglot.exp.Select):
                     raise ValueError("Effective query is not a SELECT statement.")
 
-                rewritten_select = apply_keyset_pagination(
-                    parsed_effective,
-                    keyset_order_keys,
-                    keyset_values,
-                    provider=provider,
-                )
+                rewritten_select = parsed_effective
+                if keyset_values:
+                    rewritten_select = apply_keyset_pagination(
+                        parsed_effective,
+                        keyset_order_keys,
+                        keyset_values,
+                        provider=provider,
+                    )
                 if page_size:
                     rewritten_select = rewritten_select.limit(page_size + 1)
                 effective_sql_query = rewritten_select.sql(dialect=dialect)
@@ -1648,10 +1654,11 @@ async def handler(
                 nonlocal columns, next_token
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
-                pagination_requested = bool(page_token or effective_page_size)
+                offset_pagination_requested = pagination_mode == "offset" and bool(
+                    page_token or effective_page_size
+                )
                 if (
-                    pagination_mode == "offset"
-                    and pagination_requested
+                    offset_pagination_requested
                     and supports_server_pagination
                     and callable(fetch_page)
                 ):
@@ -1670,7 +1677,7 @@ async def handler(
                         *effective_params,
                     )
                     return rows
-                if pagination_requested and (
+                if offset_pagination_requested and (
                     not callable(fetch_page) or not supports_server_pagination
                 ):
                     if not (
@@ -1801,6 +1808,16 @@ async def handler(
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
 
+        keyset_page_truncated = False
+        if (
+            pagination_mode == "keyset"
+            and applied_page_size is not None
+            and applied_page_size > 0
+            and len(result_rows) > int(applied_page_size)
+        ):
+            result_rows = result_rows[: int(applied_page_size)]
+            keyset_page_truncated = True
+
         effective_row_limit = int(row_limit or 0)
         if resource_limits.enforce_row_limit:
             configured_row_limit = max(1, int(resource_limits.max_rows))
@@ -1855,23 +1872,27 @@ async def handler(
 
         is_truncated = bool(
             last_truncated
+            or keyset_page_truncated
             or row_limit_truncated
             or safety_truncated
             or forced_limited
             or size_truncated
         )
 
+        if pagination_mode == "keyset":
+            # Keyset pagination does not use offset page tokens.
+            next_token = None
+
         if pagination_mode == "keyset" and is_truncated and not size_truncated and result_rows:
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
 
-            secret = get_env_str("MCP_PAGINATION_TOKEN_SECRET", "default-secret")
             try:
                 keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
                 next_keyset_cursor = encode_keyset_cursor(
                     keyset_vals,
                     [k.alias or k.expression.sql() for k in keyset_order_keys],
                     query_fingerprint,
-                    secret=secret,
+                    secret=keyset_token_secret,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["is_paginated"] = True
@@ -1910,7 +1931,13 @@ async def handler(
             is_truncated=is_truncated,
             partial=is_truncated,
             provider=provider,
-            is_paginated=bool(applied_page_size or page_token or next_token),
+            is_paginated=bool(
+                applied_page_size
+                or page_token
+                or keyset_cursor
+                or next_token
+                or tenant_enforcement_metadata.get("next_keyset_cursor")
+            ),
             row_limit=int(row_limit or 0) if row_limit else None,
             next_page_token=next_token,
             page_size=applied_page_size,

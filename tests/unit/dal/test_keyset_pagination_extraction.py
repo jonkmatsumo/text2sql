@@ -1,6 +1,6 @@
 import pytest
 
-from dal.keyset_pagination import KeysetOrderKey, extract_keyset_order_keys
+from dal.keyset_pagination import extract_keyset_order_keys
 
 
 def test_extract_keyset_order_keys_basic():
@@ -8,8 +8,14 @@ def test_extract_keyset_order_keys_basic():
     sql = "SELECT id, name FROM users ORDER BY created_at DESC, id ASC"
     keys = extract_keyset_order_keys(sql)
     assert len(keys) == 2
-    assert keys[0] == KeysetOrderKey("created_at", "created_at", True, True)  # DESC -> NULLS FIRST
-    assert keys[1] == KeysetOrderKey("id", "id", False, False)  # ASC -> NULLS LAST
+    assert keys[0].expression.sql() == "created_at"
+    assert keys[0].alias == "created_at"
+    assert keys[0].descending is True
+    assert keys[0].nulls_first is True  # DESC -> NULLS FIRST
+    assert keys[1].expression.sql() == "id"
+    assert keys[1].alias == "id"
+    assert keys[1].descending is False
+    assert keys[1].nulls_first is False  # ASC -> NULLS LAST
 
 
 def test_extract_keyset_order_keys_no_order():
@@ -38,7 +44,7 @@ def test_extract_keyset_order_keys_complex_expression():
     sql = "SELECT id FROM users ORDER BY UPPER(name) ASC"
     keys = extract_keyset_order_keys(sql)
     assert len(keys) == 1
-    assert keys[0].expression == "UPPER(name)"
+    assert keys[0].expression.sql() == "UPPER(name)"
     assert keys[0].descending is False
 
 

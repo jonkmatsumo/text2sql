@@ -163,21 +163,47 @@ def _build_keyset_predicate(keys: List[KeysetOrderKey], values: List[Any]) -> ex
     key = keys[0]
     val = values[0]
 
-    val_exp = _to_exp_literal(val)
-
-    # Comparison op based on direction
-    op = exp.GT if not key.descending else exp.LT
-
-    # Use the expression from the ORDER BY
-    comp = op(this=key.expression.copy(), expression=val_exp)
+    comp = _build_order_comparison(key, val)
 
     if len(keys) == 1:
         return comp
 
-    eq = exp.EQ(this=key.expression.copy(), expression=val_exp)
+    eq = _build_order_equality(key, val)
     next_predicate = _build_keyset_predicate(keys[1:], values[1:])
 
-    return exp.Or(this=comp, expression=exp.And(this=eq, expression=next_predicate))
+    return exp.Or(
+        this=comp,
+        expression=exp.And(this=eq, expression=exp.Paren(this=next_predicate)),
+    )
+
+
+def _build_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build keyset 'strictly after cursor' comparison for one ORDER BY key."""
+    key_exp = key.expression.copy()
+    if value is None:
+        # NULLS FIRST: non-null values follow nulls.
+        # NULLS LAST: nothing follows null at this key.
+        # Tie-breakers are handled by the equality branch.
+        if key.nulls_first:
+            return exp.Not(this=exp.Is(this=key_exp, expression=exp.Null()))
+        return exp.Boolean(this=False)
+
+    op = exp.GT if not key.descending else exp.LT
+    comp: exp.Condition = op(this=key_exp, expression=_to_exp_literal(value))
+    if not key.nulls_first:
+        # For NULLS LAST, null rows are ordered after non-null cursor values.
+        comp = exp.Or(
+            this=comp, expression=exp.Is(this=key.expression.copy(), expression=exp.Null())
+        )
+    return comp
+
+
+def _build_order_equality(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build equality clause used for lexicographic tie-break traversal."""
+    key_exp = key.expression.copy()
+    if value is None:
+        return exp.Is(this=key_exp, expression=exp.Null())
+    return exp.EQ(this=key_exp, expression=_to_exp_literal(value))
 
 
 def _to_exp_literal(val: Any) -> exp.Expression:
