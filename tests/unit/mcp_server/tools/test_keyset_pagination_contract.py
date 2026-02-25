@@ -355,3 +355,96 @@ async def test_execute_sql_query_keyset_first_page_applies_limit_plus_one():
         assert mock_conn.sql is not None
         assert "LIMIT 3" in mock_conn.sql
         assert metadata["next_keyset_cursor"]
+        assert metadata.get("pagination.keyset.partial_page") in {None, False}
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_byte_truncation_suppresses_cursor(monkeypatch):
+    """Byte-cap partial pages must not emit a keyset cursor."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "10")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "80")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [
+                    {"id": 1, "blob": "x" * 64},
+                    {"id": 2, "blob": "y" * 64},
+                    {"id": 3, "blob": "z" * 64},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata.get("next_keyset_cursor") is None
+        assert metadata["pagination.keyset.partial_page"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_timeout_suppresses_cursor():
+    """Timeouts in keyset mode must mark partial-page and suppress cursor emission."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.run_with_timeout", side_effect=TimeoutError),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return [{"id": 1}]
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+        )
+        result = json.loads(payload)
+        metadata = result["metadata"]
+        assert result["error"]["category"] == "timeout"
+        assert metadata.get("next_keyset_cursor") is None
+        assert metadata["pagination.keyset.partial_page"] is True

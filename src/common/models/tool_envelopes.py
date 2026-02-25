@@ -132,6 +132,12 @@ class ExecuteSQLQueryMetadata(BaseModel):
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
     )
+    pagination_keyset_partial_page: Optional[bool] = Field(
+        None,
+        description="True when keyset pagination page is partial due containment truncation",
+        validation_alias="pagination.keyset.partial_page",
+        serialization_alias="pagination.keyset.partial_page",
+    )
 
     @model_validator(mode="before")
     @classmethod

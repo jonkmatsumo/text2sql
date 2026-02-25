@@ -797,7 +797,7 @@ def _construct_error_response(
         ),
         error=error_meta,
     )
-    return envelope.model_dump_json(exclude_none=True)
+    return envelope.model_dump_json(exclude_none=True, by_alias=True)
 
 
 def _record_complexity_attributes(
@@ -2011,7 +2011,21 @@ async def handler(
             # Keyset pagination does not use offset page tokens.
             next_token = None
 
-        if pagination_mode == "keyset" and is_truncated and not size_truncated and result_rows:
+        keyset_partial_page = bool(
+            pagination_mode == "keyset" and (size_truncated or row_limit_truncated)
+        )
+        if keyset_partial_page:
+            tenant_enforcement_metadata["pagination.keyset.partial_page"] = True
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
+        else:
+            tenant_enforcement_metadata.pop("pagination.keyset.partial_page", None)
+
+        if (
+            pagination_mode == "keyset"
+            and keyset_page_truncated
+            and not keyset_partial_page
+            and result_rows
+        ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
 
             try:
@@ -2114,6 +2128,11 @@ async def handler(
             ),
             pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
+            **{
+                "pagination.keyset.partial_page": tenant_enforcement_metadata.get(
+                    "pagination.keyset.partial_page"
+                )
+            },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
 
@@ -2137,12 +2156,15 @@ async def handler(
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
         )
 
-        return envelope.model_dump_json(exclude_none=True)
+        return envelope.model_dump_json(exclude_none=True, by_alias=True)
 
     except _SandboxExecutionTimeout as e:
         provider = _active_provider()
         tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         tenant_enforcement_metadata["execution_timeout_triggered"] = True
+        if tenant_enforcement_metadata.get("pagination_mode_used") == "keyset":
+            tenant_enforcement_metadata["pagination.keyset.partial_page"] = True
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
         tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",
