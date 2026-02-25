@@ -31,6 +31,7 @@ class PostgresMetadataStore(MetadataStore):
                 "name": col.name,
                 "type": col.data_type,
                 "nullable": col.is_nullable,
+                "is_primary_key": col.is_primary_key,
             }
             for col in table_def.columns
         ]

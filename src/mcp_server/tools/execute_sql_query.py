@@ -561,6 +561,35 @@ def _extract_columns_from_table_definition(definition_payload: str) -> Optional[
     return extracted or None
 
 
+def _extract_keyset_column_metadata(
+    definition_payload: str,
+) -> Optional[dict[str, dict[str, Any]]]:
+    try:
+        parsed = json.loads(definition_payload)
+    except Exception:
+        return None
+    columns = parsed.get("columns")
+    if not isinstance(columns, list):
+        return None
+
+    metadata: dict[str, dict[str, Any]] = {}
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        normalized = name.strip().lower()
+        metadata[normalized] = {
+            "nullable": entry.get("nullable"),
+            "is_nullable": entry.get("is_nullable"),
+            "is_primary_key": entry.get("is_primary_key"),
+            "is_unique": entry.get("is_unique"),
+            "unique": entry.get("unique"),
+        }
+    return metadata or None
+
+
 async def _load_table_columns_for_rewrite(
     table_names: Sequence[str],
     tenant_id: int,
@@ -599,6 +628,62 @@ async def _load_table_columns_for_rewrite(
             break
 
     return table_columns
+
+
+async def _load_keyset_column_metadata(
+    table_names: Sequence[str], tenant_id: int | None
+) -> dict[str, dict[str, Any]]:
+    """Best-effort metadata loader for keyset tie-breaker validation."""
+    if not table_names:
+        return {}
+
+    try:
+        store = Database.get_metadata_store()
+    except Exception:
+        return {}
+
+    loaded: dict[str, dict[str, Any]] = {}
+    single_table = len(table_names) == 1
+    for table_name in table_names:
+        normalized = (table_name or "").strip().lower()
+        if not normalized:
+            continue
+
+        candidates = [normalized]
+        short_name = normalized.split(".")[-1]
+        if short_name != normalized:
+            candidates.append(short_name)
+
+        table_metadata: dict[str, dict[str, Any]] | None = None
+        resolved_table_name = short_name
+        for candidate in candidates:
+            try:
+                definition_payload = await store.get_table_definition(
+                    candidate, tenant_id=tenant_id
+                )
+            except Exception:
+                continue
+            table_metadata = _extract_keyset_column_metadata(definition_payload)
+            if table_metadata:
+                resolved_table_name = candidate.split(".")[-1]
+                break
+
+        if not table_metadata:
+            continue
+
+        for column_name, metadata in table_metadata.items():
+            loaded[f"{resolved_table_name}.{column_name}"] = metadata
+            if single_table:
+                loaded[column_name] = metadata
+
+    return loaded
+
+
+def _keyset_tiebreaker_allowlist() -> set[str]:
+    raw = (get_env_str("MCP_KEYSET_TIEBREAKER_ALLOWLIST", "") or "").strip()
+    if not raw:
+        return set()
+    return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
 
 
 def _resolve_row_limit(conn: object) -> int:
@@ -1006,6 +1091,8 @@ async def handler(
     provider = _active_provider()
     keyset_order_keys = []
     keyset_values = []
+    keyset_table_names: List[str] = []
+    keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1153,10 +1240,16 @@ async def handler(
                 envelope_metadata=tenant_enforcement_metadata,
             )
 
-        from dal.keyset_pagination import extract_keyset_order_keys
+        from dal.keyset_pagination import (
+            KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            extract_keyset_order_keys,
+            extract_keyset_table_names,
+            validate_stable_tiebreaker,
+        )
 
         try:
             keyset_order_keys = extract_keyset_order_keys(sql_query, provider=provider)
+            keyset_table_names = extract_keyset_table_names(sql_query, provider=provider)
         except ValueError as e:
             return _construct_error_response(
                 message=str(e),
@@ -1175,6 +1268,28 @@ async def handler(
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"reason_code": "execution_pagination_keyset_order_by_required"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+
+        keyset_column_metadata = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        try:
+            validate_stable_tiebreaker(
+                keyset_order_keys,
+                table_names=keyset_table_names,
+                allowlist=_keyset_tiebreaker_allowlist(),
+                column_metadata=keyset_column_metadata,
+            )
+        except ValueError as e:
+            reason_code = (
+                KEYSET_REQUIRES_STABLE_TIEBREAKER
+                if KEYSET_REQUIRES_STABLE_TIEBREAKER in str(e)
+                else "execution_pagination_keyset_invalid_sql"
+            )
+            return _construct_error_response(
+                message=str(e),
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": reason_code},
                 envelope_metadata=tenant_enforcement_metadata,
             )
 

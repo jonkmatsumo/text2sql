@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 import sqlglot
 from sqlglot import exp
 
+KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+
 
 @dataclass(frozen=True)
 class KeysetCursorPayload:
@@ -141,6 +143,114 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
         )
 
     return keys
+
+
+def extract_keyset_table_names(sql: str, provider: str = "postgres") -> List[str]:
+    """Extract base table names referenced by a SELECT query."""
+    dialect = sqlglot.Dialect.get(provider)
+    try:
+        expression = sqlglot.parse_one(sql, read=dialect)
+    except Exception as e:
+        raise ValueError(f"Failed to parse SQL: {str(e)}")
+
+    if not isinstance(expression, exp.Select):
+        raise ValueError("Keyset pagination only supports a single SELECT statement.")
+
+    cte_names = {
+        _normalize_identifier(cte.alias_or_name)
+        for cte in expression.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    table_names: List[str] = []
+    seen: set[str] = set()
+    for table in expression.find_all(exp.Table):
+        table_name = _normalize_identifier(table.name)
+        if not table_name or table_name in cte_names:
+            continue
+        schema_name = _normalize_identifier(table.db)
+        full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+        if full_name in seen:
+            continue
+        seen.add(full_name)
+        table_names.append(full_name)
+    return table_names
+
+
+def validate_stable_tiebreaker(
+    order_keys: List[KeysetOrderKey],
+    *,
+    table_names: Optional[List[str]] = None,
+    allowlist: Optional[set[str]] = None,
+    column_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
+    """Fail closed unless ORDER BY terminates in a stable deterministic tie-breaker."""
+    if not order_keys:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY must include a stable tie-breaker."
+        )
+
+    tie_key = order_keys[-1]
+    if _is_nondeterministic(tie_key.expression):
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY tie-breaker must be deterministic."
+        )
+    if not isinstance(tie_key.expression, exp.Column):
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be a plain column."
+        )
+
+    column_name = _normalize_identifier(tie_key.expression.name)
+    if not column_name:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY column name is invalid."
+        )
+
+    metadata = column_metadata or {}
+    if metadata:
+        qualified_name = _normalize_identifier(tie_key.expression.table)
+        metadata_key = column_name
+        if qualified_name:
+            metadata_key = f"{qualified_name}.{column_name}"
+        column_info = metadata.get(metadata_key) or metadata.get(column_name)
+        if not column_info:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Unable to verify tie-breaker metadata."
+            )
+
+        is_nullable = _is_truthy_metadata_flag(
+            column_info.get("nullable")
+        ) or _is_truthy_metadata_flag(column_info.get("is_nullable"))
+        if is_nullable:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be NOT NULL."
+            )
+
+        is_unique = any(
+            _is_truthy_metadata_flag(column_info.get(flag))
+            for flag in ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        )
+        if not is_unique:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+                "Final ORDER BY key must be unique or primary key."
+            )
+        return
+
+    allowed_columns = {"id"}
+    for table_name in table_names or []:
+        normalized_table = _normalize_table_name(table_name)
+        if normalized_table:
+            allowed_columns.add(f"{normalized_table}_id")
+    for name in allowlist or set():
+        normalized_name = _normalize_identifier(name)
+        if normalized_name:
+            allowed_columns.add(normalized_name)
+
+    if column_name not in allowed_columns:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+            "Final ORDER BY key must be id/<table>_id or allowlisted."
+        )
 
 
 def apply_keyset_pagination(
@@ -296,3 +406,24 @@ def _is_nondeterministic(expression: exp.Expression) -> bool:
 def _is_postgres_provider(provider: str) -> bool:
     """Return True when provider is PostgreSQL family."""
     return (provider or "").strip().lower() in {"postgres", "postgresql"}
+
+
+def _normalize_identifier(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip('"').lower()
+
+
+def _normalize_table_name(table_name: str) -> str:
+    normalized = _normalize_identifier(table_name)
+    return normalized.split(".")[-1] if normalized else ""
+
+
+def _is_truthy_metadata_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False

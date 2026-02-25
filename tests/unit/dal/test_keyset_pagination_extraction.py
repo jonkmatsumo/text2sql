@@ -1,6 +1,10 @@
 import pytest
 
-from dal.keyset_pagination import extract_keyset_order_keys
+from dal.keyset_pagination import (
+    KEYSET_REQUIRES_STABLE_TIEBREAKER,
+    extract_keyset_order_keys,
+    validate_stable_tiebreaker,
+)
 
 
 def test_extract_keyset_order_keys_basic():
@@ -69,3 +73,33 @@ def test_extract_keyset_order_keys_invalid_sql():
     sql = "DELET FROM users"
     with pytest.raises(ValueError, match="Failed to parse SQL|Keyset pagination only supports"):
         extract_keyset_order_keys(sql)
+
+
+def test_validate_stable_tiebreaker_rejects_created_at_only():
+    """Single non-id tie-breakers should fail closed without metadata."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC")
+    with pytest.raises(ValueError, match=KEYSET_REQUIRES_STABLE_TIEBREAKER):
+        validate_stable_tiebreaker(keys, table_names=["users"])
+
+
+def test_validate_stable_tiebreaker_allows_created_at_with_id():
+    """Appending id as final tie-breaker is allowed without metadata."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
+    validate_stable_tiebreaker(keys, table_names=["users"])
+
+
+def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():
+    """Metadata should reject nullable final tie-breaker columns."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
+    with pytest.raises(ValueError, match=KEYSET_REQUIRES_STABLE_TIEBREAKER):
+        validate_stable_tiebreaker(
+            keys,
+            table_names=["users"],
+            column_metadata={
+                "id": {
+                    "nullable": True,
+                    "is_primary_key": False,
+                    "is_unique": False,
+                }
+            },
+        )
