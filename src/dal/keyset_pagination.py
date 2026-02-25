@@ -292,6 +292,13 @@ def apply_keyset_pagination(
     return expression.where(predicate)
 
 
+def canonicalize_keyset_sql(expression: exp.Select, provider: str = "postgres") -> str:
+    """Render keyset-rewritten SQL in a stable canonical string form."""
+    dialect = sqlglot.Dialect.get(provider)
+    rendered = expression.sql(dialect=dialect, pretty=False)
+    return " ".join(rendered.split())
+
+
 def _build_keyset_predicate(
     keys: List[KeysetOrderKey], values: List[Any], provider: str = "postgres"
 ) -> exp.Condition:
@@ -307,10 +314,8 @@ def _build_keyset_predicate(
     eq = _build_order_equality(key, val)
     next_predicate = _build_keyset_predicate(keys[1:], values[1:], provider=provider)
 
-    return exp.Or(
-        this=comp,
-        expression=exp.And(this=eq, expression=exp.Paren(this=next_predicate)),
-    )
+    tie_branch = exp.And(this=eq, expression=exp.Paren(this=next_predicate))
+    return exp.Or(this=comp, expression=exp.Paren(this=tie_branch))
 
 
 def _build_order_comparison(

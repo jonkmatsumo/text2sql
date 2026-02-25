@@ -1727,7 +1727,7 @@ async def handler(
         if pagination_mode == "keyset":
             import sqlglot
 
-            from dal.keyset_pagination import apply_keyset_pagination
+            from dal.keyset_pagination import apply_keyset_pagination, canonicalize_keyset_sql
 
             try:
                 dialect = normalize_sqlglot_dialect(provider)
@@ -1745,7 +1745,7 @@ async def handler(
                     )
                 if page_size:
                     rewritten_select = rewritten_select.limit(page_size + 1)
-                effective_sql_query = rewritten_select.sql(dialect=dialect)
+                effective_sql_query = canonicalize_keyset_sql(rewritten_select, provider=provider)
             except Exception as e:
                 return _construct_error_response(
                     message=f"Failed to apply keyset pagination rewrite: {str(e)}",
