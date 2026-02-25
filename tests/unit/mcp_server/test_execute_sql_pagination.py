@@ -12,6 +12,28 @@ from dal.offset_pagination import build_query_fingerprint, encode_offset_paginat
 from mcp_server.tools.execute_sql_query import handler
 
 
+def test_build_query_fingerprint_changes_with_order_signature():
+    """Order signature must be part of the pagination fingerprint context."""
+    base_kwargs = {
+        "sql": "SELECT id FROM users ORDER BY id ASC",
+        "params": [],
+        "tenant_id": 1,
+        "provider": "postgres",
+        "max_rows": 1000,
+        "max_bytes": 1024 * 1024,
+        "max_execution_ms": 30_000,
+    }
+    fingerprint_asc = build_query_fingerprint(
+        **base_kwargs,
+        order_signature='["id|asc|nulls_last"]',
+    )
+    fingerprint_desc = build_query_fingerprint(
+        **base_kwargs,
+        order_signature='["id|desc|nulls_first"]',
+    )
+    assert fingerprint_asc != fingerprint_desc
+
+
 @pytest.mark.asyncio
 async def test_execute_sql_query_pagination_rejects_unsupported(monkeypatch):
     """Pagination options should be rejected when unsupported."""

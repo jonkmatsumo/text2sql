@@ -37,6 +37,7 @@ def build_query_fingerprint(
     max_rows: int,
     max_bytes: int,
     max_execution_ms: int,
+    order_signature: str | None = None,
 ) -> str:
     """Build a stable fingerprint binding pagination tokens to execution context."""
     sql_normalized = " ".join((sql or "").strip().split())
@@ -50,6 +51,8 @@ def build_query_fingerprint(
         "max_bytes": int(max_bytes),
         "max_execution_ms": int(max_execution_ms),
     }
+    if order_signature is not None:
+        payload["order_signature"] = " ".join(order_signature.strip().split())
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 

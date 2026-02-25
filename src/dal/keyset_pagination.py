@@ -11,6 +11,7 @@ import sqlglot
 from sqlglot import exp
 
 KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,10 @@ def encode_keyset_cursor(
 
 
 def decode_keyset_cursor(
-    cursor: str, expected_fingerprint: str, secret: Optional[str] = None
+    cursor: str,
+    expected_fingerprint: str,
+    secret: Optional[str] = None,
+    expected_keys: Optional[List[str]] = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -53,6 +57,11 @@ def decode_keyset_cursor(
 
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
+        if expected_keys is not None:
+            raw_keys = payload.get("k", [])
+            payload_keys = raw_keys if isinstance(raw_keys, list) else []
+            if payload_keys != expected_keys:
+                raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
 
         if secret:
             stored_sig = payload.get("s")
@@ -253,6 +262,17 @@ def validate_stable_tiebreaker(
         )
 
 
+def build_keyset_order_signature(order_keys: List[KeysetOrderKey]) -> List[str]:
+    """Build a deterministic structural signature for ORDER BY parity checks."""
+    signature: List[str] = []
+    for key in order_keys:
+        expression_sql = _normalize_sql_fragment(key.expression.sql())
+        direction = "desc" if key.descending else "asc"
+        nulls = "nulls_first" if key.nulls_first else "nulls_last"
+        signature.append(f"{expression_sql}|{direction}|{nulls}")
+    return signature
+
+
 def apply_keyset_pagination(
     expression: exp.Select,
     order_keys: List[KeysetOrderKey],
@@ -427,3 +447,9 @@ def _is_truthy_metadata_flag(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return False
+
+
+def _normalize_sql_fragment(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.strip().lower().split())

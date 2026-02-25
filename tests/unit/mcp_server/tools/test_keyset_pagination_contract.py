@@ -203,7 +203,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
         from dal.keyset_pagination import encode_keyset_cursor
 
         # Cursor from a different query/fingerprint
-        cursor = encode_keyset_cursor([50], ["id"], "old-fingerprint")
+        cursor = encode_keyset_cursor([50], ["id|asc|nulls_last"], "old-fingerprint")
 
         sql = "SELECT id FROM users ORDER BY id ASC"
         payload = await handler(
@@ -220,6 +220,43 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             == "execution_pagination_keyset_cursor_invalid"
         )
         assert "fingerprint mismatch" in result["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
+    """Cursor should be rejected when ORDER BY structure changes across requests."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="stable-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        from dal.keyset_pagination import encode_keyset_cursor
+
+        cursor = encode_keyset_cursor([50], ["id|asc|nulls_last"], "stable-fingerprint")
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id DESC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_MISMATCH"
 
 
 @pytest.mark.asyncio
@@ -262,7 +299,7 @@ async def test_execute_sql_query_keyset_rewrite_applied():
 
         from dal.keyset_pagination import encode_keyset_cursor
 
-        cursor = encode_keyset_cursor([50], ["id"], "test-fingerprint")
+        cursor = encode_keyset_cursor([50], ["id|asc|nulls_last"], "test-fingerprint")
 
         await handler(
             sql,

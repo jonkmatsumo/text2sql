@@ -1093,6 +1093,7 @@ async def handler(
     keyset_values = []
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
+    keyset_order_signature: List[str] = []
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1242,6 +1243,7 @@ async def handler(
 
         from dal.keyset_pagination import (
             KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            build_keyset_order_signature,
             extract_keyset_order_keys,
             extract_keyset_table_names,
             validate_stable_tiebreaker,
@@ -1292,6 +1294,7 @@ async def handler(
                 metadata={"reason_code": reason_code},
                 envelope_metadata=tenant_enforcement_metadata,
             )
+        keyset_order_signature = build_keyset_order_signature(keyset_order_keys)
 
         if page_size:
             row_limit = page_size
@@ -1672,6 +1675,11 @@ async def handler(
         applied_page_size = page_size
         conn = None
         execution_started_at = time.monotonic()
+        keyset_signature_for_fingerprint = (
+            json.dumps(keyset_order_signature, separators=(",", ":"))
+            if keyset_order_signature
+            else None
+        )
         query_fingerprint = build_query_fingerprint(
             sql=effective_sql_query,
             params=effective_params,
@@ -1680,25 +1688,30 @@ async def handler(
             max_rows=int(resource_limits.max_rows),
             max_bytes=int(resource_limits.max_bytes),
             max_execution_ms=int(resource_limits.max_execution_ms),
+            order_signature=keyset_signature_for_fingerprint,
         )
         keyset_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
         keyset_token_secret = keyset_token_secret_raw or None
 
         if pagination_mode == "keyset" and keyset_cursor:
-            from dal.keyset_pagination import decode_keyset_cursor
+            from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor
 
             try:
                 keyset_values = decode_keyset_cursor(
                     keyset_cursor,
                     expected_fingerprint=query_fingerprint,
                     secret=keyset_token_secret,
+                    expected_keys=keyset_order_signature,
                 )
             except ValueError as e:
+                reason_code = "execution_pagination_keyset_cursor_invalid"
+                if KEYSET_ORDER_MISMATCH in str(e):
+                    reason_code = KEYSET_ORDER_MISMATCH
                 return _construct_error_response(
                     message=str(e),
                     category=ErrorCategory.INVALID_REQUEST,
                     provider=provider,
-                    metadata={"reason_code": "execution_pagination_keyset_cursor_invalid"},
+                    metadata={"reason_code": reason_code},
                     envelope_metadata=tenant_enforcement_metadata,
                 )
             # Ensure the number of values matches the number of ORDER BY columns
@@ -2005,7 +2018,7 @@ async def handler(
                 keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
                 next_keyset_cursor = encode_keyset_cursor(
                     keyset_vals,
-                    [k.alias or k.expression.sql() for k in keyset_order_keys],
+                    keyset_order_signature,
                     query_fingerprint,
                     secret=keyset_token_secret,
                 )
