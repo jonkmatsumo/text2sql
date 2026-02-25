@@ -95,6 +95,7 @@ class KeysetOrderKey:
 def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[KeysetOrderKey]:
     """Extract and canonicalize ORDER BY keys from a SQL query."""
     dialect = sqlglot.Dialect.get(provider)
+    postgres_null_semantics = _is_postgres_provider(provider)
     try:
         expressions = sqlglot.parse(sql, read=dialect)
     except Exception as e:
@@ -118,12 +119,15 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
             )
 
         descending = o.args.get("desc") is True
-        nulls_first = o.args.get("nulls_first") is True
-        # If nulls_first is not specified, postgres defaults:
-        # ASC: NULLS LAST
-        # DESC: NULLS FIRST
-        if o.args.get("nulls_first") is None:
-            nulls_first = descending
+        explicit_nulls_first = o.args.get("nulls_first")
+        if explicit_nulls_first is None:
+            # Postgres defaults:
+            # ASC: NULLS LAST
+            # DESC: NULLS FIRST
+            # Other providers remain conservative unless NULL ordering is explicit.
+            nulls_first = descending if postgres_null_semantics else False
+        else:
+            nulls_first = explicit_nulls_first is True
 
         # Try to resolve alias if 'this' is a Column and matches a projection alias
         alias = None
@@ -154,22 +158,24 @@ def apply_keyset_pagination(
             f"Mismatch between order keys ({len(order_keys)}) and values ({len(values)}) count."
         )
 
-    predicate = _build_keyset_predicate(order_keys, values)
+    predicate = _build_keyset_predicate(order_keys, values, provider=provider)
     return expression.where(predicate)
 
 
-def _build_keyset_predicate(keys: List[KeysetOrderKey], values: List[Any]) -> exp.Condition:
+def _build_keyset_predicate(
+    keys: List[KeysetOrderKey], values: List[Any], provider: str = "postgres"
+) -> exp.Condition:
     """Recursively build the nested keyset predicate."""
     key = keys[0]
     val = values[0]
 
-    comp = _build_order_comparison(key, val)
+    comp = _build_order_comparison(key, val, provider=provider)
 
     if len(keys) == 1:
         return comp
 
     eq = _build_order_equality(key, val)
-    next_predicate = _build_keyset_predicate(keys[1:], values[1:])
+    next_predicate = _build_keyset_predicate(keys[1:], values[1:], provider=provider)
 
     return exp.Or(
         this=comp,
@@ -177,8 +183,17 @@ def _build_keyset_predicate(keys: List[KeysetOrderKey], values: List[Any]) -> ex
     )
 
 
-def _build_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+def _build_order_comparison(
+    key: KeysetOrderKey, value: Any, provider: str = "postgres"
+) -> exp.Condition:
     """Build keyset 'strictly after cursor' comparison for one ORDER BY key."""
+    if _is_postgres_provider(provider):
+        return _build_postgres_order_comparison(key, value)
+    return _build_fail_closed_order_comparison(key, value)
+
+
+def _build_postgres_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build comparison semantics that match Postgres NULLS FIRST/LAST behavior."""
     key_exp = key.expression.copy()
     if value is None:
         # NULLS FIRST: non-null values follow nulls.
@@ -196,6 +211,14 @@ def _build_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
             this=comp, expression=exp.Is(this=key.expression.copy(), expression=exp.Null())
         )
     return comp
+
+
+def _build_fail_closed_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build conservative comparison semantics for non-Postgres providers."""
+    if value is None:
+        return exp.Boolean(this=False)
+    op = exp.GT if not key.descending else exp.LT
+    return op(this=key.expression.copy(), expression=_to_exp_literal(value))
 
 
 def _build_order_equality(key: KeysetOrderKey, value: Any) -> exp.Condition:
@@ -268,3 +291,8 @@ def _is_nondeterministic(expression: exp.Expression) -> bool:
         if name and name.upper() in nondeterministic_funcs:
             return True
     return False
+
+
+def _is_postgres_provider(provider: str) -> bool:
+    """Return True when provider is PostgreSQL family."""
+    return (provider or "").strip().lower() in {"postgres", "postgresql"}

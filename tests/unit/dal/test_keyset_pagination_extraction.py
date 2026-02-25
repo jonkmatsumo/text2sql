@@ -48,6 +48,22 @@ def test_extract_keyset_order_keys_complex_expression():
     assert keys[0].descending is False
 
 
+def test_extract_keyset_order_keys_postgres_defaults_null_ordering():
+    """Postgres defaults should be DESC NULLS FIRST and ASC NULLS LAST."""
+    sql = "SELECT id FROM users ORDER BY created_at DESC, id ASC"
+    keys = extract_keyset_order_keys(sql, provider="postgres")
+    assert keys[0].nulls_first is True
+    assert keys[1].nulls_first is False
+
+
+def test_extract_keyset_order_keys_non_postgres_without_nulls_clause_is_conservative():
+    """Non-Postgres providers should avoid assuming provider-specific NULL defaults."""
+    sql = "SELECT id FROM users ORDER BY created_at DESC"
+    keys = extract_keyset_order_keys(sql, provider="mysql")
+    assert len(keys) == 1
+    assert keys[0].nulls_first is False
+
+
 def test_extract_keyset_order_keys_invalid_sql():
     """Test that non-SELECT statements are rejected."""
     sql = "DELET FROM users"

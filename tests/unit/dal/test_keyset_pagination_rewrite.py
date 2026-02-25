@@ -69,8 +69,34 @@ def test_apply_keyset_pagination_nulls_last_includes_null_rows():
     assert "score > NULL" not in sql_out
 
 
-def test_apply_keyset_pagination_null_cursor_uses_is_null_path():
-    """NULL cursor values should use IS NULL semantics instead of equality/comparison to NULL."""
+def test_apply_keyset_pagination_null_cursor_asc_nulls_last_uses_is_null_path():
+    """Postgres ASC NULLS LAST with NULL cursor should only advance inside the NULL partition."""
+    sql = "SELECT * FROM users ORDER BY score ASC NULLS LAST, id ASC"
+    expression = sqlglot.parse_one(sql)
+    keys = [
+        KeysetOrderKey(
+            expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="score", quoted=False)),
+            alias="score",
+            descending=False,
+            nulls_first=False,
+        ),
+        KeysetOrderKey(
+            expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
+            alias="id",
+            descending=False,
+            nulls_first=False,
+        ),
+    ]
+
+    rewritten = apply_keyset_pagination(expression, keys, [None, 50])
+    sql_out = rewritten.sql()
+    assert "score IS NULL AND (id > 50 OR id IS NULL)" in sql_out
+    assert "score = NULL" not in sql_out
+    assert "score > NULL" not in sql_out
+
+
+def test_apply_keyset_pagination_null_cursor_desc_nulls_first_uses_is_null_path():
+    """Postgres DESC NULLS FIRST should advance to non-NULL rows and NULL peers."""
     sql = "SELECT * FROM users ORDER BY score DESC NULLS FIRST, id ASC"
     expression = sqlglot.parse_one(sql)
     keys = [
@@ -88,9 +114,53 @@ def test_apply_keyset_pagination_null_cursor_uses_is_null_path():
         ),
     ]
 
-    rewritten = apply_keyset_pagination(expression, keys, [None, 50])
+    rewritten = apply_keyset_pagination(expression, keys, [None, 50], provider="postgres")
     sql_out = rewritten.sql()
     assert "NOT score IS NULL" in sql_out
     assert "score IS NULL AND (id > 50 OR id IS NULL)" in sql_out
     assert "score = NULL" not in sql_out
     assert "score > NULL" not in sql_out
+
+
+def test_apply_keyset_pagination_non_postgres_nulls_fail_closed():
+    """Non-Postgres providers keep conservative NULL handling."""
+    sql = "SELECT * FROM users ORDER BY score ASC NULLS LAST"
+    expression = sqlglot.parse_one(sql)
+    keys = [
+        KeysetOrderKey(
+            expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="score", quoted=False)),
+            alias="score",
+            descending=False,
+            nulls_first=False,
+        )
+    ]
+    rewritten = apply_keyset_pagination(expression, keys, [10], provider="mysql")
+    sql_out = rewritten.sql()
+    assert "score > 10" in sql_out
+    assert "score IS NULL" not in sql_out
+
+
+def test_apply_keyset_pagination_sql_output_is_deterministic():
+    """Equivalent rewrites should emit identical SQL strings."""
+    sql = "SELECT id, score FROM users ORDER BY score DESC NULLS FIRST, id ASC"
+    keys = [
+        KeysetOrderKey(
+            expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="score", quoted=False)),
+            alias="score",
+            descending=True,
+            nulls_first=True,
+        ),
+        KeysetOrderKey(
+            expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
+            alias="id",
+            descending=False,
+            nulls_first=False,
+        ),
+    ]
+    first = apply_keyset_pagination(
+        sqlglot.parse_one(sql), keys, [None, 3], provider="postgres"
+    ).sql()
+    second = apply_keyset_pagination(
+        sqlglot.parse_one(sql), keys, [None, 3], provider="postgres"
+    ).sql()
+    assert first == second
