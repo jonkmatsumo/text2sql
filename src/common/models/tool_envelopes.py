@@ -126,6 +126,12 @@ class ExecuteSQLQueryMetadata(BaseModel):
     execution_timeout_applied: Optional[bool] = None
     execution_timeout_triggered: Optional[bool] = None
     resource_capability_mismatch: Optional[str] = None
+    pagination_mode_used: Optional[Literal["offset", "keyset"]] = Field(
+        None, description="The pagination strategy applied for this result"
+    )
+    next_keyset_cursor: Optional[str] = Field(
+        None, description="Opaque cursor for the next page when using keyset pagination"
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -188,6 +194,18 @@ class ExecuteSQLQueryMetadata(BaseModel):
             normalized["next_cursor"] = normalized["next_page_token"]
 
         if (
+            normalized.get("next_keyset_cursor") is None
+            and normalized.get("next_page_token") is not None
+            and normalized.get("pagination_mode_used") == "keyset"
+        ):
+            normalized["next_keyset_cursor"] = normalized["next_page_token"]
+        if (
+            normalized.get("next_page_token") is None
+            and normalized.get("next_keyset_cursor") is not None
+        ):
+            normalized["next_page_token"] = normalized["next_keyset_cursor"]
+
+        if (
             normalized.get("partial_reason") is None
             and normalized.get("truncation_reason") is not None
         ):
@@ -221,6 +239,14 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.next_cursor = self.next_page_token
         if self.next_page_token is None and self.next_cursor is not None:
             self.next_page_token = self.next_cursor
+        if (
+            self.next_keyset_cursor is None
+            and self.next_page_token is not None
+            and self.pagination_mode_used == "keyset"
+        ):
+            self.next_keyset_cursor = self.next_page_token
+        if self.next_page_token is None and self.next_keyset_cursor is not None:
+            self.next_page_token = self.next_keyset_cursor
         if self.truncation_reason is None and self.partial_reason is not None:
             self.truncation_reason = self.partial_reason
         return self

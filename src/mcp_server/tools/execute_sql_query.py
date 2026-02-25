@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import asyncpg
 from opentelemetry import trace
@@ -435,6 +435,8 @@ def _record_result_contract_observability(
     next_page_token: str | None,
     bytes_returned: int,
     execution_duration_ms: int,
+    pagination_mode: str | None = None,
+    next_keyset_cursor: str | None = None,
 ) -> None:
     span = trace.get_current_span()
     if span is None or not span.is_recording():
@@ -446,6 +448,10 @@ def _record_result_contract_observability(
         span.set_attribute("db.result.page_size", int(page_size))
     span.set_attribute("db.result.page_items_returned", int(page_items_returned))
     span.set_attribute("db.result.next_page_token_present", bool(next_page_token))
+    if pagination_mode:
+        span.set_attribute("db.pagination.mode", str(pagination_mode))
+    if next_keyset_cursor:
+        span.set_attribute("db.pagination.next_keyset_cursor_present", True)
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
     span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
@@ -978,6 +984,9 @@ async def handler(
     timeout_seconds: Optional[float] = None,
     page_token: Optional[str] = None,
     page_size: Optional[int] = None,
+    pagination_mode: Literal["offset", "keyset"] = "offset",
+    keyset_cursor: Optional[str] = None,
+    keyset_order_by: Optional[List[str]] = None,
 ) -> str:
     """Execute a validated SQL query against the target database.
 
@@ -995,6 +1004,8 @@ async def handler(
         - Capacity detection: If query triggers row/resource caps.
     """
     provider = _active_provider()
+    keyset_order_keys = []
+    keyset_values = []
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1019,11 +1030,27 @@ async def handler(
         rollback=False,
         failure_reason=SANDBOX_FAILURE_NONE,
     )
+    # Initialize metadata for consistent error responses
+    tenant_enforcement_metadata: Dict[str, Any] = {
+        "pagination_mode_used": pagination_mode,
+        "next_keyset_cursor": None,
+        "execution_timeout_applied": execution_timeout_applied,
+        "execution_timeout_triggered": False,
+        "resource_capability_mismatch": None,
+    }
+    tenant_enforcement_metadata.update(session_guardrail_metadata)
+    tenant_enforcement_metadata.update(sandbox_metadata)
 
     from mcp_server.utils.auth import validate_role
 
-    if err := validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
-        return err
+    if validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
+        return _construct_error_response(
+            message="Unauthorized: SQL_ADMIN_ROLE required.",
+            category=ErrorCategory.AUTHENTICATION_FAILED,
+            provider=provider,
+            metadata={"reason_code": "unauthorized"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     # 5. Execute Query
     try:
@@ -1060,12 +1087,7 @@ async def handler(
         rewrite_enabled=rewrite_settings.enabled,
     )
     policy_decision = policy.default_decision(sql=sql_query, params=params)
-    tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
-    tenant_enforcement_metadata.update(session_guardrail_metadata)
-    tenant_enforcement_metadata.update(sandbox_metadata)
-    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
-    tenant_enforcement_metadata["execution_timeout_triggered"] = False
-    tenant_enforcement_metadata["resource_capability_mismatch"] = None
+    tenant_enforcement_metadata.update(policy_decision.envelope_metadata)
 
     try:
         validate_resource_capabilities(
@@ -1111,7 +1133,80 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
-    # 2. Server-Side AST Validation
+    # 1.5 Pagination Mode and Bounded Fields Validation
+    if pagination_mode == "keyset":
+        if not (
+            bool(getattr(caps, "supports_pagination", False))
+            or (
+                bool(getattr(caps, "supports_offset_pagination_wrapper", False))
+                and bool(getattr(caps, "supports_query_wrapping_subselect", False))
+            )
+        ):
+            return _construct_error_response(
+                "Pagination is not supported for this provider.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={
+                    "reason_code": "execution_pagination_unsupported_provider",
+                    "required_capability": "pagination",
+                },
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+
+        from dal.keyset_pagination import extract_keyset_order_keys
+
+        try:
+            keyset_order_keys = extract_keyset_order_keys(sql_query, provider=provider)
+        except ValueError as e:
+            return _construct_error_response(
+                message=str(e),
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_keyset_invalid_sql"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+
+        if not keyset_order_keys:
+            return _construct_error_response(
+                message=(
+                    "Keyset pagination requires an ORDER BY clause with "
+                    "deterministic expressions."
+                ),
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_keyset_order_by_required"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+
+        if page_size:
+            row_limit = page_size
+
+        if keyset_cursor and len(keyset_cursor) > _DEFAULT_PAGE_TOKEN_MAX_LENGTH:
+            return _construct_error_response(
+                message="Keyset cursor exceeds maximum allowed length.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_keyset_cursor_too_long"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        if keyset_order_by and len(keyset_order_by) > 10:  # Bounded
+            return _construct_error_response(
+                message="Keyset order-by columns exceed maximum allowed count.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_keyset_order_by_too_many_columns"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+    elif pagination_mode == "offset":
+        if keyset_cursor or keyset_order_by:
+            return _construct_error_response(
+                message="Keyset pagination fields are not allowed in offset mode.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": "execution_pagination_keyset_fields_not_allowed"},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+
     validation_error = _validate_sql_ast(sql_query, provider)
     if validation_error:
         validation_failure = _validate_sql_ast_failure(sql_query, provider)
@@ -1239,12 +1334,7 @@ async def handler(
         schema_snapshot_loader=_load_table_columns_for_rewrite,
     )
     _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
-    tenant_enforcement_metadata = dict(policy_decision.envelope_metadata)
-    tenant_enforcement_metadata.update(session_guardrail_metadata)
-    tenant_enforcement_metadata.update(sandbox_metadata)
-    tenant_enforcement_metadata["execution_timeout_applied"] = execution_timeout_applied
-    tenant_enforcement_metadata["execution_timeout_triggered"] = False
-    tenant_enforcement_metadata["resource_capability_mismatch"] = None
+    tenant_enforcement_metadata.update(policy_decision.envelope_metadata)
     effective_sql_query = policy_decision.sql_to_execute
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
@@ -1372,7 +1462,9 @@ async def handler(
     supports_query_wrapping_subselect = bool(
         getattr(caps, "supports_query_wrapping_subselect", False)
     )
-    pagination_requested = bool(page_token or page_size)
+    pagination_requested = bool(
+        page_token or page_size or keyset_cursor or pagination_mode == "keyset"
+    )
     if pagination_requested and not (
         supports_server_pagination
         or (supports_offset_pagination_wrapper and supports_query_wrapping_subselect)
@@ -1474,6 +1566,60 @@ async def handler(
             max_bytes=int(resource_limits.max_bytes),
             max_execution_ms=int(resource_limits.max_execution_ms),
         )
+        if pagination_mode == "keyset" and keyset_cursor:
+            from dal.keyset_pagination import decode_keyset_cursor
+
+            secret = get_env_str("MCP_PAGINATION_TOKEN_SECRET", "default-secret")
+            try:
+                keyset_values = decode_keyset_cursor(
+                    keyset_cursor, expected_fingerprint=query_fingerprint, secret=secret
+                )
+            except ValueError as e:
+                return _construct_error_response(
+                    message=str(e),
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": "execution_pagination_keyset_cursor_invalid"},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+            # Ensure the number of values matches the number of ORDER BY columns
+            if len(keyset_values) != len(keyset_order_keys):
+                return _construct_error_response(
+                    message="Keyset cursor value count mismatch with ORDER BY columns.",
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": "execution_pagination_keyset_cursor_column_mismatch"},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+
+        if pagination_mode == "keyset" and keyset_values:
+            import sqlglot
+
+            from dal.keyset_pagination import apply_keyset_pagination
+
+            try:
+                dialect = normalize_sqlglot_dialect(provider)
+                parsed_effective = sqlglot.parse_one(effective_sql_query, read=dialect)
+                if not isinstance(parsed_effective, sqlglot.exp.Select):
+                    raise ValueError("Effective query is not a SELECT statement.")
+
+                rewritten_select = apply_keyset_pagination(
+                    parsed_effective,
+                    keyset_order_keys,
+                    keyset_values,
+                    provider=provider,
+                )
+                if page_size:
+                    rewritten_select = rewritten_select.limit(page_size + 1)
+                effective_sql_query = rewritten_select.sql(dialect=dialect)
+            except Exception as e:
+                return _construct_error_response(
+                    message=f"Failed to apply keyset pagination rewrite: {str(e)}",
+                    category=ErrorCategory.INTERNAL,
+                    provider=provider,
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
@@ -1503,7 +1649,12 @@ async def handler(
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 pagination_requested = bool(page_token or effective_page_size)
-                if pagination_requested and supports_server_pagination and callable(fetch_page):
+                if (
+                    pagination_mode == "offset"
+                    and pagination_requested
+                    and supports_server_pagination
+                    and callable(fetch_page)
+                ):
                     if include_columns and callable(fetch_page_with_columns):
                         rows, columns, next_token = await fetch_page_with_columns(
                             effective_sql_query,
@@ -1709,6 +1860,23 @@ async def handler(
             or forced_limited
             or size_truncated
         )
+
+        if pagination_mode == "keyset" and is_truncated and not size_truncated and result_rows:
+            from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
+
+            secret = get_env_str("MCP_PAGINATION_TOKEN_SECRET", "default-secret")
+            try:
+                keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
+                next_keyset_cursor = encode_keyset_cursor(
+                    keyset_vals,
+                    [k.alias or k.expression.sql() for k in keyset_order_keys],
+                    query_fingerprint,
+                    secret=secret,
+                )
+                tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
+                tenant_enforcement_metadata["is_paginated"] = True
+            except Exception as e:
+                logger.warning(f"Failed to generate next_keyset_cursor: {e}")
         partial_reason = last_truncated_reason
         if partial_reason is None and size_truncated:
             partial_reason = size_truncated_reason or PayloadTruncationReason.MAX_BYTES.value
@@ -1737,7 +1905,6 @@ async def handler(
                 if row_limit <= 0:
                     row_limit = len(result_rows)
 
-        # Typed Envelope Construction (Legacy mode removed)
         envelope_metadata = ExecuteSQLQueryMetadata(
             rows_returned=len(result_rows),
             is_truncated=is_truncated,
@@ -1790,7 +1957,10 @@ async def handler(
             resource_capability_mismatch=tenant_enforcement_metadata.get(
                 "resource_capability_mismatch"
             ),
+            pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
+            next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
         )
+        # print(f"DEBUG: metadata={envelope_metadata}")
 
         envelope = ExecuteSQLQueryResponseEnvelope(
             rows=result_rows, columns=columns, metadata=envelope_metadata
@@ -1808,6 +1978,8 @@ async def handler(
             next_page_token=next_token,
             bytes_returned=bytes_returned,
             execution_duration_ms=execution_duration_ms,
+            pagination_mode=tenant_enforcement_metadata.get("pagination_mode_used"),
+            next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
         )
 
         return envelope.model_dump_json(exclude_none=True)
