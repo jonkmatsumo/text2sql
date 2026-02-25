@@ -78,3 +78,22 @@ def test_execute_sql_query_metadata_items_returned_aliases():
     meta2 = ExecuteSQLQueryMetadata(returned_count=4)
     assert meta2.rows_returned == 4
     assert meta2.items_returned == 4
+
+
+def test_execute_sql_query_metadata_keyset_cursor_aliasing_is_one_way():
+    """next_keyset_cursor should populate next_page_token, but not vice versa."""
+    keyset_meta = ExecuteSQLQueryMetadata(
+        rows_returned=1,
+        pagination_mode_used="keyset",
+        next_keyset_cursor="ks-1",
+    )
+    assert keyset_meta.next_keyset_cursor == "ks-1"
+    assert keyset_meta.next_page_token == "ks-1"
+
+    page_token_meta = ExecuteSQLQueryMetadata(
+        rows_returned=1,
+        pagination_mode_used="keyset",
+        next_page_token="offset-1",
+    )
+    assert page_token_meta.next_page_token == "offset-1"
+    assert page_token_meta.next_keyset_cursor is None
