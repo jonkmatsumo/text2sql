@@ -561,6 +561,35 @@ def _extract_columns_from_table_definition(definition_payload: str) -> Optional[
     return extracted or None
 
 
+def _extract_keyset_column_metadata(
+    definition_payload: str,
+) -> Optional[dict[str, dict[str, Any]]]:
+    try:
+        parsed = json.loads(definition_payload)
+    except Exception:
+        return None
+    columns = parsed.get("columns")
+    if not isinstance(columns, list):
+        return None
+
+    metadata: dict[str, dict[str, Any]] = {}
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        normalized = name.strip().lower()
+        metadata[normalized] = {
+            "nullable": entry.get("nullable"),
+            "is_nullable": entry.get("is_nullable"),
+            "is_primary_key": entry.get("is_primary_key"),
+            "is_unique": entry.get("is_unique"),
+            "unique": entry.get("unique"),
+        }
+    return metadata or None
+
+
 async def _load_table_columns_for_rewrite(
     table_names: Sequence[str],
     tenant_id: int,
@@ -599,6 +628,62 @@ async def _load_table_columns_for_rewrite(
             break
 
     return table_columns
+
+
+async def _load_keyset_column_metadata(
+    table_names: Sequence[str], tenant_id: int | None
+) -> dict[str, dict[str, Any]]:
+    """Best-effort metadata loader for keyset tie-breaker validation."""
+    if not table_names:
+        return {}
+
+    try:
+        store = Database.get_metadata_store()
+    except Exception:
+        return {}
+
+    loaded: dict[str, dict[str, Any]] = {}
+    single_table = len(table_names) == 1
+    for table_name in table_names:
+        normalized = (table_name or "").strip().lower()
+        if not normalized:
+            continue
+
+        candidates = [normalized]
+        short_name = normalized.split(".")[-1]
+        if short_name != normalized:
+            candidates.append(short_name)
+
+        table_metadata: dict[str, dict[str, Any]] | None = None
+        resolved_table_name = short_name
+        for candidate in candidates:
+            try:
+                definition_payload = await store.get_table_definition(
+                    candidate, tenant_id=tenant_id
+                )
+            except Exception:
+                continue
+            table_metadata = _extract_keyset_column_metadata(definition_payload)
+            if table_metadata:
+                resolved_table_name = candidate.split(".")[-1]
+                break
+
+        if not table_metadata:
+            continue
+
+        for column_name, metadata in table_metadata.items():
+            loaded[f"{resolved_table_name}.{column_name}"] = metadata
+            if single_table:
+                loaded[column_name] = metadata
+
+    return loaded
+
+
+def _keyset_tiebreaker_allowlist() -> set[str]:
+    raw = (get_env_str("MCP_KEYSET_TIEBREAKER_ALLOWLIST", "") or "").strip()
+    if not raw:
+        return set()
+    return {entry.strip().lower() for entry in raw.split(",") if entry.strip()}
 
 
 def _resolve_row_limit(conn: object) -> int:
@@ -1006,6 +1091,9 @@ async def handler(
     provider = _active_provider()
     keyset_order_keys = []
     keyset_values = []
+    keyset_table_names: List[str] = []
+    keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
+    keyset_order_signature: List[str] = []
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1153,10 +1241,17 @@ async def handler(
                 envelope_metadata=tenant_enforcement_metadata,
             )
 
-        from dal.keyset_pagination import extract_keyset_order_keys
+        from dal.keyset_pagination import (
+            KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            build_keyset_order_signature,
+            extract_keyset_order_keys,
+            extract_keyset_table_names,
+            validate_stable_tiebreaker,
+        )
 
         try:
             keyset_order_keys = extract_keyset_order_keys(sql_query, provider=provider)
+            keyset_table_names = extract_keyset_table_names(sql_query, provider=provider)
         except ValueError as e:
             return _construct_error_response(
                 message=str(e),
@@ -1177,6 +1272,29 @@ async def handler(
                 metadata={"reason_code": "execution_pagination_keyset_order_by_required"},
                 envelope_metadata=tenant_enforcement_metadata,
             )
+
+        keyset_column_metadata = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        try:
+            validate_stable_tiebreaker(
+                keyset_order_keys,
+                table_names=keyset_table_names,
+                allowlist=_keyset_tiebreaker_allowlist(),
+                column_metadata=keyset_column_metadata,
+            )
+        except ValueError as e:
+            reason_code = (
+                KEYSET_REQUIRES_STABLE_TIEBREAKER
+                if KEYSET_REQUIRES_STABLE_TIEBREAKER in str(e)
+                else "execution_pagination_keyset_invalid_sql"
+            )
+            return _construct_error_response(
+                message=str(e),
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={"reason_code": reason_code},
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        keyset_order_signature = build_keyset_order_signature(keyset_order_keys)
 
         if page_size:
             row_limit = page_size
@@ -1557,6 +1675,11 @@ async def handler(
         applied_page_size = page_size
         conn = None
         execution_started_at = time.monotonic()
+        keyset_signature_for_fingerprint = (
+            json.dumps(keyset_order_signature, separators=(",", ":"))
+            if keyset_order_signature
+            else None
+        )
         query_fingerprint = build_query_fingerprint(
             sql=effective_sql_query,
             params=effective_params,
@@ -1565,25 +1688,30 @@ async def handler(
             max_rows=int(resource_limits.max_rows),
             max_bytes=int(resource_limits.max_bytes),
             max_execution_ms=int(resource_limits.max_execution_ms),
+            order_signature=keyset_signature_for_fingerprint,
         )
         keyset_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
         keyset_token_secret = keyset_token_secret_raw or None
 
         if pagination_mode == "keyset" and keyset_cursor:
-            from dal.keyset_pagination import decode_keyset_cursor
+            from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor
 
             try:
                 keyset_values = decode_keyset_cursor(
                     keyset_cursor,
                     expected_fingerprint=query_fingerprint,
                     secret=keyset_token_secret,
+                    expected_keys=keyset_order_signature,
                 )
             except ValueError as e:
+                reason_code = "execution_pagination_keyset_cursor_invalid"
+                if KEYSET_ORDER_MISMATCH in str(e):
+                    reason_code = KEYSET_ORDER_MISMATCH
                 return _construct_error_response(
                     message=str(e),
                     category=ErrorCategory.INVALID_REQUEST,
                     provider=provider,
-                    metadata={"reason_code": "execution_pagination_keyset_cursor_invalid"},
+                    metadata={"reason_code": reason_code},
                     envelope_metadata=tenant_enforcement_metadata,
                 )
             # Ensure the number of values matches the number of ORDER BY columns
@@ -1599,7 +1727,7 @@ async def handler(
         if pagination_mode == "keyset":
             import sqlglot
 
-            from dal.keyset_pagination import apply_keyset_pagination
+            from dal.keyset_pagination import apply_keyset_pagination, canonicalize_keyset_sql
 
             try:
                 dialect = normalize_sqlglot_dialect(provider)
@@ -1617,7 +1745,7 @@ async def handler(
                     )
                 if page_size:
                     rewritten_select = rewritten_select.limit(page_size + 1)
-                effective_sql_query = rewritten_select.sql(dialect=dialect)
+                effective_sql_query = canonicalize_keyset_sql(rewritten_select, provider=provider)
             except Exception as e:
                 return _construct_error_response(
                     message=f"Failed to apply keyset pagination rewrite: {str(e)}",
@@ -1890,7 +2018,7 @@ async def handler(
                 keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
                 next_keyset_cursor = encode_keyset_cursor(
                     keyset_vals,
-                    [k.alias or k.expression.sql() for k in keyset_order_keys],
+                    keyset_order_signature,
                     query_fingerprint,
                     secret=keyset_token_secret,
                 )

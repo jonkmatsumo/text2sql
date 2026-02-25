@@ -1,6 +1,6 @@
 import pytest
 
-from dal.keyset_pagination import decode_keyset_cursor, encode_keyset_cursor
+from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor, encode_keyset_cursor
 
 
 def test_keyset_cursor_roundtrip():
@@ -54,3 +54,55 @@ def test_keyset_cursor_secret_validation():
     cursor_no_secret = encode_keyset_cursor(values, keys, fingerprint)
     with pytest.raises(ValueError, match="signature mismatch"):
         decode_keyset_cursor(cursor_no_secret, fingerprint, secret=secret)
+
+
+def test_keyset_cursor_order_signature_rejects_direction_change():
+    """Changing ORDER BY direction between pages must be rejected."""
+    cursor = encode_keyset_cursor([123], ["id|asc|nulls_last"], "f1")
+    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|desc|nulls_first"],
+        )
+
+
+def test_keyset_cursor_order_signature_rejects_added_or_removed_key():
+    """Changing ORDER BY key count between pages must be rejected."""
+    cursor = encode_keyset_cursor([123], ["created_at|desc|nulls_first"], "f1")
+    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["created_at|desc|nulls_first", "id|asc|nulls_last"],
+        )
+
+
+def test_keyset_cursor_order_signature_rejects_reordered_keys():
+    """Changing ORDER BY key order between pages must be rejected."""
+    cursor = encode_keyset_cursor(
+        [123, 456],
+        ["created_at|desc|nulls_first", "id|asc|nulls_last"],
+        "f1",
+    )
+    with pytest.raises(ValueError, match=KEYSET_ORDER_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last", "created_at|desc|nulls_first"],
+        )
+
+
+def test_keyset_cursor_order_signature_accepts_same_structure():
+    """Matching ORDER BY structure should decode successfully."""
+    cursor = encode_keyset_cursor(
+        [123, 456],
+        ["created_at|desc|nulls_first", "id|asc|nulls_last"],
+        "f1",
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["created_at|desc|nulls_first", "id|asc|nulls_last"],
+    )
+    assert decoded == [123, 456]

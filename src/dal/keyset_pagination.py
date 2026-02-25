@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional
 import sqlglot
 from sqlglot import exp
 
+KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
+
 
 @dataclass(frozen=True)
 class KeysetCursorPayload:
@@ -37,7 +40,10 @@ def encode_keyset_cursor(
 
 
 def decode_keyset_cursor(
-    cursor: str, expected_fingerprint: str, secret: Optional[str] = None
+    cursor: str,
+    expected_fingerprint: str,
+    secret: Optional[str] = None,
+    expected_keys: Optional[List[str]] = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -51,6 +57,11 @@ def decode_keyset_cursor(
 
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
+        if expected_keys is not None:
+            raw_keys = payload.get("k", [])
+            payload_keys = raw_keys if isinstance(raw_keys, list) else []
+            if payload_keys != expected_keys:
+                raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
 
         if secret:
             stored_sig = payload.get("s")
@@ -95,6 +106,7 @@ class KeysetOrderKey:
 def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[KeysetOrderKey]:
     """Extract and canonicalize ORDER BY keys from a SQL query."""
     dialect = sqlglot.Dialect.get(provider)
+    postgres_null_semantics = _is_postgres_provider(provider)
     try:
         expressions = sqlglot.parse(sql, read=dialect)
     except Exception as e:
@@ -118,12 +130,15 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
             )
 
         descending = o.args.get("desc") is True
-        nulls_first = o.args.get("nulls_first") is True
-        # If nulls_first is not specified, postgres defaults:
-        # ASC: NULLS LAST
-        # DESC: NULLS FIRST
-        if o.args.get("nulls_first") is None:
-            nulls_first = descending
+        explicit_nulls_first = o.args.get("nulls_first")
+        if explicit_nulls_first is None:
+            # Postgres defaults:
+            # ASC: NULLS LAST
+            # DESC: NULLS FIRST
+            # Other providers remain conservative unless NULL ordering is explicit.
+            nulls_first = descending if postgres_null_semantics else False
+        else:
+            nulls_first = explicit_nulls_first is True
 
         # Try to resolve alias if 'this' is a Column and matches a projection alias
         alias = None
@@ -137,6 +152,125 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
         )
 
     return keys
+
+
+def extract_keyset_table_names(sql: str, provider: str = "postgres") -> List[str]:
+    """Extract base table names referenced by a SELECT query."""
+    dialect = sqlglot.Dialect.get(provider)
+    try:
+        expression = sqlglot.parse_one(sql, read=dialect)
+    except Exception as e:
+        raise ValueError(f"Failed to parse SQL: {str(e)}")
+
+    if not isinstance(expression, exp.Select):
+        raise ValueError("Keyset pagination only supports a single SELECT statement.")
+
+    cte_names = {
+        _normalize_identifier(cte.alias_or_name)
+        for cte in expression.find_all(exp.CTE)
+        if cte.alias_or_name
+    }
+    table_names: List[str] = []
+    seen: set[str] = set()
+    for table in expression.find_all(exp.Table):
+        table_name = _normalize_identifier(table.name)
+        if not table_name or table_name in cte_names:
+            continue
+        schema_name = _normalize_identifier(table.db)
+        full_name = f"{schema_name}.{table_name}" if schema_name else table_name
+        if full_name in seen:
+            continue
+        seen.add(full_name)
+        table_names.append(full_name)
+    return table_names
+
+
+def validate_stable_tiebreaker(
+    order_keys: List[KeysetOrderKey],
+    *,
+    table_names: Optional[List[str]] = None,
+    allowlist: Optional[set[str]] = None,
+    column_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
+    """Fail closed unless ORDER BY terminates in a stable deterministic tie-breaker."""
+    if not order_keys:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY must include a stable tie-breaker."
+        )
+
+    tie_key = order_keys[-1]
+    if _is_nondeterministic(tie_key.expression):
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY tie-breaker must be deterministic."
+        )
+    if not isinstance(tie_key.expression, exp.Column):
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be a plain column."
+        )
+
+    column_name = _normalize_identifier(tie_key.expression.name)
+    if not column_name:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY column name is invalid."
+        )
+
+    metadata = column_metadata or {}
+    if metadata:
+        qualified_name = _normalize_identifier(tie_key.expression.table)
+        metadata_key = column_name
+        if qualified_name:
+            metadata_key = f"{qualified_name}.{column_name}"
+        column_info = metadata.get(metadata_key) or metadata.get(column_name)
+        if not column_info:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Unable to verify tie-breaker metadata."
+            )
+
+        is_nullable = _is_truthy_metadata_flag(
+            column_info.get("nullable")
+        ) or _is_truthy_metadata_flag(column_info.get("is_nullable"))
+        if is_nullable:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be NOT NULL."
+            )
+
+        is_unique = any(
+            _is_truthy_metadata_flag(column_info.get(flag))
+            for flag in ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        )
+        if not is_unique:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+                "Final ORDER BY key must be unique or primary key."
+            )
+        return
+
+    allowed_columns = {"id"}
+    for table_name in table_names or []:
+        normalized_table = _normalize_table_name(table_name)
+        if normalized_table:
+            allowed_columns.add(f"{normalized_table}_id")
+    for name in allowlist or set():
+        normalized_name = _normalize_identifier(name)
+        if normalized_name:
+            allowed_columns.add(normalized_name)
+
+    if column_name not in allowed_columns:
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+            "Final ORDER BY key must be id/<table>_id or allowlisted."
+        )
+
+
+def build_keyset_order_signature(order_keys: List[KeysetOrderKey]) -> List[str]:
+    """Build a deterministic structural signature for ORDER BY parity checks."""
+    signature: List[str] = []
+    for key in order_keys:
+        expression_sql = _normalize_sql_fragment(key.expression.sql())
+        direction = "desc" if key.descending else "asc"
+        nulls = "nulls_first" if key.nulls_first else "nulls_last"
+        signature.append(f"{expression_sql}|{direction}|{nulls}")
+    return signature
 
 
 def apply_keyset_pagination(
@@ -154,31 +288,47 @@ def apply_keyset_pagination(
             f"Mismatch between order keys ({len(order_keys)}) and values ({len(values)}) count."
         )
 
-    predicate = _build_keyset_predicate(order_keys, values)
+    predicate = _build_keyset_predicate(order_keys, values, provider=provider)
     return expression.where(predicate)
 
 
-def _build_keyset_predicate(keys: List[KeysetOrderKey], values: List[Any]) -> exp.Condition:
+def canonicalize_keyset_sql(expression: exp.Select, provider: str = "postgres") -> str:
+    """Render keyset-rewritten SQL in a stable canonical string form."""
+    dialect = sqlglot.Dialect.get(provider)
+    rendered = expression.sql(dialect=dialect, pretty=False)
+    return " ".join(rendered.split())
+
+
+def _build_keyset_predicate(
+    keys: List[KeysetOrderKey], values: List[Any], provider: str = "postgres"
+) -> exp.Condition:
     """Recursively build the nested keyset predicate."""
     key = keys[0]
     val = values[0]
 
-    comp = _build_order_comparison(key, val)
+    comp = _build_order_comparison(key, val, provider=provider)
 
     if len(keys) == 1:
         return comp
 
     eq = _build_order_equality(key, val)
-    next_predicate = _build_keyset_predicate(keys[1:], values[1:])
+    next_predicate = _build_keyset_predicate(keys[1:], values[1:], provider=provider)
 
-    return exp.Or(
-        this=comp,
-        expression=exp.And(this=eq, expression=exp.Paren(this=next_predicate)),
-    )
+    tie_branch = exp.And(this=eq, expression=exp.Paren(this=next_predicate))
+    return exp.Or(this=comp, expression=exp.Paren(this=tie_branch))
 
 
-def _build_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+def _build_order_comparison(
+    key: KeysetOrderKey, value: Any, provider: str = "postgres"
+) -> exp.Condition:
     """Build keyset 'strictly after cursor' comparison for one ORDER BY key."""
+    if _is_postgres_provider(provider):
+        return _build_postgres_order_comparison(key, value)
+    return _build_fail_closed_order_comparison(key, value)
+
+
+def _build_postgres_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build comparison semantics that match Postgres NULLS FIRST/LAST behavior."""
     key_exp = key.expression.copy()
     if value is None:
         # NULLS FIRST: non-null values follow nulls.
@@ -196,6 +346,14 @@ def _build_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
             this=comp, expression=exp.Is(this=key.expression.copy(), expression=exp.Null())
         )
     return comp
+
+
+def _build_fail_closed_order_comparison(key: KeysetOrderKey, value: Any) -> exp.Condition:
+    """Build conservative comparison semantics for non-Postgres providers."""
+    if value is None:
+        return exp.Boolean(this=False)
+    op = exp.GT if not key.descending else exp.LT
+    return op(this=key.expression.copy(), expression=_to_exp_literal(value))
 
 
 def _build_order_equality(key: KeysetOrderKey, value: Any) -> exp.Condition:
@@ -268,3 +426,35 @@ def _is_nondeterministic(expression: exp.Expression) -> bool:
         if name and name.upper() in nondeterministic_funcs:
             return True
     return False
+
+
+def _is_postgres_provider(provider: str) -> bool:
+    """Return True when provider is PostgreSQL family."""
+    return (provider or "").strip().lower() in {"postgres", "postgresql"}
+
+
+def _normalize_identifier(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().strip('"').lower()
+
+
+def _normalize_table_name(table_name: str) -> str:
+    normalized = _normalize_identifier(table_name)
+    return normalized.split(".")[-1] if normalized else ""
+
+
+def _is_truthy_metadata_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def _normalize_sql_fragment(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.strip().lower().split())
