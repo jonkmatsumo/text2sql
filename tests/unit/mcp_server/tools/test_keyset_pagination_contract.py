@@ -35,6 +35,139 @@ async def test_execute_sql_query_keyset_order_by_required():
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_rejects_mixed_pagination_tokens():
+    """Supplying both offset and keyset tokens should fail closed."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_token="offset-token",
+            keyset_cursor="keyset-token",
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_MODE_TOKEN_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_rejects_keyset_mode_with_page_token():
+    """Using offset token in keyset mode should be rejected."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_token="offset-token",
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_MODE_TOKEN_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_rejects_offset_mode_with_keyset_cursor():
+    """Using keyset cursor in offset mode should be rejected."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users",
+            tenant_id=1,
+            pagination_mode="offset",
+            keyset_cursor="keyset-token",
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_MODE_TOKEN_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_mode_with_page_token_still_allows_flow():
+    """Proper offset-mode token usage should remain valid."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch_page(self, _sql, _page_token, _page_size, *_params):
+                return [{"id": 1}], None
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users",
+            tenant_id=1,
+            pagination_mode="offset",
+            page_token="offset-token",
+            page_size=1,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    assert result["rows"] == [{"id": 1}]
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_rejects_unstable_tiebreaker_created_at_only():
     """ORDER BY created_at alone should fail stable tie-breaker validation."""
     caps = SimpleNamespace(

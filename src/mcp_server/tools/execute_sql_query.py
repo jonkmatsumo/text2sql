@@ -1223,6 +1223,31 @@ async def handler(
         )
 
     # 1.5 Pagination Mode and Bounded Fields Validation
+    if page_token and keyset_cursor:
+        return _construct_error_response(
+            message="Pagination token mode mismatch: provide only one pagination token type.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+    if pagination_mode == "keyset" and page_token:
+        return _construct_error_response(
+            message="Keyset pagination mode does not accept page_token.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+    if pagination_mode == "offset" and keyset_cursor:
+        return _construct_error_response(
+            message="Offset pagination mode does not accept keyset_cursor.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+
     if pagination_mode == "keyset":
         if not (
             bool(getattr(caps, "supports_pagination", False))
