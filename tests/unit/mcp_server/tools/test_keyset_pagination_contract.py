@@ -806,3 +806,149 @@ async def test_execute_sql_query_keyset_rejection_does_not_leak_raw_sql():
     assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_MODE_TOKEN_MISMATCH"
     assert "LEAK_SENTINEL_123" not in serialized
     assert sql not in serialized
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_streaming_early_termination_suppresses_cursor():
+    """Early streaming termination in keyset mode must suppress cursor emission."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.max_rows = 10
+                self.last_streaming_terminated = True
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+            streaming=True,
+        )
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata.get("next_keyset_cursor") is None
+        assert metadata["pagination.keyset.cursor_emitted"] is False
+        assert metadata["pagination.keyset.streaming_terminated"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_streaming_completion_keeps_cursor_behavior():
+    """Normal streaming completion should keep normal keyset cursor behavior."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.sql = None
+                self.max_rows = 10
+                self.last_streaming_terminated = False
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, query, *args):
+                self.sql = query
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+            streaming=True,
+        )
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata.get("next_keyset_cursor")
+        assert metadata["pagination.keyset.cursor_emitted"] is True
+        assert metadata["pagination.keyset.streaming_terminated"] is False
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_streaming_state_does_not_change_offset_tokens():
+    """Offset pagination should be unaffected by keyset streaming-termination guardrails."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.last_streaming_terminated = True
+                self.session_guardrail_metadata = {}
+
+            async def fetch_page(self, _sql, _page_token, _page_size, *_params):
+                return [{"id": 1}], "offset-next-token"
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="offset",
+            page_size=1,
+            streaming=True,
+        )
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata.get("next_page_token") == "offset-next-token"
+        assert metadata.get("pagination.keyset.streaming_terminated") is None

@@ -1084,6 +1084,7 @@ async def handler(
     pagination_mode: Literal["offset", "keyset"] = "offset",
     keyset_cursor: Optional[str] = None,
     keyset_order_by: Optional[List[str]] = None,
+    streaming: bool = False,
 ) -> str:
     """Execute a validated SQL query against the target database.
 
@@ -1107,6 +1108,7 @@ async def handler(
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
     keyset_order_signature: List[str] = []
     keyset_rewritten_select = None
+    streaming_terminated_early = False
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1143,6 +1145,8 @@ async def handler(
     if pagination_mode == "keyset":
         tenant_enforcement_metadata["pagination.keyset.partial_page"] = False
         tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+        if streaming:
+            tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
 
@@ -2021,6 +2025,12 @@ async def handler(
             last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
             raw_reason = getattr(conn, "last_truncated_reason", None)
             last_truncated_reason = raw_reason if isinstance(raw_reason, str) else None
+            if pagination_mode == "keyset" and streaming:
+                raw_streaming_terminated = getattr(conn, "last_streaming_terminated", False)
+                raw_client_disconnected = getattr(conn, "last_stream_client_disconnected", False)
+                streaming_terminated_early = bool(raw_streaming_terminated) or bool(
+                    raw_client_disconnected
+                )
 
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
@@ -2083,6 +2093,8 @@ async def handler(
         execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
         if size_truncated:
             next_token = None
+            if pagination_mode == "keyset" and streaming:
+                streaming_terminated_early = True
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -2105,7 +2117,14 @@ async def handler(
         )
         if pagination_mode == "keyset":
             tenant_enforcement_metadata["pagination.keyset.partial_page"] = keyset_partial_page
+            if streaming:
+                tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = (
+                    streaming_terminated_early
+                )
         if keyset_partial_page:
+            tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
+        if pagination_mode == "keyset" and streaming and streaming_terminated_early:
             tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
             tenant_enforcement_metadata["next_keyset_cursor"] = None
 
@@ -2113,6 +2132,7 @@ async def handler(
             pagination_mode == "keyset"
             and keyset_page_truncated
             and not keyset_partial_page
+            and not streaming_terminated_early
             and result_rows
         ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
@@ -2232,6 +2252,9 @@ async def handler(
                 "pagination.keyset.cursor_emitted": tenant_enforcement_metadata.get(
                     "pagination.keyset.cursor_emitted"
                 ),
+                "pagination.keyset.streaming_terminated": tenant_enforcement_metadata.get(
+                    "pagination.keyset.streaming_terminated"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
@@ -2274,6 +2297,8 @@ async def handler(
             tenant_enforcement_metadata["pagination.keyset.partial_page"] = True
             tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
             tenant_enforcement_metadata["next_keyset_cursor"] = None
+            if streaming:
+                tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = True
         tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",

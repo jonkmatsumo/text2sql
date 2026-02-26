@@ -159,6 +159,12 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.cursor_emitted",
         serialization_alias="pagination.keyset.cursor_emitted",
     )
+    pagination_keyset_streaming_terminated: Optional[bool] = Field(
+        None,
+        description="True when keyset streaming terminated before normal completion",
+        validation_alias="pagination.keyset.streaming_terminated",
+        serialization_alias="pagination.keyset.streaming_terminated",
+    )
 
     @model_validator(mode="before")
     @classmethod
