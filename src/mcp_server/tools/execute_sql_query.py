@@ -1,6 +1,7 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -116,6 +117,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SNAPSHOT_REQUIRED",
     "KEYSET_TOPOLOGY_MISMATCH",
     "KEYSET_ISOLATION_UNSAFE",
+    "KEYSET_REPLICA_LAG_UNSAFE",
 }
 
 
@@ -442,6 +444,30 @@ def _normalize_keyset_db_role(value: Any) -> str | None:
     return lowered
 
 
+def _normalize_non_negative_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric if numeric >= 0 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            numeric = float(stripped)
+        except ValueError:
+            return None
+        return numeric if numeric >= 0 else None
+    return None
+
+
+def _get_env_non_negative_float(name: str, default: float) -> float:
+    raw_value = get_env_str(name, str(default))
+    normalized = _normalize_non_negative_float(raw_value)
+    return normalized if normalized is not None else float(default)
+
+
 def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
     if conn is None:
         return {}
@@ -500,6 +526,34 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
             context["node_id"] = value
             break
     return context
+
+
+async def _extract_keyset_replica_lag_seconds(conn: object | None) -> float | None:
+    if conn is None:
+        return None
+
+    lag_probe = getattr(conn, "get_replica_lag_seconds", None)
+    if callable(lag_probe):
+        try:
+            raw_lag = lag_probe()
+            if inspect.isawaitable(raw_lag):
+                raw_lag = await raw_lag
+            lag_seconds = _normalize_non_negative_float(raw_lag)
+            if lag_seconds is not None:
+                return lag_seconds
+        except Exception:
+            pass
+
+    for attr_name in (
+        "replica_lag_seconds",
+        "keyset_replica_lag_seconds",
+        "db_replica_lag_seconds",
+    ):
+        lag_seconds = _normalize_non_negative_float(getattr(conn, attr_name, None))
+        if lag_seconds is not None:
+            return lag_seconds
+
+    return None
 
 
 def _normalize_isolation_level(value: Any) -> str | None:
@@ -566,6 +620,9 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     node_id_present = bool(schema_metadata.get("pagination.keyset.node_id_present"))
     topology_mismatch = bool(schema_metadata.get("pagination.keyset.topology_mismatch"))
     topology_available = bool(schema_metadata.get("pagination.keyset.topology_available"))
+    replica_lag_seconds = _normalize_non_negative_float(
+        schema_metadata.get("pagination.keyset.replica_lag_seconds")
+    )
     isolation_enforced = bool(schema_metadata.get("pagination.keyset.isolation_enforced"))
     isolation_level = _normalize_isolation_level(
         schema_metadata.get("pagination.keyset.isolation_level")
@@ -589,6 +646,8 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.node_id_present", node_id_present)
         span.set_attribute("pagination.keyset.topology_mismatch", topology_mismatch)
         span.set_attribute("pagination.keyset.topology_available", topology_available)
+        if replica_lag_seconds is not None:
+            span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
         span.set_attribute("pagination.keyset.isolation_enforced", isolation_enforced)
         if rejection_reason_code is not None:
@@ -1515,6 +1574,9 @@ async def handler(
     keyset_schema_strict = bool(get_env_bool("KEYSET_SCHEMA_STRICT", False))
     keyset_schema_ttl_seconds = max(0, int(get_env_int("KEYSET_SCHEMA_TTL_SECONDS", 300) or 0))
     keyset_snapshot_strict = bool(get_env_bool("KEYSET_STRICT_SNAPSHOT", False))
+    keyset_max_replica_lag_seconds = _get_env_non_negative_float(
+        "KEYSET_MAX_REPLICA_LAG_SECONDS", 0.0
+    )
     keyset_allow_weaker_isolation = bool(get_env_bool("KEYSET_ALLOW_WEAKER_ISOLATION", False))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
@@ -1566,6 +1628,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.node_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_available"] = False
+        tenant_enforcement_metadata["pagination.keyset.replica_lag_seconds"] = None
         tenant_enforcement_metadata["pagination.keyset.isolation_level"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
             not keyset_allow_weaker_isolation
@@ -2345,6 +2408,30 @@ async def handler(
                 tenant_enforcement_metadata["pagination.keyset.topology_available"] = bool(
                     keyset_db_role or keyset_region or keyset_node_id
                 )
+                replica_lag_seconds = await _extract_keyset_replica_lag_seconds(conn)
+                if replica_lag_seconds is not None:
+                    tenant_enforcement_metadata["pagination.keyset.replica_lag_seconds"] = (
+                        replica_lag_seconds
+                    )
+                if (
+                    keyset_db_role == "replica"
+                    and keyset_max_replica_lag_seconds > 0
+                    and replica_lag_seconds is not None
+                    and replica_lag_seconds > keyset_max_replica_lag_seconds
+                ):
+                    tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                        "KEYSET_REPLICA_LAG_UNSAFE"
+                    )
+                    return _construct_error_response(
+                        message=(
+                            "Keyset pagination is not safe on replicas with excessive "
+                            "replication lag."
+                        ),
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={"reason_code": "KEYSET_REPLICA_LAG_UNSAFE"},
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
                 if keyset_snapshot_strict and not keyset_cursor_context.get("snapshot_id"):
                     tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
                         "KEYSET_SNAPSHOT_REQUIRED"
@@ -2892,6 +2979,9 @@ async def handler(
                 ),
                 "pagination.keyset.topology_available": tenant_enforcement_metadata.get(
                     "pagination.keyset.topology_available"
+                ),
+                "pagination.keyset.replica_lag_seconds": tenant_enforcement_metadata.get(
+                    "pagination.keyset.replica_lag_seconds"
                 ),
                 "pagination.keyset.isolation_level": tenant_enforcement_metadata.get(
                     "pagination.keyset.isolation_level"

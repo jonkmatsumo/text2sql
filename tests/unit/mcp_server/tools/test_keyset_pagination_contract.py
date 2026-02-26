@@ -1084,6 +1084,150 @@ async def test_execute_sql_query_keyset_cursor_allows_same_topology_context_reus
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_within_threshold_allows(monkeypatch):
+    """Replica lag within threshold should allow keyset execution and emit telemetry."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "10")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "replica"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 2.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.keyset.replica_lag_seconds"] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_above_threshold_rejects(monkeypatch):
+    """Replica lag above threshold should fail closed for keyset mode."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "5")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "replica"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 42.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_REPLICA_LAG_UNSAFE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_guard_does_not_block_primary(monkeypatch):
+    """Primary role should be unaffected by replica lag guardrail checks."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "1")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "primary"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 999.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_snapshot_unavailable_fallback_emits_telemetry_flag():
     """Providers without snapshot context should preserve behavior and emit bounded telemetry."""
     caps = SimpleNamespace(
