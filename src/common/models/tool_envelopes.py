@@ -177,6 +177,30 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.byte_budget",
         serialization_alias="pagination.keyset.byte_budget",
     )
+    pagination_keyset_schema_used: Optional[bool] = Field(
+        None,
+        description="True when schema metadata informed keyset validation",
+        validation_alias="pagination.keyset.schema_used",
+        serialization_alias="pagination.keyset.schema_used",
+    )
+    pagination_keyset_schema_strict: Optional[bool] = Field(
+        None,
+        description="True when strict schema requirements are enabled for keyset validation",
+        validation_alias="pagination.keyset.schema_strict",
+        serialization_alias="pagination.keyset.schema_strict",
+    )
+    pagination_keyset_schema_stale: Optional[bool] = Field(
+        None,
+        description="True when schema metadata was considered stale for keyset validation",
+        validation_alias="pagination.keyset.schema_stale",
+        serialization_alias="pagination.keyset.schema_stale",
+    )
+    pagination_keyset_rejection_reason_code: Optional[str] = Field(
+        None,
+        description="Bounded keyset rejection reason code for schema-aware policy outcomes",
+        validation_alias="pagination.keyset.rejection_reason_code",
+        serialization_alias="pagination.keyset.rejection_reason_code",
+    )
 
     @model_validator(mode="before")
     @classmethod

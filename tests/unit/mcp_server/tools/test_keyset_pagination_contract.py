@@ -637,6 +637,100 @@ async def test_execute_sql_query_keyset_strict_mode_disabled_keeps_fallback_with
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_schema_rejection_observability_parity():
+    """Schema-aware keyset rejections should align metadata and span attributes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    metadata = result["metadata"]
+    reason_code = result["error"]["details_safe"]["reason_code"]
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+
+    assert reason_code == "KEYSET_ORDER_COLUMN_NOT_FOUND"
+    assert metadata["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.schema_used"] == metadata["pagination.keyset.schema_used"]
+    assert attrs["pagination.keyset.schema_strict"] == metadata["pagination.keyset.schema_strict"]
+    assert attrs["pagination.keyset.schema_stale"] == metadata["pagination.keyset.schema_stale"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_schema_rejection_does_not_leak_raw_sql(monkeypatch):
+    """Schema-aware keyset rejections must not include raw caller SQL."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_SCHEMA_456' ORDER BY id ASC"
+    monkeypatch.setenv("KEYSET_SCHEMA_STRICT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", side_effect=RuntimeError("missing")),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    serialized = json.dumps(result)
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_SCHEMA_REQUIRED"
+    assert "LEAK_SENTINEL_SCHEMA_456" not in serialized
+    assert sql not in serialized
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
     """Test that keyset pagination rejects cursors with mismatched fingerprints."""
     caps = SimpleNamespace(

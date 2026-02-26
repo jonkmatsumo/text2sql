@@ -106,6 +106,13 @@ _PARTIAL_REASON_NORMALIZATION = {
     "timeout": "timeout",
 }
 _ADAPTIVE_ROW_SIZE_FALLBACK_BYTES = 1024
+_KEYSET_REJECTION_REASON_ALLOWLIST = {
+    "KEYSET_ORDER_COLUMN_NOT_FOUND",
+    "KEYSET_TIEBREAKER_NULLABLE",
+    "KEYSET_TIEBREAKER_NOT_UNIQUE",
+    "KEYSET_SCHEMA_REQUIRED",
+    "KEYSET_SCHEMA_STALE",
+}
 
 
 @dataclass(frozen=True)
@@ -405,6 +412,31 @@ def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
             "execution_timeout_triggered": timeout_triggered,
         },
     )
+
+
+def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
+    reason_code = raw_reason_code.strip() if isinstance(raw_reason_code, str) else ""
+    if reason_code in _KEYSET_REJECTION_REASON_ALLOWLIST:
+        return reason_code
+    return None
+
+
+def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
+    schema_metadata = metadata if isinstance(metadata, dict) else {}
+    schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
+    schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
+    schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
+    rejection_reason_code = _bounded_keyset_rejection_reason_code(
+        schema_metadata.get("pagination.keyset.rejection_reason_code")
+    )
+
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("pagination.keyset.schema_used", schema_used)
+        span.set_attribute("pagination.keyset.schema_strict", schema_strict)
+        span.set_attribute("pagination.keyset.schema_stale", schema_stale)
+        if rejection_reason_code is not None:
+            span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
 
 
 def _query_contains_limit_or_offset(sql: str, provider: str) -> bool:
@@ -966,6 +998,7 @@ def _construct_error_response(
     from mcp_server.utils.errors import build_error_metadata
 
     resolved_provider = resolve_provider(provider)
+    envelope_meta = dict(envelope_metadata or {})
 
     # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
@@ -1001,10 +1034,15 @@ def _construct_error_response(
     if details_safe:
         error_meta = error_meta.model_copy(update={"details_safe": details_safe})
 
-    _record_tenant_enforcement_observability(envelope_metadata)
-    _record_session_guardrail_observability(envelope_metadata)
-    _record_sandbox_observability(envelope_metadata)
-    _record_timeout_observability(envelope_metadata)
+    keyset_rejection_reason = _bounded_keyset_rejection_reason_code(meta_dict.get("reason_code"))
+    if keyset_rejection_reason is not None:
+        envelope_meta["pagination.keyset.rejection_reason_code"] = keyset_rejection_reason
+
+    _record_tenant_enforcement_observability(envelope_meta)
+    _record_session_guardrail_observability(envelope_meta)
+    _record_sandbox_observability(envelope_meta)
+    _record_timeout_observability(envelope_meta)
+    _record_keyset_schema_observability(envelope_meta)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -1012,7 +1050,7 @@ def _construct_error_response(
             rows_returned=0,
             is_truncated=False,
             provider=resolved_provider,
-            **(envelope_metadata or {}),
+            **envelope_meta,
         ),
         error=error_meta,
     )
@@ -1362,6 +1400,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.schema_used"] = False
         tenant_enforcement_metadata["pagination.keyset.schema_strict"] = keyset_schema_strict
         tenant_enforcement_metadata["pagination.keyset.schema_stale"] = False
+        tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = None
         if streaming:
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
@@ -1580,6 +1619,9 @@ async def handler(
                 table_name in keyset_schema_load.loaded_tables for table_name in normalized_tables
             )
             if not has_full_schema_coverage:
+                tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                    KEYSET_SCHEMA_REQUIRED
+                )
                 return _construct_error_response(
                     message=(
                         "Keyset pagination requires schema metadata for referenced ORDER BY tables "
@@ -1596,6 +1638,9 @@ async def handler(
                 and keyset_schema_load.max_schema_age_seconds > keyset_schema_ttl_seconds
             ):
                 tenant_enforcement_metadata["pagination.keyset.schema_stale"] = True
+                tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                    KEYSET_SCHEMA_STALE
+                )
                 return _construct_error_response(
                     message=(
                         "Keyset pagination schema metadata is stale under strict schema mode."
@@ -1638,6 +1683,7 @@ async def handler(
                 if schema_reason in error_message:
                     reason_code = schema_reason
                     break
+            tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
             return _construct_error_response(
                 message=error_message,
                 category=ErrorCategory.INVALID_REQUEST,
@@ -2560,6 +2606,18 @@ async def handler(
                 "pagination.keyset.byte_budget": tenant_enforcement_metadata.get(
                     "pagination.keyset.byte_budget"
                 ),
+                "pagination.keyset.schema_used": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_used"
+                ),
+                "pagination.keyset.schema_strict": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_strict"
+                ),
+                "pagination.keyset.schema_stale": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_stale"
+                ),
+                "pagination.keyset.rejection_reason_code": tenant_enforcement_metadata.get(
+                    "pagination.keyset.rejection_reason_code"
+                ),
                 "pagination.keyset.page_size_effective": tenant_enforcement_metadata.get(
                     "pagination.keyset.page_size_effective"
                 ),
@@ -2580,6 +2638,7 @@ async def handler(
         _record_session_guardrail_observability(tenant_enforcement_metadata)
         _record_sandbox_observability(tenant_enforcement_metadata)
         _record_timeout_observability(tenant_enforcement_metadata)
+        _record_keyset_schema_observability(tenant_enforcement_metadata)
         _record_result_contract_observability(
             partial=is_truncated,
             partial_reason=partial_reason,
