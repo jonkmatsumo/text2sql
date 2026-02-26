@@ -85,7 +85,36 @@ def test_validate_stable_tiebreaker_rejects_created_at_only():
 def test_validate_stable_tiebreaker_allows_created_at_with_id():
     """Appending id as final tie-breaker is allowed without metadata."""
     keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
-    validate_stable_tiebreaker(keys, table_names=["users"])
+    validate_stable_tiebreaker(keys, table_names=["users"], schema_info=None)
+
+
+def test_validate_stable_tiebreaker_invokes_schema_info_provider_when_passed():
+    """Schema-aware validation should consult provider methods for tie-breaker checks."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
+
+    class _Provider:
+        def __init__(self) -> None:
+            self.has_column_calls = 0
+            self.is_nullable_calls = 0
+            self.is_unique_key_calls = 0
+
+        def has_column(self, table: str, col: str) -> bool:
+            self.has_column_calls += 1
+            return table == "users" and col == "id"
+
+        def is_nullable(self, table: str, col: str) -> bool | None:
+            self.is_nullable_calls += 1
+            return False
+
+        def is_unique_key(self, table: str, col_set: list[str]) -> bool | None:
+            self.is_unique_key_calls += 1
+            return table == "users" and col_set == ["id"]
+
+    provider = _Provider()
+    validate_stable_tiebreaker(keys, table_names=["users"], schema_info=provider)
+    assert provider.has_column_calls >= 1
+    assert provider.is_nullable_calls == 1
+    assert provider.is_unique_key_calls == 1
 
 
 def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():

@@ -5,13 +5,131 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 import sqlglot
 from sqlglot import exp
 
 KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
 KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
+
+
+@runtime_checkable
+class SchemaInfoProvider(Protocol):
+    """Minimal schema metadata contract used by keyset validation."""
+
+    def has_column(self, table: str, col: str) -> bool:
+        """Return True when the table exposes the requested column."""
+        ...
+
+    def is_nullable(self, table: str, col: str) -> Optional[bool]:
+        """Return nullability for table.column when known."""
+        ...
+
+    def is_unique_key(self, table: str, col_set: List[str]) -> Optional[bool]:
+        """Return whether table col_set is a unique key when known."""
+        ...
+
+
+class StaticSchemaInfoProvider:
+    """In-memory schema provider for keyset validation."""
+
+    def __init__(self, by_table: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+        """Normalize and store table/column metadata."""
+        self._by_table: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for table_name, columns in (by_table or {}).items():
+            normalized_table = _normalize_identifier(table_name)
+            if not normalized_table:
+                continue
+            normalized_columns: Dict[str, Dict[str, Any]] = {}
+            for column_name, payload in (columns or {}).items():
+                normalized_column = _normalize_identifier(column_name)
+                if not normalized_column:
+                    continue
+                normalized_columns[normalized_column] = payload if isinstance(payload, dict) else {}
+            if normalized_columns:
+                self._by_table[normalized_table] = normalized_columns
+
+    @classmethod
+    def from_column_metadata(
+        cls,
+        column_metadata: Optional[Dict[str, Dict[str, Any]]],
+        *,
+        table_names: Optional[List[str]] = None,
+    ) -> "StaticSchemaInfoProvider":
+        """Build a provider from legacy flat keyset metadata."""
+        by_table: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        metadata = column_metadata or {}
+        normalized_tables = [_normalize_identifier(t) for t in (table_names or []) if t]
+        single_table = normalized_tables[0] if len(normalized_tables) == 1 else None
+
+        for raw_key, payload in metadata.items():
+            normalized_key = _normalize_identifier(raw_key)
+            if not normalized_key:
+                continue
+            table_name = ""
+            column_name = normalized_key
+            if "." in normalized_key:
+                table_name, column_name = normalized_key.rsplit(".", 1)
+            elif single_table:
+                table_name = single_table
+            else:
+                continue
+
+            if not table_name or not column_name:
+                continue
+            by_table.setdefault(table_name, {})[column_name] = (
+                payload if isinstance(payload, dict) else {}
+            )
+            short_table = _normalize_table_name(table_name)
+            if short_table and short_table != table_name:
+                by_table.setdefault(short_table, {})[column_name] = (
+                    payload if isinstance(payload, dict) else {}
+                )
+
+        return cls(by_table)
+
+    def has_column(self, table: str, col: str) -> bool:
+        """Return True when table.column is known in metadata."""
+        return self._lookup_column_payload(table, col) is not None
+
+    def is_nullable(self, table: str, col: str) -> Optional[bool]:
+        """Return nullability when available for table.column."""
+        payload = self._lookup_column_payload(table, col)
+        if payload is None:
+            return None
+        raw_nullable = payload.get("nullable")
+        if raw_nullable is None:
+            raw_nullable = payload.get("is_nullable")
+        if raw_nullable is None:
+            return None
+        return _is_truthy_metadata_flag(raw_nullable)
+
+    def is_unique_key(self, table: str, col_set: List[str]) -> Optional[bool]:
+        """Return uniqueness for single-column keys when present in metadata."""
+        if len(col_set) != 1:
+            return None
+        payload = self._lookup_column_payload(table, col_set[0])
+        if payload is None:
+            return None
+        unique_flags = ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        for flag in unique_flags:
+            if flag in payload:
+                return _is_truthy_metadata_flag(payload.get(flag))
+        return None
+
+    def _lookup_column_payload(self, table: str, col: str) -> Optional[Dict[str, Any]]:
+        normalized_column = _normalize_identifier(col)
+        if not normalized_column:
+            return None
+        for candidate_table in _candidate_table_names(table):
+            table_columns = self._by_table.get(candidate_table)
+            if not table_columns:
+                continue
+            payload = table_columns.get(normalized_column)
+            if payload is not None:
+                return payload
+        return None
 
 
 @dataclass(frozen=True)
@@ -191,6 +309,7 @@ def validate_stable_tiebreaker(
     table_names: Optional[List[str]] = None,
     allowlist: Optional[set[str]] = None,
     column_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+    schema_info: Optional[SchemaInfoProvider] = None,
 ) -> None:
     """Fail closed unless ORDER BY terminates in a stable deterministic tie-breaker."""
     if not order_keys:
@@ -213,6 +332,32 @@ def validate_stable_tiebreaker(
         raise ValueError(
             f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY column name is invalid."
         )
+
+    if schema_info is not None:
+        resolved_table = _resolve_schema_table_for_column(
+            raw_table_name=tie_key.expression.table,
+            column_name=column_name,
+            table_names=table_names,
+            schema_info=schema_info,
+        )
+        if not resolved_table:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Unable to verify tie-breaker metadata."
+            )
+
+        is_nullable = schema_info.is_nullable(resolved_table, column_name)
+        if is_nullable is True:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be NOT NULL."
+            )
+
+        is_unique = schema_info.is_unique_key(resolved_table, [column_name])
+        if is_unique is not True:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+                "Final ORDER BY key must be unique or primary key."
+            )
+        return
 
     metadata = column_metadata or {}
     if metadata:
@@ -442,6 +587,39 @@ def _normalize_identifier(value: Any) -> str:
 def _normalize_table_name(table_name: str) -> str:
     normalized = _normalize_identifier(table_name)
     return normalized.split(".")[-1] if normalized else ""
+
+
+def _candidate_table_names(table_name: str) -> List[str]:
+    normalized = _normalize_identifier(table_name)
+    if not normalized:
+        return []
+    short_name = _normalize_table_name(normalized)
+    if short_name and short_name != normalized:
+        return [normalized, short_name]
+    return [normalized]
+
+
+def _resolve_schema_table_for_column(
+    *,
+    raw_table_name: Any,
+    column_name: str,
+    table_names: Optional[List[str]],
+    schema_info: SchemaInfoProvider,
+) -> Optional[str]:
+    candidates: List[str] = []
+    explicit_table = _normalize_identifier(raw_table_name)
+    if explicit_table:
+        candidates.extend(_candidate_table_names(explicit_table))
+
+    for table_name in table_names or []:
+        for candidate in _candidate_table_names(table_name):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+    for candidate in candidates:
+        if schema_info.has_column(candidate, column_name):
+            return candidate
+    return None
 
 
 def _is_truthy_metadata_flag(value: Any) -> bool:

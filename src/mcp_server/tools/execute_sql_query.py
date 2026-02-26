@@ -1131,6 +1131,7 @@ async def handler(
     keyset_values = []
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
+    keyset_schema_info = None
     keyset_order_signature: List[str] = []
     keyset_rewritten_select = None
     streaming_terminated_early = False
@@ -1341,6 +1342,7 @@ async def handler(
 
         from dal.keyset_pagination import (
             KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            StaticSchemaInfoProvider,
             build_keyset_order_signature,
             extract_keyset_order_keys,
             extract_keyset_table_names,
@@ -1372,12 +1374,18 @@ async def handler(
             )
 
         keyset_column_metadata = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        if keyset_column_metadata:
+            keyset_schema_info = StaticSchemaInfoProvider.from_column_metadata(
+                keyset_column_metadata,
+                table_names=keyset_table_names,
+            )
         try:
             validate_stable_tiebreaker(
                 keyset_order_keys,
                 table_names=keyset_table_names,
                 allowlist=_keyset_tiebreaker_allowlist(),
                 column_metadata=keyset_column_metadata,
+                schema_info=keyset_schema_info,
             )
         except ValueError as e:
             reason_code = (
