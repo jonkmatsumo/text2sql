@@ -116,6 +116,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SNAPSHOT_MISMATCH",
     "KEYSET_SNAPSHOT_REQUIRED",
     "KEYSET_TOPOLOGY_MISMATCH",
+    "KEYSET_TOPOLOGY_REQUIRED",
     "KEYSET_ISOLATION_UNSAFE",
     "KEYSET_REPLICA_LAG_UNSAFE",
 }
@@ -620,6 +621,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     node_id_present = bool(schema_metadata.get("pagination.keyset.node_id_present"))
     topology_mismatch = bool(schema_metadata.get("pagination.keyset.topology_mismatch"))
     topology_available = bool(schema_metadata.get("pagination.keyset.topology_available"))
+    topology_strict = bool(schema_metadata.get("pagination.keyset.topology_strict"))
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -646,6 +648,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.node_id_present", node_id_present)
         span.set_attribute("pagination.keyset.topology_mismatch", topology_mismatch)
         span.set_attribute("pagination.keyset.topology_available", topology_available)
+        span.set_attribute("pagination.keyset.topology_strict", topology_strict)
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
@@ -1574,6 +1577,7 @@ async def handler(
     keyset_schema_strict = bool(get_env_bool("KEYSET_SCHEMA_STRICT", False))
     keyset_schema_ttl_seconds = max(0, int(get_env_int("KEYSET_SCHEMA_TTL_SECONDS", 300) or 0))
     keyset_snapshot_strict = bool(get_env_bool("KEYSET_STRICT_SNAPSHOT", False))
+    keyset_topology_strict = bool(get_env_bool("KEYSET_STRICT_TOPOLOGY", False))
     keyset_max_replica_lag_seconds = _get_env_non_negative_float(
         "KEYSET_MAX_REPLICA_LAG_SECONDS", 0.0
     )
@@ -1628,6 +1632,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.node_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_available"] = False
+        tenant_enforcement_metadata["pagination.keyset.topology_strict"] = keyset_topology_strict
         tenant_enforcement_metadata["pagination.keyset.replica_lag_seconds"] = None
         tenant_enforcement_metadata["pagination.keyset.isolation_level"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
@@ -2408,6 +2413,22 @@ async def handler(
                 tenant_enforcement_metadata["pagination.keyset.topology_available"] = bool(
                     keyset_db_role or keyset_region or keyset_node_id
                 )
+                if keyset_topology_strict and not tenant_enforcement_metadata.get(
+                    "pagination.keyset.topology_available"
+                ):
+                    tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                        "KEYSET_TOPOLOGY_REQUIRED"
+                    )
+                    return _construct_error_response(
+                        message=(
+                            "Keyset pagination requires execution topology metadata when strict "
+                            "topology mode is enabled."
+                        ),
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={"reason_code": "KEYSET_TOPOLOGY_REQUIRED"},
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
                 replica_lag_seconds = await _extract_keyset_replica_lag_seconds(conn)
                 if replica_lag_seconds is not None:
                     tenant_enforcement_metadata["pagination.keyset.replica_lag_seconds"] = (
@@ -2979,6 +3000,9 @@ async def handler(
                 ),
                 "pagination.keyset.topology_available": tenant_enforcement_metadata.get(
                     "pagination.keyset.topology_available"
+                ),
+                "pagination.keyset.topology_strict": tenant_enforcement_metadata.get(
+                    "pagination.keyset.topology_strict"
                 ),
                 "pagination.keyset.replica_lag_seconds": tenant_enforcement_metadata.get(
                     "pagination.keyset.replica_lag_seconds"
