@@ -113,6 +113,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SCHEMA_REQUIRED",
     "KEYSET_SCHEMA_STALE",
     "KEYSET_SNAPSHOT_MISMATCH",
+    "KEYSET_ISOLATION_UNSAFE",
 }
 
 
@@ -454,6 +455,51 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
             context["transaction_id"] = value
             break
     return context
+
+
+def _normalize_isolation_level(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.strip().lower().replace("_", " ").split())
+    if normalized == "read committed":
+        return "READ COMMITTED"
+    if normalized == "repeatable read":
+        return "REPEATABLE READ"
+    if normalized == "serializable":
+        return "SERIALIZABLE"
+    if normalized == "snapshot":
+        return "SNAPSHOT"
+    if normalized == "read uncommitted":
+        return "READ UNCOMMITTED"
+    return None
+
+
+def _extract_keyset_isolation_level(conn: object | None, caps: object) -> str | None:
+    isolation_candidates = (
+        "keyset_isolation_level",
+        "isolation_level",
+        "transaction_isolation",
+        "db_isolation_level",
+    )
+    for attr_name in isolation_candidates:
+        normalized = _normalize_isolation_level(getattr(conn, attr_name, None))
+        if normalized is not None:
+            return normalized
+    capability_candidates = (
+        "keyset_isolation_level",
+        "isolation_level",
+        "default_isolation_level",
+    )
+    for attr_name in capability_candidates:
+        normalized = _normalize_isolation_level(getattr(caps, attr_name, None))
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _is_keyset_isolation_safe(isolation_level: str | None) -> bool:
+    normalized = _normalize_isolation_level(isolation_level)
+    return normalized in {"REPEATABLE READ", "SERIALIZABLE", "SNAPSHOT"}
 
 
 def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
@@ -1397,6 +1443,7 @@ async def handler(
     streaming_terminated_early = False
     keyset_schema_strict = bool(get_env_bool("KEYSET_SCHEMA_STRICT", False))
     keyset_schema_ttl_seconds = max(0, int(get_env_int("KEYSET_SCHEMA_TTL_SECONDS", 300) or 0))
+    keyset_allow_weaker_isolation = bool(get_env_bool("KEYSET_ALLOW_WEAKER_ISOLATION", False))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1441,6 +1488,10 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.schema_stale"] = False
         tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = False
+        tenant_enforcement_metadata["pagination.keyset.isolation_level"] = None
+        tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
+            not keyset_allow_weaker_isolation
+        )
         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = None
         if streaming:
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
@@ -2200,6 +2251,28 @@ async def handler(
                 tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
                     keyset_cursor_context.get("snapshot_id")
                 )
+                keyset_isolation_level = _extract_keyset_isolation_level(conn, caps)
+                if keyset_isolation_level is not None:
+                    tenant_enforcement_metadata["pagination.keyset.isolation_level"] = (
+                        keyset_isolation_level
+                    )
+                if (
+                    not keyset_allow_weaker_isolation
+                    and keyset_isolation_level is not None
+                    and not _is_keyset_isolation_safe(keyset_isolation_level)
+                ):
+                    tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                        "KEYSET_ISOLATION_UNSAFE"
+                    )
+                    return _construct_error_response(
+                        message=(
+                            "Keyset pagination requires REPEATABLE READ or stronger isolation."
+                        ),
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={"reason_code": "KEYSET_ISOLATION_UNSAFE"},
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
 
                 if keyset_cursor and keyset_cursor_context:
                     try:

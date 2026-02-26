@@ -997,6 +997,175 @@ async def test_execute_sql_query_keyset_snapshot_unavailable_fallback_emits_tele
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_allows_repeatable_read_isolation():
+    """Keyset pagination should allow REPEATABLE READ isolation when exposed by provider."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.isolation_level = "REPEATABLE READ"
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_read_committed_isolation():
+    """Keyset pagination must reject unsafe READ COMMITTED isolation by default."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.isolation_level = "READ COMMITTED"
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ISOLATION_UNSAFE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_weaker_isolation_override_allows_read_committed(
+    monkeypatch,
+):
+    """Override should permit keyset mode under READ COMMITTED isolation when explicitly enabled."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_ALLOW_WEAKER_ISOLATION", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.isolation_level = "READ COMMITTED"
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_mode_unaffected_by_keyset_isolation_policy():
+    """Offset pagination should remain unaffected by keyset isolation-level requirements."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.isolation_level = "READ COMMITTED"
+
+            async def fetch_page(self, _sql, _page_token, _page_size, *_params):
+                return [{"id": 1}], None
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users",
+            tenant_id=1,
+            pagination_mode="offset",
+            page_size=1,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    assert result["rows"] == [{"id": 1}]
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_rewrite_applied():
     """Test that the SQL is correctly rewritten when a valid keyset cursor is provided."""
     caps = SimpleNamespace(
