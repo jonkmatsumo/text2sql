@@ -2,6 +2,7 @@ import pytest
 
 from dal.keyset_pagination import (
     KEYSET_ORDER_MISMATCH,
+    KEYSET_SHARD_MISMATCH,
     KEYSET_SNAPSHOT_MISMATCH,
     KEYSET_TOPOLOGY_MISMATCH,
     decode_keyset_cursor,
@@ -179,4 +180,38 @@ def test_keyset_cursor_context_rejects_topology_mismatch():
             expected_fingerprint="f1",
             expected_keys=["id|asc|nulls_last"],
             expected_cursor_context={"db_role": "replica", "region": "us-east-1"},
+        )
+
+
+def test_keyset_cursor_context_accepts_matching_shard_context():
+    """Cursor context should validate when shard identifiers match."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"shard_id": "shard-a", "shard_key_hash": "abc123"},
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["id|asc|nulls_last"],
+        expected_cursor_context={"shard_id": "shard-a", "shard_key_hash": "abc123"},
+    )
+    assert decoded == [123]
+
+
+def test_keyset_cursor_context_rejects_shard_mismatch():
+    """Cursor context should fail closed when shard identifiers differ."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"shard_id": "shard-a"},
+    )
+    with pytest.raises(ValueError, match=KEYSET_SHARD_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_cursor_context={"shard_id": "shard-b"},
         )

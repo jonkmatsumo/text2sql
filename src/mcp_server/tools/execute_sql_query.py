@@ -117,6 +117,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SNAPSHOT_REQUIRED",
     "KEYSET_TOPOLOGY_MISMATCH",
     "KEYSET_TOPOLOGY_REQUIRED",
+    "KEYSET_SHARD_MISMATCH",
     "KEYSET_ISOLATION_UNSAFE",
     "KEYSET_REPLICA_LAG_UNSAFE",
 }
@@ -501,6 +502,16 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
         "execution_node_id",
         "db_node_id",
     )
+    shard_id_candidates = (
+        "keyset_shard_id",
+        "shard_id",
+        "execution_shard_id",
+    )
+    shard_key_hash_candidates = (
+        "keyset_shard_key_hash",
+        "shard_key_hash",
+        "execution_shard_key_hash",
+    )
     for attr_name in snapshot_candidates:
         value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
         if value is not None:
@@ -525,6 +536,16 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
         value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
         if value is not None:
             context["node_id"] = value
+            break
+    for attr_name in shard_id_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["shard_id"] = value
+            break
+    for attr_name in shard_key_hash_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["shard_key_hash"] = value
             break
     return context
 
@@ -622,6 +643,15 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     topology_mismatch = bool(schema_metadata.get("pagination.keyset.topology_mismatch"))
     topology_available = bool(schema_metadata.get("pagination.keyset.topology_available"))
     topology_strict = bool(schema_metadata.get("pagination.keyset.topology_strict"))
+    shard_id_raw = schema_metadata.get("pagination.keyset.shard_id")
+    shard_id = (
+        str(shard_id_raw).strip()
+        if isinstance(shard_id_raw, str) and str(shard_id_raw).strip()
+        else "unknown"
+    )
+    shard_key_hash_present = bool(schema_metadata.get("pagination.keyset.shard_key_hash_present"))
+    shard_mismatch = bool(schema_metadata.get("pagination.keyset.shard_mismatch"))
+    shard_info_available = bool(schema_metadata.get("pagination.keyset.shard_info_available"))
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -649,6 +679,10 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.topology_mismatch", topology_mismatch)
         span.set_attribute("pagination.keyset.topology_available", topology_available)
         span.set_attribute("pagination.keyset.topology_strict", topology_strict)
+        span.set_attribute("pagination.keyset.shard_id", shard_id)
+        span.set_attribute("pagination.keyset.shard_key_hash_present", shard_key_hash_present)
+        span.set_attribute("pagination.keyset.shard_mismatch", shard_mismatch)
+        span.set_attribute("pagination.keyset.shard_info_available", shard_info_available)
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
@@ -1633,6 +1667,10 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_available"] = False
         tenant_enforcement_metadata["pagination.keyset.topology_strict"] = keyset_topology_strict
+        tenant_enforcement_metadata["pagination.keyset.shard_id"] = "unknown"
+        tenant_enforcement_metadata["pagination.keyset.shard_key_hash_present"] = False
+        tenant_enforcement_metadata["pagination.keyset.shard_mismatch"] = False
+        tenant_enforcement_metadata["pagination.keyset.shard_info_available"] = False
         tenant_enforcement_metadata["pagination.keyset.replica_lag_seconds"] = None
         tenant_enforcement_metadata["pagination.keyset.isolation_level"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
@@ -2387,6 +2425,7 @@ async def handler(
 
                 from dal.keyset_pagination import (
                     KEYSET_ORDER_MISMATCH,
+                    KEYSET_SHARD_MISMATCH,
                     KEYSET_SNAPSHOT_MISMATCH,
                     KEYSET_TOPOLOGY_MISMATCH,
                     apply_keyset_pagination,
@@ -2398,6 +2437,8 @@ async def handler(
                 keyset_db_role = keyset_cursor_context.get("db_role")
                 keyset_region = keyset_cursor_context.get("region")
                 keyset_node_id = keyset_cursor_context.get("node_id")
+                keyset_shard_id = keyset_cursor_context.get("shard_id")
+                keyset_shard_key_hash = keyset_cursor_context.get("shard_key_hash")
                 tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
                     keyset_cursor_context.get("snapshot_id")
                 )
@@ -2412,6 +2453,15 @@ async def handler(
                 )
                 tenant_enforcement_metadata["pagination.keyset.topology_available"] = bool(
                     keyset_db_role or keyset_region or keyset_node_id
+                )
+                tenant_enforcement_metadata["pagination.keyset.shard_id"] = (
+                    keyset_shard_id if keyset_shard_id else "unknown"
+                )
+                tenant_enforcement_metadata["pagination.keyset.shard_key_hash_present"] = bool(
+                    keyset_shard_key_hash
+                )
+                tenant_enforcement_metadata["pagination.keyset.shard_info_available"] = bool(
+                    keyset_shard_id or keyset_shard_key_hash
                 )
                 if keyset_topology_strict and not tenant_enforcement_metadata.get(
                     "pagination.keyset.topology_available"
@@ -2513,6 +2563,9 @@ async def handler(
                             tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = (
                                 True
                             )
+                        elif KEYSET_SHARD_MISMATCH in str(e):
+                            reason_code = KEYSET_SHARD_MISMATCH
+                            tenant_enforcement_metadata["pagination.keyset.shard_mismatch"] = True
                         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
                             reason_code
                         )
@@ -3003,6 +3056,18 @@ async def handler(
                 ),
                 "pagination.keyset.topology_strict": tenant_enforcement_metadata.get(
                     "pagination.keyset.topology_strict"
+                ),
+                "pagination.keyset.shard_id": tenant_enforcement_metadata.get(
+                    "pagination.keyset.shard_id"
+                ),
+                "pagination.keyset.shard_key_hash_present": tenant_enforcement_metadata.get(
+                    "pagination.keyset.shard_key_hash_present"
+                ),
+                "pagination.keyset.shard_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.keyset.shard_mismatch"
+                ),
+                "pagination.keyset.shard_info_available": tenant_enforcement_metadata.get(
+                    "pagination.keyset.shard_info_available"
                 ),
                 "pagination.keyset.replica_lag_seconds": tenant_enforcement_metadata.get(
                     "pagination.keyset.replica_lag_seconds"
