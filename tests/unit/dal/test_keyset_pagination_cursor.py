@@ -2,6 +2,7 @@ import pytest
 
 from dal.keyset_pagination import (
     KEYSET_ORDER_MISMATCH,
+    KEYSET_PARTITION_SET_CHANGED,
     KEYSET_SHARD_MISMATCH,
     KEYSET_SNAPSHOT_MISMATCH,
     KEYSET_TOPOLOGY_MISMATCH,
@@ -214,4 +215,38 @@ def test_keyset_cursor_context_rejects_shard_mismatch():
             expected_fingerprint="f1",
             expected_keys=["id|asc|nulls_last"],
             expected_cursor_context={"shard_id": "shard-b"},
+        )
+
+
+def test_keyset_cursor_context_accepts_matching_partition_signature():
+    """Cursor context should validate when partition signatures match."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"partition_signature": "partitions-v1"},
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["id|asc|nulls_last"],
+        expected_cursor_context={"partition_signature": "partitions-v1"},
+    )
+    assert decoded == [123]
+
+
+def test_keyset_cursor_context_rejects_partition_signature_change():
+    """Cursor context should fail closed when partition signatures change."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"partition_signature": "partitions-v1"},
+    )
+    with pytest.raises(ValueError, match=KEYSET_PARTITION_SET_CHANGED):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_cursor_context={"partition_signature": "partitions-v2"},
         )

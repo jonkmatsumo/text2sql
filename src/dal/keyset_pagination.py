@@ -20,6 +20,7 @@ KEYSET_SCHEMA_STALE = "KEYSET_SCHEMA_STALE"
 KEYSET_SNAPSHOT_MISMATCH = "KEYSET_SNAPSHOT_MISMATCH"
 KEYSET_TOPOLOGY_MISMATCH = "KEYSET_TOPOLOGY_MISMATCH"
 KEYSET_SHARD_MISMATCH = "KEYSET_SHARD_MISMATCH"
+KEYSET_PARTITION_SET_CHANGED = "KEYSET_PARTITION_SET_CHANGED"
 
 
 @runtime_checkable
@@ -254,7 +255,11 @@ def decode_keyset_cursor(
                     else (
                         KEYSET_SHARD_MISMATCH
                         if context_key in {"shard_id", "shard_key_hash"}
-                        else KEYSET_SNAPSHOT_MISMATCH
+                        else (
+                            KEYSET_PARTITION_SET_CHANGED
+                            if context_key in {"partition_signature"}
+                            else KEYSET_SNAPSHOT_MISMATCH
+                        )
                     )
                 )
                 raise ValueError(f"Invalid cursor: {reason_code}.")
@@ -303,6 +308,7 @@ def _normalize_cursor_context(raw_context: Any) -> Dict[str, str]:
         "node_id",
         "shard_id",
         "shard_key_hash",
+        "partition_signature",
     ):
         raw_value = raw_context.get(key)
         if not isinstance(raw_value, str):
