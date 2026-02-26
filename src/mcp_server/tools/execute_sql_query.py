@@ -113,6 +113,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SCHEMA_REQUIRED",
     "KEYSET_SCHEMA_STALE",
     "KEYSET_SNAPSHOT_MISMATCH",
+    "KEYSET_SNAPSHOT_REQUIRED",
     "KEYSET_ISOLATION_UNSAFE",
 }
 
@@ -507,6 +508,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
     schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
     schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
+    snapshot_strict = bool(schema_metadata.get("pagination.keyset.snapshot_strict"))
     snapshot_id_present = bool(schema_metadata.get("pagination.keyset.snapshot_id_present"))
     snapshot_mismatch = bool(schema_metadata.get("pagination.keyset.snapshot_mismatch"))
     rejection_reason_code = _bounded_keyset_rejection_reason_code(
@@ -518,6 +520,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.schema_used", schema_used)
         span.set_attribute("pagination.keyset.schema_strict", schema_strict)
         span.set_attribute("pagination.keyset.schema_stale", schema_stale)
+        span.set_attribute("pagination.keyset.snapshot_strict", snapshot_strict)
         span.set_attribute("pagination.keyset.snapshot_id_present", snapshot_id_present)
         span.set_attribute("pagination.keyset.snapshot_mismatch", snapshot_mismatch)
         if rejection_reason_code is not None:
@@ -1443,6 +1446,7 @@ async def handler(
     streaming_terminated_early = False
     keyset_schema_strict = bool(get_env_bool("KEYSET_SCHEMA_STRICT", False))
     keyset_schema_ttl_seconds = max(0, int(get_env_int("KEYSET_SCHEMA_TTL_SECONDS", 300) or 0))
+    keyset_snapshot_strict = bool(get_env_bool("KEYSET_STRICT_SNAPSHOT", False))
     keyset_allow_weaker_isolation = bool(get_env_bool("KEYSET_ALLOW_WEAKER_ISOLATION", False))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
@@ -1486,6 +1490,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.schema_used"] = False
         tenant_enforcement_metadata["pagination.keyset.schema_strict"] = keyset_schema_strict
         tenant_enforcement_metadata["pagination.keyset.schema_stale"] = False
+        tenant_enforcement_metadata["pagination.keyset.snapshot_strict"] = keyset_snapshot_strict
         tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.isolation_level"] = None
@@ -2251,6 +2256,20 @@ async def handler(
                 tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
                     keyset_cursor_context.get("snapshot_id")
                 )
+                if keyset_snapshot_strict and not keyset_cursor_context.get("snapshot_id"):
+                    tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                        "KEYSET_SNAPSHOT_REQUIRED"
+                    )
+                    return _construct_error_response(
+                        message=(
+                            "Keyset pagination requires snapshot identifiers when strict snapshot "
+                            "mode is enabled."
+                        ),
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={"reason_code": "KEYSET_SNAPSHOT_REQUIRED"},
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
                 keyset_isolation_level = _extract_keyset_isolation_level(conn, caps)
                 if keyset_isolation_level is not None:
                     tenant_enforcement_metadata["pagination.keyset.isolation_level"] = (

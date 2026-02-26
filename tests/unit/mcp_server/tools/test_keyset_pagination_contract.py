@@ -997,6 +997,94 @@ async def test_execute_sql_query_keyset_snapshot_unavailable_fallback_emits_tele
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_snapshot_rejects_missing_snapshot_context(
+    monkeypatch,
+):
+    """Strict snapshot mode should fail closed when provider context lacks snapshot identifiers."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_STRICT_SNAPSHOT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_SNAPSHOT_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_snapshot_allows_snapshot_aware_provider(
+    monkeypatch,
+):
+    """Strict snapshot mode should allow keyset pagination when snapshot identifiers are present."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_STRICT_SNAPSHOT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.snapshot_id = "snap-1"
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_allows_repeatable_read_isolation():
     """Keyset pagination should allow REPEATABLE READ isolation when exposed by provider."""
     caps = SimpleNamespace(
