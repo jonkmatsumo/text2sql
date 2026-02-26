@@ -121,6 +121,8 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_PARTITION_SET_CHANGED",
     "KEYSET_ISOLATION_UNSAFE",
     "KEYSET_REPLICA_LAG_UNSAFE",
+    "KEYSET_FEDERATED_ORDERING_UNSAFE",
+    "OFFSET_FEDERATED_UNSUPPORTED",
 }
 
 
@@ -2312,6 +2314,35 @@ async def handler(
             },
             envelope_metadata=tenant_enforcement_metadata,
         )
+    is_federated = caps.execution_topology == "federated"
+    if (
+        pagination_mode == "keyset"
+        and is_federated
+        and not caps.supports_federated_deterministic_ordering
+    ):
+        return _construct_error_response(
+            "Keyset pagination is not supported for federated backends without deterministic ordering.",
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            provider=provider,
+            metadata={
+                "reason_code": "KEYSET_FEDERATED_ORDERING_UNSAFE",
+                "required_capability": "federated_deterministic_ordering",
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+
+    disallow_federated_offset = get_env_bool("PAGINATION_DISALLOW_FEDERATED_OFFSET", False)
+    if pagination_mode == "offset" and is_federated and disallow_federated_offset:
+        return _construct_error_response(
+            "Offset pagination is not supported for federated backends.",
+            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            provider=provider,
+            metadata={
+                "reason_code": "OFFSET_FEDERATED_UNSUPPORTED",
+                "required_capability": "deterministic_federated_ordering",
+            },
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
@@ -2389,57 +2420,62 @@ async def handler(
         next_token = None
         applied_page_size = page_size
         conn = None
-        execution_started_at = time.monotonic()
-        keyset_signature_for_fingerprint = (
-            json.dumps(keyset_order_signature, separators=(",", ":"))
-            if keyset_order_signature
-            else None
-        )
-        query_fingerprint = build_query_fingerprint(
-            sql=effective_sql_query,
-            params=effective_params,
-            tenant_id=tenant_id,
-            provider=provider,
-            max_rows=int(resource_limits.max_rows),
-            max_bytes=int(resource_limits.max_bytes),
-            max_execution_ms=int(resource_limits.max_execution_ms),
-            order_signature=keyset_signature_for_fingerprint,
-        )
-        keyset_cursor_context: dict[str, str] = {}
-        keyset_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
-        keyset_token_secret = keyset_token_secret_raw or None
-
-        if pagination_mode == "keyset" and keyset_cursor:
-            from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor
-
-            try:
-                keyset_values = decode_keyset_cursor(
-                    keyset_cursor,
-                    expected_fingerprint=query_fingerprint,
-                    secret=keyset_token_secret,
-                    expected_keys=keyset_order_signature,
-                )
-            except ValueError as e:
-                reason_code = "execution_pagination_keyset_cursor_invalid"
-                if KEYSET_ORDER_MISMATCH in str(e):
-                    reason_code = KEYSET_ORDER_MISMATCH
-                return _construct_error_response(
-                    message=str(e),
-                    category=ErrorCategory.INVALID_REQUEST,
-                    provider=provider,
-                    metadata={"reason_code": reason_code},
-                    envelope_metadata=tenant_enforcement_metadata,
-                )
-            if len(keyset_values) != len(keyset_order_keys):
-                return _construct_error_response(
-                    message="Keyset cursor value count mismatch with ORDER BY columns.",
-                    category=ErrorCategory.INVALID_REQUEST,
-                    provider=provider,
-                    metadata={"reason_code": "execution_pagination_keyset_cursor_column_mismatch"},
-                    envelope_metadata=tenant_enforcement_metadata,
-                )
+        pagination_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
+        pagination_token_secret = pagination_token_secret_raw or None
+        query_fingerprint = None  # Bound to backend signature inside connection block
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
+            keyset_cursor_context = _extract_keyset_cursor_context(conn)
+            partition_signature = keyset_cursor_context.get("partition_signature")
+
+            keyset_signature_for_fingerprint = (
+                json.dumps(keyset_order_signature, separators=(",", ":"))
+                if keyset_order_signature
+                else None
+            )
+            query_fingerprint = build_query_fingerprint(
+                sql=effective_sql_query,
+                params=effective_params,
+                tenant_id=tenant_id,
+                provider=provider,
+                max_rows=int(resource_limits.max_rows),
+                max_bytes=int(resource_limits.max_bytes),
+                max_execution_ms=int(resource_limits.max_execution_ms),
+                order_signature=keyset_signature_for_fingerprint,
+                backend_signature=partition_signature,
+            )
+
+            if pagination_mode == "keyset" and keyset_cursor:
+                from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor
+
+                try:
+                    keyset_values = decode_keyset_cursor(
+                        keyset_cursor,
+                        expected_fingerprint=query_fingerprint,
+                        secret=pagination_token_secret,
+                        expected_keys=keyset_order_signature,
+                    )
+                except ValueError as e:
+                    reason_code = "execution_pagination_keyset_cursor_invalid"
+                    if KEYSET_ORDER_MISMATCH in str(e):
+                        reason_code = KEYSET_ORDER_MISMATCH
+                    return _construct_error_response(
+                        message=str(e),
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={"reason_code": reason_code},
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
+                if len(keyset_values) != len(keyset_order_keys):
+                    return _construct_error_response(
+                        message="Keyset cursor value count mismatch with ORDER BY columns.",
+                        category=ErrorCategory.INVALID_REQUEST,
+                        provider=provider,
+                        metadata={
+                            "reason_code": "execution_pagination_keyset_cursor_column_mismatch"
+                        },
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
                 session_guardrail_metadata = {
@@ -2476,7 +2512,7 @@ async def handler(
                     decode_keyset_cursor,
                 )
 
-                keyset_cursor_context = _extract_keyset_cursor_context(conn)
+                # Already extracted context above for fingerprint
                 keyset_db_role = keyset_cursor_context.get("db_role")
                 keyset_region = keyset_cursor_context.get("region")
                 keyset_node_id = keyset_cursor_context.get("node_id")
@@ -2974,7 +3010,7 @@ async def handler(
                     keyset_vals,
                     keyset_order_signature,
                     query_fingerprint,
-                    secret=keyset_token_secret,
+                    secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
