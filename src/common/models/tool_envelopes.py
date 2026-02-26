@@ -165,6 +165,18 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.streaming_terminated",
         serialization_alias="pagination.keyset.streaming_terminated",
     )
+    pagination_keyset_adaptive_page_size: Optional[int] = Field(
+        None,
+        description="Adaptive keyset page size derived from byte-budget estimation",
+        validation_alias="pagination.keyset.adaptive_page_size",
+        serialization_alias="pagination.keyset.adaptive_page_size",
+    )
+    pagination_keyset_byte_budget: Optional[int] = Field(
+        None,
+        description="Byte budget used for keyset adaptive page sizing",
+        validation_alias="pagination.keyset.byte_budget",
+        serialization_alias="pagination.keyset.byte_budget",
+    )
 
     @model_validator(mode="before")
     @classmethod
