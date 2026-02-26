@@ -15,6 +15,9 @@ class _MutableDatasetConn:
         *,
         snapshot_id: str | None = None,
         transaction_id: str | None = None,
+        db_role: str | None = None,
+        region: str | None = None,
+        node_id: str | None = None,
     ) -> None:
         self._rows = rows
         self.session_guardrail_metadata = {}
@@ -22,6 +25,12 @@ class _MutableDatasetConn:
             self.snapshot_id = snapshot_id
         if transaction_id is not None:
             self.transaction_id = transaction_id
+        if db_role is not None:
+            self.db_role = db_role
+        if region is not None:
+            self.region = region
+        if node_id is not None:
+            self.node_id = node_id
 
     async def fetch(self, query: str, *_args):
         normalized_sql = " ".join(query.split())
@@ -169,3 +178,68 @@ async def test_keyset_concurrency_snapshot_change_rejects_second_page_cursor():
 
     assert page_two["error"]["category"] == "invalid_request"
     assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_SNAPSHOT_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_keyset_distributed_region_drift_rejects_second_page_cursor():
+    """Cross-region page routing should fail closed with stable topology mismatch reason."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    shared_rows = [{"id": 1}, {"id": 2}, {"id": 4}, {"id": 5}]
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="concurrency-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        mock_get_conn.side_effect = [
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shared_rows,
+                    db_role="replica",
+                    region="us-east-1",
+                    node_id="node-a",
+                )
+            ),
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shared_rows,
+                    db_role="replica",
+                    region="us-west-2",
+                    node_id="node-b",
+                )
+            ),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        # Simulate writes while request is rerouted to a different region.
+        shared_rows.append({"id": 3})
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+        page_two = json.loads(page_two_payload)
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_TOPOLOGY_MISMATCH"
