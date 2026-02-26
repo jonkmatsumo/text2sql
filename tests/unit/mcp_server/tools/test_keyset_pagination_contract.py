@@ -1120,6 +1120,11 @@ async def test_execute_sql_query_keyset_adaptive_page_size_is_deterministic(monk
             == metadata_two["pagination.keyset.adaptive_page_size"]
         )
         assert result_one["rows"] == result_two["rows"]
+        assert metadata_one.get("next_keyset_cursor") == metadata_two.get("next_keyset_cursor")
+        assert (
+            metadata_one["pagination.keyset.cursor_emitted"]
+            == metadata_two["pagination.keyset.cursor_emitted"]
+        )
 
 
 @pytest.mark.asyncio
@@ -1164,3 +1169,116 @@ async def test_execute_sql_query_offset_mode_unaffected_by_adaptive_keyset_budge
         assert metadata["next_page_token"] == "offset-next-token"
         assert metadata["page_size"] == 2
         assert metadata.get("pagination.keyset.adaptive_page_size") is None
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_adaptive_cursor_uses_last_emitted_row(monkeypatch):
+    """Cursor values must match the final emitted row under adaptive truncation."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "50")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "260")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint", return_value="stable-fp"
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.max_rows = 50
+
+            async def fetch(self, _query, *_args):
+                return [
+                    {"id": 1, "blob": "x" * 200},
+                    {"id": 2, "blob": "y" * 200},
+                    {"id": 3, "blob": "z" * 200},
+                    {"id": 4, "blob": "a" * 200},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=4)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        from dal.keyset_pagination import decode_keyset_cursor
+
+        cursor_values = decode_keyset_cursor(
+            metadata["next_keyset_cursor"],
+            expected_fingerprint="stable-fp",
+            expected_keys=["id|asc|nulls_last"],
+        )
+        assert metadata["pagination.keyset.adaptive_page_size"] == 1
+        assert metadata["pagination.keyset.cursor_emitted"] is True
+        assert cursor_values == [result["rows"][-1]["id"]]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_byte_cap_mid_page_suppresses_cursor_under_adaptive(
+    monkeypatch,
+):
+    """Byte-cap truncation after adaptive sizing must suppress keyset cursor emission."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "50")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "150")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.max_rows = 50
+
+            async def fetch(self, _query, *_args):
+                return [
+                    {"id": 1, "blob": "x" * 110},
+                    {"id": 2, "blob": "y"},
+                    {"id": 3, "blob": "z"},
+                    {"id": 4, "blob": "w"},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=3)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata["pagination.keyset.adaptive_page_size"] == 2
+        assert metadata["pagination.keyset.partial_page"] is True
+        assert metadata["pagination.keyset.cursor_emitted"] is False
+        assert metadata.get("next_keyset_cursor") is None

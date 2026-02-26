@@ -2184,8 +2184,14 @@ async def handler(
         ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
 
+            emitted_row_count = len(result_rows)
+            cursor_row_index = emitted_row_count - 1
+            if cursor_row_index != emitted_row_count - 1:
+                raise AssertionError(
+                    "Invariant violation: cursor_row_index must equal emitted_row_count - 1."
+                )
             try:
-                keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
+                keyset_vals = get_keyset_values(result_rows[cursor_row_index], keyset_order_keys)
                 next_keyset_cursor = encode_keyset_cursor(
                     keyset_vals,
                     keyset_order_signature,
