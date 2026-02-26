@@ -455,6 +455,7 @@ def _record_result_contract_observability(
     pagination_mode_requested: str | None = None,
     pagination_mode_used: str | None = None,
     keyset_partial_page: bool | None = None,
+    keyset_streaming_terminated: bool | None = None,
     keyset_effective_page_size: int | None = None,
     keyset_adaptive_page_size: int | None = None,
     keyset_byte_budget: int | None = None,
@@ -478,6 +479,7 @@ def _record_result_contract_observability(
     if pagination_mode_used:
         span.set_attribute("pagination.mode_used", str(pagination_mode_used))
     span.set_attribute("pagination.keyset.partial_page", bool(keyset_partial_page))
+    span.set_attribute("pagination.keyset.streaming_terminated", bool(keyset_streaming_terminated))
     if keyset_effective_page_size is not None:
         span.set_attribute("pagination.keyset.effective_page_size", int(keyset_effective_page_size))
     if keyset_adaptive_page_size is not None:
@@ -2337,6 +2339,9 @@ async def handler(
             pagination_mode_requested=tenant_enforcement_metadata.get("pagination_mode_requested"),
             pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
             keyset_partial_page=tenant_enforcement_metadata.get("pagination.keyset.partial_page"),
+            keyset_streaming_terminated=tenant_enforcement_metadata.get(
+                "pagination.keyset.streaming_terminated"
+            ),
             keyset_effective_page_size=tenant_enforcement_metadata.get(
                 "pagination.keyset.effective_page_size"
             ),

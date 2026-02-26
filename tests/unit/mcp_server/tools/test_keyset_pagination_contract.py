@@ -1282,3 +1282,126 @@ async def test_execute_sql_query_keyset_byte_cap_mid_page_suppresses_cursor_unde
         assert metadata["pagination.keyset.partial_page"] is True
         assert metadata["pagination.keyset.cursor_emitted"] is False
         assert metadata.get("next_keyset_cursor") is None
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_streaming_budget_telemetry_parity_with_metadata(
+    monkeypatch,
+):
+    """Streaming+budget keyset metadata should match bounded span attributes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "50")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "260")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+                self.last_streaming_terminated = True
+
+            async def fetch(self, _query, *_args):
+                return [
+                    {"id": 1, "blob": "x" * 200},
+                    {"id": 2, "blob": "y" * 200},
+                    {"id": 3, "blob": "z" * 200},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+            streaming=True,
+        )
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        attrs = {}
+        for call in mock_span.set_attribute.call_args_list:
+            key, value = call.args
+            attrs[key] = value
+
+        assert (
+            attrs["pagination.keyset.streaming_terminated"]
+            == metadata["pagination.keyset.streaming_terminated"]
+        )
+        assert (
+            attrs["pagination.keyset.adaptive_page_size"]
+            == metadata["pagination.keyset.adaptive_page_size"]
+        )
+        assert attrs["pagination.keyset.byte_budget"] == metadata["pagination.keyset.byte_budget"]
+        assert (
+            attrs["pagination.keyset.cursor_emitted"]
+            == metadata["pagination.keyset.cursor_emitted"]
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_budget_metadata_non_negative(monkeypatch):
+    """Adaptive-budget keyset metadata must remain bounded and non-negative."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id, blob FROM users ORDER BY id ASC"
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_ROWS", "50")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_ROW_LIMIT", "true")
+    monkeypatch.setenv("EXECUTION_RESOURCE_MAX_BYTES", "260")
+    monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return [
+                    {"id": 1, "blob": "x" * 200},
+                    {"id": 2, "blob": "y" * 200},
+                    {"id": 3, "blob": "z" * 200},
+                ]
+
+        mock_conn = _Conn()
+        mock_get_conn.return_value.__aenter__.return_value = mock_conn
+
+        payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        result = json.loads(payload)
+        metadata = result["metadata"]
+
+        assert metadata["pagination.keyset.byte_budget"] >= 0
+        assert metadata["pagination.keyset.adaptive_page_size"] >= 1
+        assert metadata["pagination.keyset.effective_page_size"] >= 1
