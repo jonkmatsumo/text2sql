@@ -45,6 +45,8 @@ class TestCapabilitiesCompleteness:
         assert caps.execution_model == "sync"
         assert caps.supports_arrays is True
         assert caps.tenant_enforcement_mode == "unsupported"
+        assert caps.execution_topology == "single_backend"
+        assert caps.supports_federated_deterministic_ordering is False
 
     @pytest.mark.parametrize("provider", KNOWN_PROVIDERS)
     def test_known_providers_expose_stable_provider_name(self, provider: str):

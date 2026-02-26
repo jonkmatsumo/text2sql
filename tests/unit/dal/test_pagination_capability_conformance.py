@@ -14,12 +14,13 @@ from mcp_server.tools.execute_sql_query import handler
 
 
 @pytest.mark.parametrize(
-    "provider, expected_server, expected_wrapper, expected_keyset, expected_keyset_containment",
+    "provider, expected_server, expected_wrapper, expected_keyset, "
+    "expected_keyset_containment, expected_topology, expected_federated_ordering",
     [
-        ("postgres", False, True, True, True),
-        ("sqlite", False, True, True, True),
-        ("duckdb", False, True, True, True),
-        ("bigquery", False, False, False, False),
+        ("postgres", False, True, True, True, "single_backend", False),
+        ("sqlite", False, True, True, True, "single_backend", False),
+        ("duckdb", False, True, True, True, "single_backend", False),
+        ("bigquery", False, False, False, False, "single_backend", False),
     ],
 )
 def test_pagination_capability_matrix(
@@ -28,6 +29,8 @@ def test_pagination_capability_matrix(
     expected_wrapper: bool,
     expected_keyset: bool,
     expected_keyset_containment: bool,
+    expected_topology: str,
+    expected_federated_ordering: bool,
 ):
     """Provider capability matrix should expose deterministic pagination support flags."""
     caps = capabilities_for_provider(provider)
@@ -35,6 +38,8 @@ def test_pagination_capability_matrix(
     assert bool(caps.supports_offset_pagination_wrapper) is expected_wrapper
     assert bool(caps.supports_keyset) is expected_keyset
     assert bool(caps.supports_keyset_with_containment) is expected_keyset_containment
+    assert caps.execution_topology == expected_topology
+    assert caps.supports_federated_deterministic_ordering is expected_federated_ordering
 
 
 def test_unknown_provider_pagination_capability_defaults_fail_closed():

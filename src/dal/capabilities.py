@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 TenantEnforcementMode = Literal["rls_session", "sql_rewrite", "unsupported"]
+ExecutionTopology = Literal["single_backend", "federated"]
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,8 @@ class BackendCapabilities:
     supports_db_readonly_session: bool = False
     notes: Optional[str] = None
     execution_model: Literal["sync", "async"] = "sync"
+    execution_topology: ExecutionTopology = "single_backend"
+    supports_federated_deterministic_ordering: bool = False
     supports_column_metadata: bool = True
     supports_cancel: bool = False
     supports_pagination: bool = False
