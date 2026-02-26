@@ -112,6 +112,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_TIEBREAKER_NOT_UNIQUE",
     "KEYSET_SCHEMA_REQUIRED",
     "KEYSET_SCHEMA_STALE",
+    "KEYSET_SNAPSHOT_MISMATCH",
 }
 
 
@@ -421,11 +422,47 @@ def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
     return None
 
 
+def _normalize_keyset_context_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized if normalized else None
+
+
+def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
+    if conn is None:
+        return {}
+    context: dict[str, str] = {}
+    snapshot_candidates = (
+        "keyset_snapshot_id",
+        "snapshot_id",
+        "execution_snapshot_id",
+    )
+    transaction_candidates = (
+        "keyset_transaction_id",
+        "transaction_id",
+        "execution_transaction_id",
+    )
+    for attr_name in snapshot_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["snapshot_id"] = value
+            break
+    for attr_name in transaction_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["transaction_id"] = value
+            break
+    return context
+
+
 def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
     schema_metadata = metadata if isinstance(metadata, dict) else {}
     schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
     schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
     schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
+    snapshot_id_present = bool(schema_metadata.get("pagination.keyset.snapshot_id_present"))
+    snapshot_mismatch = bool(schema_metadata.get("pagination.keyset.snapshot_mismatch"))
     rejection_reason_code = _bounded_keyset_rejection_reason_code(
         schema_metadata.get("pagination.keyset.rejection_reason_code")
     )
@@ -435,6 +472,8 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.schema_used", schema_used)
         span.set_attribute("pagination.keyset.schema_strict", schema_strict)
         span.set_attribute("pagination.keyset.schema_stale", schema_stale)
+        span.set_attribute("pagination.keyset.snapshot_id_present", snapshot_id_present)
+        span.set_attribute("pagination.keyset.snapshot_mismatch", snapshot_mismatch)
         if rejection_reason_code is not None:
             span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
 
@@ -1400,6 +1439,8 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.schema_used"] = False
         tenant_enforcement_metadata["pagination.keyset.schema_strict"] = keyset_schema_strict
         tenant_enforcement_metadata["pagination.keyset.schema_stale"] = False
+        tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = False
+        tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = None
         if streaming:
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
@@ -2087,6 +2128,7 @@ async def handler(
             max_execution_ms=int(resource_limits.max_execution_ms),
             order_signature=keyset_signature_for_fingerprint,
         )
+        keyset_cursor_context: dict[str, str] = {}
         keyset_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
         keyset_token_secret = keyset_token_secret_raw or None
 
@@ -2111,41 +2153,12 @@ async def handler(
                     metadata={"reason_code": reason_code},
                     envelope_metadata=tenant_enforcement_metadata,
                 )
-            # Ensure the number of values matches the number of ORDER BY columns
             if len(keyset_values) != len(keyset_order_keys):
                 return _construct_error_response(
                     message="Keyset cursor value count mismatch with ORDER BY columns.",
                     category=ErrorCategory.INVALID_REQUEST,
                     provider=provider,
                     metadata={"reason_code": "execution_pagination_keyset_cursor_column_mismatch"},
-                    envelope_metadata=tenant_enforcement_metadata,
-                )
-
-        if pagination_mode == "keyset":
-            import sqlglot
-
-            from dal.keyset_pagination import apply_keyset_pagination
-
-            try:
-                dialect = normalize_sqlglot_dialect(provider)
-                parsed_effective = sqlglot.parse_one(effective_sql_query, read=dialect)
-                if not isinstance(parsed_effective, sqlglot.exp.Select):
-                    raise ValueError("Effective query is not a SELECT statement.")
-
-                rewritten_select = parsed_effective
-                if keyset_values:
-                    rewritten_select = apply_keyset_pagination(
-                        parsed_effective,
-                        keyset_order_keys,
-                        keyset_values,
-                        provider=provider,
-                    )
-                keyset_rewritten_select = rewritten_select
-            except Exception as e:
-                return _construct_error_response(
-                    message=f"Failed to apply keyset pagination rewrite: {str(e)}",
-                    category=ErrorCategory.INTERNAL,
-                    provider=provider,
                     envelope_metadata=tenant_enforcement_metadata,
                 )
 
@@ -2173,19 +2186,73 @@ async def handler(
                 effective_page_size = max_page_size
             applied_page_size = effective_page_size
             if pagination_mode == "keyset":
-                from dal.keyset_pagination import canonicalize_keyset_sql
+                import sqlglot
 
-                execution_select = keyset_rewritten_select
-                if execution_select is None:
-                    import sqlglot
+                from dal.keyset_pagination import (
+                    KEYSET_ORDER_MISMATCH,
+                    KEYSET_SNAPSHOT_MISMATCH,
+                    apply_keyset_pagination,
+                    canonicalize_keyset_sql,
+                    decode_keyset_cursor,
+                )
 
+                keyset_cursor_context = _extract_keyset_cursor_context(conn)
+                tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
+                    keyset_cursor_context.get("snapshot_id")
+                )
+
+                if keyset_cursor and keyset_cursor_context:
+                    try:
+                        _ = decode_keyset_cursor(
+                            keyset_cursor,
+                            expected_fingerprint=query_fingerprint,
+                            secret=keyset_token_secret,
+                            expected_keys=keyset_order_signature,
+                            expected_cursor_context=keyset_cursor_context,
+                        )
+                    except ValueError as e:
+                        reason_code = "execution_pagination_keyset_cursor_invalid"
+                        if KEYSET_ORDER_MISMATCH in str(e):
+                            reason_code = KEYSET_ORDER_MISMATCH
+                        elif KEYSET_SNAPSHOT_MISMATCH in str(e):
+                            reason_code = KEYSET_SNAPSHOT_MISMATCH
+                            tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = (
+                                True
+                            )
+                        tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                            reason_code
+                        )
+                        return _construct_error_response(
+                            message=str(e),
+                            category=ErrorCategory.INVALID_REQUEST,
+                            provider=provider,
+                            metadata={"reason_code": reason_code},
+                            envelope_metadata=tenant_enforcement_metadata,
+                        )
+
+                try:
                     dialect = normalize_sqlglot_dialect(provider)
                     parsed_effective = sqlglot.parse_one(effective_sql_query, read=dialect)
                     if not isinstance(parsed_effective, sqlglot.exp.Select):
                         raise ValueError("Effective query is not a SELECT statement.")
                     execution_select = parsed_effective
+                    if keyset_values:
+                        execution_select = apply_keyset_pagination(
+                            parsed_effective,
+                            keyset_order_keys,
+                            keyset_values,
+                            provider=provider,
+                        )
+                    keyset_rewritten_select = execution_select
+                except Exception as e:
+                    return _construct_error_response(
+                        message=f"Failed to apply keyset pagination rewrite: {str(e)}",
+                        category=ErrorCategory.INTERNAL,
+                        provider=provider,
+                        envelope_metadata=tenant_enforcement_metadata,
+                    )
 
-                execution_select = execution_select.copy()
+                execution_select = keyset_rewritten_select.copy()
                 if effective_page_size:
                     execution_select = execution_select.limit(int(effective_page_size) + 1)
                 effective_sql_query = canonicalize_keyset_sql(execution_select, provider=provider)
@@ -2498,6 +2565,7 @@ async def handler(
                     keyset_order_signature,
                     query_fingerprint,
                     secret=keyset_token_secret,
+                    cursor_context=keyset_cursor_context or None,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True

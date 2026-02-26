@@ -1,6 +1,11 @@
 import pytest
 
-from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor, encode_keyset_cursor
+from dal.keyset_pagination import (
+    KEYSET_ORDER_MISMATCH,
+    KEYSET_SNAPSHOT_MISMATCH,
+    decode_keyset_cursor,
+    encode_keyset_cursor,
+)
 
 
 def test_keyset_cursor_roundtrip():
@@ -106,3 +111,37 @@ def test_keyset_cursor_order_signature_accepts_same_structure():
         expected_keys=["created_at|desc|nulls_first", "id|asc|nulls_last"],
     )
     assert decoded == [123, 456]
+
+
+def test_keyset_cursor_context_accepts_matching_snapshot_and_transaction():
+    """Cursor context should validate when snapshot and transaction identifiers match."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"snapshot_id": "snap-1", "transaction_id": "tx-1"},
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["id|asc|nulls_last"],
+        expected_cursor_context={"snapshot_id": "snap-1", "transaction_id": "tx-1"},
+    )
+    assert decoded == [123]
+
+
+def test_keyset_cursor_context_rejects_snapshot_mismatch():
+    """Cursor context should fail closed when snapshot identifiers differ."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"snapshot_id": "snap-1"},
+    )
+    with pytest.raises(ValueError, match=KEYSET_SNAPSHOT_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_cursor_context={"snapshot_id": "snap-2"},
+        )
