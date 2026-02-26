@@ -1,7 +1,10 @@
 import pytest
 
 from dal.keyset_pagination import (
+    KEYSET_ORDER_COLUMN_NOT_FOUND,
     KEYSET_REQUIRES_STABLE_TIEBREAKER,
+    KEYSET_TIEBREAKER_NULLABLE,
+    StaticSchemaInfoProvider,
     extract_keyset_order_keys,
     validate_stable_tiebreaker,
 )
@@ -100,7 +103,7 @@ def test_validate_stable_tiebreaker_invokes_schema_info_provider_when_passed():
 
         def has_column(self, table: str, col: str) -> bool:
             self.has_column_calls += 1
-            return table == "users" and col == "id"
+            return table == "users" and col in {"created_at", "id"}
 
         def is_nullable(self, table: str, col: str) -> bool | None:
             self.is_nullable_calls += 1
@@ -112,9 +115,54 @@ def test_validate_stable_tiebreaker_invokes_schema_info_provider_when_passed():
 
     provider = _Provider()
     validate_stable_tiebreaker(keys, table_names=["users"], schema_info=provider)
-    assert provider.has_column_calls >= 1
+    assert provider.has_column_calls >= 2
     assert provider.is_nullable_calls == 1
     assert provider.is_unique_key_calls == 1
+
+
+def test_validate_stable_tiebreaker_rejects_order_columns_missing_from_schema():
+    """Schema-aware validation should reject ORDER BY keys not found in metadata."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
+    schema_info = StaticSchemaInfoProvider(
+        by_table={
+            "users": {
+                "created_at": {"nullable": False},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match=KEYSET_ORDER_COLUMN_NOT_FOUND):
+        validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
+
+
+def test_validate_stable_tiebreaker_rejects_nullable_tiebreaker_without_explicit_nulls():
+    """Schema-aware validation should reject nullable final tie-breakers by default."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at DESC, id ASC")
+    schema_info = StaticSchemaInfoProvider(
+        by_table={
+            "users": {
+                "created_at": {"nullable": False},
+                "id": {"nullable": True, "is_primary_key": True},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match=KEYSET_TIEBREAKER_NULLABLE):
+        validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
+
+
+def test_validate_stable_tiebreaker_allows_nullable_non_final_with_explicit_nulls_ordering():
+    """Nullable non-final ORDER BY keys are allowed when NULL ordering is explicit."""
+    keys = extract_keyset_order_keys(
+        "SELECT id FROM users ORDER BY created_at DESC NULLS LAST, id ASC"
+    )
+    schema_info = StaticSchemaInfoProvider(
+        by_table={
+            "users": {
+                "created_at": {"nullable": True},
+                "id": {"nullable": False, "is_primary_key": True},
+            }
+        }
+    )
+    validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
 
 
 def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():

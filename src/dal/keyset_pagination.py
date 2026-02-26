@@ -12,6 +12,8 @@ from sqlglot import exp
 
 KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
 KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
+KEYSET_ORDER_COLUMN_NOT_FOUND = "KEYSET_ORDER_COLUMN_NOT_FOUND"
+KEYSET_TIEBREAKER_NULLABLE = "KEYSET_TIEBREAKER_NULLABLE"
 
 
 @runtime_checkable
@@ -113,9 +115,14 @@ class StaticSchemaInfoProvider:
         if payload is None:
             return None
         unique_flags = ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        saw_unique_flag = False
+        is_unique = False
         for flag in unique_flags:
             if flag in payload:
-                return _is_truthy_metadata_flag(payload.get(flag))
+                saw_unique_flag = True
+                is_unique = is_unique or _is_truthy_metadata_flag(payload.get(flag))
+        if saw_unique_flag:
+            return is_unique
         return None
 
     def _lookup_column_payload(self, table: str, col: str) -> Optional[Dict[str, Any]]:
@@ -219,6 +226,7 @@ class KeysetOrderKey:
     alias: Optional[str]  # The alias if defined
     descending: bool
     nulls_first: bool
+    explicit_nulls_order: bool
 
 
 def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[KeysetOrderKey]:
@@ -249,14 +257,20 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
 
         descending = o.args.get("desc") is True
         explicit_nulls_first = o.args.get("nulls_first")
-        if explicit_nulls_first is None:
+        if postgres_null_semantics:
             # Postgres defaults:
             # ASC: NULLS LAST
             # DESC: NULLS FIRST
+            default_nulls_first = descending
+            nulls_first = explicit_nulls_first is True
+            explicit_nulls_order = nulls_first != default_nulls_first
+        elif explicit_nulls_first is None:
             # Other providers remain conservative unless NULL ordering is explicit.
-            nulls_first = descending if postgres_null_semantics else False
+            nulls_first = False
+            explicit_nulls_order = False
         else:
             nulls_first = explicit_nulls_first is True
+            explicit_nulls_order = True
 
         # Try to resolve alias if 'this' is a Column and matches a projection alias
         alias = None
@@ -265,7 +279,11 @@ def extract_keyset_order_keys(sql: str, provider: str = "postgres") -> List[Keys
 
         keys.append(
             KeysetOrderKey(
-                expression=this, alias=alias, descending=descending, nulls_first=nulls_first
+                expression=this,
+                alias=alias,
+                descending=descending,
+                nulls_first=nulls_first,
+                explicit_nulls_order=explicit_nulls_order,
             )
         )
 
@@ -317,6 +335,30 @@ def validate_stable_tiebreaker(
             f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: ORDER BY must include a stable tie-breaker."
         )
 
+    if schema_info is not None:
+        resolved_order_columns = _resolve_order_columns_with_schema(
+            order_keys=order_keys,
+            table_names=table_names,
+            schema_info=schema_info,
+        )
+        tie_key = order_keys[-1]
+        tie_table, tie_column = resolved_order_columns[-1]
+
+        is_nullable = schema_info.is_nullable(tie_table, tie_column)
+        if is_nullable is True and not tie_key.explicit_nulls_order:
+            raise ValueError(
+                f"{KEYSET_TIEBREAKER_NULLABLE}: "
+                "Final ORDER BY key must be NOT NULL unless NULLS FIRST/LAST is explicit."
+            )
+
+        is_unique = schema_info.is_unique_key(tie_table, [tie_column])
+        if is_unique is not True:
+            raise ValueError(
+                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+                "Final ORDER BY key must be unique or primary key."
+            )
+        return
+
     tie_key = order_keys[-1]
     if _is_nondeterministic(tie_key.expression):
         raise ValueError(
@@ -332,32 +374,6 @@ def validate_stable_tiebreaker(
         raise ValueError(
             f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY column name is invalid."
         )
-
-    if schema_info is not None:
-        resolved_table = _resolve_schema_table_for_column(
-            raw_table_name=tie_key.expression.table,
-            column_name=column_name,
-            table_names=table_names,
-            schema_info=schema_info,
-        )
-        if not resolved_table:
-            raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Unable to verify tie-breaker metadata."
-            )
-
-        is_nullable = schema_info.is_nullable(resolved_table, column_name)
-        if is_nullable is True:
-            raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: Final ORDER BY key must be NOT NULL."
-            )
-
-        is_unique = schema_info.is_unique_key(resolved_table, [column_name])
-        if is_unique is not True:
-            raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
-                "Final ORDER BY key must be unique or primary key."
-            )
-        return
 
     metadata = column_metadata or {}
     if metadata:
@@ -608,18 +624,61 @@ def _resolve_schema_table_for_column(
 ) -> Optional[str]:
     candidates: List[str] = []
     explicit_table = _normalize_identifier(raw_table_name)
+    explicit_candidates: List[str] = []
     if explicit_table:
-        candidates.extend(_candidate_table_names(explicit_table))
+        explicit_candidates = _candidate_table_names(explicit_table)
+        candidates.extend(explicit_candidates)
 
     for table_name in table_names or []:
         for candidate in _candidate_table_names(table_name):
             if candidate not in candidates:
                 candidates.append(candidate)
 
+    matches: List[str] = []
     for candidate in candidates:
         if schema_info.has_column(candidate, column_name):
-            return candidate
+            matches.append(candidate)
+    if not matches:
+        return None
+
+    for explicit_candidate in explicit_candidates:
+        if explicit_candidate in matches:
+            return explicit_candidate
+    if len(matches) == 1:
+        return matches[0]
     return None
+
+
+def _resolve_order_columns_with_schema(
+    *,
+    order_keys: List[KeysetOrderKey],
+    table_names: Optional[List[str]],
+    schema_info: SchemaInfoProvider,
+) -> List[tuple[str, str]]:
+    resolved: List[tuple[str, str]] = []
+    for key in order_keys:
+        if not isinstance(key.expression, exp.Column):
+            raise ValueError(
+                f"{KEYSET_ORDER_COLUMN_NOT_FOUND}: ORDER BY keys must reference base columns."
+            )
+        column_name = _normalize_identifier(key.expression.name)
+        if not column_name:
+            raise ValueError(
+                f"{KEYSET_ORDER_COLUMN_NOT_FOUND}: ORDER BY includes an invalid column reference."
+            )
+
+        table_name = _resolve_schema_table_for_column(
+            raw_table_name=key.expression.table,
+            column_name=column_name,
+            table_names=table_names,
+            schema_info=schema_info,
+        )
+        if not table_name:
+            raise ValueError(
+                f"{KEYSET_ORDER_COLUMN_NOT_FOUND}: ORDER BY column must exist in schema metadata."
+            )
+        resolved.append((table_name, column_name))
+    return resolved
 
 
 def _is_truthy_metadata_flag(value: Any) -> bool:

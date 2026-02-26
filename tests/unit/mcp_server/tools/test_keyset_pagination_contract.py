@@ -310,7 +310,105 @@ async def test_execute_sql_query_keyset_rejects_nullable_tiebreaker_with_metadat
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NULLABLE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_order_column_missing_from_schema():
+    """Missing ORDER BY schema columns should fail closed in keyset mode."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_COLUMN_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_allows_nullable_non_final_with_explicit_nulls_ordering():
+    """Explicit NULLS ordering should allow nullable non-final ORDER BY columns."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": True, "is_primary_key": False},
+                        {"name": "id", "nullable": False, "is_primary_key": True},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC NULLS LAST, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
 
 
 @pytest.mark.asyncio

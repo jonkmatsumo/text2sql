@@ -13,6 +13,7 @@ def test_apply_keyset_pagination_single_column():
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         )
     ]
     values = [50]
@@ -33,12 +34,14 @@ def test_apply_keyset_pagination_multi_column():
             alias="created_at",
             descending=True,
             nulls_first=True,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
     vals = ["2024-01-01", 100]
@@ -60,6 +63,7 @@ def test_apply_keyset_pagination_nulls_last_includes_null_rows():
             alias="score",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         )
     ]
 
@@ -79,12 +83,14 @@ def test_apply_keyset_pagination_null_cursor_asc_nulls_last_uses_is_null_path():
             alias="score",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
 
@@ -105,12 +111,14 @@ def test_apply_keyset_pagination_null_cursor_desc_nulls_first_uses_is_null_path(
             alias="score",
             descending=True,
             nulls_first=True,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
 
@@ -132,6 +140,7 @@ def test_apply_keyset_pagination_non_postgres_nulls_fail_closed():
             alias="score",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         )
     ]
     rewritten = apply_keyset_pagination(expression, keys, [10], provider="mysql")
@@ -149,12 +158,14 @@ def test_apply_keyset_pagination_sql_output_is_deterministic():
             alias="score",
             descending=True,
             nulls_first=True,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
     first = canonicalize_keyset_sql(
@@ -180,12 +191,14 @@ def test_apply_keyset_pagination_canonical_sql_snapshot():
             alias="created_at",
             descending=True,
             nulls_first=True,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
 
@@ -210,6 +223,7 @@ def test_apply_keyset_pagination_multi_key_predicate_ordering_is_stable():
             alias="created_at",
             descending=True,
             nulls_first=True,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(
@@ -218,12 +232,14 @@ def test_apply_keyset_pagination_multi_key_predicate_ordering_is_stable():
             alias="priority",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
         KeysetOrderKey(
             expression=sqlglot.exp.Column(this=sqlglot.exp.Identifier(this="id", quoted=False)),
             alias="id",
             descending=False,
             nulls_first=False,
+            explicit_nulls_order=False,
         ),
     ]
     first = canonicalize_keyset_sql(

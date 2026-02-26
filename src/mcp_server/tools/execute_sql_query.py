@@ -1341,7 +1341,9 @@ async def handler(
             )
 
         from dal.keyset_pagination import (
+            KEYSET_ORDER_COLUMN_NOT_FOUND,
             KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            KEYSET_TIEBREAKER_NULLABLE,
             StaticSchemaInfoProvider,
             build_keyset_order_signature,
             extract_keyset_order_keys,
@@ -1388,13 +1390,18 @@ async def handler(
                 schema_info=keyset_schema_info,
             )
         except ValueError as e:
+            error_message = str(e)
             reason_code = (
                 KEYSET_REQUIRES_STABLE_TIEBREAKER
-                if KEYSET_REQUIRES_STABLE_TIEBREAKER in str(e)
+                if KEYSET_REQUIRES_STABLE_TIEBREAKER in error_message
                 else "execution_pagination_keyset_invalid_sql"
             )
+            for schema_reason in (KEYSET_ORDER_COLUMN_NOT_FOUND, KEYSET_TIEBREAKER_NULLABLE):
+                if schema_reason in error_message:
+                    reason_code = schema_reason
+                    break
             return _construct_error_response(
-                message=str(e),
+                message=error_message,
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"reason_code": reason_code},
