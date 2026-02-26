@@ -129,8 +129,35 @@ class ExecuteSQLQueryMetadata(BaseModel):
     pagination_mode_used: Optional[Literal["offset", "keyset"]] = Field(
         None, description="The pagination strategy applied for this result"
     )
+    pagination_mode_requested: Optional[Literal["offset", "keyset"]] = Field(
+        None, description="The pagination strategy requested by the caller"
+    )
     next_keyset_cursor: Optional[str] = Field(
         None, description="Opaque cursor for the next page when using keyset pagination"
+    )
+    pagination_keyset_partial_page: Optional[bool] = Field(
+        None,
+        description="True when keyset pagination page is partial due containment truncation",
+        validation_alias="pagination.keyset.partial_page",
+        serialization_alias="pagination.keyset.partial_page",
+    )
+    pagination_keyset_page_size_effective: Optional[int] = Field(
+        None,
+        description="Effective keyset page size after hard-cap enforcement",
+        validation_alias="pagination.keyset.page_size_effective",
+        serialization_alias="pagination.keyset.page_size_effective",
+    )
+    pagination_keyset_effective_page_size: Optional[int] = Field(
+        None,
+        description="Effective keyset page size after hard-cap enforcement",
+        validation_alias="pagination.keyset.effective_page_size",
+        serialization_alias="pagination.keyset.effective_page_size",
+    )
+    pagination_keyset_cursor_emitted: Optional[bool] = Field(
+        None,
+        description="True when this response emitted a next keyset cursor",
+        validation_alias="pagination.keyset.cursor_emitted",
+        serialization_alias="pagination.keyset.cursor_emitted",
     )
 
     @model_validator(mode="before")
@@ -210,6 +237,21 @@ class ExecuteSQLQueryMetadata(BaseModel):
         ):
             normalized["truncation_reason"] = normalized["partial_reason"]
 
+        if (
+            normalized.get("pagination.keyset.effective_page_size") is None
+            and normalized.get("pagination.keyset.page_size_effective") is not None
+        ):
+            normalized["pagination.keyset.effective_page_size"] = normalized[
+                "pagination.keyset.page_size_effective"
+            ]
+        if (
+            normalized.get("pagination.keyset.page_size_effective") is None
+            and normalized.get("pagination.keyset.effective_page_size") is not None
+        ):
+            normalized["pagination.keyset.page_size_effective"] = normalized[
+                "pagination.keyset.effective_page_size"
+            ]
+
         return normalized
 
     @model_validator(mode="after")
@@ -237,6 +279,16 @@ class ExecuteSQLQueryMetadata(BaseModel):
             self.next_page_token = self.next_keyset_cursor
         if self.truncation_reason is None and self.partial_reason is not None:
             self.truncation_reason = self.partial_reason
+        if (
+            self.pagination_keyset_effective_page_size is None
+            and self.pagination_keyset_page_size_effective is not None
+        ):
+            self.pagination_keyset_effective_page_size = self.pagination_keyset_page_size_effective
+        if (
+            self.pagination_keyset_page_size_effective is None
+            and self.pagination_keyset_effective_page_size is not None
+        ):
+            self.pagination_keyset_page_size_effective = self.pagination_keyset_effective_page_size
         return self
 
 

@@ -435,7 +435,11 @@ def _record_result_contract_observability(
     next_page_token: str | None,
     bytes_returned: int,
     execution_duration_ms: int,
-    pagination_mode: str | None = None,
+    pagination_mode_requested: str | None = None,
+    pagination_mode_used: str | None = None,
+    keyset_partial_page: bool | None = None,
+    keyset_effective_page_size: int | None = None,
+    keyset_cursor_emitted: bool | None = None,
     next_keyset_cursor: str | None = None,
 ) -> None:
     span = trace.get_current_span()
@@ -448,8 +452,16 @@ def _record_result_contract_observability(
         span.set_attribute("db.result.page_size", int(page_size))
     span.set_attribute("db.result.page_items_returned", int(page_items_returned))
     span.set_attribute("db.result.next_page_token_present", bool(next_page_token))
-    if pagination_mode:
-        span.set_attribute("db.pagination.mode", str(pagination_mode))
+    if pagination_mode_used:
+        span.set_attribute("db.pagination.mode", str(pagination_mode_used))
+    if pagination_mode_requested:
+        span.set_attribute("pagination.mode_requested", str(pagination_mode_requested))
+    if pagination_mode_used:
+        span.set_attribute("pagination.mode_used", str(pagination_mode_used))
+    span.set_attribute("pagination.keyset.partial_page", bool(keyset_partial_page))
+    if keyset_effective_page_size is not None:
+        span.set_attribute("pagination.keyset.effective_page_size", int(keyset_effective_page_size))
+    span.set_attribute("pagination.keyset.cursor_emitted", bool(keyset_cursor_emitted))
     if next_keyset_cursor:
         span.set_attribute("db.pagination.next_keyset_cursor_present", True)
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
@@ -797,7 +809,7 @@ def _construct_error_response(
         ),
         error=error_meta,
     )
-    return envelope.model_dump_json(exclude_none=True)
+    return envelope.model_dump_json(exclude_none=True, by_alias=True)
 
 
 def _record_complexity_attributes(
@@ -1094,6 +1106,7 @@ async def handler(
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
     keyset_order_signature: List[str] = []
+    keyset_rewritten_select = None
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1120,12 +1133,16 @@ async def handler(
     )
     # Initialize metadata for consistent error responses
     tenant_enforcement_metadata: Dict[str, Any] = {
+        "pagination_mode_requested": pagination_mode,
         "pagination_mode_used": pagination_mode,
         "next_keyset_cursor": None,
         "execution_timeout_applied": execution_timeout_applied,
         "execution_timeout_triggered": False,
         "resource_capability_mismatch": None,
     }
+    if pagination_mode == "keyset":
+        tenant_enforcement_metadata["pagination.keyset.partial_page"] = False
+        tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
 
@@ -1222,21 +1239,70 @@ async def handler(
         )
 
     # 1.5 Pagination Mode and Bounded Fields Validation
+    if page_token and keyset_cursor:
+        return _construct_error_response(
+            message="Pagination token mode mismatch: provide only one pagination token type.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+    if pagination_mode == "keyset" and page_token:
+        return _construct_error_response(
+            message="Keyset pagination mode does not accept page_token.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+    if pagination_mode == "offset" and keyset_cursor:
+        return _construct_error_response(
+            message="Offset pagination mode does not accept keyset_cursor.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": "PAGINATION_MODE_TOKEN_MISMATCH"},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
+
     if pagination_mode == "keyset":
-        if not (
-            bool(getattr(caps, "supports_pagination", False))
-            or (
-                bool(getattr(caps, "supports_offset_pagination_wrapper", False))
-                and bool(getattr(caps, "supports_query_wrapping_subselect", False))
+        supports_keyset_fallback = bool(getattr(caps, "supports_pagination", False)) or (
+            bool(getattr(caps, "supports_offset_pagination_wrapper", False))
+            and bool(getattr(caps, "supports_query_wrapping_subselect", False))
+        )
+        supports_keyset = bool(getattr(caps, "supports_keyset", supports_keyset_fallback))
+        supports_keyset_with_containment_fallback = (
+            supports_keyset
+            and bool(getattr(caps, "supports_row_cap", True))
+            and bool(getattr(caps, "supports_byte_cap", True))
+            and bool(getattr(caps, "supports_timeout", True))
+        )
+        supports_keyset_with_containment = bool(
+            getattr(
+                caps,
+                "supports_keyset_with_containment",
+                supports_keyset_with_containment_fallback,
             )
-        ):
+        )
+
+        if not supports_keyset:
             return _construct_error_response(
-                "Pagination is not supported for this provider.",
+                "Keyset pagination is not supported for this provider.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={
                     "reason_code": "execution_pagination_unsupported_provider",
-                    "required_capability": "pagination",
+                    "required_capability": "keyset_pagination",
+                },
+                envelope_metadata=tenant_enforcement_metadata,
+            )
+        if not supports_keyset_with_containment:
+            return _construct_error_response(
+                "Keyset pagination with resource containment is not supported for this provider.",
+                category=ErrorCategory.INVALID_REQUEST,
+                provider=provider,
+                metadata={
+                    "reason_code": "execution_pagination_unsupported_provider",
+                    "required_capability": "keyset_with_containment",
                 },
                 envelope_metadata=tenant_enforcement_metadata,
             )
@@ -1727,7 +1793,7 @@ async def handler(
         if pagination_mode == "keyset":
             import sqlglot
 
-            from dal.keyset_pagination import apply_keyset_pagination, canonicalize_keyset_sql
+            from dal.keyset_pagination import apply_keyset_pagination
 
             try:
                 dialect = normalize_sqlglot_dialect(provider)
@@ -1743,9 +1809,7 @@ async def handler(
                         keyset_values,
                         provider=provider,
                     )
-                if page_size:
-                    rewritten_select = rewritten_select.limit(page_size + 1)
-                effective_sql_query = canonicalize_keyset_sql(rewritten_select, provider=provider)
+                keyset_rewritten_select = rewritten_select
             except Exception as e:
                 return _construct_error_response(
                     message=f"Failed to apply keyset pagination rewrite: {str(e)}",
@@ -1777,6 +1841,31 @@ async def handler(
             if effective_page_size and effective_page_size > max_page_size:
                 effective_page_size = max_page_size
             applied_page_size = effective_page_size
+            if pagination_mode == "keyset":
+                from dal.keyset_pagination import canonicalize_keyset_sql
+
+                execution_select = keyset_rewritten_select
+                if execution_select is None:
+                    import sqlglot
+
+                    dialect = normalize_sqlglot_dialect(provider)
+                    parsed_effective = sqlglot.parse_one(effective_sql_query, read=dialect)
+                    if not isinstance(parsed_effective, sqlglot.exp.Select):
+                        raise ValueError("Effective query is not a SELECT statement.")
+                    execution_select = parsed_effective
+
+                execution_select = execution_select.copy()
+                if effective_page_size:
+                    execution_select = execution_select.limit(int(effective_page_size) + 1)
+                effective_sql_query = canonicalize_keyset_sql(execution_select, provider=provider)
+                if effective_page_size is not None:
+                    effective_page_size_int = int(effective_page_size)
+                    tenant_enforcement_metadata["pagination.keyset.effective_page_size"] = (
+                        effective_page_size_int
+                    )
+                    tenant_enforcement_metadata["pagination.keyset.page_size_effective"] = (
+                        effective_page_size_int
+                    )
 
             async def _fetch_rows():
                 nonlocal columns, next_token
@@ -2011,7 +2100,21 @@ async def handler(
             # Keyset pagination does not use offset page tokens.
             next_token = None
 
-        if pagination_mode == "keyset" and is_truncated and not size_truncated and result_rows:
+        keyset_partial_page = bool(
+            pagination_mode == "keyset" and (size_truncated or row_limit_truncated)
+        )
+        if pagination_mode == "keyset":
+            tenant_enforcement_metadata["pagination.keyset.partial_page"] = keyset_partial_page
+        if keyset_partial_page:
+            tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
+
+        if (
+            pagination_mode == "keyset"
+            and keyset_page_truncated
+            and not keyset_partial_page
+            and result_rows
+        ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
 
             try:
@@ -2023,6 +2126,7 @@ async def handler(
                     secret=keyset_token_secret,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
+                tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True
                 tenant_enforcement_metadata["is_paginated"] = True
             except Exception as e:
                 logger.warning(f"Failed to generate next_keyset_cursor: {e}")
@@ -2112,8 +2216,23 @@ async def handler(
             resource_capability_mismatch=tenant_enforcement_metadata.get(
                 "resource_capability_mismatch"
             ),
+            pagination_mode_requested=tenant_enforcement_metadata.get("pagination_mode_requested"),
             pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
+            **{
+                "pagination.keyset.partial_page": tenant_enforcement_metadata.get(
+                    "pagination.keyset.partial_page"
+                ),
+                "pagination.keyset.effective_page_size": tenant_enforcement_metadata.get(
+                    "pagination.keyset.effective_page_size"
+                ),
+                "pagination.keyset.page_size_effective": tenant_enforcement_metadata.get(
+                    "pagination.keyset.page_size_effective"
+                ),
+                "pagination.keyset.cursor_emitted": tenant_enforcement_metadata.get(
+                    "pagination.keyset.cursor_emitted"
+                ),
+            },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
 
@@ -2133,16 +2252,28 @@ async def handler(
             next_page_token=next_token,
             bytes_returned=bytes_returned,
             execution_duration_ms=execution_duration_ms,
-            pagination_mode=tenant_enforcement_metadata.get("pagination_mode_used"),
+            pagination_mode_requested=tenant_enforcement_metadata.get("pagination_mode_requested"),
+            pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
+            keyset_partial_page=tenant_enforcement_metadata.get("pagination.keyset.partial_page"),
+            keyset_effective_page_size=tenant_enforcement_metadata.get(
+                "pagination.keyset.effective_page_size"
+            ),
+            keyset_cursor_emitted=tenant_enforcement_metadata.get(
+                "pagination.keyset.cursor_emitted"
+            ),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
         )
 
-        return envelope.model_dump_json(exclude_none=True)
+        return envelope.model_dump_json(exclude_none=True, by_alias=True)
 
     except _SandboxExecutionTimeout as e:
         provider = _active_provider()
         tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         tenant_enforcement_metadata["execution_timeout_triggered"] = True
+        if tenant_enforcement_metadata.get("pagination_mode_used") == "keyset":
+            tenant_enforcement_metadata["pagination.keyset.partial_page"] = True
+            tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
         tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",

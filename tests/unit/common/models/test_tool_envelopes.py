@@ -97,3 +97,20 @@ def test_execute_sql_query_metadata_keyset_cursor_aliasing_is_one_way():
     )
     assert page_token_meta.next_page_token == "offset-1"
     assert page_token_meta.next_keyset_cursor is None
+
+
+def test_execute_sql_query_metadata_keyset_effective_page_size_aliases():
+    """Legacy and canonical keyset effective page size aliases should stay synchronized."""
+    meta_from_legacy = ExecuteSQLQueryMetadata(
+        rows_returned=1,
+        **{"pagination.keyset.page_size_effective": 5},
+    )
+    assert meta_from_legacy.pagination_keyset_page_size_effective == 5
+    assert meta_from_legacy.pagination_keyset_effective_page_size == 5
+
+    meta_from_canonical = ExecuteSQLQueryMetadata(
+        rows_returned=1,
+        **{"pagination.keyset.effective_page_size": 7},
+    )
+    assert meta_from_canonical.pagination_keyset_effective_page_size == 7
+    assert meta_from_canonical.pagination_keyset_page_size_effective == 7
