@@ -105,6 +105,7 @@ _PARTIAL_REASON_NORMALIZATION = {
     "safety": PayloadTruncationReason.SAFETY_LIMIT.value,
     "timeout": "timeout",
 }
+_ADAPTIVE_ROW_SIZE_FALLBACK_BYTES = 1024
 
 
 @dataclass(frozen=True)
@@ -425,6 +426,22 @@ def _normalize_partial_reason(reason: str | None) -> str | None:
     return None
 
 
+def _rolling_average_row_size_bytes(rows: Sequence[dict[str, Any]]) -> int | None:
+    """Estimate average serialized row size using a stable rolling average."""
+    if not rows:
+        return None
+    running_average = 0.0
+    observed = 0
+    for row in rows:
+        try:
+            row_size = len(json.dumps(row, default=str, separators=(",", ":")).encode("utf-8"))
+        except Exception:
+            row_size = 0
+        observed += 1
+        running_average += (float(row_size) - running_average) / float(observed)
+    return max(1, int(round(running_average)))
+
+
 def _record_result_contract_observability(
     *,
     partial: bool,
@@ -438,7 +455,10 @@ def _record_result_contract_observability(
     pagination_mode_requested: str | None = None,
     pagination_mode_used: str | None = None,
     keyset_partial_page: bool | None = None,
+    keyset_streaming_terminated: bool | None = None,
     keyset_effective_page_size: int | None = None,
+    keyset_adaptive_page_size: int | None = None,
+    keyset_byte_budget: int | None = None,
     keyset_cursor_emitted: bool | None = None,
     next_keyset_cursor: str | None = None,
 ) -> None:
@@ -459,8 +479,13 @@ def _record_result_contract_observability(
     if pagination_mode_used:
         span.set_attribute("pagination.mode_used", str(pagination_mode_used))
     span.set_attribute("pagination.keyset.partial_page", bool(keyset_partial_page))
+    span.set_attribute("pagination.keyset.streaming_terminated", bool(keyset_streaming_terminated))
     if keyset_effective_page_size is not None:
         span.set_attribute("pagination.keyset.effective_page_size", int(keyset_effective_page_size))
+    if keyset_adaptive_page_size is not None:
+        span.set_attribute("pagination.keyset.adaptive_page_size", int(keyset_adaptive_page_size))
+    if keyset_byte_budget is not None:
+        span.set_attribute("pagination.keyset.byte_budget", int(keyset_byte_budget))
     span.set_attribute("pagination.keyset.cursor_emitted", bool(keyset_cursor_emitted))
     if next_keyset_cursor:
         span.set_attribute("db.pagination.next_keyset_cursor_present", True)
@@ -1084,6 +1109,7 @@ async def handler(
     pagination_mode: Literal["offset", "keyset"] = "offset",
     keyset_cursor: Optional[str] = None,
     keyset_order_by: Optional[List[str]] = None,
+    streaming: bool = False,
 ) -> str:
     """Execute a validated SQL query against the target database.
 
@@ -1107,6 +1133,7 @@ async def handler(
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
     keyset_order_signature: List[str] = []
     keyset_rewritten_select = None
+    streaming_terminated_early = False
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1143,6 +1170,11 @@ async def handler(
     if pagination_mode == "keyset":
         tenant_enforcement_metadata["pagination.keyset.partial_page"] = False
         tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+        tenant_enforcement_metadata["pagination.keyset.byte_budget"] = max(
+            0, int(resource_limits.max_bytes)
+        )
+        if streaming:
+            tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
 
@@ -2021,9 +2053,36 @@ async def handler(
             last_truncated = raw_last_truncated if isinstance(raw_last_truncated, bool) else False
             raw_reason = getattr(conn, "last_truncated_reason", None)
             last_truncated_reason = raw_reason if isinstance(raw_reason, str) else None
+            if pagination_mode == "keyset" and streaming:
+                raw_streaming_terminated = getattr(conn, "last_streaming_terminated", False)
+                raw_client_disconnected = getattr(conn, "last_stream_client_disconnected", False)
+                streaming_terminated_early = bool(raw_streaming_terminated) or bool(
+                    raw_client_disconnected
+                )
 
         if conn is not None:
             tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(conn))
+
+        if pagination_mode == "keyset" and applied_page_size is not None and applied_page_size > 0:
+            requested_page_size = int(applied_page_size)
+            adaptive_page_size = requested_page_size
+            byte_budget = max(0, int(resource_limits.max_bytes))
+            if resource_limits.enforce_byte_limit and byte_budget > 0:
+                average_row_size = _rolling_average_row_size_bytes(
+                    result_rows[:requested_page_size]
+                )
+                estimated_row_size = average_row_size or _ADAPTIVE_ROW_SIZE_FALLBACK_BYTES
+                budget_limited_page_size = max(1, byte_budget // max(1, int(estimated_row_size)))
+                adaptive_page_size = min(requested_page_size, int(budget_limited_page_size))
+            adaptive_page_size = max(1, int(adaptive_page_size))
+            applied_page_size = adaptive_page_size
+            tenant_enforcement_metadata["pagination.keyset.adaptive_page_size"] = adaptive_page_size
+            tenant_enforcement_metadata["pagination.keyset.effective_page_size"] = (
+                adaptive_page_size
+            )
+            tenant_enforcement_metadata["pagination.keyset.page_size_effective"] = (
+                adaptive_page_size
+            )
 
         keyset_page_truncated = False
         if (
@@ -2083,6 +2142,8 @@ async def handler(
         execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
         if size_truncated:
             next_token = None
+            if pagination_mode == "keyset" and streaming:
+                streaming_terminated_early = True
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -2105,7 +2166,14 @@ async def handler(
         )
         if pagination_mode == "keyset":
             tenant_enforcement_metadata["pagination.keyset.partial_page"] = keyset_partial_page
+            if streaming:
+                tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = (
+                    streaming_terminated_early
+                )
         if keyset_partial_page:
+            tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+            tenant_enforcement_metadata["next_keyset_cursor"] = None
+        if pagination_mode == "keyset" and streaming and streaming_terminated_early:
             tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
             tenant_enforcement_metadata["next_keyset_cursor"] = None
 
@@ -2113,12 +2181,19 @@ async def handler(
             pagination_mode == "keyset"
             and keyset_page_truncated
             and not keyset_partial_page
+            and not streaming_terminated_early
             and result_rows
         ):
             from dal.keyset_pagination import encode_keyset_cursor, get_keyset_values
 
+            emitted_row_count = len(result_rows)
+            cursor_row_index = emitted_row_count - 1
+            if cursor_row_index != emitted_row_count - 1:
+                raise AssertionError(
+                    "Invariant violation: cursor_row_index must equal emitted_row_count - 1."
+                )
             try:
-                keyset_vals = get_keyset_values(result_rows[-1], keyset_order_keys)
+                keyset_vals = get_keyset_values(result_rows[cursor_row_index], keyset_order_keys)
                 next_keyset_cursor = encode_keyset_cursor(
                     keyset_vals,
                     keyset_order_signature,
@@ -2226,11 +2301,20 @@ async def handler(
                 "pagination.keyset.effective_page_size": tenant_enforcement_metadata.get(
                     "pagination.keyset.effective_page_size"
                 ),
+                "pagination.keyset.adaptive_page_size": tenant_enforcement_metadata.get(
+                    "pagination.keyset.adaptive_page_size"
+                ),
+                "pagination.keyset.byte_budget": tenant_enforcement_metadata.get(
+                    "pagination.keyset.byte_budget"
+                ),
                 "pagination.keyset.page_size_effective": tenant_enforcement_metadata.get(
                     "pagination.keyset.page_size_effective"
                 ),
                 "pagination.keyset.cursor_emitted": tenant_enforcement_metadata.get(
                     "pagination.keyset.cursor_emitted"
+                ),
+                "pagination.keyset.streaming_terminated": tenant_enforcement_metadata.get(
+                    "pagination.keyset.streaming_terminated"
                 ),
             },
         )
@@ -2255,9 +2339,16 @@ async def handler(
             pagination_mode_requested=tenant_enforcement_metadata.get("pagination_mode_requested"),
             pagination_mode_used=tenant_enforcement_metadata.get("pagination_mode_used"),
             keyset_partial_page=tenant_enforcement_metadata.get("pagination.keyset.partial_page"),
+            keyset_streaming_terminated=tenant_enforcement_metadata.get(
+                "pagination.keyset.streaming_terminated"
+            ),
             keyset_effective_page_size=tenant_enforcement_metadata.get(
                 "pagination.keyset.effective_page_size"
             ),
+            keyset_adaptive_page_size=tenant_enforcement_metadata.get(
+                "pagination.keyset.adaptive_page_size"
+            ),
+            keyset_byte_budget=tenant_enforcement_metadata.get("pagination.keyset.byte_budget"),
             keyset_cursor_emitted=tenant_enforcement_metadata.get(
                 "pagination.keyset.cursor_emitted"
             ),
@@ -2274,6 +2365,8 @@ async def handler(
             tenant_enforcement_metadata["pagination.keyset.partial_page"] = True
             tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
             tenant_enforcement_metadata["next_keyset_cursor"] = None
+            if streaming:
+                tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = True
         tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
             message="Execution timed out.",
