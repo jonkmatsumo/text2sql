@@ -600,7 +600,7 @@ def _extract_columns_from_table_definition(definition_payload: str) -> Optional[
 
 def _extract_keyset_column_metadata(
     definition_payload: str,
-) -> Optional[dict[str, dict[str, Any]]]:
+) -> Optional[tuple[dict[str, dict[str, Any]], list[list[str]]]]:
     try:
         parsed = json.loads(definition_payload)
     except Exception:
@@ -624,7 +624,99 @@ def _extract_keyset_column_metadata(
             "is_unique": entry.get("is_unique"),
             "unique": entry.get("unique"),
         }
-    return metadata or None
+    if not metadata:
+        return None
+    unique_keys = _extract_keyset_unique_keys(parsed, columns)
+    return metadata, unique_keys
+
+
+def _extract_keyset_unique_keys(
+    parsed_payload: dict[str, Any],
+    columns: list[Any],
+) -> list[list[str]]:
+    unique_keys: list[list[str]] = []
+    seen: set[frozenset[str]] = set()
+
+    def _add_unique_key(raw_value: Any) -> None:
+        normalized_columns = _normalize_unique_key_columns(raw_value)
+        if not normalized_columns:
+            return
+        key_signature = frozenset(normalized_columns)
+        if not key_signature or key_signature in seen:
+            return
+        seen.add(key_signature)
+        unique_keys.append(normalized_columns)
+
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if any(
+            _is_truthy_metadata_flag(entry.get(flag))
+            for flag in ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        ):
+            _add_unique_key([name])
+
+    for field_name in ("unique_keys", "unique_indexes", "unique_constraints"):
+        raw_field = parsed_payload.get(field_name)
+        if isinstance(raw_field, list):
+            for entry in raw_field:
+                _add_unique_key(entry)
+        elif raw_field is not None:
+            _add_unique_key(raw_field)
+
+    raw_primary_key = parsed_payload.get("primary_key")
+    if raw_primary_key is not None:
+        _add_unique_key(raw_primary_key)
+
+    raw_indexes = parsed_payload.get("indexes")
+    if isinstance(raw_indexes, list):
+        for raw_index in raw_indexes:
+            if not isinstance(raw_index, dict):
+                continue
+            if not any(
+                _is_truthy_metadata_flag(raw_index.get(flag))
+                for flag in ("is_unique", "unique", "primary", "is_primary")
+            ):
+                continue
+            _add_unique_key(raw_index.get("columns"))
+
+    return unique_keys
+
+
+def _normalize_unique_key_columns(raw_value: Any) -> list[str]:
+    if isinstance(raw_value, dict):
+        raw_value = raw_value.get("columns") or raw_value.get("key") or raw_value.get("column")
+
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().strip('"').lower()
+        return [normalized] if normalized else []
+
+    if not isinstance(raw_value, (list, tuple)):
+        return []
+
+    normalized_columns: list[str] = []
+    for entry in raw_value:
+        if isinstance(entry, dict):
+            entry = entry.get("name") or entry.get("column")
+        if not isinstance(entry, str):
+            continue
+        normalized = entry.strip().strip('"').lower()
+        if normalized and normalized not in normalized_columns:
+            normalized_columns.append(normalized)
+    return normalized_columns
+
+
+def _is_truthy_metadata_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
 
 
 async def _load_table_columns_for_rewrite(
@@ -669,17 +761,18 @@ async def _load_table_columns_for_rewrite(
 
 async def _load_keyset_column_metadata(
     table_names: Sequence[str], tenant_id: int | None
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[list[str]]]]:
     """Best-effort metadata loader for keyset tie-breaker validation."""
     if not table_names:
-        return {}
+        return {}, {}
 
     try:
         store = Database.get_metadata_store()
     except Exception:
-        return {}
+        return {}, {}
 
     loaded: dict[str, dict[str, Any]] = {}
+    loaded_unique_keys: dict[str, list[list[str]]] = {}
     single_table = len(table_names) == 1
     for table_name in table_names:
         normalized = (table_name or "").strip().lower()
@@ -692,6 +785,7 @@ async def _load_keyset_column_metadata(
             candidates.append(short_name)
 
         table_metadata: dict[str, dict[str, Any]] | None = None
+        table_unique_keys: list[list[str]] = []
         resolved_table_name = short_name
         for candidate in candidates:
             try:
@@ -700,8 +794,9 @@ async def _load_keyset_column_metadata(
                 )
             except Exception:
                 continue
-            table_metadata = _extract_keyset_column_metadata(definition_payload)
-            if table_metadata:
+            extracted = _extract_keyset_column_metadata(definition_payload)
+            if extracted:
+                table_metadata, table_unique_keys = extracted
                 resolved_table_name = candidate.split(".")[-1]
                 break
 
@@ -713,7 +808,13 @@ async def _load_keyset_column_metadata(
             if single_table:
                 loaded[column_name] = metadata
 
-    return loaded
+        if table_unique_keys:
+            loaded_unique_keys[resolved_table_name] = table_unique_keys
+            loaded_unique_keys[normalized] = table_unique_keys
+            if short_name:
+                loaded_unique_keys[short_name] = table_unique_keys
+
+    return loaded, loaded_unique_keys
 
 
 def _keyset_tiebreaker_allowlist() -> set[str]:
@@ -1131,6 +1232,7 @@ async def handler(
     keyset_values = []
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
+    keyset_unique_keys_by_table: Dict[str, List[List[str]]] = {}
     keyset_schema_info = None
     keyset_order_signature: List[str] = []
     keyset_rewritten_select = None
@@ -1343,6 +1445,7 @@ async def handler(
         from dal.keyset_pagination import (
             KEYSET_ORDER_COLUMN_NOT_FOUND,
             KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            KEYSET_TIEBREAKER_NOT_UNIQUE,
             KEYSET_TIEBREAKER_NULLABLE,
             StaticSchemaInfoProvider,
             build_keyset_order_signature,
@@ -1375,11 +1478,14 @@ async def handler(
                 envelope_metadata=tenant_enforcement_metadata,
             )
 
-        keyset_column_metadata = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        keyset_column_metadata, keyset_unique_keys_by_table = await _load_keyset_column_metadata(
+            keyset_table_names, tenant_id
+        )
         if keyset_column_metadata:
             keyset_schema_info = StaticSchemaInfoProvider.from_column_metadata(
                 keyset_column_metadata,
                 table_names=keyset_table_names,
+                unique_keys_by_table=keyset_unique_keys_by_table,
             )
         try:
             validate_stable_tiebreaker(
@@ -1396,7 +1502,11 @@ async def handler(
                 if KEYSET_REQUIRES_STABLE_TIEBREAKER in error_message
                 else "execution_pagination_keyset_invalid_sql"
             )
-            for schema_reason in (KEYSET_ORDER_COLUMN_NOT_FOUND, KEYSET_TIEBREAKER_NULLABLE):
+            for schema_reason in (
+                KEYSET_ORDER_COLUMN_NOT_FOUND,
+                KEYSET_TIEBREAKER_NULLABLE,
+                KEYSET_TIEBREAKER_NOT_UNIQUE,
+            ):
                 if schema_reason in error_message:
                     reason_code = schema_reason
                     break

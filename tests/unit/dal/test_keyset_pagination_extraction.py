@@ -3,6 +3,7 @@ import pytest
 from dal.keyset_pagination import (
     KEYSET_ORDER_COLUMN_NOT_FOUND,
     KEYSET_REQUIRES_STABLE_TIEBREAKER,
+    KEYSET_TIEBREAKER_NOT_UNIQUE,
     KEYSET_TIEBREAKER_NULLABLE,
     StaticSchemaInfoProvider,
     extract_keyset_order_keys,
@@ -163,6 +164,37 @@ def test_validate_stable_tiebreaker_allows_nullable_non_final_with_explicit_null
         }
     )
     validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
+
+
+def test_validate_stable_tiebreaker_allows_composite_unique_suffix():
+    """Composite unique suffixes should satisfy keyset tie-breaker stability."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY user_id ASC, created_at ASC")
+    schema_info = StaticSchemaInfoProvider(
+        by_table={
+            "users": {
+                "user_id": {"nullable": False},
+                "created_at": {"nullable": False},
+            }
+        },
+        unique_keys_by_table={"users": [["user_id", "created_at"]]},
+    )
+    validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
+
+
+def test_validate_stable_tiebreaker_rejects_non_unique_suffix_when_schema_knows_uniqueness():
+    """Known uniqueness metadata should reject non-unique final tie-breakers."""
+    keys = extract_keyset_order_keys("SELECT id FROM users ORDER BY created_at ASC")
+    schema_info = StaticSchemaInfoProvider(
+        by_table={
+            "users": {
+                "created_at": {"nullable": False},
+                "id": {"nullable": False},
+            }
+        },
+        unique_keys_by_table={"users": [["id"]]},
+    )
+    with pytest.raises(ValueError, match=KEYSET_TIEBREAKER_NOT_UNIQUE):
+        validate_stable_tiebreaker(keys, table_names=["users"], schema_info=schema_info)
 
 
 def test_validate_stable_tiebreaker_rejects_nullable_metadata_tiebreaker():

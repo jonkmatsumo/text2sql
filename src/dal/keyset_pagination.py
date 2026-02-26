@@ -14,6 +14,7 @@ KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
 KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
 KEYSET_ORDER_COLUMN_NOT_FOUND = "KEYSET_ORDER_COLUMN_NOT_FOUND"
 KEYSET_TIEBREAKER_NULLABLE = "KEYSET_TIEBREAKER_NULLABLE"
+KEYSET_TIEBREAKER_NOT_UNIQUE = "KEYSET_TIEBREAKER_NOT_UNIQUE"
 
 
 @runtime_checkable
@@ -36,9 +37,16 @@ class SchemaInfoProvider(Protocol):
 class StaticSchemaInfoProvider:
     """In-memory schema provider for keyset validation."""
 
-    def __init__(self, by_table: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        by_table: Dict[str, Dict[str, Dict[str, Any]]],
+        *,
+        unique_keys_by_table: Optional[Dict[str, List[List[str]]]] = None,
+    ) -> None:
         """Normalize and store table/column metadata."""
         self._by_table: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._unique_keys_by_table: Dict[str, List[frozenset[str]]] = {}
+        self._tables_with_uniqueness_info: set[str] = set()
         for table_name, columns in (by_table or {}).items():
             normalized_table = _normalize_identifier(table_name)
             if not normalized_table:
@@ -48,9 +56,38 @@ class StaticSchemaInfoProvider:
                 normalized_column = _normalize_identifier(column_name)
                 if not normalized_column:
                     continue
-                normalized_columns[normalized_column] = payload if isinstance(payload, dict) else {}
+                normalized_payload = payload if isinstance(payload, dict) else {}
+                normalized_columns[normalized_column] = normalized_payload
+                if any(
+                    unique_flag in normalized_payload
+                    for unique_flag in (
+                        "is_unique",
+                        "unique",
+                        "is_primary_key",
+                        "primary_key",
+                        "is_pk",
+                    )
+                ):
+                    self._tables_with_uniqueness_info.add(normalized_table)
+                if any(
+                    _is_truthy_metadata_flag(normalized_payload.get(unique_flag))
+                    for unique_flag in (
+                        "is_unique",
+                        "unique",
+                        "is_primary_key",
+                        "primary_key",
+                        "is_pk",
+                    )
+                ):
+                    self._add_unique_key(normalized_table, [normalized_column])
             if normalized_columns:
                 self._by_table[normalized_table] = normalized_columns
+
+        for table_name, unique_keys in (unique_keys_by_table or {}).items():
+            for normalized_table in _candidate_table_names(table_name):
+                self._tables_with_uniqueness_info.add(normalized_table)
+                for unique_key in unique_keys or []:
+                    self._add_unique_key(normalized_table, unique_key)
 
     @classmethod
     def from_column_metadata(
@@ -58,6 +95,7 @@ class StaticSchemaInfoProvider:
         column_metadata: Optional[Dict[str, Dict[str, Any]]],
         *,
         table_names: Optional[List[str]] = None,
+        unique_keys_by_table: Optional[Dict[str, List[List[str]]]] = None,
     ) -> "StaticSchemaInfoProvider":
         """Build a provider from legacy flat keyset metadata."""
         by_table: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -89,7 +127,7 @@ class StaticSchemaInfoProvider:
                     payload if isinstance(payload, dict) else {}
                 )
 
-        return cls(by_table)
+        return cls(by_table, unique_keys_by_table=unique_keys_by_table)
 
     def has_column(self, table: str, col: str) -> bool:
         """Return True when table.column is known in metadata."""
@@ -108,22 +146,22 @@ class StaticSchemaInfoProvider:
         return _is_truthy_metadata_flag(raw_nullable)
 
     def is_unique_key(self, table: str, col_set: List[str]) -> Optional[bool]:
-        """Return uniqueness for single-column keys when present in metadata."""
-        if len(col_set) != 1:
+        """Return uniqueness for single/composite keys when present in metadata."""
+        normalized_col_set = [_normalize_identifier(col) for col in (col_set or []) if col]
+        if not normalized_col_set:
             return None
-        payload = self._lookup_column_payload(table, col_set[0])
-        if payload is None:
+
+        saw_uniqueness_info = False
+        unique_keys: List[frozenset[str]] = []
+        for candidate_table in _candidate_table_names(table):
+            if candidate_table in self._tables_with_uniqueness_info:
+                saw_uniqueness_info = True
+            unique_keys.extend(self._unique_keys_by_table.get(candidate_table, []))
+
+        if not saw_uniqueness_info and not unique_keys:
             return None
-        unique_flags = ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
-        saw_unique_flag = False
-        is_unique = False
-        for flag in unique_flags:
-            if flag in payload:
-                saw_unique_flag = True
-                is_unique = is_unique or _is_truthy_metadata_flag(payload.get(flag))
-        if saw_unique_flag:
-            return is_unique
-        return None
+        target = frozenset(normalized_col_set)
+        return target in unique_keys
 
     def _lookup_column_payload(self, table: str, col: str) -> Optional[Dict[str, Any]]:
         normalized_column = _normalize_identifier(col)
@@ -137,6 +175,18 @@ class StaticSchemaInfoProvider:
             if payload is not None:
                 return payload
         return None
+
+    def _add_unique_key(self, table: str, columns: List[str]) -> None:
+        normalized_columns = [_normalize_identifier(col) for col in columns if col]
+        normalized_columns = [col for col in normalized_columns if col]
+        if not normalized_columns:
+            return
+        unique_set = frozenset(normalized_columns)
+        if not unique_set:
+            return
+        self._unique_keys_by_table.setdefault(table, [])
+        if unique_set not in self._unique_keys_by_table[table]:
+            self._unique_keys_by_table[table].append(unique_set)
 
 
 @dataclass(frozen=True)
@@ -351,13 +401,26 @@ def validate_stable_tiebreaker(
                 "Final ORDER BY key must be NOT NULL unless NULLS FIRST/LAST is explicit."
             )
 
-        is_unique = schema_info.is_unique_key(tie_table, [tie_column])
-        if is_unique is not True:
+        saw_uniqueness_info = False
+        for suffix_table, suffix_columns in _candidate_unique_suffixes(resolved_order_columns):
+            is_unique = schema_info.is_unique_key(suffix_table, suffix_columns)
+            if is_unique is None:
+                continue
+            saw_uniqueness_info = True
+            if is_unique is True:
+                return
+
+        if saw_uniqueness_info:
             raise ValueError(
-                f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
-                "Final ORDER BY key must be unique or primary key."
+                f"{KEYSET_TIEBREAKER_NOT_UNIQUE}: "
+                "ORDER BY suffix must include a unique key for stable keyset pagination."
             )
-        return
+        if _is_legacy_allowed_tiebreaker(tie_column, table_names=table_names, allowlist=allowlist):
+            return
+        raise ValueError(
+            f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
+            "Final ORDER BY key must be id/<table>_id or allowlisted."
+        )
 
     tie_key = order_keys[-1]
     if _is_nondeterministic(tie_key.expression):
@@ -406,17 +469,7 @@ def validate_stable_tiebreaker(
             )
         return
 
-    allowed_columns = {"id"}
-    for table_name in table_names or []:
-        normalized_table = _normalize_table_name(table_name)
-        if normalized_table:
-            allowed_columns.add(f"{normalized_table}_id")
-    for name in allowlist or set():
-        normalized_name = _normalize_identifier(name)
-        if normalized_name:
-            allowed_columns.add(normalized_name)
-
-    if column_name not in allowed_columns:
+    if not _is_legacy_allowed_tiebreaker(column_name, table_names=table_names, allowlist=allowlist):
         raise ValueError(
             f"{KEYSET_REQUIRES_STABLE_TIEBREAKER}: "
             "Final ORDER BY key must be id/<table>_id or allowlisted."
@@ -679,6 +732,40 @@ def _resolve_order_columns_with_schema(
             )
         resolved.append((table_name, column_name))
     return resolved
+
+
+def _candidate_unique_suffixes(
+    resolved_order_columns: List[tuple[str, str]],
+) -> List[tuple[str, List[str]]]:
+    suffixes: List[tuple[str, List[str]]] = []
+    for start_idx in range(len(resolved_order_columns) - 1, -1, -1):
+        suffix = resolved_order_columns[start_idx:]
+        if not suffix:
+            continue
+        suffix_table = suffix[0][0]
+        if any(table_name != suffix_table for table_name, _ in suffix):
+            continue
+        suffix_columns = [column_name for _, column_name in suffix]
+        suffixes.append((suffix_table, suffix_columns))
+    return suffixes
+
+
+def _is_legacy_allowed_tiebreaker(
+    column_name: str,
+    *,
+    table_names: Optional[List[str]],
+    allowlist: Optional[set[str]],
+) -> bool:
+    allowed_columns = {"id"}
+    for table_name in table_names or []:
+        normalized_table = _normalize_table_name(table_name)
+        if normalized_table:
+            allowed_columns.add(f"{normalized_table}_id")
+    for name in allowlist or set():
+        normalized_name = _normalize_identifier(name)
+        if normalized_name:
+            allowed_columns.add(normalized_name)
+    return column_name in allowed_columns
 
 
 def _is_truthy_metadata_flag(value: Any) -> bool:

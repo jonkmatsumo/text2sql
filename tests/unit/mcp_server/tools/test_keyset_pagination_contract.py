@@ -299,6 +299,7 @@ async def test_execute_sql_query_keyset_rejects_nullable_tiebreaker_with_metadat
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
         patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         payload = await handler(
@@ -409,6 +410,107 @@ async def test_execute_sql_query_keyset_allows_nullable_non_final_with_explicit_
 
     result = json.loads(payload)
     assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_allows_composite_unique_suffix_with_schema_metadata():
+    """Composite unique keys should satisfy schema-aware keyset stability checks."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "events",
+                    "columns": [
+                        {"name": "user_id", "nullable": False, "is_primary_key": False},
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "unique_keys": [["user_id", "created_at"]],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT user_id, created_at FROM events ORDER BY user_id ASC, created_at ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_non_unique_tiebreaker_with_schema_metadata():
+    """Known non-unique ORDER BY suffixes should be rejected with bounded reason codes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "events",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                        {"name": "id", "nullable": False, "is_primary_key": True},
+                    ],
+                    "unique_keys": [["id"]],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT created_at FROM events ORDER BY created_at ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NOT_UNIQUE"
 
 
 @pytest.mark.asyncio
