@@ -195,6 +195,36 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.schema_stale",
         serialization_alias="pagination.keyset.schema_stale",
     )
+    pagination_keyset_snapshot_strict: Optional[bool] = Field(
+        None,
+        description="True when strict snapshot requirements are enabled for keyset validation",
+        validation_alias="pagination.keyset.snapshot_strict",
+        serialization_alias="pagination.keyset.snapshot_strict",
+    )
+    pagination_keyset_snapshot_id_present: Optional[bool] = Field(
+        None,
+        description="True when execution context exposed a snapshot identifier",
+        validation_alias="pagination.keyset.snapshot_id_present",
+        serialization_alias="pagination.keyset.snapshot_id_present",
+    )
+    pagination_keyset_snapshot_mismatch: Optional[bool] = Field(
+        None,
+        description="True when keyset cursor snapshot context mismatched current execution context",
+        validation_alias="pagination.keyset.snapshot_mismatch",
+        serialization_alias="pagination.keyset.snapshot_mismatch",
+    )
+    pagination_keyset_isolation_level: Optional[str] = Field(
+        None,
+        description="Normalized transaction isolation level observed for keyset execution",
+        validation_alias="pagination.keyset.isolation_level",
+        serialization_alias="pagination.keyset.isolation_level",
+    )
+    pagination_keyset_isolation_enforced: Optional[bool] = Field(
+        None,
+        description="True when weaker isolation levels are rejected for keyset execution",
+        validation_alias="pagination.keyset.isolation_enforced",
+        serialization_alias="pagination.keyset.isolation_enforced",
+    )
     pagination_keyset_rejection_reason_code: Optional[str] = Field(
         None,
         description="Bounded keyset rejection reason code for schema-aware policy outcomes",

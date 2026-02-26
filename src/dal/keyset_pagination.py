@@ -17,6 +17,7 @@ KEYSET_TIEBREAKER_NULLABLE = "KEYSET_TIEBREAKER_NULLABLE"
 KEYSET_TIEBREAKER_NOT_UNIQUE = "KEYSET_TIEBREAKER_NOT_UNIQUE"
 KEYSET_SCHEMA_REQUIRED = "KEYSET_SCHEMA_REQUIRED"
 KEYSET_SCHEMA_STALE = "KEYSET_SCHEMA_STALE"
+KEYSET_SNAPSHOT_MISMATCH = "KEYSET_SNAPSHOT_MISMATCH"
 
 
 @runtime_checkable
@@ -198,10 +199,15 @@ class KeysetCursorPayload:
     values: List[Any]
     keys: List[str]
     fingerprint: str
+    context: Dict[str, str]
 
 
 def encode_keyset_cursor(
-    values: List[Any], keys: List[str], fingerprint: str, secret: Optional[str] = None
+    values: List[Any],
+    keys: List[str],
+    fingerprint: str,
+    secret: Optional[str] = None,
+    cursor_context: Optional[Dict[str, str]] = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
     payload = {
@@ -209,6 +215,9 @@ def encode_keyset_cursor(
         "k": keys,
         "f": fingerprint,
     }
+    normalized_context = _normalize_cursor_context(cursor_context)
+    if normalized_context:
+        payload["c"] = normalized_context
     if secret:
         payload["s"] = _calculate_signature(payload, secret)
 
@@ -221,6 +230,7 @@ def decode_keyset_cursor(
     expected_fingerprint: str,
     secret: Optional[str] = None,
     expected_keys: Optional[List[str]] = None,
+    expected_cursor_context: Optional[Dict[str, str]] = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -231,6 +241,12 @@ def decode_keyset_cursor(
 
         json_data = base64.urlsafe_b64decode(cursor).decode()
         payload = json.loads(json_data)
+
+        payload_context = _normalize_cursor_context(payload.get("c"))
+        required_context = _normalize_cursor_context(expected_cursor_context)
+        for context_key, context_value in required_context.items():
+            if payload_context.get(context_key) != context_value:
+                raise ValueError(f"Invalid cursor: {KEYSET_SNAPSHOT_MISMATCH}.")
 
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
@@ -262,6 +278,20 @@ def _json_serializable(obj: Any) -> Any:
     if isinstance(obj, Decimal):
         return str(obj)
     return obj
+
+
+def _normalize_cursor_context(raw_context: Any) -> Dict[str, str]:
+    if not isinstance(raw_context, dict):
+        return {}
+    normalized: Dict[str, str] = {}
+    for key in ("snapshot_id", "transaction_id"):
+        raw_value = raw_context.get(key)
+        if not isinstance(raw_value, str):
+            continue
+        stripped_value = raw_value.strip()
+        if stripped_value:
+            normalized[key] = stripped_value
+    return normalized
 
 
 def _calculate_signature(payload: Dict[str, Any], secret: str) -> str:
