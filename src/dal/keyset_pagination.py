@@ -19,6 +19,8 @@ KEYSET_SCHEMA_REQUIRED = "KEYSET_SCHEMA_REQUIRED"
 KEYSET_SCHEMA_STALE = "KEYSET_SCHEMA_STALE"
 KEYSET_SNAPSHOT_MISMATCH = "KEYSET_SNAPSHOT_MISMATCH"
 KEYSET_TOPOLOGY_MISMATCH = "KEYSET_TOPOLOGY_MISMATCH"
+KEYSET_SHARD_MISMATCH = "KEYSET_SHARD_MISMATCH"
+KEYSET_PARTITION_SET_CHANGED = "KEYSET_PARTITION_SET_CHANGED"
 
 
 @runtime_checkable
@@ -250,7 +252,15 @@ def decode_keyset_cursor(
                 reason_code = (
                     KEYSET_TOPOLOGY_MISMATCH
                     if context_key in {"db_role", "region", "node_id"}
-                    else KEYSET_SNAPSHOT_MISMATCH
+                    else (
+                        KEYSET_SHARD_MISMATCH
+                        if context_key in {"shard_id", "shard_key_hash"}
+                        else (
+                            KEYSET_PARTITION_SET_CHANGED
+                            if context_key in {"partition_signature"}
+                            else KEYSET_SNAPSHOT_MISMATCH
+                        )
+                    )
                 )
                 raise ValueError(f"Invalid cursor: {reason_code}.")
 
@@ -290,7 +300,16 @@ def _normalize_cursor_context(raw_context: Any) -> Dict[str, str]:
     if not isinstance(raw_context, dict):
         return {}
     normalized: Dict[str, str] = {}
-    for key in ("snapshot_id", "transaction_id", "db_role", "region", "node_id"):
+    for key in (
+        "snapshot_id",
+        "transaction_id",
+        "db_role",
+        "region",
+        "node_id",
+        "shard_id",
+        "shard_key_hash",
+        "partition_signature",
+    ):
         raw_value = raw_context.get(key)
         if not isinstance(raw_value, str):
             continue

@@ -18,6 +18,8 @@ class _MutableDatasetConn:
         db_role: str | None = None,
         region: str | None = None,
         node_id: str | None = None,
+        shard_id: str | None = None,
+        shard_key_hash: str | None = None,
     ) -> None:
         self._rows = rows
         self.session_guardrail_metadata = {}
@@ -31,6 +33,10 @@ class _MutableDatasetConn:
             self.region = region
         if node_id is not None:
             self.node_id = node_id
+        if shard_id is not None:
+            self.shard_id = shard_id
+        if shard_key_hash is not None:
+            self.shard_key_hash = shard_key_hash
 
     async def fetch(self, query: str, *_args):
         normalized_sql = " ".join(query.split())
@@ -243,3 +249,137 @@ async def test_keyset_distributed_region_drift_rejects_second_page_cursor():
 
     assert page_two["error"]["category"] == "invalid_request"
     assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_TOPOLOGY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_keyset_shard_drift_rejects_second_page_cursor_when_cross_shard_disabled():
+    """Cross-shard page routing should fail closed with stable shard mismatch reason."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    shard_a_rows = [{"id": 1}, {"id": 2}, {"id": 5}]
+    shard_b_rows = [{"id": 4}, {"id": 6}]
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="concurrency-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        mock_get_conn.side_effect = [
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shard_a_rows,
+                    shard_id="shard-a",
+                    shard_key_hash="hash-a",
+                )
+            ),
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shard_b_rows,
+                    shard_id="shard-b",
+                    shard_key_hash="hash-b",
+                )
+            ),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        # Simulate concurrent writes landing on shard-b between page requests.
+        shard_b_rows.append({"id": 3})
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+        page_two = json.loads(page_two_payload)
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_SHARD_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_keyset_shard_drift_is_deterministic_when_cross_shard_mode_enabled(monkeypatch):
+    """Cross-shard mode should allow deterministic continuation across shard rerouting."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    shard_a_rows = [{"id": 1}, {"id": 2}, {"id": 5}]
+    shard_b_rows = [{"id": 4}, {"id": 6}]
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("KEYSET_ALLOW_CROSS_SHARD", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="concurrency-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        mock_get_conn.side_effect = [
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shard_a_rows,
+                    shard_id="shard-a",
+                    shard_key_hash="hash-a",
+                )
+            ),
+            _ConnCtx(
+                _MutableDatasetConn(
+                    shard_b_rows,
+                    shard_id="shard-b",
+                    shard_key_hash="hash-b",
+                )
+            ),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        assert "error" not in page_one
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        # Simulate a row arriving on shard-b in the cursor boundary gap.
+        shard_b_rows.append({"id": 3})
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+        page_two = json.loads(page_two_payload)
+        assert "error" not in page_two
+
+    page_one_ids = [row["id"] for row in page_one["rows"]]
+    page_two_ids = [row["id"] for row in page_two["rows"]]
+    assert page_one_ids == [1, 2]
+    assert page_two_ids == [3, 4]
+    assert set(page_one_ids).isdisjoint(set(page_two_ids))
