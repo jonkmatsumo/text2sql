@@ -511,6 +511,12 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     snapshot_strict = bool(schema_metadata.get("pagination.keyset.snapshot_strict"))
     snapshot_id_present = bool(schema_metadata.get("pagination.keyset.snapshot_id_present"))
     snapshot_mismatch = bool(schema_metadata.get("pagination.keyset.snapshot_mismatch"))
+    isolation_enforced = bool(schema_metadata.get("pagination.keyset.isolation_enforced"))
+    isolation_level = _normalize_isolation_level(
+        schema_metadata.get("pagination.keyset.isolation_level")
+    )
+    if isolation_level is None:
+        isolation_level = "unknown"
     rejection_reason_code = _bounded_keyset_rejection_reason_code(
         schema_metadata.get("pagination.keyset.rejection_reason_code")
     )
@@ -523,6 +529,8 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.snapshot_strict", snapshot_strict)
         span.set_attribute("pagination.keyset.snapshot_id_present", snapshot_id_present)
         span.set_attribute("pagination.keyset.snapshot_mismatch", snapshot_mismatch)
+        span.set_attribute("pagination.keyset.isolation_level", isolation_level)
+        span.set_attribute("pagination.keyset.isolation_enforced", isolation_enforced)
         if rejection_reason_code is not None:
             span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
 
@@ -1493,7 +1501,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.snapshot_strict"] = keyset_snapshot_strict
         tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = False
-        tenant_enforcement_metadata["pagination.keyset.isolation_level"] = None
+        tenant_enforcement_metadata["pagination.keyset.isolation_level"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
             not keyset_allow_weaker_isolation
         )
@@ -2774,6 +2782,21 @@ async def handler(
                 ),
                 "pagination.keyset.schema_stale": tenant_enforcement_metadata.get(
                     "pagination.keyset.schema_stale"
+                ),
+                "pagination.keyset.snapshot_strict": tenant_enforcement_metadata.get(
+                    "pagination.keyset.snapshot_strict"
+                ),
+                "pagination.keyset.snapshot_id_present": tenant_enforcement_metadata.get(
+                    "pagination.keyset.snapshot_id_present"
+                ),
+                "pagination.keyset.snapshot_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.keyset.snapshot_mismatch"
+                ),
+                "pagination.keyset.isolation_level": tenant_enforcement_metadata.get(
+                    "pagination.keyset.isolation_level"
+                ),
+                "pagination.keyset.isolation_enforced": tenant_enforcement_metadata.get(
+                    "pagination.keyset.isolation_enforced"
                 ),
                 "pagination.keyset.rejection_reason_code": tenant_enforcement_metadata.get(
                     "pagination.keyset.rejection_reason_code"
