@@ -114,6 +114,7 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_SCHEMA_STALE",
     "KEYSET_SNAPSHOT_MISMATCH",
     "KEYSET_SNAPSHOT_REQUIRED",
+    "KEYSET_TOPOLOGY_MISMATCH",
     "KEYSET_ISOLATION_UNSAFE",
 }
 
@@ -431,6 +432,16 @@ def _normalize_keyset_context_value(value: Any) -> str | None:
     return normalized if normalized else None
 
 
+def _normalize_keyset_db_role(value: Any) -> str | None:
+    normalized = _normalize_keyset_context_value(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered in {"primary", "replica"}:
+        return lowered
+    return lowered
+
+
 def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
     if conn is None:
         return {}
@@ -445,6 +456,24 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
         "transaction_id",
         "execution_transaction_id",
     )
+    db_role_candidates = (
+        "keyset_db_role",
+        "db_role",
+        "execution_db_role",
+        "read_role",
+    )
+    region_candidates = (
+        "keyset_region",
+        "region",
+        "execution_region",
+        "db_region",
+    )
+    node_id_candidates = (
+        "keyset_node_id",
+        "node_id",
+        "execution_node_id",
+        "db_node_id",
+    )
     for attr_name in snapshot_candidates:
         value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
         if value is not None:
@@ -454,6 +483,21 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
         value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
         if value is not None:
             context["transaction_id"] = value
+            break
+    for attr_name in db_role_candidates:
+        value = _normalize_keyset_db_role(getattr(conn, attr_name, None))
+        if value is not None:
+            context["db_role"] = value
+            break
+    for attr_name in region_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["region"] = value.lower()
+            break
+    for attr_name in node_id_candidates:
+        value = _normalize_keyset_context_value(getattr(conn, attr_name, None))
+        if value is not None:
+            context["node_id"] = value
             break
     return context
 
@@ -511,6 +555,17 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     snapshot_strict = bool(schema_metadata.get("pagination.keyset.snapshot_strict"))
     snapshot_id_present = bool(schema_metadata.get("pagination.keyset.snapshot_id_present"))
     snapshot_mismatch = bool(schema_metadata.get("pagination.keyset.snapshot_mismatch"))
+    db_role_raw = schema_metadata.get("pagination.keyset.db_role")
+    db_role = db_role_raw if db_role_raw in {"primary", "replica"} else "unknown"
+    region_raw = schema_metadata.get("pagination.keyset.region")
+    region = (
+        str(region_raw).strip().lower()
+        if isinstance(region_raw, str) and str(region_raw).strip()
+        else "unknown"
+    )
+    node_id_present = bool(schema_metadata.get("pagination.keyset.node_id_present"))
+    topology_mismatch = bool(schema_metadata.get("pagination.keyset.topology_mismatch"))
+    topology_available = bool(schema_metadata.get("pagination.keyset.topology_available"))
     isolation_enforced = bool(schema_metadata.get("pagination.keyset.isolation_enforced"))
     isolation_level = _normalize_isolation_level(
         schema_metadata.get("pagination.keyset.isolation_level")
@@ -529,6 +584,11 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.snapshot_strict", snapshot_strict)
         span.set_attribute("pagination.keyset.snapshot_id_present", snapshot_id_present)
         span.set_attribute("pagination.keyset.snapshot_mismatch", snapshot_mismatch)
+        span.set_attribute("pagination.keyset.db_role", db_role)
+        span.set_attribute("pagination.keyset.region", region)
+        span.set_attribute("pagination.keyset.node_id_present", node_id_present)
+        span.set_attribute("pagination.keyset.topology_mismatch", topology_mismatch)
+        span.set_attribute("pagination.keyset.topology_available", topology_available)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
         span.set_attribute("pagination.keyset.isolation_enforced", isolation_enforced)
         if rejection_reason_code is not None:
@@ -1501,6 +1561,11 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.snapshot_strict"] = keyset_snapshot_strict
         tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = False
         tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = False
+        tenant_enforcement_metadata["pagination.keyset.db_role"] = "unknown"
+        tenant_enforcement_metadata["pagination.keyset.region"] = "unknown"
+        tenant_enforcement_metadata["pagination.keyset.node_id_present"] = False
+        tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = False
+        tenant_enforcement_metadata["pagination.keyset.topology_available"] = False
         tenant_enforcement_metadata["pagination.keyset.isolation_level"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.isolation_enforced"] = (
             not keyset_allow_weaker_isolation
@@ -2255,14 +2320,30 @@ async def handler(
                 from dal.keyset_pagination import (
                     KEYSET_ORDER_MISMATCH,
                     KEYSET_SNAPSHOT_MISMATCH,
+                    KEYSET_TOPOLOGY_MISMATCH,
                     apply_keyset_pagination,
                     canonicalize_keyset_sql,
                     decode_keyset_cursor,
                 )
 
                 keyset_cursor_context = _extract_keyset_cursor_context(conn)
+                keyset_db_role = keyset_cursor_context.get("db_role")
+                keyset_region = keyset_cursor_context.get("region")
+                keyset_node_id = keyset_cursor_context.get("node_id")
                 tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
                     keyset_cursor_context.get("snapshot_id")
+                )
+                tenant_enforcement_metadata["pagination.keyset.db_role"] = (
+                    keyset_db_role if keyset_db_role in {"primary", "replica"} else "unknown"
+                )
+                tenant_enforcement_metadata["pagination.keyset.region"] = (
+                    keyset_region if keyset_region else "unknown"
+                )
+                tenant_enforcement_metadata["pagination.keyset.node_id_present"] = bool(
+                    keyset_node_id
+                )
+                tenant_enforcement_metadata["pagination.keyset.topology_available"] = bool(
+                    keyset_db_role or keyset_region or keyset_node_id
                 )
                 if keyset_snapshot_strict and not keyset_cursor_context.get("snapshot_id"):
                     tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
@@ -2317,6 +2398,11 @@ async def handler(
                         elif KEYSET_SNAPSHOT_MISMATCH in str(e):
                             reason_code = KEYSET_SNAPSHOT_MISMATCH
                             tenant_enforcement_metadata["pagination.keyset.snapshot_mismatch"] = (
+                                True
+                            )
+                        elif KEYSET_TOPOLOGY_MISMATCH in str(e):
+                            reason_code = KEYSET_TOPOLOGY_MISMATCH
+                            tenant_enforcement_metadata["pagination.keyset.topology_mismatch"] = (
                                 True
                             )
                         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
@@ -2791,6 +2877,21 @@ async def handler(
                 ),
                 "pagination.keyset.snapshot_mismatch": tenant_enforcement_metadata.get(
                     "pagination.keyset.snapshot_mismatch"
+                ),
+                "pagination.keyset.db_role": tenant_enforcement_metadata.get(
+                    "pagination.keyset.db_role"
+                ),
+                "pagination.keyset.region": tenant_enforcement_metadata.get(
+                    "pagination.keyset.region"
+                ),
+                "pagination.keyset.node_id_present": tenant_enforcement_metadata.get(
+                    "pagination.keyset.node_id_present"
+                ),
+                "pagination.keyset.topology_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.keyset.topology_mismatch"
+                ),
+                "pagination.keyset.topology_available": tenant_enforcement_metadata.get(
+                    "pagination.keyset.topology_available"
                 ),
                 "pagination.keyset.isolation_level": tenant_enforcement_metadata.get(
                     "pagination.keyset.isolation_level"
