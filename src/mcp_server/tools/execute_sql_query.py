@@ -663,6 +663,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     shard_key_hash_present = bool(schema_metadata.get("pagination.keyset.shard_key_hash_present"))
     shard_mismatch = bool(schema_metadata.get("pagination.keyset.shard_mismatch"))
     shard_info_available = bool(schema_metadata.get("pagination.keyset.shard_info_available"))
+    cross_shard_mode = bool(schema_metadata.get("pagination.keyset.cross_shard_mode"))
     partition_signature_raw = schema_metadata.get("pagination.keyset.partition_signature")
     partition_signature = (
         str(partition_signature_raw).strip()
@@ -704,6 +705,7 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.shard_key_hash_present", shard_key_hash_present)
         span.set_attribute("pagination.keyset.shard_mismatch", shard_mismatch)
         span.set_attribute("pagination.keyset.shard_info_available", shard_info_available)
+        span.set_attribute("pagination.keyset.cross_shard_mode", cross_shard_mode)
         span.set_attribute("pagination.keyset.partition_signature", partition_signature)
         span.set_attribute(
             "pagination.keyset.partition_signature_available",
@@ -1643,6 +1645,7 @@ async def handler(
         "KEYSET_MAX_REPLICA_LAG_SECONDS", 0.0
     )
     keyset_allow_weaker_isolation = bool(get_env_bool("KEYSET_ALLOW_WEAKER_ISOLATION", False))
+    keyset_allow_cross_shard = bool(get_env_bool("KEYSET_ALLOW_CROSS_SHARD", False))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1698,6 +1701,7 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.shard_key_hash_present"] = False
         tenant_enforcement_metadata["pagination.keyset.shard_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.shard_info_available"] = False
+        tenant_enforcement_metadata["pagination.keyset.cross_shard_mode"] = keyset_allow_cross_shard
         tenant_enforcement_metadata["pagination.keyset.partition_signature"] = "unknown"
         tenant_enforcement_metadata["pagination.keyset.partition_signature_available"] = False
         tenant_enforcement_metadata["pagination.keyset.partition_set_changed"] = False
@@ -2578,14 +2582,22 @@ async def handler(
                         envelope_metadata=tenant_enforcement_metadata,
                     )
 
-                if keyset_cursor and keyset_cursor_context:
+                expected_cursor_context = keyset_cursor_context
+                if keyset_allow_cross_shard and keyset_cursor_context:
+                    expected_cursor_context = {
+                        key: value
+                        for key, value in keyset_cursor_context.items()
+                        if key not in {"shard_id", "shard_key_hash"}
+                    }
+
+                if keyset_cursor and expected_cursor_context:
                     try:
                         _ = decode_keyset_cursor(
                             keyset_cursor,
                             expected_fingerprint=query_fingerprint,
                             secret=keyset_token_secret,
                             expected_keys=keyset_order_signature,
-                            expected_cursor_context=keyset_cursor_context,
+                            expected_cursor_context=expected_cursor_context,
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -3111,6 +3123,9 @@ async def handler(
                 ),
                 "pagination.keyset.shard_info_available": tenant_enforcement_metadata.get(
                     "pagination.keyset.shard_info_available"
+                ),
+                "pagination.keyset.cross_shard_mode": tenant_enforcement_metadata.get(
+                    "pagination.keyset.cross_shard_mode"
                 ),
                 "pagination.keyset.partition_signature": tenant_enforcement_metadata.get(
                     "pagination.keyset.partition_signature"

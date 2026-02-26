@@ -1219,6 +1219,124 @@ async def test_execute_sql_query_keyset_cursor_allows_same_shard_context_reuse()
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_allows_cross_shard_when_enabled(monkeypatch):
+    """Cross-shard keyset mode should allow cursor reuse across shard boundaries."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    monkeypatch.setenv("KEYSET_ALLOW_CROSS_SHARD", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="shard-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows, shard_id):
+                self._rows = list(rows)
+                self.shard_id = shard_id
+                self.shard_key_hash = f"hash-{shard_id}"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}], "shard-a")),
+            _ConnCtx(_Conn([{"id": 3}], "shard-b")),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one_result = json.loads(page_one_payload)
+        cursor = page_one_result["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+
+    page_two_result = json.loads(page_two_payload)
+    assert "error" not in page_two_result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cross_shard_mode_sets_telemetry(monkeypatch):
+    """Cross-shard keyset mode should emit bounded telemetry attributes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    monkeypatch.setenv("KEYSET_ALLOW_CROSS_SHARD", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.shard_id = "shard-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=2,
+        )
+
+    result = json.loads(payload)
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert "error" not in result
+    assert attrs["pagination.keyset.cross_shard_mode"] is True
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_missing_shard_info_fallback_sets_telemetry_flag():
     """Missing shard context should keep fallback behavior and emit bounded telemetry flag."""
     caps = SimpleNamespace(
