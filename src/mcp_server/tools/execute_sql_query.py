@@ -12,7 +12,7 @@ import asyncpg
 from opentelemetry import trace
 
 from agent.audit import AuditEventSource, AuditEventType, emit_audit_event
-from common.config.env import get_env_int, get_env_str
+from common.config.env import get_env_bool, get_env_int, get_env_str
 from common.constants.reason_codes import PayloadTruncationReason
 from common.errors.error_codes import ErrorCode
 from common.models.error_metadata import ErrorCategory
@@ -106,6 +106,13 @@ _PARTIAL_REASON_NORMALIZATION = {
     "timeout": "timeout",
 }
 _ADAPTIVE_ROW_SIZE_FALLBACK_BYTES = 1024
+_KEYSET_REJECTION_REASON_ALLOWLIST = {
+    "KEYSET_ORDER_COLUMN_NOT_FOUND",
+    "KEYSET_TIEBREAKER_NULLABLE",
+    "KEYSET_TIEBREAKER_NOT_UNIQUE",
+    "KEYSET_SCHEMA_REQUIRED",
+    "KEYSET_SCHEMA_STALE",
+}
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,16 @@ class SQLASTValidationFailure:
     reason_code: str
     category: ErrorCategory = ErrorCategory.INVALID_REQUEST
     error_code: str = ErrorCode.VALIDATION_ERROR.value
+
+
+@dataclass(frozen=True)
+class KeysetSchemaLoadResult:
+    """Loaded schema metadata used for keyset validation policy checks."""
+
+    columns: Dict[str, Dict[str, Any]]
+    unique_keys_by_table: Dict[str, List[List[str]]]
+    loaded_tables: set[str]
+    max_schema_age_seconds: float | None
 
 
 class _SandboxExecutionTimeout(RuntimeError):
@@ -397,6 +414,31 @@ def _record_timeout_observability(metadata: dict[str, Any] | None) -> None:
     )
 
 
+def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
+    reason_code = raw_reason_code.strip() if isinstance(raw_reason_code, str) else ""
+    if reason_code in _KEYSET_REJECTION_REASON_ALLOWLIST:
+        return reason_code
+    return None
+
+
+def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
+    schema_metadata = metadata if isinstance(metadata, dict) else {}
+    schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
+    schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
+    schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
+    rejection_reason_code = _bounded_keyset_rejection_reason_code(
+        schema_metadata.get("pagination.keyset.rejection_reason_code")
+    )
+
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        span.set_attribute("pagination.keyset.schema_used", schema_used)
+        span.set_attribute("pagination.keyset.schema_strict", schema_strict)
+        span.set_attribute("pagination.keyset.schema_stale", schema_stale)
+        if rejection_reason_code is not None:
+            span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
+
+
 def _query_contains_limit_or_offset(sql: str, provider: str) -> bool:
     """Return True when SQL explicitly includes LIMIT/OFFSET clauses."""
     import sqlglot
@@ -600,7 +642,7 @@ def _extract_columns_from_table_definition(definition_payload: str) -> Optional[
 
 def _extract_keyset_column_metadata(
     definition_payload: str,
-) -> Optional[dict[str, dict[str, Any]]]:
+) -> Optional[tuple[dict[str, dict[str, Any]], list[list[str]], float | None]]:
     try:
         parsed = json.loads(definition_payload)
     except Exception:
@@ -624,7 +666,139 @@ def _extract_keyset_column_metadata(
             "is_unique": entry.get("is_unique"),
             "unique": entry.get("unique"),
         }
-    return metadata or None
+    if not metadata:
+        return None
+    unique_keys = _extract_keyset_unique_keys(parsed, columns)
+    schema_age_seconds = _extract_schema_age_seconds(parsed)
+    return metadata, unique_keys, schema_age_seconds
+
+
+def _extract_keyset_unique_keys(
+    parsed_payload: dict[str, Any],
+    columns: list[Any],
+) -> list[list[str]]:
+    unique_keys: list[list[str]] = []
+    seen: set[frozenset[str]] = set()
+
+    def _add_unique_key(raw_value: Any) -> None:
+        normalized_columns = _normalize_unique_key_columns(raw_value)
+        if not normalized_columns:
+            return
+        key_signature = frozenset(normalized_columns)
+        if not key_signature or key_signature in seen:
+            return
+        seen.add(key_signature)
+        unique_keys.append(normalized_columns)
+
+    for entry in columns:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if any(
+            _is_truthy_metadata_flag(entry.get(flag))
+            for flag in ("is_unique", "unique", "is_primary_key", "primary_key", "is_pk")
+        ):
+            _add_unique_key([name])
+
+    for field_name in ("unique_keys", "unique_indexes", "unique_constraints"):
+        raw_field = parsed_payload.get(field_name)
+        if isinstance(raw_field, list):
+            for entry in raw_field:
+                _add_unique_key(entry)
+        elif raw_field is not None:
+            _add_unique_key(raw_field)
+
+    raw_primary_key = parsed_payload.get("primary_key")
+    if raw_primary_key is not None:
+        _add_unique_key(raw_primary_key)
+
+    raw_indexes = parsed_payload.get("indexes")
+    if isinstance(raw_indexes, list):
+        for raw_index in raw_indexes:
+            if not isinstance(raw_index, dict):
+                continue
+            if not any(
+                _is_truthy_metadata_flag(raw_index.get(flag))
+                for flag in ("is_unique", "unique", "primary", "is_primary")
+            ):
+                continue
+            _add_unique_key(raw_index.get("columns"))
+
+    return unique_keys
+
+
+def _normalize_unique_key_columns(raw_value: Any) -> list[str]:
+    if isinstance(raw_value, dict):
+        raw_value = raw_value.get("columns") or raw_value.get("key") or raw_value.get("column")
+
+    if isinstance(raw_value, str):
+        normalized = raw_value.strip().strip('"').lower()
+        return [normalized] if normalized else []
+
+    if not isinstance(raw_value, (list, tuple)):
+        return []
+
+    normalized_columns: list[str] = []
+    for entry in raw_value:
+        if isinstance(entry, dict):
+            entry = entry.get("name") or entry.get("column")
+        if not isinstance(entry, str):
+            continue
+        normalized = entry.strip().strip('"').lower()
+        if normalized and normalized not in normalized_columns:
+            normalized_columns.append(normalized)
+    return normalized_columns
+
+
+def _is_truthy_metadata_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return False
+
+
+def _extract_schema_age_seconds(parsed_payload: dict[str, Any]) -> float | None:
+    metadata_payload = (
+        parsed_payload.get("metadata") if isinstance(parsed_payload.get("metadata"), dict) else None
+    )
+    candidate_payloads = [parsed_payload]
+    if metadata_payload is not None:
+        candidate_payloads.append(metadata_payload)
+
+    for payload in candidate_payloads:
+        for field_name in (
+            "schema_age_seconds",
+            "schema_snapshot_age_seconds",
+            "snapshot_age_seconds",
+        ):
+            raw_value = payload.get(field_name)
+            if raw_value is None:
+                continue
+            try:
+                age_seconds = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            if age_seconds >= 0:
+                return age_seconds
+
+        for field_name in ("schema_snapshot_ts", "snapshot_ts", "schema_fetched_at_ts"):
+            raw_value = payload.get(field_name)
+            if raw_value is None:
+                continue
+            try:
+                snapshot_ts = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            age_seconds = float(time.time()) - snapshot_ts
+            if age_seconds >= 0:
+                return age_seconds
+
+    return None
 
 
 async def _load_table_columns_for_rewrite(
@@ -669,17 +843,30 @@ async def _load_table_columns_for_rewrite(
 
 async def _load_keyset_column_metadata(
     table_names: Sequence[str], tenant_id: int | None
-) -> dict[str, dict[str, Any]]:
+) -> KeysetSchemaLoadResult:
     """Best-effort metadata loader for keyset tie-breaker validation."""
     if not table_names:
-        return {}
+        return KeysetSchemaLoadResult(
+            columns={},
+            unique_keys_by_table={},
+            loaded_tables=set(),
+            max_schema_age_seconds=None,
+        )
 
     try:
         store = Database.get_metadata_store()
     except Exception:
-        return {}
+        return KeysetSchemaLoadResult(
+            columns={},
+            unique_keys_by_table={},
+            loaded_tables=set(),
+            max_schema_age_seconds=None,
+        )
 
     loaded: dict[str, dict[str, Any]] = {}
+    loaded_unique_keys: dict[str, list[list[str]]] = {}
+    loaded_tables: set[str] = set()
+    max_schema_age_seconds: float | None = None
     single_table = len(table_names) == 1
     for table_name in table_names:
         normalized = (table_name or "").strip().lower()
@@ -692,6 +879,8 @@ async def _load_keyset_column_metadata(
             candidates.append(short_name)
 
         table_metadata: dict[str, dict[str, Any]] | None = None
+        table_unique_keys: list[list[str]] = []
+        table_schema_age_seconds: float | None = None
         resolved_table_name = short_name
         for candidate in candidates:
             try:
@@ -700,8 +889,9 @@ async def _load_keyset_column_metadata(
                 )
             except Exception:
                 continue
-            table_metadata = _extract_keyset_column_metadata(definition_payload)
-            if table_metadata:
+            extracted = _extract_keyset_column_metadata(definition_payload)
+            if extracted:
+                table_metadata, table_unique_keys, table_schema_age_seconds = extracted
                 resolved_table_name = candidate.split(".")[-1]
                 break
 
@@ -713,7 +903,31 @@ async def _load_keyset_column_metadata(
             if single_table:
                 loaded[column_name] = metadata
 
-    return loaded
+        if table_unique_keys:
+            loaded_unique_keys[resolved_table_name] = table_unique_keys
+            loaded_unique_keys[normalized] = table_unique_keys
+            if short_name:
+                loaded_unique_keys[short_name] = table_unique_keys
+
+        loaded_tables.add(normalized)
+        if short_name:
+            loaded_tables.add(short_name)
+        loaded_tables.add(resolved_table_name)
+
+        if table_schema_age_seconds is not None:
+            if max_schema_age_seconds is None:
+                max_schema_age_seconds = float(table_schema_age_seconds)
+            else:
+                max_schema_age_seconds = max(
+                    max_schema_age_seconds, float(table_schema_age_seconds)
+                )
+
+    return KeysetSchemaLoadResult(
+        columns=loaded,
+        unique_keys_by_table=loaded_unique_keys,
+        loaded_tables=loaded_tables,
+        max_schema_age_seconds=max_schema_age_seconds,
+    )
 
 
 def _keyset_tiebreaker_allowlist() -> set[str]:
@@ -784,6 +998,7 @@ def _construct_error_response(
     from mcp_server.utils.errors import build_error_metadata
 
     resolved_provider = resolve_provider(provider)
+    envelope_meta = dict(envelope_metadata or {})
 
     # Envelope Mode (Legacy mode removed as per hardening requirements)
     meta_dict = (metadata or {}).copy()
@@ -819,10 +1034,15 @@ def _construct_error_response(
     if details_safe:
         error_meta = error_meta.model_copy(update={"details_safe": details_safe})
 
-    _record_tenant_enforcement_observability(envelope_metadata)
-    _record_session_guardrail_observability(envelope_metadata)
-    _record_sandbox_observability(envelope_metadata)
-    _record_timeout_observability(envelope_metadata)
+    keyset_rejection_reason = _bounded_keyset_rejection_reason_code(meta_dict.get("reason_code"))
+    if keyset_rejection_reason is not None:
+        envelope_meta["pagination.keyset.rejection_reason_code"] = keyset_rejection_reason
+
+    _record_tenant_enforcement_observability(envelope_meta)
+    _record_session_guardrail_observability(envelope_meta)
+    _record_sandbox_observability(envelope_meta)
+    _record_timeout_observability(envelope_meta)
+    _record_keyset_schema_observability(envelope_meta)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -830,7 +1050,7 @@ def _construct_error_response(
             rows_returned=0,
             is_truncated=False,
             provider=resolved_provider,
-            **(envelope_metadata or {}),
+            **envelope_meta,
         ),
         error=error_meta,
     )
@@ -1131,9 +1351,13 @@ async def handler(
     keyset_values = []
     keyset_table_names: List[str] = []
     keyset_column_metadata: Dict[str, Dict[str, Any]] = {}
+    keyset_unique_keys_by_table: Dict[str, List[List[str]]] = {}
+    keyset_schema_info = None
     keyset_order_signature: List[str] = []
     keyset_rewritten_select = None
     streaming_terminated_early = False
+    keyset_schema_strict = bool(get_env_bool("KEYSET_SCHEMA_STRICT", False))
+    keyset_schema_ttl_seconds = max(0, int(get_env_int("KEYSET_SCHEMA_TTL_SECONDS", 300) or 0))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
@@ -1173,6 +1397,10 @@ async def handler(
         tenant_enforcement_metadata["pagination.keyset.byte_budget"] = max(
             0, int(resource_limits.max_bytes)
         )
+        tenant_enforcement_metadata["pagination.keyset.schema_used"] = False
+        tenant_enforcement_metadata["pagination.keyset.schema_strict"] = keyset_schema_strict
+        tenant_enforcement_metadata["pagination.keyset.schema_stale"] = False
+        tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = None
         if streaming:
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
@@ -1340,7 +1568,13 @@ async def handler(
             )
 
         from dal.keyset_pagination import (
+            KEYSET_ORDER_COLUMN_NOT_FOUND,
             KEYSET_REQUIRES_STABLE_TIEBREAKER,
+            KEYSET_SCHEMA_REQUIRED,
+            KEYSET_SCHEMA_STALE,
+            KEYSET_TIEBREAKER_NOT_UNIQUE,
+            KEYSET_TIEBREAKER_NULLABLE,
+            StaticSchemaInfoProvider,
             build_keyset_order_signature,
             extract_keyset_order_keys,
             extract_keyset_table_names,
@@ -1371,22 +1605,87 @@ async def handler(
                 envelope_metadata=tenant_enforcement_metadata,
             )
 
-        keyset_column_metadata = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        keyset_schema_load = await _load_keyset_column_metadata(keyset_table_names, tenant_id)
+        keyset_column_metadata = keyset_schema_load.columns
+        keyset_unique_keys_by_table = keyset_schema_load.unique_keys_by_table
+
+        if keyset_schema_strict:
+            normalized_tables = {
+                (table_name or "").strip().lower().split(".")[-1]
+                for table_name in keyset_table_names
+                if isinstance(table_name, str) and table_name.strip()
+            }
+            has_full_schema_coverage = bool(normalized_tables) and all(
+                table_name in keyset_schema_load.loaded_tables for table_name in normalized_tables
+            )
+            if not has_full_schema_coverage:
+                tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                    KEYSET_SCHEMA_REQUIRED
+                )
+                return _construct_error_response(
+                    message=(
+                        "Keyset pagination requires schema metadata for referenced ORDER BY tables "
+                        "when strict schema mode is enabled."
+                    ),
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": KEYSET_SCHEMA_REQUIRED},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+            if (
+                keyset_schema_load.max_schema_age_seconds is not None
+                and keyset_schema_ttl_seconds > 0
+                and keyset_schema_load.max_schema_age_seconds > keyset_schema_ttl_seconds
+            ):
+                tenant_enforcement_metadata["pagination.keyset.schema_stale"] = True
+                tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                    KEYSET_SCHEMA_STALE
+                )
+                return _construct_error_response(
+                    message=(
+                        "Keyset pagination schema metadata is stale under strict schema mode."
+                    ),
+                    category=ErrorCategory.INVALID_REQUEST,
+                    provider=provider,
+                    metadata={"reason_code": KEYSET_SCHEMA_STALE},
+                    envelope_metadata=tenant_enforcement_metadata,
+                )
+
+        if keyset_column_metadata:
+            keyset_schema_info = StaticSchemaInfoProvider.from_column_metadata(
+                keyset_column_metadata,
+                table_names=keyset_table_names,
+                unique_keys_by_table=keyset_unique_keys_by_table,
+            )
+            tenant_enforcement_metadata["pagination.keyset.schema_used"] = True
         try:
             validate_stable_tiebreaker(
                 keyset_order_keys,
                 table_names=keyset_table_names,
                 allowlist=_keyset_tiebreaker_allowlist(),
                 column_metadata=keyset_column_metadata,
+                schema_info=keyset_schema_info,
             )
         except ValueError as e:
+            error_message = str(e)
             reason_code = (
                 KEYSET_REQUIRES_STABLE_TIEBREAKER
-                if KEYSET_REQUIRES_STABLE_TIEBREAKER in str(e)
+                if KEYSET_REQUIRES_STABLE_TIEBREAKER in error_message
                 else "execution_pagination_keyset_invalid_sql"
             )
+            for schema_reason in (
+                KEYSET_ORDER_COLUMN_NOT_FOUND,
+                KEYSET_SCHEMA_REQUIRED,
+                KEYSET_SCHEMA_STALE,
+                KEYSET_TIEBREAKER_NULLABLE,
+                KEYSET_TIEBREAKER_NOT_UNIQUE,
+            ):
+                if schema_reason in error_message:
+                    reason_code = schema_reason
+                    break
+            tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
             return _construct_error_response(
-                message=str(e),
+                message=error_message,
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
                 metadata={"reason_code": reason_code},
@@ -2307,6 +2606,18 @@ async def handler(
                 "pagination.keyset.byte_budget": tenant_enforcement_metadata.get(
                     "pagination.keyset.byte_budget"
                 ),
+                "pagination.keyset.schema_used": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_used"
+                ),
+                "pagination.keyset.schema_strict": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_strict"
+                ),
+                "pagination.keyset.schema_stale": tenant_enforcement_metadata.get(
+                    "pagination.keyset.schema_stale"
+                ),
+                "pagination.keyset.rejection_reason_code": tenant_enforcement_metadata.get(
+                    "pagination.keyset.rejection_reason_code"
+                ),
                 "pagination.keyset.page_size_effective": tenant_enforcement_metadata.get(
                     "pagination.keyset.page_size_effective"
                 ),
@@ -2327,6 +2638,7 @@ async def handler(
         _record_session_guardrail_observability(tenant_enforcement_metadata)
         _record_sandbox_observability(tenant_enforcement_metadata)
         _record_timeout_observability(tenant_enforcement_metadata)
+        _record_keyset_schema_observability(tenant_enforcement_metadata)
         _record_result_contract_observability(
             partial=is_truncated,
             partial_reason=partial_reason,

@@ -299,6 +299,7 @@ async def test_execute_sql_query_keyset_rejects_nullable_tiebreaker_with_metadat
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
         patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         payload = await handler(
@@ -310,7 +311,423 @@ async def test_execute_sql_query_keyset_rejects_nullable_tiebreaker_with_metadat
 
     result = json.loads(payload)
     assert result["error"]["category"] == "invalid_request"
-    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_REQUIRES_STABLE_TIEBREAKER"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NULLABLE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_order_column_missing_from_schema():
+    """Missing ORDER BY schema columns should fail closed in keyset mode."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_ORDER_COLUMN_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_allows_nullable_non_final_with_explicit_nulls_ordering():
+    """Explicit NULLS ordering should allow nullable non-final ORDER BY columns."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": True, "is_primary_key": False},
+                        {"name": "id", "nullable": False, "is_primary_key": True},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC NULLS LAST, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_allows_composite_unique_suffix_with_schema_metadata():
+    """Composite unique keys should satisfy schema-aware keyset stability checks."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "events",
+                    "columns": [
+                        {"name": "user_id", "nullable": False, "is_primary_key": False},
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "unique_keys": [["user_id", "created_at"]],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT user_id, created_at FROM events ORDER BY user_id ASC, created_at ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_rejects_non_unique_tiebreaker_with_schema_metadata():
+    """Known non-unique ORDER BY suffixes should be rejected with bounded reason codes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "events",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                        {"name": "id", "nullable": False, "is_primary_key": True},
+                    ],
+                    "unique_keys": [["id"]],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT created_at FROM events ORDER BY created_at ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TIEBREAKER_NOT_UNIQUE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_mode_rejects_missing_schema(monkeypatch):
+    """Strict schema mode should fail closed when keyset schema metadata is unavailable."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_SCHEMA_STRICT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", side_effect=RuntimeError("missing")),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_SCHEMA_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_mode_rejects_stale_schema(monkeypatch):
+    """Strict schema mode should reject stale schema snapshots when age metadata is present."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_SCHEMA_STRICT", "true")
+    monkeypatch.setenv("KEYSET_SCHEMA_TTL_SECONDS", "60")
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "id", "nullable": False, "is_primary_key": True},
+                    ],
+                    "schema_age_seconds": 3600,
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_SCHEMA_STALE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_mode_disabled_keeps_fallback_without_schema(
+    monkeypatch,
+):
+    """Disabling strict schema mode should preserve no-schema keyset fallback behavior."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_SCHEMA_STRICT", "false")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", side_effect=RuntimeError("missing")),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_schema_rejection_observability_parity():
+    """Schema-aware keyset rejections should align metadata and span attributes."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    class _MetadataStore:
+        async def get_table_definition(self, _table_name, tenant_id=None):
+            _ = tenant_id
+            return json.dumps(
+                {
+                    "table_name": "users",
+                    "columns": [
+                        {"name": "created_at", "nullable": False, "is_primary_key": False},
+                    ],
+                    "foreign_keys": [],
+                }
+            )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", return_value=_MetadataStore()),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+        payload = await handler(
+            "SELECT id FROM users ORDER BY created_at DESC, id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    metadata = result["metadata"]
+    reason_code = result["error"]["details_safe"]["reason_code"]
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+
+    assert reason_code == "KEYSET_ORDER_COLUMN_NOT_FOUND"
+    assert metadata["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.schema_used"] == metadata["pagination.keyset.schema_used"]
+    assert attrs["pagination.keyset.schema_strict"] == metadata["pagination.keyset.schema_strict"]
+    assert attrs["pagination.keyset.schema_stale"] == metadata["pagination.keyset.schema_stale"]
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_schema_rejection_does_not_leak_raw_sql(monkeypatch):
+    """Schema-aware keyset rejections must not include raw caller SQL."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_SCHEMA_456' ORDER BY id ASC"
+    monkeypatch.setenv("KEYSET_SCHEMA_STRICT", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_metadata_store", side_effect=RuntimeError("missing")),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    serialized = json.dumps(result)
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_SCHEMA_REQUIRED"
+    assert "LEAK_SENTINEL_SCHEMA_456" not in serialized
+    assert sql not in serialized
 
 
 @pytest.mark.asyncio
