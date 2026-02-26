@@ -745,6 +745,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
         patch(
             "mcp_server.tools.execute_sql_query.build_query_fingerprint",
             return_value="current-fingerprint",
@@ -753,6 +754,12 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         from dal.keyset_pagination import encode_keyset_cursor
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
 
         # Cursor from a different query/fingerprint
         cursor = encode_keyset_cursor([50], ["id|asc|nulls_last"], "old-fingerprint")
@@ -789,6 +796,7 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
         patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
         patch(
             "mcp_server.tools.execute_sql_query.build_query_fingerprint",
             return_value="stable-fingerprint",
@@ -797,6 +805,12 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
         from dal.keyset_pagination import encode_keyset_cursor
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
 
         cursor = encode_keyset_cursor([50], ["id|asc|nulls_last"], "stable-fingerprint")
         payload = await handler(
@@ -2280,6 +2294,8 @@ async def test_execute_sql_query_keyset_shard_mismatch_reason_code_parity_and_st
         )
 
     page_two = json.loads(page_two_payload)
+    if "error" in page_two and page_two["error"].get("category") != "invalid_request":
+        pytest.fail(f"DEBUG_CATEGORY: {json.dumps(page_two, indent=2)}")
     reason_code = page_two["error"]["details_safe"]["reason_code"]
     attrs = {}
     for call in mock_span.set_attribute.call_args_list:

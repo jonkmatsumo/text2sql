@@ -11,24 +11,33 @@ from mcp_server.tools.execute_sql_query import handler
 
 
 class BaseMockConn:
+    """Base mock connection for testing."""
+
     def __init__(self, partition_sig=None):
+        """Initialize mock connection."""
         self.session_guardrail_metadata = {}
         self.partition_signature = partition_sig
 
     async def fetch(self, *args, **kwargs):
+        """Mock fetch."""
         return [{"id": 1}]
 
     async def fetch_page(self, *args, **kwargs):
+        """Mock fetch_page."""
         return [{"id": 1}], None
 
     async def fetch_page_with_columns(self, *args, **kwargs):
+        """Mock fetch_page_with_columns."""
         return [{"id": 1}], [], None
 
     def __getattr__(self, name):
+        """Mock getattr."""
         return MagicMock()
 
 
 class SpecializedMockConn(BaseMockConn):
+    """Specialized mock connection for testing."""
+
     pass
 
 
@@ -325,7 +334,7 @@ async def test_offset_pagination_accepted_on_federated_when_env_disabled():
 
 @pytest.mark.asyncio
 async def test_cursor_rejected_on_backend_signature_mismatch():
-    """Pagination cursor should be rejected if the backend set signature (partition_signature) changes."""
+    """Pagination cursor should be rejected if partition_signature changes."""
     caps = BackendCapabilities(
         provider_name="federated-db",
         execution_topology="federated",
@@ -338,8 +347,11 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
 
     @asynccontextmanager
     async def _mock_conn_factory(partition_sig):
-        # We need to yield an instance of a class that has the methods defined in its type().__dict__
+        # Yield a class instance with methods defined in its type().__dict__
         class TestSpecificMockConn(SpecializedMockConn):
+            async def fetch(self, *args, **kwargs):
+                return [{"id": 1}, {"id": 2}]
+
             async def fetch_page(self, *args, **kwargs):
                 return [{"id": 1}, {"id": 2}], "some-token"
 

@@ -858,6 +858,7 @@ def _build_columns_from_rows(rows: list[dict]) -> list[dict]:
 
 
 def _tenant_enforcement_unsupported_response(
+    execution_started_at: Optional[float],
     provider: str,
     *,
     policy_decision: PolicyDecision,
@@ -870,6 +871,7 @@ def _tenant_enforcement_unsupported_response(
 
     if policy_decision.result.outcome == "REJECTED_MISSING_TENANT":
         return _construct_error_response(
+            execution_started_at,
             message=f"Tenant ID is required for {TOOL_NAME}.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -886,6 +888,7 @@ def _tenant_enforcement_unsupported_response(
         message = "Tenant isolation is not supported for this provider."
 
     return _construct_error_response(
+        execution_started_at,
         message=message,
         category=ErrorCategory.TENANT_ENFORCEMENT_UNSUPPORTED,
         provider=provider,
@@ -1277,6 +1280,7 @@ async def _cancel_best_effort(conn: object) -> None:
 
 
 def _construct_error_response(
+    execution_started_at: Optional[float],
     message: str,
     category: ErrorCategory = ErrorCategory.UNKNOWN,
     metadata: Optional[Dict[str, Any]] = None,
@@ -1322,8 +1326,18 @@ def _construct_error_response(
         details_safe.update(
             {key: value for key, value in meta_dict.items() if key not in {"sql_state", "hint"}}
         )
+
+    updates = {}
     if details_safe:
-        error_meta = error_meta.model_copy(update={"details_safe": details_safe})
+        updates["details_safe"] = details_safe
+
+    # Sync reason_code to top level if present
+    # Some older tests expect it in details_safe specifically, so we keep it there too.
+    if "reason_code" in meta_dict:
+        updates["reason_code"] = meta_dict["reason_code"]
+
+    if updates:
+        error_meta = error_meta.model_copy(update=updates)
 
     keyset_rejection_reason = _bounded_keyset_rejection_reason_code(meta_dict.get("reason_code"))
     if keyset_rejection_reason is not None:
@@ -1340,7 +1354,11 @@ def _construct_error_response(
         metadata=ExecuteSQLQueryMetadata(
             rows_returned=0,
             is_truncated=False,
+            execution_duration_ms=max(
+                0, int((time.monotonic() - (execution_started_at or time.monotonic())) * 1000)
+            ),
             provider=resolved_provider,
+            row_limit=envelope_meta.get("row_limit") or 0,
             **envelope_meta,
         ),
         error=error_meta,
@@ -1638,6 +1656,9 @@ async def handler(
         - Capacity detection: If query triggers row/resource caps.
     """
     provider = _active_provider()
+    import time
+
+    execution_started_at = time.monotonic()
     keyset_order_keys = []
     keyset_values = []
     keyset_table_names: List[str] = []
@@ -1660,6 +1681,7 @@ async def handler(
         resource_limits = ExecutionResourceLimits.from_env()
     except ValueError:
         return _construct_error_response(
+            execution_started_at,
             message="Execution resource limits are misconfigured.",
             category=ErrorCategory.INTERNAL,
             provider=provider,
@@ -1730,6 +1752,7 @@ async def handler(
 
     if validate_role("SQL_ADMIN_ROLE", TOOL_NAME):
         return _construct_error_response(
+            execution_started_at,
             message="Unauthorized: SQL_ADMIN_ROLE required.",
             category=ErrorCategory.AUTHENTICATION_FAILED,
             provider=provider,
@@ -1787,6 +1810,7 @@ async def handler(
     except ResourceContainmentPolicyError as e:
         tenant_enforcement_metadata["resource_capability_mismatch"] = e.reason_code
         return _construct_error_response(
+            execution_started_at,
             message=str(e),
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider,
@@ -1800,6 +1824,7 @@ async def handler(
     if tenant_id is not None and not policy_decision.should_execute:
         _record_policy_decision_telemetry(policy_decision.telemetry_attributes)
         return _tenant_enforcement_unsupported_response(
+            execution_started_at,
             provider,
             policy_decision=policy_decision,
             envelope_metadata=tenant_enforcement_metadata,
@@ -1812,6 +1837,7 @@ async def handler(
     max_sql_len = get_env_int("MCP_MAX_SQL_LENGTH", 100 * 1024)
     if len(sql_query) > max_sql_len:
         return _construct_error_response(
+            execution_started_at,
             message=f"SQL query exceeds maximum length of {max_sql_len} bytes.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -1821,6 +1847,7 @@ async def handler(
     # 1.5 Pagination Mode and Bounded Fields Validation
     if page_token and keyset_cursor:
         return _construct_error_response(
+            execution_started_at,
             message="Pagination token mode mismatch: provide only one pagination token type.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -1829,6 +1856,7 @@ async def handler(
         )
     if pagination_mode == "keyset" and page_token:
         return _construct_error_response(
+            execution_started_at,
             message="Keyset pagination mode does not accept page_token.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -1837,6 +1865,7 @@ async def handler(
         )
     if pagination_mode == "offset" and keyset_cursor:
         return _construct_error_response(
+            execution_started_at,
             message="Offset pagination mode does not accept keyset_cursor.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -1866,6 +1895,7 @@ async def handler(
 
         if not supports_keyset:
             return _construct_error_response(
+                execution_started_at,
                 "Keyset pagination is not supported for this provider.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -1877,6 +1907,7 @@ async def handler(
             )
         if not supports_keyset_with_containment:
             return _construct_error_response(
+                execution_started_at,
                 "Keyset pagination with resource containment is not supported for this provider.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -1906,6 +1937,7 @@ async def handler(
             keyset_table_names = extract_keyset_table_names(sql_query, provider=provider)
         except ValueError as e:
             return _construct_error_response(
+                execution_started_at,
                 message=str(e),
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -1915,6 +1947,7 @@ async def handler(
 
         if not keyset_order_keys:
             return _construct_error_response(
+                execution_started_at,
                 message=(
                     "Keyset pagination requires an ORDER BY clause with "
                     "deterministic expressions."
@@ -1943,6 +1976,7 @@ async def handler(
                     KEYSET_SCHEMA_REQUIRED
                 )
                 return _construct_error_response(
+                    execution_started_at,
                     message=(
                         "Keyset pagination requires schema metadata for referenced ORDER BY tables "
                         "when strict schema mode is enabled."
@@ -1962,6 +1996,7 @@ async def handler(
                     KEYSET_SCHEMA_STALE
                 )
                 return _construct_error_response(
+                    execution_started_at,
                     message=(
                         "Keyset pagination schema metadata is stale under strict schema mode."
                     ),
@@ -2005,6 +2040,7 @@ async def handler(
                     break
             tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
             return _construct_error_response(
+                execution_started_at,
                 message=error_message,
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2018,6 +2054,7 @@ async def handler(
 
         if keyset_cursor and len(keyset_cursor) > _DEFAULT_PAGE_TOKEN_MAX_LENGTH:
             return _construct_error_response(
+                execution_started_at,
                 message="Keyset cursor exceeds maximum allowed length.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2026,6 +2063,7 @@ async def handler(
             )
         if keyset_order_by and len(keyset_order_by) > 10:  # Bounded
             return _construct_error_response(
+                execution_started_at,
                 message="Keyset order-by columns exceed maximum allowed count.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2035,6 +2073,7 @@ async def handler(
     elif pagination_mode == "offset":
         if keyset_cursor or keyset_order_by:
             return _construct_error_response(
+                execution_started_at,
                 message="Keyset pagination fields are not allowed in offset mode.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2067,6 +2106,7 @@ async def handler(
                 },
             )
         return _construct_error_response(
+            execution_started_at,
             validation_failure.message,
             category=validation_failure.category,
             provider=provider,
@@ -2095,6 +2135,7 @@ async def handler(
             },
         )
         return _construct_error_response(
+            execution_started_at,
             complexity_error,
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -2131,6 +2172,7 @@ async def handler(
             )
 
         return _construct_error_response(
+            execution_started_at,
             str(e),
             category=ErrorCategory.MUTATION_BLOCKED,
             provider=provider,
@@ -2144,6 +2186,7 @@ async def handler(
         PolicyEnforcer.validate_sql(sql_query)
     except ValueError as e:
         return _construct_error_response(
+            execution_started_at,
             str(e),
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -2154,6 +2197,7 @@ async def handler(
     param_error = _validate_params(params)
     if param_error:
         return _construct_error_response(
+            execution_started_at,
             param_error,
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -2174,6 +2218,7 @@ async def handler(
     effective_params = list(policy_decision.params_to_bind)
     if not policy_decision.should_execute:
         return _tenant_enforcement_unsupported_response(
+            execution_started_at,
             provider,
             policy_decision=policy_decision,
             envelope_metadata=tenant_enforcement_metadata,
@@ -2184,6 +2229,7 @@ async def handler(
         provider_name: str,
         negotiation: Optional[CapabilityNegotiationResult] = None,
     ) -> str:
+        """Construct an unsupported capability error response."""
         capability_required = (
             negotiation.capability_required if negotiation else required_capability
         )
@@ -2209,6 +2255,7 @@ async def handler(
         )
 
         return _construct_error_response(
+            execution_started_at,
             message=f"Requested capability is not supported: {required_capability}.",
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider_name,
@@ -2284,9 +2331,9 @@ async def handler(
         bool(
             effective_timeout_seconds
             and effective_timeout_seconds > 0
-            and caps.execution_model == "async"
+            and getattr(caps, "execution_model", "sync") == "async"
         ),
-        caps.supports_cancel,
+        bool(getattr(caps, "supports_cancel", False)),
     )
     if unsupported_response is not None:
         return unsupported_response
@@ -2305,6 +2352,7 @@ async def handler(
         or (supports_offset_pagination_wrapper and supports_query_wrapping_subselect)
     ):
         return _construct_error_response(
+            execution_started_at,
             "Pagination is not supported for this provider.",
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -2314,14 +2362,16 @@ async def handler(
             },
             envelope_metadata=tenant_enforcement_metadata,
         )
-    is_federated = caps.execution_topology == "federated"
+    is_federated = getattr(caps, "execution_topology", None) == "federated"
     if (
         pagination_mode == "keyset"
         and is_federated
-        and not caps.supports_federated_deterministic_ordering
+        and not getattr(caps, "supports_federated_deterministic_ordering", False)
     ):
         return _construct_error_response(
-            "Keyset pagination is not supported for federated backends without deterministic ordering.",
+            execution_started_at,
+            "Keyset pagination is not supported for federated backends "
+            "without deterministic ordering.",
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider,
             metadata={
@@ -2334,6 +2384,7 @@ async def handler(
     disallow_federated_offset = get_env_bool("PAGINATION_DISALLOW_FEDERATED_OFFSET", False)
     if pagination_mode == "offset" and is_federated and disallow_federated_offset:
         return _construct_error_response(
+            execution_started_at,
             "Offset pagination is not supported for federated backends.",
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider,
@@ -2361,6 +2412,7 @@ async def handler(
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
             return _construct_error_response(
+                execution_started_at,
                 "Invalid page_token: must not be empty.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2369,6 +2421,7 @@ async def handler(
             )
         if len(normalized_page_token) > max_page_token_len:
             return _construct_error_response(
+                execution_started_at,
                 "Invalid page_token: exceeds maximum length.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2383,6 +2436,7 @@ async def handler(
     if page_size is not None:
         if page_size <= 0:
             return _construct_error_response(
+                execution_started_at,
                 "Invalid page_size: must be greater than zero.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2391,6 +2445,7 @@ async def handler(
             )
         if page_size > max_page_size:
             return _construct_error_response(
+                execution_started_at,
                 "Invalid page_size: exceeds maximum rows per request.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2404,6 +2459,7 @@ async def handler(
         errors = validate_redshift_query(effective_sql_query)
         if errors:
             return _construct_error_response(
+                execution_started_at,
                 "Redshift query validation failed.",
                 category=ErrorCategory.INVALID_REQUEST,
                 provider=provider,
@@ -2460,6 +2516,7 @@ async def handler(
                     if KEYSET_ORDER_MISMATCH in str(e):
                         reason_code = KEYSET_ORDER_MISMATCH
                     return _construct_error_response(
+                        execution_started_at,
                         message=str(e),
                         category=ErrorCategory.INVALID_REQUEST,
                         provider=provider,
@@ -2468,6 +2525,7 @@ async def handler(
                     )
                 if len(keyset_values) != len(keyset_order_keys):
                     return _construct_error_response(
+                        execution_started_at,
                         message="Keyset cursor value count mismatch with ORDER BY columns.",
                         category=ErrorCategory.INVALID_REQUEST,
                         provider=provider,
@@ -2556,6 +2614,7 @@ async def handler(
                         "KEYSET_TOPOLOGY_REQUIRED"
                     )
                     return _construct_error_response(
+                        execution_started_at,
                         message=(
                             "Keyset pagination requires execution topology metadata when strict "
                             "topology mode is enabled."
@@ -2580,6 +2639,7 @@ async def handler(
                         "KEYSET_REPLICA_LAG_UNSAFE"
                     )
                     return _construct_error_response(
+                        execution_started_at,
                         message=(
                             "Keyset pagination is not safe on replicas with excessive "
                             "replication lag."
@@ -2594,6 +2654,7 @@ async def handler(
                         "KEYSET_SNAPSHOT_REQUIRED"
                     )
                     return _construct_error_response(
+                        execution_started_at,
                         message=(
                             "Keyset pagination requires snapshot identifiers when strict snapshot "
                             "mode is enabled."
@@ -2617,6 +2678,7 @@ async def handler(
                         "KEYSET_ISOLATION_UNSAFE"
                     )
                     return _construct_error_response(
+                        execution_started_at,
                         message=(
                             "Keyset pagination requires REPEATABLE READ or stronger isolation."
                         ),
@@ -2639,7 +2701,7 @@ async def handler(
                         _ = decode_keyset_cursor(
                             keyset_cursor,
                             expected_fingerprint=query_fingerprint,
-                            secret=keyset_token_secret,
+                            secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
                             expected_cursor_context=expected_cursor_context,
                         )
@@ -2669,6 +2731,7 @@ async def handler(
                             reason_code
                         )
                         return _construct_error_response(
+                            execution_started_at,
                             message=str(e),
                             category=ErrorCategory.INVALID_REQUEST,
                             provider=provider,
@@ -2692,6 +2755,7 @@ async def handler(
                     keyset_rewritten_select = execution_select
                 except Exception as e:
                     return _construct_error_response(
+                        execution_started_at,
                         message=f"Failed to apply keyset pagination rewrite: {str(e)}",
                         category=ErrorCategory.INTERNAL,
                         provider=provider,
@@ -2712,6 +2776,7 @@ async def handler(
                     )
 
             async def _fetch_rows():
+                """Fetch rows from the database."""
                 nonlocal columns, next_token
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
@@ -3018,6 +3083,11 @@ async def handler(
                 tenant_enforcement_metadata["is_paginated"] = True
             except Exception as e:
                 logger.warning(f"Failed to generate next_keyset_cursor: {e}")
+        if row_limit is not None and row_limit > 0:
+            tenant_enforcement_metadata["limit_applied"] = int(row_limit)
+        elif pagination_mode == "offset" and page_size is not None:
+            tenant_enforcement_metadata["limit_applied"] = int(page_size)
+
         partial_reason = last_truncated_reason
         if partial_reason is None and size_truncated:
             partial_reason = size_truncated_reason or PayloadTruncationReason.MAX_BYTES.value
@@ -3065,6 +3135,7 @@ async def handler(
             partial_reason=partial_reason,
             items_returned=len(result_rows),
             bytes_returned=bytes_returned,
+            limit_applied=tenant_enforcement_metadata.get("limit_applied"),
             execution_duration_ms=execution_duration_ms,
             cap_detected=cap_detected,
             cap_mitigation_applied=cap_mitigation_applied,
@@ -3259,6 +3330,7 @@ async def handler(
                 tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = True
         tenant_enforcement_metadata["partial_reason"] = "timeout"
         return _construct_error_response(
+            execution_started_at,
             message="Execution timed out.",
             category=ErrorCategory.TIMEOUT,
             provider=provider,
@@ -3267,6 +3339,7 @@ async def handler(
     except OffsetPaginationTokenError as e:
         provider = _active_provider()
         return _construct_error_response(
+            execution_started_at,
             message=str(e),
             category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
@@ -3279,6 +3352,7 @@ async def handler(
         tenant_enforcement_metadata.update(session_guardrail_metadata)
         tenant_enforcement_metadata.update(_extract_postgres_sandbox_metadata(e))
         return _construct_error_response(
+            execution_started_at,
             message=str(e),
             category=ErrorCategory.UNSUPPORTED_CAPABILITY,
             provider=provider,
@@ -3294,6 +3368,7 @@ async def handler(
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
+            execution_started_at,
             message=metadata.message,
             category=metadata.category,
             provider=provider,
@@ -3308,6 +3383,7 @@ async def handler(
         metadata = extract_error_metadata(provider, e)
         emit_classified_error(provider, "execute_sql_query", metadata.category, e)
         return _construct_error_response(
+            execution_started_at,
             message=metadata.message,
             category=metadata.category,
             provider=provider,
