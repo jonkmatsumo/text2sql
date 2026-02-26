@@ -249,6 +249,30 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.topology_strict",
         serialization_alias="pagination.keyset.topology_strict",
     )
+    pagination_keyset_shard_id: Optional[str] = Field(
+        None,
+        description="Bounded shard identifier used for keyset execution context",
+        validation_alias="pagination.keyset.shard_id",
+        serialization_alias="pagination.keyset.shard_id",
+    )
+    pagination_keyset_shard_mismatch: Optional[bool] = Field(
+        None,
+        description="True when keyset cursor shard context mismatched current execution context",
+        validation_alias="pagination.keyset.shard_mismatch",
+        serialization_alias="pagination.keyset.shard_mismatch",
+    )
+    pagination_keyset_partition_signature: Optional[str] = Field(
+        None,
+        description="Bounded partition-set signature used for keyset execution context",
+        validation_alias="pagination.keyset.partition_signature",
+        serialization_alias="pagination.keyset.partition_signature",
+    )
+    pagination_keyset_cross_shard_mode: Optional[bool] = Field(
+        None,
+        description="True when cross-shard keyset cursor reuse mode is enabled",
+        validation_alias="pagination.keyset.cross_shard_mode",
+        serialization_alias="pagination.keyset.cross_shard_mode",
+    )
     pagination_keyset_replica_lag_seconds: Optional[float] = Field(
         None,
         description="Replica lag observed for keyset execution context",
