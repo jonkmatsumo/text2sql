@@ -18,6 +18,7 @@ KEYSET_TIEBREAKER_NOT_UNIQUE = "KEYSET_TIEBREAKER_NOT_UNIQUE"
 KEYSET_SCHEMA_REQUIRED = "KEYSET_SCHEMA_REQUIRED"
 KEYSET_SCHEMA_STALE = "KEYSET_SCHEMA_STALE"
 KEYSET_SNAPSHOT_MISMATCH = "KEYSET_SNAPSHOT_MISMATCH"
+KEYSET_TOPOLOGY_MISMATCH = "KEYSET_TOPOLOGY_MISMATCH"
 
 
 @runtime_checkable
@@ -246,7 +247,12 @@ def decode_keyset_cursor(
         required_context = _normalize_cursor_context(expected_cursor_context)
         for context_key, context_value in required_context.items():
             if payload_context.get(context_key) != context_value:
-                raise ValueError(f"Invalid cursor: {KEYSET_SNAPSHOT_MISMATCH}.")
+                reason_code = (
+                    KEYSET_TOPOLOGY_MISMATCH
+                    if context_key in {"db_role", "region", "node_id"}
+                    else KEYSET_SNAPSHOT_MISMATCH
+                )
+                raise ValueError(f"Invalid cursor: {reason_code}.")
 
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
@@ -284,13 +290,16 @@ def _normalize_cursor_context(raw_context: Any) -> Dict[str, str]:
     if not isinstance(raw_context, dict):
         return {}
     normalized: Dict[str, str] = {}
-    for key in ("snapshot_id", "transaction_id"):
+    for key in ("snapshot_id", "transaction_id", "db_role", "region", "node_id"):
         raw_value = raw_context.get(key)
         if not isinstance(raw_value, str):
             continue
         stripped_value = raw_value.strip()
         if stripped_value:
-            normalized[key] = stripped_value
+            if key in {"db_role", "region"}:
+                normalized[key] = stripped_value.lower()
+            else:
+                normalized[key] = stripped_value
     return normalized
 
 

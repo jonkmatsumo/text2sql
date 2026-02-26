@@ -3,6 +3,7 @@ import pytest
 from dal.keyset_pagination import (
     KEYSET_ORDER_MISMATCH,
     KEYSET_SNAPSHOT_MISMATCH,
+    KEYSET_TOPOLOGY_MISMATCH,
     decode_keyset_cursor,
     encode_keyset_cursor,
 )
@@ -144,4 +145,38 @@ def test_keyset_cursor_context_rejects_snapshot_mismatch():
             expected_fingerprint="f1",
             expected_keys=["id|asc|nulls_last"],
             expected_cursor_context={"snapshot_id": "snap-2"},
+        )
+
+
+def test_keyset_cursor_context_accepts_matching_topology():
+    """Cursor context should validate when topology identifiers match."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"db_role": "primary", "region": "us-east-1", "node_id": "node-a"},
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["id|asc|nulls_last"],
+        expected_cursor_context={"db_role": "primary", "region": "us-east-1", "node_id": "node-a"},
+    )
+    assert decoded == [123]
+
+
+def test_keyset_cursor_context_rejects_topology_mismatch():
+    """Cursor context should fail closed when topology identifiers differ."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"db_role": "primary", "region": "us-east-1"},
+    )
+    with pytest.raises(ValueError, match=KEYSET_TOPOLOGY_MISMATCH):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_cursor_context={"db_role": "replica", "region": "us-east-1"},
         )

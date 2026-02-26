@@ -213,6 +213,48 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.snapshot_mismatch",
         serialization_alias="pagination.keyset.snapshot_mismatch",
     )
+    pagination_keyset_db_role: Optional[str] = Field(
+        None,
+        description="Bounded database role used for keyset execution context",
+        validation_alias="pagination.keyset.db_role",
+        serialization_alias="pagination.keyset.db_role",
+    )
+    pagination_keyset_region: Optional[str] = Field(
+        None,
+        description="Bounded region used for keyset execution context",
+        validation_alias="pagination.keyset.region",
+        serialization_alias="pagination.keyset.region",
+    )
+    pagination_keyset_node_id_present: Optional[bool] = Field(
+        None,
+        description="True when keyset execution context includes a stable node identifier",
+        validation_alias="pagination.keyset.node_id_present",
+        serialization_alias="pagination.keyset.node_id_present",
+    )
+    pagination_keyset_topology_mismatch: Optional[bool] = Field(
+        None,
+        description="True when keyset cursor topology context mismatched current execution context",
+        validation_alias="pagination.keyset.topology_mismatch",
+        serialization_alias="pagination.keyset.topology_mismatch",
+    )
+    pagination_keyset_topology_available: Optional[bool] = Field(
+        None,
+        description="True when keyset execution context includes topology metadata",
+        validation_alias="pagination.keyset.topology_available",
+        serialization_alias="pagination.keyset.topology_available",
+    )
+    pagination_keyset_topology_strict: Optional[bool] = Field(
+        None,
+        description="True when strict topology requirements are enabled for keyset validation",
+        validation_alias="pagination.keyset.topology_strict",
+        serialization_alias="pagination.keyset.topology_strict",
+    )
+    pagination_keyset_replica_lag_seconds: Optional[float] = Field(
+        None,
+        description="Replica lag observed for keyset execution context",
+        validation_alias="pagination.keyset.replica_lag_seconds",
+        serialization_alias="pagination.keyset.replica_lag_seconds",
+    )
     pagination_keyset_isolation_level: Optional[str] = Field(
         None,
         description="Normalized transaction isolation level observed for keyset execution",

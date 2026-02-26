@@ -947,6 +947,383 @@ async def test_execute_sql_query_keyset_cursor_rejects_snapshot_context_mismatch
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_rejects_topology_context_mismatch():
+    """Keyset cursor must fail closed when execution topology changes between requests."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="topology-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows, db_role):
+                self._rows = list(rows)
+                self.db_role = db_role
+                self.region = "us-east-1"
+                self.node_id = "node-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}], "primary")),
+            _ConnCtx(_Conn([{"id": 3}], "replica")),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one_result = json.loads(page_one_payload)
+        cursor = page_one_result["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+
+    page_two_result = json.loads(page_two_payload)
+    assert page_two_result["error"]["category"] == "invalid_request"
+    assert page_two_result["error"]["details_safe"]["reason_code"] == "KEYSET_TOPOLOGY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_allows_same_topology_context_reuse():
+    """Keyset cursors should be reusable when topology context remains unchanged."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="topology-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.db_role = "primary"
+                self.region = "us-east-1"
+                self.node_id = "node-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one_result = json.loads(page_one_payload)
+        cursor = page_one_result["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+
+    page_two_result = json.loads(page_two_payload)
+    assert "error" not in page_two_result
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_within_threshold_allows(monkeypatch):
+    """Replica lag within threshold should allow keyset execution and emit telemetry."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "10")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "replica"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 2.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.keyset.replica_lag_seconds"] == 2.0
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_topology_rejects_missing_topology_context(
+    monkeypatch,
+):
+    """Strict topology mode should reject keyset requests without topology metadata."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_STRICT_TOPOLOGY", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_TOPOLOGY_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_strict_topology_allows_when_topology_present(monkeypatch):
+    """Strict topology mode should allow keyset when topology metadata is available."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    monkeypatch.setenv("KEYSET_STRICT_TOPOLOGY", "true")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "primary"
+                self.region = "us-east-1"
+                self.node_id = "node-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["pagination.keyset.topology_strict"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_above_threshold_rejects(monkeypatch):
+    """Replica lag above threshold should fail closed for keyset mode."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "5")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "replica"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 42.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "KEYSET_REPLICA_LAG_UNSAFE"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_replica_lag_guard_does_not_block_primary(monkeypatch):
+    """Primary role should be unaffected by replica lag guardrail checks."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    monkeypatch.setenv("KEYSET_MAX_REPLICA_LAG_SECONDS", "1")
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self):
+                self.db_role = "primary"
+                self.session_guardrail_metadata = {}
+
+            async def get_replica_lag_seconds(self):
+                return 999.0
+
+            async def fetch(self, _query, *_args):
+                return []
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+
+    result = json.loads(payload)
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_snapshot_unavailable_fallback_emits_telemetry_flag():
     """Providers without snapshot context should preserve behavior and emit bounded telemetry."""
     caps = SimpleNamespace(
@@ -994,6 +1371,9 @@ async def test_execute_sql_query_keyset_snapshot_unavailable_fallback_emits_tele
         attrs[key] = value
     assert attrs["pagination.keyset.snapshot_id_present"] is False
     assert attrs["pagination.keyset.snapshot_mismatch"] is False
+    assert attrs["pagination.keyset.db_role"] == "unknown"
+    assert attrs["pagination.keyset.region"] == "unknown"
+    assert attrs["pagination.keyset.node_id_present"] is False
 
 
 @pytest.mark.asyncio
@@ -1088,7 +1468,7 @@ async def test_execute_sql_query_keyset_strict_snapshot_allows_snapshot_aware_pr
 async def test_execute_sql_query_keyset_snapshot_and_isolation_telemetry_parity(
     monkeypatch,
 ):
-    """Snapshot/isolation metadata should match bounded keyset span attributes."""
+    """Snapshot/isolation/topology metadata should match bounded keyset span attributes."""
     caps = SimpleNamespace(
         provider_name="postgres",
         tenant_enforcement_mode="rls_session",
@@ -1115,7 +1495,13 @@ async def test_execute_sql_query_keyset_snapshot_and_isolation_telemetry_parity(
                 self.session_guardrail_metadata = {}
                 self.snapshot_id = "snap-1"
                 self.transaction_id = "tx-1"
+                self.db_role = "replica"
+                self.region = "us-east-1"
+                self.node_id = "node-a"
                 self.isolation_level = "REPEATABLE READ"
+
+            async def get_replica_lag_seconds(self):
+                return 1.25
 
             async def fetch(self, _query, *_args):
                 return [{"id": 1}, {"id": 2}, {"id": 3}]
@@ -1153,6 +1539,19 @@ async def test_execute_sql_query_keyset_snapshot_and_isolation_telemetry_parity(
     )
     assert (
         attrs["pagination.keyset.snapshot_strict"] == metadata["pagination.keyset.snapshot_strict"]
+    )
+    assert attrs["pagination.keyset.db_role"] == metadata["pagination.keyset.db_role"]
+    assert attrs["pagination.keyset.region"] == metadata["pagination.keyset.region"]
+    assert (
+        attrs["pagination.keyset.node_id_present"] == metadata["pagination.keyset.node_id_present"]
+    )
+    assert (
+        attrs["pagination.keyset.replica_lag_seconds"]
+        == metadata["pagination.keyset.replica_lag_seconds"]
+    )
+    assert (
+        attrs["pagination.keyset.topology_mismatch"]
+        == metadata["pagination.keyset.topology_mismatch"]
     )
 
 
@@ -1237,6 +1636,86 @@ async def test_execute_sql_query_keyset_snapshot_mismatch_reason_code_parity_and
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_topology_mismatch_reason_code_parity_and_stability():
+    """Topology mismatch reason codes must be stable across metadata and spans."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="topology-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+
+        class _Conn:
+            def __init__(self, rows, db_role):
+                self._rows = list(rows)
+                self.db_role = db_role
+                self.region = "us-east-1"
+                self.node_id = "node-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}], "primary")),
+            _ConnCtx(_Conn([{"id": 3}], "replica")),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+
+    page_two = json.loads(page_two_payload)
+    reason_code = page_two["error"]["details_safe"]["reason_code"]
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+
+    assert reason_code == "KEYSET_TOPOLOGY_MISMATCH"
+    assert page_two["metadata"]["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.rejection_reason_code"] == reason_code
+    assert attrs["pagination.keyset.topology_mismatch"] is True
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_snapshot_mismatch_rejection_does_not_leak_raw_sql():
     """Snapshot-mismatch rejection payloads must not include caller SQL text."""
     caps = SimpleNamespace(
@@ -1304,6 +1783,77 @@ async def test_execute_sql_query_keyset_snapshot_mismatch_rejection_does_not_lea
     serialized = json.dumps(page_two)
     assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_SNAPSHOT_MISMATCH"
     assert "LEAK_SENTINEL_SNAPSHOT_789" not in serialized
+    assert sql not in serialized
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_topology_mismatch_rejection_does_not_leak_raw_sql():
+    """Topology-mismatch rejection payloads must not include caller SQL text."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_TOPOLOGY_456' ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="topology-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows, db_role):
+                self._rows = list(rows)
+                self.db_role = db_role
+                self.region = "us-east-1"
+                self.node_id = "node-a"
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}], "primary")),
+            _ConnCtx(_Conn([{"id": 3}], "replica")),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+            page_size=2,
+        )
+
+    page_two = json.loads(page_two_payload)
+    serialized = json.dumps(page_two)
+    assert page_two["error"]["details_safe"]["reason_code"] == "KEYSET_TOPOLOGY_MISMATCH"
+    assert "LEAK_SENTINEL_TOPOLOGY_456" not in serialized
     assert sql not in serialized
 
 
