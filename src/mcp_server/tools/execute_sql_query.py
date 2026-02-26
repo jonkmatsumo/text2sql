@@ -784,6 +784,8 @@ def _record_result_contract_observability(
     keyset_byte_budget: int | None = None,
     keyset_cursor_emitted: bool | None = None,
     next_keyset_cursor: str | None = None,
+    execution_topology: str | None = None,
+    federated_ordering_supported: bool | None = None,
 ) -> None:
     span = trace.get_current_span()
     if span is None or not span.is_recording():
@@ -812,6 +814,12 @@ def _record_result_contract_observability(
     span.set_attribute("pagination.keyset.cursor_emitted", bool(keyset_cursor_emitted))
     if next_keyset_cursor:
         span.set_attribute("db.pagination.next_keyset_cursor_present", True)
+    if execution_topology:
+        span.set_attribute("pagination.execution_topology", str(execution_topology))
+    if federated_ordering_supported is not None:
+        span.set_attribute(
+            "pagination.federated.ordering_supported", bool(federated_ordering_supported)
+        )
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
     span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
@@ -3195,6 +3203,10 @@ async def handler(
                 "pagination.keyset.cursor_emitted"
             ),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
+            execution_topology=getattr(caps, "execution_topology", None),
+            federated_ordering_supported=getattr(
+                caps, "supports_federated_deterministic_ordering", None
+            ),
         )
 
         return envelope.model_dump_json(exclude_none=True, by_alias=True)
