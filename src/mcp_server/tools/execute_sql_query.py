@@ -121,8 +121,9 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_PARTITION_SET_CHANGED",
     "KEYSET_ISOLATION_UNSAFE",
     "KEYSET_REPLICA_LAG_UNSAFE",
-    "KEYSET_FEDERATED_ORDERING_UNSAFE",
-    "OFFSET_FEDERATED_UNSUPPORTED",
+    "PAGINATION_FEDERATED_ORDERING_UNSAFE",
+    "PAGINATION_FEDERATED_UNSUPPORTED",
+    "PAGINATION_BACKEND_SET_CHANGED",
 }
 
 
@@ -2372,10 +2373,10 @@ async def handler(
             execution_started_at,
             "Keyset pagination is not supported for federated backends "
             "without deterministic ordering.",
-            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata={
-                "reason_code": "KEYSET_FEDERATED_ORDERING_UNSAFE",
+                "reason_code": "PAGINATION_FEDERATED_ORDERING_UNSAFE",
                 "required_capability": "federated_deterministic_ordering",
             },
             envelope_metadata=tenant_enforcement_metadata,
@@ -2386,10 +2387,10 @@ async def handler(
         return _construct_error_response(
             execution_started_at,
             "Offset pagination is not supported for federated backends.",
-            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata={
-                "reason_code": "OFFSET_FEDERATED_UNSUPPORTED",
+                "reason_code": "PAGINATION_FEDERATED_UNSUPPORTED",
                 "required_capability": "deterministic_federated_ordering",
             },
             envelope_metadata=tenant_enforcement_metadata,

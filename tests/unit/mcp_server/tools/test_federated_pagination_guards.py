@@ -104,8 +104,11 @@ async def test_keyset_pagination_rejected_on_federated_without_ordering():
         result = json.loads(result_json)
 
         assert "error" in result
-        assert result["error"]["category"] == "unsupported_capability"
-        assert result["error"]["details_safe"]["reason_code"] == "KEYSET_FEDERATED_ORDERING_UNSAFE"
+        assert result["error"]["category"] == "invalid_request"
+        assert result["error"]["error_code"] == "VALIDATION_ERROR"
+        assert (
+            result["error"]["details_safe"]["reason_code"] == "PAGINATION_FEDERATED_ORDERING_UNSAFE"
+        )
 
 
 @pytest.mark.asyncio
@@ -256,8 +259,9 @@ async def test_offset_pagination_rejected_on_federated_when_env_enabled():
         result = json.loads(result_json)
 
         assert "error" in result
-        assert result["error"]["category"] == "unsupported_capability"
-        assert result["error"]["details_safe"]["reason_code"] == "OFFSET_FEDERATED_UNSUPPORTED"
+        assert result["error"]["category"] == "invalid_request"
+        assert result["error"]["error_code"] == "VALIDATION_ERROR"
+        assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_FEDERATED_UNSUPPORTED"
 
 
 @pytest.mark.asyncio
