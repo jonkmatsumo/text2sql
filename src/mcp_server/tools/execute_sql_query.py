@@ -791,6 +791,9 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     partition_set_changed = bool(schema_metadata.get("pagination.keyset.partition_set_changed"))
     backend_set_sig_present = bool(schema_metadata.get("pagination.backend_set_sig_present"))
     backend_set_mismatch = bool(schema_metadata.get("pagination.backend_set_mismatch"))
+    legacy_cursor_issued_at_accepted = bool(
+        schema_metadata.get("pagination.cursor.legacy_issued_at_accepted")
+    )
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -841,6 +844,11 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.partition_set_changed", partition_set_changed)
         span.set_attribute("pagination.backend_set_sig_present", backend_set_sig_present)
         span.set_attribute("pagination.backend_set_mismatch", backend_set_mismatch)
+        if "pagination.cursor.legacy_issued_at_accepted" in schema_metadata:
+            span.set_attribute(
+                "pagination.cursor.legacy_issued_at_accepted",
+                legacy_cursor_issued_at_accepted,
+            )
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
@@ -2553,6 +2561,10 @@ async def handler(
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
     )
+    cursor_max_age_seconds = max(
+        1, int(get_env_int("PAGINATION_CURSOR_MAX_AGE_SECONDS", 3600) or 3600)
+    )
+    cursor_require_issued_at = get_env_bool("PAGINATION_CURSOR_REQUIRE_ISSUED_AT", True)
     max_offset_pages = max(
         1,
         int(
@@ -2834,6 +2846,7 @@ async def handler(
                     }
 
                 if keyset_cursor:
+                    keyset_decode_metadata: dict[str, Any] = {}
                     try:
                         keyset_values = decode_keyset_cursor(
                             keyset_cursor,
@@ -2841,6 +2854,8 @@ async def handler(
                             secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
                             expected_cursor_context=expected_cursor_context or None,
+                            require_issued_at=cursor_require_issued_at,
+                            decode_metadata=keyset_decode_metadata,
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -2878,6 +2893,10 @@ async def handler(
                             metadata={"reason_code": reason_code},
                             envelope_metadata=tenant_enforcement_metadata,
                         )
+                    if keyset_decode_metadata.get("legacy_issued_at_accepted") is True:
+                        tenant_enforcement_metadata[
+                            "pagination.cursor.legacy_issued_at_accepted"
+                        ] = True
                     if len(keyset_values) != len(keyset_order_keys):
                         return _construct_error_response(
                             execution_started_at,
@@ -2974,14 +2993,21 @@ async def handler(
                     pagination_offset = 0
                     pagination_limit = int(effective_page_size or 0)
                     if page_token:
+                        offset_decode_metadata: dict[str, Any] = {}
                         token_payload = decode_offset_pagination_token(
                             token=page_token,
                             expected_fingerprint=query_fingerprint,
                             max_length=max_page_token_len,
                             secret=pagination_token_secret or None,
+                            require_issued_at=cursor_require_issued_at,
+                            decode_metadata=offset_decode_metadata,
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
+                        if offset_decode_metadata.get("legacy_issued_at_accepted") is True:
+                            tenant_enforcement_metadata[
+                                "pagination.cursor.legacy_issued_at_accepted"
+                            ] = True
                         if effective_page_size is not None and int(effective_page_size) != int(
                             token_payload.limit
                         ):
@@ -3018,6 +3044,7 @@ async def handler(
                             limit=pagination_limit,
                             fingerprint=query_fingerprint,
                             secret=pagination_token_secret or None,
+                            max_age_s=cursor_max_age_seconds,
                         )
                     else:
                         next_token = None
@@ -3228,6 +3255,7 @@ async def handler(
                     query_fingerprint,
                     secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
+                    max_age_s=cursor_max_age_seconds,
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True

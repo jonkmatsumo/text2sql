@@ -9,6 +9,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from dal.pagination_cursor import cursor_now_epoch_seconds, normalize_optional_int
+
 
 class OffsetPaginationTokenError(ValueError):
     """Raised when pagination token validation fails."""
@@ -26,6 +28,10 @@ class OffsetPaginationToken:
     offset: int
     limit: int
     fingerprint: str
+    issued_at: int | None = None
+    max_age_s: int | None = None
+    legacy_issued_at_accepted: bool = False
+    query_fingerprint: str | None = None
 
 
 def build_query_fingerprint(
@@ -66,9 +72,27 @@ def encode_offset_pagination_token(
     limit: int,
     fingerprint: str,
     secret: str | None = None,
+    issued_at: int | None = None,
+    max_age_s: int | None = None,
+    now_epoch_seconds: int | None = None,
+    query_fp: str | None = None,
 ) -> str:
     """Encode a deterministic opaque pagination token."""
-    payload = {"v": 1, "o": int(offset), "l": int(limit), "f": str(fingerprint)}
+    payload: dict[str, Any] = {
+        "v": 1,
+        "o": int(offset),
+        "l": int(limit),
+        "f": str(fingerprint),
+        "issued_at": cursor_now_epoch_seconds(
+            now_epoch_seconds=issued_at if issued_at is not None else now_epoch_seconds
+        ),
+    }
+    normalized_max_age = normalize_optional_int(max_age_s)
+    if normalized_max_age is not None:
+        payload["max_age_s"] = normalized_max_age
+    normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
+    if normalized_query_fp:
+        payload["query_fp"] = normalized_query_fp
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     wrapper: dict[str, Any] = {"p": payload}
     secret_value = (secret or "").strip()
@@ -89,6 +113,8 @@ def decode_offset_pagination_token(
     expected_fingerprint: str,
     max_length: int,
     secret: str | None = None,
+    require_issued_at: bool = True,
+    decode_metadata: dict[str, Any] | None = None,
 ) -> OffsetPaginationToken:
     """Decode and validate an offset pagination token."""
     normalized_token = (token or "").strip()
@@ -141,6 +167,20 @@ def decode_offset_pagination_token(
             reason_code="execution_pagination_page_token_malformed",
             message="Malformed pagination token payload.",
         )
+    issued_at = normalize_optional_int(payload.get("issued_at"))
+    legacy_issued_at_accepted = False
+    if issued_at is None:
+        if require_issued_at:
+            raise OffsetPaginationTokenError(
+                reason_code="PAGINATION_CURSOR_ISSUED_AT_INVALID",
+                message="Invalid pagination token: issued_at is required.",
+            )
+        legacy_issued_at_accepted = True
+        if isinstance(decode_metadata, dict):
+            decode_metadata["legacy_issued_at_accepted"] = True
+    max_age_s = normalize_optional_int(payload.get("max_age_s"))
+    query_fp = payload.get("query_fp")
+    query_fingerprint = str(query_fp).strip() if isinstance(query_fp, str) else None
 
     secret_value = (secret or "").strip()
     signature = raw_wrapper.get("s")
@@ -166,4 +206,12 @@ def decode_offset_pagination_token(
             message="Pagination token does not match the current query.",
         )
 
-    return OffsetPaginationToken(offset=offset, limit=limit, fingerprint=fingerprint)
+    return OffsetPaginationToken(
+        offset=offset,
+        limit=limit,
+        fingerprint=fingerprint,
+        issued_at=issued_at,
+        max_age_s=max_age_s,
+        legacy_issued_at_accepted=legacy_issued_at_accepted,
+        query_fingerprint=query_fingerprint,
+    )

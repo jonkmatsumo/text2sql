@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 import sqlglot
 from sqlglot import exp
 
+from dal.pagination_cursor import cursor_now_epoch_seconds, normalize_optional_int
+
 KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
 KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
 KEYSET_ORDER_COLUMN_NOT_FOUND = "KEYSET_ORDER_COLUMN_NOT_FOUND"
@@ -212,13 +214,26 @@ def encode_keyset_cursor(
     fingerprint: str,
     secret: Optional[str] = None,
     cursor_context: Optional[Dict[str, str]] = None,
+    issued_at: int | None = None,
+    max_age_s: int | None = None,
+    now_epoch_seconds: int | None = None,
+    query_fp: str | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
-    payload = {
+    payload: Dict[str, Any] = {
         "v": [_json_serializable(v) for v in values],
         "k": keys,
         "f": fingerprint,
+        "issued_at": cursor_now_epoch_seconds(
+            now_epoch_seconds=issued_at if issued_at is not None else now_epoch_seconds
+        ),
     }
+    normalized_max_age = normalize_optional_int(max_age_s)
+    if normalized_max_age is not None:
+        payload["max_age_s"] = normalized_max_age
+    normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
+    if normalized_query_fp:
+        payload["query_fp"] = normalized_query_fp
     normalized_context = _normalize_cursor_context(cursor_context)
     if normalized_context:
         payload["c"] = normalized_context
@@ -235,6 +250,8 @@ def decode_keyset_cursor(
     secret: Optional[str] = None,
     expected_keys: Optional[List[str]] = None,
     expected_cursor_context: Optional[Dict[str, str]] = None,
+    require_issued_at: bool = True,
+    decode_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -268,6 +285,13 @@ def decode_keyset_cursor(
                     )
                 )
                 raise ValueError(f"Invalid cursor: {reason_code}.")
+
+        issued_at = normalize_optional_int(payload.get("issued_at"))
+        if issued_at is None:
+            if require_issued_at:
+                raise ValueError("Invalid cursor: PAGINATION_CURSOR_ISSUED_AT_INVALID.")
+            if isinstance(decode_metadata, dict):
+                decode_metadata["legacy_issued_at_accepted"] = True
 
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
