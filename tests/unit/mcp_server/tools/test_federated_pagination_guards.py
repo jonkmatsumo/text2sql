@@ -13,10 +13,11 @@ from mcp_server.tools.execute_sql_query import handler
 class BaseMockConn:
     """Base mock connection for testing."""
 
-    def __init__(self, partition_sig=None):
+    def __init__(self, partition_sig=None, backend_set=None):
         """Initialize mock connection."""
         self.session_guardrail_metadata = {}
         self.partition_signature = partition_sig
+        self.backend_set = backend_set
 
     async def fetch(self, *args, **kwargs):
         """Mock fetch."""
@@ -338,7 +339,7 @@ async def test_offset_pagination_accepted_on_federated_when_env_disabled():
 
 @pytest.mark.asyncio
 async def test_cursor_rejected_on_backend_signature_mismatch():
-    """Pagination cursor should be rejected if partition_signature changes."""
+    """Pagination cursor should be rejected if backend-set membership changes."""
     caps = BackendCapabilities(
         provider_name="federated-db",
         execution_topology="federated",
@@ -350,7 +351,7 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
     )
 
     @asynccontextmanager
-    async def _mock_conn_factory(partition_sig):
+    async def _mock_conn_factory(backend_set):
         # Yield a class instance with methods defined in its type().__dict__
         class TestSpecificMockConn(SpecializedMockConn):
             async def fetch(self, *args, **kwargs):
@@ -362,7 +363,7 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
             async def fetch_page_with_columns(self, *args, **kwargs):
                 return [{"id": 1}, {"id": 2}], [], "some-token"
 
-        yield TestSpecificMockConn(partition_sig)
+        yield TestSpecificMockConn(partition_sig=None, backend_set=backend_set)
 
     mock_policy_inst = MagicMock()
     mock_policy_inst.evaluate = AsyncMock(
@@ -390,7 +391,12 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_mock_conn_factory("sig-A"),
+            return_value=_mock_conn_factory(
+                [
+                    {"backend_id": "db-a", "region": "us-east-1", "role": "primary"},
+                    {"backend_id": "db-b", "region": "us-east-1", "role": "replica"},
+                ]
+            ),
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=False),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
@@ -414,14 +420,12 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
             page_size=1,
         )
         result = json.loads(result_json)
-        if "error" in result:
-            print(f"DEBUG Error 1 Trace: {result['error']}")
         assert "error" not in result
         assert "next_page_token" in result["metadata"]
         cursor = result["metadata"]["next_page_token"]
         assert cursor is not None
 
-    # Second call using the cursor but with signature B
+    # Second call using the cursor but with backend membership reduced to A-only.
     with (
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
@@ -433,7 +437,9 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_mock_conn_factory("sig-B"),
+            return_value=_mock_conn_factory(
+                [{"backend_id": "db-a", "region": "us-east-1", "role": "primary"}]
+            ),
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=False),
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
@@ -460,8 +466,4 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
         result_2 = json.loads(result_json_2)
 
         assert "error" in result_2
-        # Fingerprint mismatch because of backend_signature change
-        assert (
-            result_2["error"]["details_safe"]["reason_code"]
-            == "execution_pagination_keyset_cursor_invalid"
-        )
+        assert result_2["error"]["details_safe"]["reason_code"] == "PAGINATION_BACKEND_SET_CHANGED"
