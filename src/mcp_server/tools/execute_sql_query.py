@@ -125,6 +125,18 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_FEDERATED_ORDERING_UNSAFE",
     "PAGINATION_FEDERATED_UNSUPPORTED",
     "PAGINATION_BACKEND_SET_CHANGED",
+    "PAGINATION_CURSOR_EXPIRED",
+    "PAGINATION_CURSOR_ISSUED_AT_INVALID",
+    "PAGINATION_CURSOR_CLOCK_SKEW",
+    "PAGINATION_CURSOR_QUERY_MISMATCH",
+}
+_CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
+    "OK",
+    "EXPIRED",
+    "SKEW",
+    "INVALID",
+    "QUERY_MISMATCH",
+    "LEGACY_ACCEPTED",
 }
 
 
@@ -443,6 +455,70 @@ def _normalize_execution_topology(raw_value: Any) -> str:
     if normalized == "federated":
         return "federated"
     return "single_backend"
+
+
+def _normalize_cursor_validation_outcome(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip().upper()
+    if normalized in _CURSOR_VALIDATION_OUTCOME_ALLOWLIST:
+        return normalized
+    return None
+
+
+def _normalize_cursor_age_seconds(raw_value: Any) -> int | None:
+    numeric = _normalize_non_negative_float(raw_value)
+    if numeric is None:
+        return None
+    return min(int(numeric), 604800)
+
+
+def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
+    if not isinstance(reason_code, str):
+        return None
+    reason = reason_code.strip()
+    mapping = {
+        "PAGINATION_CURSOR_EXPIRED": "EXPIRED",
+        "PAGINATION_CURSOR_CLOCK_SKEW": "SKEW",
+        "PAGINATION_CURSOR_ISSUED_AT_INVALID": "INVALID",
+        "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
+    }
+    return mapping.get(reason)
+
+
+def _apply_cursor_decode_metadata(
+    envelope_metadata: dict[str, Any],
+    decode_metadata: dict[str, Any] | None,
+    *,
+    fallback_reason_code: str | None = None,
+) -> None:
+    if not isinstance(envelope_metadata, dict):
+        return
+    metadata = decode_metadata if isinstance(decode_metadata, dict) else {}
+    if "legacy_issued_at_accepted" in metadata:
+        envelope_metadata["pagination.cursor.legacy_issued_at_accepted"] = bool(
+            metadata.get("legacy_issued_at_accepted")
+        )
+    if "issued_at_present" in metadata:
+        envelope_metadata["pagination.cursor.issued_at_present"] = bool(
+            metadata.get("issued_at_present")
+        )
+    cursor_age_seconds = _normalize_cursor_age_seconds(metadata.get("age_s"))
+    if cursor_age_seconds is not None:
+        envelope_metadata["pagination.cursor.age_s"] = cursor_age_seconds
+    if "expired" in metadata:
+        envelope_metadata["pagination.cursor.expired"] = bool(metadata.get("expired"))
+    if "skew_detected" in metadata:
+        envelope_metadata["pagination.cursor.skew_detected"] = bool(metadata.get("skew_detected"))
+    validation_outcome = _normalize_cursor_validation_outcome(metadata.get("validation_outcome"))
+    if validation_outcome is None:
+        validation_outcome = _cursor_validation_outcome_from_reason_code(fallback_reason_code)
+    if validation_outcome is not None:
+        envelope_metadata["pagination.cursor.validation_outcome"] = validation_outcome
+    if fallback_reason_code == "PAGINATION_CURSOR_EXPIRED":
+        envelope_metadata["pagination.cursor.expired"] = True
+    if fallback_reason_code == "PAGINATION_CURSOR_CLOCK_SKEW":
+        envelope_metadata["pagination.cursor.skew_detected"] = True
 
 
 def _normalize_keyset_context_value(value: Any) -> str | None:
@@ -794,6 +870,14 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     legacy_cursor_issued_at_accepted = bool(
         schema_metadata.get("pagination.cursor.legacy_issued_at_accepted")
     )
+    cursor_age_seconds = _normalize_cursor_age_seconds(
+        schema_metadata.get("pagination.cursor.age_s")
+    )
+    cursor_expired = bool(schema_metadata.get("pagination.cursor.expired"))
+    cursor_skew_detected = bool(schema_metadata.get("pagination.cursor.skew_detected"))
+    cursor_validation_outcome = _normalize_cursor_validation_outcome(
+        schema_metadata.get("pagination.cursor.validation_outcome")
+    )
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -849,6 +933,14 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
                 "pagination.cursor.legacy_issued_at_accepted",
                 legacy_cursor_issued_at_accepted,
             )
+        if cursor_age_seconds is not None:
+            span.set_attribute("pagination.cursor.age_s", cursor_age_seconds)
+        if "pagination.cursor.expired" in schema_metadata:
+            span.set_attribute("pagination.cursor.expired", cursor_expired)
+        if "pagination.cursor.skew_detected" in schema_metadata:
+            span.set_attribute("pagination.cursor.skew_detected", cursor_skew_detected)
+        if cursor_validation_outcome is not None:
+            span.set_attribute("pagination.cursor.validation_outcome", cursor_validation_outcome)
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
@@ -2564,6 +2656,9 @@ async def handler(
     cursor_max_age_seconds = max(
         1, int(get_env_int("PAGINATION_CURSOR_MAX_AGE_SECONDS", 3600) or 3600)
     )
+    cursor_clock_skew_seconds = max(
+        0, int(get_env_int("PAGINATION_CURSOR_CLOCK_SKEW_SECONDS", 300) or 300)
+    )
     cursor_require_issued_at = get_env_bool("PAGINATION_CURSOR_REQUIRE_ISSUED_AT", True)
     max_offset_pages = max(
         1,
@@ -2643,6 +2738,7 @@ async def handler(
         next_token = None
         applied_page_size = page_size
         conn = None
+        offset_decode_metadata: dict[str, Any] | None = None
         pagination_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
         pagination_token_secret = pagination_token_secret_raw or None
         query_fingerprint = None  # Bound to backend signature inside connection block
@@ -2856,6 +2952,8 @@ async def handler(
                             expected_cursor_context=expected_cursor_context or None,
                             require_issued_at=cursor_require_issued_at,
                             decode_metadata=keyset_decode_metadata,
+                            max_age_seconds=cursor_max_age_seconds,
+                            clock_skew_seconds=cursor_clock_skew_seconds,
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -2882,6 +2980,19 @@ async def handler(
                         elif PAGINATION_BACKEND_SET_CHANGED in str(e):
                             reason_code = PAGINATION_BACKEND_SET_CHANGED
                             tenant_enforcement_metadata["pagination.backend_set_mismatch"] = True
+                        elif "PAGINATION_CURSOR_EXPIRED" in str(e):
+                            reason_code = "PAGINATION_CURSOR_EXPIRED"
+                        elif "PAGINATION_CURSOR_ISSUED_AT_INVALID" in str(e):
+                            reason_code = "PAGINATION_CURSOR_ISSUED_AT_INVALID"
+                        elif "PAGINATION_CURSOR_CLOCK_SKEW" in str(e):
+                            reason_code = "PAGINATION_CURSOR_CLOCK_SKEW"
+                        elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
+                            reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
+                        _apply_cursor_decode_metadata(
+                            tenant_enforcement_metadata,
+                            keyset_decode_metadata,
+                            fallback_reason_code=reason_code,
+                        )
                         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
                             reason_code
                         )
@@ -2893,10 +3004,9 @@ async def handler(
                             metadata={"reason_code": reason_code},
                             envelope_metadata=tenant_enforcement_metadata,
                         )
-                    if keyset_decode_metadata.get("legacy_issued_at_accepted") is True:
-                        tenant_enforcement_metadata[
-                            "pagination.cursor.legacy_issued_at_accepted"
-                        ] = True
+                    _apply_cursor_decode_metadata(
+                        tenant_enforcement_metadata, keyset_decode_metadata
+                    )
                     if len(keyset_values) != len(keyset_order_keys):
                         return _construct_error_response(
                             execution_started_at,
@@ -2947,7 +3057,7 @@ async def handler(
 
             async def _fetch_rows():
                 """Fetch rows from the database."""
-                nonlocal columns, next_token
+                nonlocal columns, next_token, offset_decode_metadata
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 offset_pagination_requested = pagination_mode == "offset" and bool(
@@ -2993,7 +3103,7 @@ async def handler(
                     pagination_offset = 0
                     pagination_limit = int(effective_page_size or 0)
                     if page_token:
-                        offset_decode_metadata: dict[str, Any] = {}
+                        offset_decode_metadata = {}
                         token_payload = decode_offset_pagination_token(
                             token=page_token,
                             expected_fingerprint=query_fingerprint,
@@ -3001,13 +3111,14 @@ async def handler(
                             secret=pagination_token_secret or None,
                             require_issued_at=cursor_require_issued_at,
                             decode_metadata=offset_decode_metadata,
+                            max_age_seconds=cursor_max_age_seconds,
+                            clock_skew_seconds=cursor_clock_skew_seconds,
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
-                        if offset_decode_metadata.get("legacy_issued_at_accepted") is True:
-                            tenant_enforcement_metadata[
-                                "pagination.cursor.legacy_issued_at_accepted"
-                            ] = True
+                        _apply_cursor_decode_metadata(
+                            tenant_enforcement_metadata, offset_decode_metadata
+                        )
                         if effective_page_size is not None and int(effective_page_size) != int(
                             token_payload.limit
                         ):
@@ -3539,6 +3650,11 @@ async def handler(
         )
     except OffsetPaginationTokenError as e:
         provider = _active_provider()
+        _apply_cursor_decode_metadata(
+            tenant_enforcement_metadata,
+            offset_decode_metadata,
+            fallback_reason_code=e.reason_code,
+        )
         return _construct_error_response(
             execution_started_at,
             message=str(e),

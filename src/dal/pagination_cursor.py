@@ -21,3 +21,19 @@ def normalize_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def normalize_strict_int(value: Any) -> int | None:
+    """Return integers only when the raw value is an int (excluding bool)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def bounded_cursor_age_seconds(age_seconds: int, *, max_bound: int = 604_800) -> int:
+    """Clamp cursor age to bounded telemetry-friendly integer ranges."""
+    if age_seconds < 0:
+        return 0
+    return min(int(age_seconds), int(max_bound))

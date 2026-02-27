@@ -782,6 +782,123 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
+    """Expired keyset cursor rejections should preserve stable classification fields."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="ttl-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        from dal.keyset_pagination import encode_keyset_cursor
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, *_args, **_kwargs):
+                return [{"id": 1}]
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+        cursor = encode_keyset_cursor(
+            [50],
+            ["id|asc|nulls_last"],
+            "ttl-fingerprint",
+            issued_at=0,
+            max_age_s=1,
+        )
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    assert (
+        result["metadata"]["pagination.keyset.rejection_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    )
+    assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
+    """Future-issued keyset cursor rejections should preserve stable classification fields."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch(
+            "mcp_server.tools.execute_sql_query.build_query_fingerprint",
+            return_value="ttl-fingerprint",
+        ),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        from dal.keyset_pagination import encode_keyset_cursor
+
+        class _Conn:
+            def __init__(self):
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, *_args, **_kwargs):
+                return [{"id": 1}]
+
+        mock_get_conn.return_value.__aenter__.return_value = _Conn()
+        cursor = encode_keyset_cursor(
+            [50],
+            ["id|asc|nulls_last"],
+            "ttl-fingerprint",
+            issued_at=4_000_000_000,
+            max_age_s=3600,
+        )
+
+        payload = await handler(
+            "SELECT id FROM users ORDER BY id ASC",
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=cursor,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_CLOCK_SKEW"
+    assert (
+        result["metadata"]["pagination.keyset.rejection_reason_code"]
+        == "PAGINATION_CURSOR_CLOCK_SKEW"
+    )
+    assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_CLOCK_SKEW"
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
     """Cursor should be rejected when ORDER BY structure changes across requests."""
     caps = SimpleNamespace(

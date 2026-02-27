@@ -480,6 +480,74 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable_classification():
+    """Expired offset cursors should return stable invalid-request classification fields."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        issued_at=0,
+        max_age_s=1,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_offset_pagination_wrapper_not_marked_partial():
     """Page slicing for pagination should not set partial truncation semantics."""
     caps = SimpleNamespace(

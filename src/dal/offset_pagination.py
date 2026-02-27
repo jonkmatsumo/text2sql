@@ -9,7 +9,17 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from dal.pagination_cursor import cursor_now_epoch_seconds, normalize_optional_int
+from dal.pagination_cursor import (
+    bounded_cursor_age_seconds,
+    cursor_now_epoch_seconds,
+    normalize_optional_int,
+    normalize_strict_int,
+)
+
+PAGINATION_CURSOR_EXPIRED = "PAGINATION_CURSOR_EXPIRED"
+PAGINATION_CURSOR_ISSUED_AT_INVALID = "PAGINATION_CURSOR_ISSUED_AT_INVALID"
+PAGINATION_CURSOR_CLOCK_SKEW = "PAGINATION_CURSOR_CLOCK_SKEW"
+PAGINATION_CURSOR_QUERY_MISMATCH = "PAGINATION_CURSOR_QUERY_MISMATCH"
 
 
 class OffsetPaginationTokenError(ValueError):
@@ -115,6 +125,10 @@ def decode_offset_pagination_token(
     secret: str | None = None,
     require_issued_at: bool = True,
     decode_metadata: dict[str, Any] | None = None,
+    max_age_seconds: int | None = 3600,
+    clock_skew_seconds: int = 300,
+    now_epoch_seconds: int | None = None,
+    expected_query_fp: str | None = None,
 ) -> OffsetPaginationToken:
     """Decode and validate an offset pagination token."""
     normalized_token = (token or "").strip()
@@ -167,21 +181,6 @@ def decode_offset_pagination_token(
             reason_code="execution_pagination_page_token_malformed",
             message="Malformed pagination token payload.",
         )
-    issued_at = normalize_optional_int(payload.get("issued_at"))
-    legacy_issued_at_accepted = False
-    if issued_at is None:
-        if require_issued_at:
-            raise OffsetPaginationTokenError(
-                reason_code="PAGINATION_CURSOR_ISSUED_AT_INVALID",
-                message="Invalid pagination token: issued_at is required.",
-            )
-        legacy_issued_at_accepted = True
-        if isinstance(decode_metadata, dict):
-            decode_metadata["legacy_issued_at_accepted"] = True
-    max_age_s = normalize_optional_int(payload.get("max_age_s"))
-    query_fp = payload.get("query_fp")
-    query_fingerprint = str(query_fp).strip() if isinstance(query_fp, str) else None
-
     secret_value = (secret or "").strip()
     signature = raw_wrapper.get("s")
     if secret_value:
@@ -200,11 +199,88 @@ def decode_offset_pagination_token(
                 message="Invalid pagination token signature.",
             )
 
+    issued_at = normalize_strict_int(payload.get("issued_at"))
+    legacy_issued_at_accepted = False
+    if isinstance(decode_metadata, dict):
+        decode_metadata["expired"] = False
+        decode_metadata["skew_detected"] = False
+        decode_metadata["issued_at_present"] = issued_at is not None
+    if issued_at is None:
+        if require_issued_at:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_ISSUED_AT_INVALID,
+                message="Invalid pagination token: issued_at is required.",
+            )
+        legacy_issued_at_accepted = True
+        if isinstance(decode_metadata, dict):
+            decode_metadata["legacy_issued_at_accepted"] = True
+            decode_metadata["validation_outcome"] = "LEGACY_ACCEPTED"
+    max_age_payload = payload.get("max_age_s")
+    max_age_s = None
+    if max_age_payload is not None:
+        max_age_s = normalize_strict_int(max_age_payload)
+        if max_age_s is None:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_ISSUED_AT_INVALID,
+                message="Invalid pagination token: max_age_s must be an integer.",
+            )
+    query_fp = payload.get("query_fp")
+    query_fingerprint = str(query_fp).strip() if isinstance(query_fp, str) else None
+    if issued_at is not None:
+        effective_max_age_s = max_age_s
+        if effective_max_age_s is None:
+            effective_max_age_s = normalize_optional_int(max_age_seconds)
+        if effective_max_age_s is None or effective_max_age_s <= 0:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "INVALID"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_ISSUED_AT_INVALID,
+                message="Invalid pagination token: max_age_s is required.",
+            )
+        now_epoch = cursor_now_epoch_seconds(now_epoch_seconds=now_epoch_seconds)
+        skew_seconds = max(0, int(clock_skew_seconds))
+        if issued_at > now_epoch + skew_seconds:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["age_s"] = 0
+                decode_metadata["skew_detected"] = True
+                decode_metadata["validation_outcome"] = "SKEW"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_CLOCK_SKEW,
+                message="Invalid pagination token: issued_at is in the future.",
+            )
+        age_seconds = now_epoch - issued_at
+        if isinstance(decode_metadata, dict):
+            decode_metadata["age_s"] = bounded_cursor_age_seconds(age_seconds)
+        if age_seconds > int(effective_max_age_s):
+            if isinstance(decode_metadata, dict):
+                decode_metadata["expired"] = True
+                decode_metadata["validation_outcome"] = "EXPIRED"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_EXPIRED,
+                message="Pagination token has expired.",
+            )
+        if isinstance(decode_metadata, dict):
+            decode_metadata["validation_outcome"] = "OK"
     if fingerprint != expected_fingerprint:
         raise OffsetPaginationTokenError(
             reason_code="execution_pagination_page_token_fingerprint_mismatch",
             message="Pagination token does not match the current query.",
         )
+    expected_query_fingerprint = (
+        str(expected_query_fp).strip() if isinstance(expected_query_fp, str) else None
+    )
+    if expected_query_fingerprint:
+        if query_fingerprint != expected_query_fingerprint:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "QUERY_MISMATCH"
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_CURSOR_QUERY_MISMATCH,
+                message="Pagination token does not match the current query fingerprint.",
+            )
 
     return OffsetPaginationToken(
         offset=offset,
