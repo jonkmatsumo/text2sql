@@ -9,8 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from dal.capabilities import capabilities_for_provider
+from dal.capabilities import BackendCapabilities, capabilities_for_provider
+from dal.util.env import PROVIDER_ALIASES
 from mcp_server.tools.execute_sql_query import handler
+
+_KNOWN_PROVIDERS = sorted({value for value in PROVIDER_ALIASES.values() if value != "memgraph"})
+_FEDERATED_PROVIDER_ORDERING_MATRIX: dict[str, bool] = {}
 
 
 @pytest.mark.parametrize(
@@ -50,6 +54,25 @@ def test_unknown_provider_pagination_capability_defaults_fail_closed():
     assert caps.supports_query_wrapping_subselect is False
     assert caps.supports_keyset is False
     assert caps.supports_keyset_with_containment is False
+    assert caps.execution_topology == "single_backend"
+    assert caps.supports_federated_deterministic_ordering is False
+
+
+def test_federated_topology_defaults_to_ordering_unsupported():
+    """Federated capabilities should fail closed unless ordering support is explicit."""
+    caps = BackendCapabilities(provider_name="federated-proxy", execution_topology="federated")
+    assert caps.supports_federated_deterministic_ordering is False
+
+
+def test_federated_topology_requires_explicit_conformance_declaration():
+    """Any provider marked federated must declare deterministic-ordering support in matrix."""
+    discovered_federated: dict[str, bool] = {}
+    for provider in _KNOWN_PROVIDERS:
+        caps = capabilities_for_provider(provider)
+        if caps.execution_topology == "federated":
+            discovered_federated[provider] = bool(caps.supports_federated_deterministic_ordering)
+
+    assert discovered_federated == _FEDERATED_PROVIDER_ORDERING_MATRIX
 
 
 @pytest.mark.asyncio
