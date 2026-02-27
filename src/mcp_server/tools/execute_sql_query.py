@@ -434,6 +434,17 @@ def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
     return None
 
 
+def _bounded_pagination_reject_reason_code(raw_reason_code: Any) -> str | None:
+    return _bounded_keyset_rejection_reason_code(raw_reason_code)
+
+
+def _normalize_execution_topology(raw_value: Any) -> str:
+    normalized = str(raw_value or "").strip().lower()
+    if normalized == "federated":
+        return "federated"
+    return "single_backend"
+
+
 def _normalize_keyset_context_value(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -727,6 +738,19 @@ def _is_keyset_isolation_safe(isolation_level: str | None) -> bool:
 
 def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
     schema_metadata = metadata if isinstance(metadata, dict) else {}
+    execution_topology = None
+    if "pagination.execution_topology" in schema_metadata:
+        execution_topology = _normalize_execution_topology(
+            schema_metadata.get("pagination.execution_topology")
+        )
+    raw_federated_ordering_supported = schema_metadata.get(
+        "pagination.federated.ordering_supported"
+    )
+    federated_ordering_supported = (
+        bool(raw_federated_ordering_supported)
+        if raw_federated_ordering_supported is not None
+        else None
+    )
     schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
     schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
     schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
@@ -779,9 +803,19 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     rejection_reason_code = _bounded_keyset_rejection_reason_code(
         schema_metadata.get("pagination.keyset.rejection_reason_code")
     )
+    pagination_reject_reason_code = (
+        _bounded_pagination_reject_reason_code(schema_metadata.get("pagination.reject_reason_code"))
+        or rejection_reason_code
+    )
 
     span = trace.get_current_span()
     if span is not None and span.is_recording():
+        if execution_topology is not None:
+            span.set_attribute("pagination.execution_topology", execution_topology)
+        if federated_ordering_supported is not None:
+            span.set_attribute(
+                "pagination.federated.ordering_supported", federated_ordering_supported
+            )
         span.set_attribute("pagination.keyset.schema_used", schema_used)
         span.set_attribute("pagination.keyset.schema_strict", schema_strict)
         span.set_attribute("pagination.keyset.schema_stale", schema_stale)
@@ -813,6 +847,8 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         span.set_attribute("pagination.keyset.isolation_enforced", isolation_enforced)
         if rejection_reason_code is not None:
             span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
+        if pagination_reject_reason_code is not None:
+            span.set_attribute("pagination.reject_reason_code", pagination_reject_reason_code)
 
 
 def _query_contains_limit_or_offset(sql: str, provider: str) -> bool:
@@ -881,6 +917,9 @@ def _record_result_contract_observability(
     next_keyset_cursor: str | None = None,
     execution_topology: str | None = None,
     federated_ordering_supported: bool | None = None,
+    backend_set_sig_present: bool | None = None,
+    backend_set_mismatch: bool | None = None,
+    pagination_reject_reason_code: str | None = None,
 ) -> None:
     span = trace.get_current_span()
     if span is None or not span.is_recording():
@@ -915,6 +954,15 @@ def _record_result_contract_observability(
         span.set_attribute(
             "pagination.federated.ordering_supported", bool(federated_ordering_supported)
         )
+    if backend_set_sig_present is not None:
+        span.set_attribute("pagination.backend_set_sig_present", bool(backend_set_sig_present))
+    if backend_set_mismatch is not None:
+        span.set_attribute("pagination.backend_set_mismatch", bool(backend_set_mismatch))
+    bounded_reject_reason_code = _bounded_pagination_reject_reason_code(
+        pagination_reject_reason_code
+    )
+    if bounded_reject_reason_code is not None:
+        span.set_attribute("pagination.reject_reason_code", bounded_reject_reason_code)
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
     span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
@@ -1432,9 +1480,13 @@ def _construct_error_response(
     if updates:
         error_meta = error_meta.model_copy(update=updates)
 
-    keyset_rejection_reason = _bounded_keyset_rejection_reason_code(meta_dict.get("reason_code"))
-    if keyset_rejection_reason is not None:
-        envelope_meta["pagination.keyset.rejection_reason_code"] = keyset_rejection_reason
+    pagination_rejection_reason = _bounded_pagination_reject_reason_code(
+        meta_dict.get("reason_code")
+    )
+    if pagination_rejection_reason is not None:
+        envelope_meta["pagination.reject_reason_code"] = pagination_rejection_reason
+        if envelope_meta.get("pagination_mode_used") == "keyset":
+            envelope_meta["pagination.keyset.rejection_reason_code"] = pagination_rejection_reason
 
     _record_tenant_enforcement_observability(envelope_meta)
     _record_session_guardrail_observability(envelope_meta)
@@ -1866,6 +1918,8 @@ async def handler(
             supports_cancel=True,
             supports_pagination=True,
             execution_model="sync",
+            execution_topology="single_backend",
+            supports_federated_deterministic_ordering=False,
         )
     tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
     tenant_enforcement_mode = (
@@ -2442,6 +2496,16 @@ async def handler(
     pagination_requested = bool(
         page_token or page_size or keyset_cursor or pagination_mode == "keyset"
     )
+    execution_topology = _normalize_execution_topology(getattr(caps, "execution_topology", None))
+    federated_ordering_supported = bool(
+        getattr(caps, "supports_federated_deterministic_ordering", False)
+    )
+    if pagination_requested:
+        tenant_enforcement_metadata["pagination.execution_topology"] = execution_topology
+        tenant_enforcement_metadata["pagination.federated.ordering_supported"] = (
+            federated_ordering_supported
+        )
+        tenant_enforcement_metadata["pagination.reject_reason_code"] = None
     if pagination_requested and not (
         supports_server_pagination
         or (supports_offset_pagination_wrapper and supports_query_wrapping_subselect)
@@ -2457,12 +2521,8 @@ async def handler(
             },
             envelope_metadata=tenant_enforcement_metadata,
         )
-    is_federated = getattr(caps, "execution_topology", None) == "federated"
-    if (
-        pagination_mode == "keyset"
-        and is_federated
-        and not getattr(caps, "supports_federated_deterministic_ordering", False)
-    ):
+    is_federated = execution_topology == "federated"
+    if pagination_mode == "keyset" and is_federated and not federated_ordering_supported:
         return _construct_error_response(
             execution_started_at,
             "Keyset pagination is not supported for federated backends "
@@ -2583,9 +2643,10 @@ async def handler(
             )
             if backend_set_sig:
                 keyset_cursor_context["backend_set_sig"] = backend_set_sig
-            tenant_enforcement_metadata["pagination.backend_set_sig_present"] = bool(
-                backend_set_sig
-            )
+            if pagination_mode == "keyset":
+                tenant_enforcement_metadata["pagination.backend_set_sig_present"] = bool(
+                    backend_set_sig
+                )
             partition_signature = keyset_cursor_context.get("partition_signature")
             backend_signature = backend_set_sig or partition_signature
 
@@ -3362,6 +3423,21 @@ async def handler(
                 "pagination.keyset.streaming_terminated": tenant_enforcement_metadata.get(
                     "pagination.keyset.streaming_terminated"
                 ),
+                "pagination.execution_topology": tenant_enforcement_metadata.get(
+                    "pagination.execution_topology"
+                ),
+                "pagination.federated.ordering_supported": tenant_enforcement_metadata.get(
+                    "pagination.federated.ordering_supported"
+                ),
+                "pagination.backend_set_sig_present": tenant_enforcement_metadata.get(
+                    "pagination.backend_set_sig_present"
+                ),
+                "pagination.backend_set_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.backend_set_mismatch"
+                ),
+                "pagination.reject_reason_code": tenant_enforcement_metadata.get(
+                    "pagination.reject_reason_code"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
@@ -3400,9 +3476,16 @@ async def handler(
                 "pagination.keyset.cursor_emitted"
             ),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
-            execution_topology=getattr(caps, "execution_topology", None),
-            federated_ordering_supported=getattr(
-                caps, "supports_federated_deterministic_ordering", None
+            execution_topology=tenant_enforcement_metadata.get("pagination.execution_topology"),
+            federated_ordering_supported=tenant_enforcement_metadata.get(
+                "pagination.federated.ordering_supported"
+            ),
+            backend_set_sig_present=tenant_enforcement_metadata.get(
+                "pagination.backend_set_sig_present"
+            ),
+            backend_set_mismatch=tenant_enforcement_metadata.get("pagination.backend_set_mismatch"),
+            pagination_reject_reason_code=tenant_enforcement_metadata.get(
+                "pagination.reject_reason_code"
             ),
         )
 

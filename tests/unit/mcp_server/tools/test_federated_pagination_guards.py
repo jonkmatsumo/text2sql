@@ -110,6 +110,11 @@ async def test_keyset_pagination_rejected_on_federated_without_ordering():
         assert (
             result["error"]["details_safe"]["reason_code"] == "PAGINATION_FEDERATED_ORDERING_UNSAFE"
         )
+        assert result["metadata"]["pagination.execution_topology"] == "federated"
+        assert (
+            result["metadata"]["pagination.reject_reason_code"]
+            == "PAGINATION_FEDERATED_ORDERING_UNSAFE"
+        )
 
 
 @pytest.mark.asyncio
@@ -380,6 +385,8 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
     )
 
     # First call to generate a valid token with signature A
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
     with (
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
@@ -455,6 +462,7 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
         patch(
             "mcp_server.tools.execute_sql_query.normalize_sqlglot_dialect", return_value="postgres"
         ),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
     ):
         result_json_2 = await handler(
             "SELECT id FROM users ORDER BY id",
@@ -467,3 +475,109 @@ async def test_cursor_rejected_on_backend_signature_mismatch():
 
         assert "error" in result_2
         assert result_2["error"]["details_safe"]["reason_code"] == "PAGINATION_BACKEND_SET_CHANGED"
+        metadata = result_2["metadata"]
+        assert metadata["pagination.backend_set_sig_present"] is True
+        assert metadata["pagination.backend_set_mismatch"] is True
+        assert metadata["pagination.reject_reason_code"] == "PAGINATION_BACKEND_SET_CHANGED"
+
+        attrs = {}
+        for call in mock_span.set_attribute.call_args_list:
+            key, value = call.args
+            attrs[key] = value
+        assert (
+            attrs["pagination.backend_set_sig_present"]
+            == metadata["pagination.backend_set_sig_present"]
+        )
+        assert (
+            attrs["pagination.backend_set_mismatch"] == metadata["pagination.backend_set_mismatch"]
+        )
+        assert attrs["pagination.reject_reason_code"] == metadata["pagination.reject_reason_code"]
+
+
+@pytest.mark.asyncio
+async def test_federated_rejection_telemetry_parity_and_invariants():
+    """Federated pagination rejection telemetry should stay bounded and SQL-safe."""
+    caps = BackendCapabilities(
+        provider_name="federated-db",
+        execution_topology="federated",
+        supports_federated_deterministic_ordering=False,
+        supports_keyset=True,
+        supports_keyset_with_containment=True,
+        supports_pagination=True,
+    )
+
+    @asynccontextmanager
+    async def _mock_conn(*args, **kwargs):
+        yield BaseMockConn()
+
+    mock_policy_inst = MagicMock()
+    mock_policy_inst.evaluate = AsyncMock(
+        return_value=MagicMock(
+            should_execute=True,
+            sql_to_execute="SELECT 1",
+            params_to_bind=[],
+            envelope_metadata={},
+            telemetry_attributes={},
+        )
+    )
+    mock_policy_inst.default_decision.return_value = MagicMock(
+        telemetry_attributes={}, envelope_metadata={}
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+    sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_FED_777' ORDER BY id"
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="federated-db",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection", return_value=_mock_conn()
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=False),
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.tools.execute_sql_query._validate_sql_ast", return_value=None),
+        patch(
+            "mcp_server.tools.execute_sql_query._validate_sql_complexity", return_value=(None, {})
+        ),
+        patch("dal.util.read_only.enforce_read_only_sql", return_value=None),
+        patch(
+            "common.security.tenant_enforcement_policy.TenantEnforcementPolicy",
+            return_value=mock_policy_inst,
+        ),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+    ):
+        result_json = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            page_size=10,
+        )
+        result = json.loads(result_json)
+
+        reason_code = result["error"]["details_safe"]["reason_code"]
+        assert reason_code == "PAGINATION_FEDERATED_ORDERING_UNSAFE"
+        assert reason_code in {
+            "PAGINATION_FEDERATED_ORDERING_UNSAFE",
+            "PAGINATION_BACKEND_SET_CHANGED",
+            "PAGINATION_FEDERATED_UNSUPPORTED",
+        }
+        metadata = result["metadata"]
+        assert metadata["pagination.execution_topology"] == "federated"
+        assert metadata["pagination.reject_reason_code"] == reason_code
+
+        attrs = {}
+        for call in mock_span.set_attribute.call_args_list:
+            key, value = call.args
+            attrs[key] = value
+        assert attrs["pagination.execution_topology"] == metadata["pagination.execution_topology"]
+        assert attrs["pagination.reject_reason_code"] == metadata["pagination.reject_reason_code"]
+        assert attrs["pagination.federated.ordering_supported"] is False
+
+        serialized = json.dumps(result)
+        assert "LEAK_SENTINEL_FED_777" not in serialized
