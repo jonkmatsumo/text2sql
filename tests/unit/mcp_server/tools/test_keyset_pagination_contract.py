@@ -1,3 +1,4 @@
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -967,6 +968,82 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
         == "PAGINATION_CURSOR_QUERY_MISMATCH"
     )
     assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
+    """Follow-up keyset requests with expired cursors should reject without SQL/cursor leakage."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_KEYSET_222' ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one_payload = await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        page_one = json.loads(page_one_payload)
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        cursor_payload = json.loads(
+            base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        )
+        cursor_payload["issued_at"] = 0
+        cursor_payload["max_age_s"] = 1
+        expired_cursor = (
+            base64.urlsafe_b64encode(json.dumps(cursor_payload).encode("utf-8"))
+            .decode("ascii")
+            .rstrip("=")
+        )
+
+        page_two_payload = await handler(
+            sql,
+            tenant_id=1,
+            pagination_mode="keyset",
+            keyset_cursor=expired_cursor,
+            page_size=2,
+        )
+
+    page_two = json.loads(page_two_payload)
+    assert page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    serialized = json.dumps(page_two)
+    assert "LEAK_SENTINEL_KEYSET_222" not in serialized
+    assert expired_cursor not in serialized
 
 
 @pytest.mark.asyncio
