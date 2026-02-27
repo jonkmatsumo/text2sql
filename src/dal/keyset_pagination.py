@@ -21,6 +21,7 @@ KEYSET_SNAPSHOT_MISMATCH = "KEYSET_SNAPSHOT_MISMATCH"
 KEYSET_TOPOLOGY_MISMATCH = "KEYSET_TOPOLOGY_MISMATCH"
 KEYSET_SHARD_MISMATCH = "KEYSET_SHARD_MISMATCH"
 KEYSET_PARTITION_SET_CHANGED = "KEYSET_PARTITION_SET_CHANGED"
+PAGINATION_BACKEND_SET_CHANGED = "PAGINATION_BACKEND_SET_CHANGED"
 
 
 @runtime_checkable
@@ -250,15 +251,19 @@ def decode_keyset_cursor(
         for context_key, context_value in required_context.items():
             if payload_context.get(context_key) != context_value:
                 reason_code = (
-                    KEYSET_TOPOLOGY_MISMATCH
-                    if context_key in {"db_role", "region", "node_id"}
+                    PAGINATION_BACKEND_SET_CHANGED
+                    if context_key == "backend_set_sig"
                     else (
-                        KEYSET_SHARD_MISMATCH
-                        if context_key in {"shard_id", "shard_key_hash"}
+                        KEYSET_TOPOLOGY_MISMATCH
+                        if context_key in {"db_role", "region", "node_id"}
                         else (
-                            KEYSET_PARTITION_SET_CHANGED
-                            if context_key in {"partition_signature"}
-                            else KEYSET_SNAPSHOT_MISMATCH
+                            KEYSET_SHARD_MISMATCH
+                            if context_key in {"shard_id", "shard_key_hash"}
+                            else (
+                                KEYSET_PARTITION_SET_CHANGED
+                                if context_key in {"partition_signature"}
+                                else KEYSET_SNAPSHOT_MISMATCH
+                            )
                         )
                     )
                 )
@@ -306,6 +311,7 @@ def _normalize_cursor_context(raw_context: Any) -> Dict[str, str]:
         "db_role",
         "region",
         "node_id",
+        "backend_set_sig",
         "shard_id",
         "shard_key_hash",
         "partition_signature",

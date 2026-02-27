@@ -297,6 +297,36 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.keyset.rejection_reason_code",
         serialization_alias="pagination.keyset.rejection_reason_code",
     )
+    pagination_execution_topology: Optional[str] = Field(
+        None,
+        description="Bounded execution-topology classification for pagination policy guards",
+        validation_alias="pagination.execution_topology",
+        serialization_alias="pagination.execution_topology",
+    )
+    pagination_federated_ordering_supported: Optional[bool] = Field(
+        None,
+        description="Whether deterministic ordering is declared for federated pagination",
+        validation_alias="pagination.federated.ordering_supported",
+        serialization_alias="pagination.federated.ordering_supported",
+    )
+    pagination_backend_set_sig_present: Optional[bool] = Field(
+        None,
+        description="True when pagination cursor context includes a backend-set signature",
+        validation_alias="pagination.backend_set_sig_present",
+        serialization_alias="pagination.backend_set_sig_present",
+    )
+    pagination_backend_set_mismatch: Optional[bool] = Field(
+        None,
+        description="True when cursor backend-set signature mismatches current execution context",
+        validation_alias="pagination.backend_set_mismatch",
+        serialization_alias="pagination.backend_set_mismatch",
+    )
+    pagination_reject_reason_code: Optional[str] = Field(
+        None,
+        description="Bounded pagination rejection reason code for cross-layer parity checks",
+        validation_alias="pagination.reject_reason_code",
+        serialization_alias="pagination.reject_reason_code",
+    )
 
     @model_validator(mode="before")
     @classmethod

@@ -6,6 +6,7 @@ from dal.keyset_pagination import (
     KEYSET_SHARD_MISMATCH,
     KEYSET_SNAPSHOT_MISMATCH,
     KEYSET_TOPOLOGY_MISMATCH,
+    PAGINATION_BACKEND_SET_CHANGED,
     decode_keyset_cursor,
     encode_keyset_cursor,
 )
@@ -249,4 +250,38 @@ def test_keyset_cursor_context_rejects_partition_signature_change():
             expected_fingerprint="f1",
             expected_keys=["id|asc|nulls_last"],
             expected_cursor_context={"partition_signature": "partitions-v2"},
+        )
+
+
+def test_keyset_cursor_context_accepts_matching_backend_set_signature():
+    """Cursor context should validate when backend-set signatures match."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"backend_set_sig": "abc123"},
+    )
+    decoded = decode_keyset_cursor(
+        cursor,
+        expected_fingerprint="f1",
+        expected_keys=["id|asc|nulls_last"],
+        expected_cursor_context={"backend_set_sig": "abc123"},
+    )
+    assert decoded == [123]
+
+
+def test_keyset_cursor_context_rejects_backend_set_signature_change():
+    """Cursor context should fail closed when backend-set signatures change."""
+    cursor = encode_keyset_cursor(
+        [123],
+        ["id|asc|nulls_last"],
+        "f1",
+        cursor_context={"backend_set_sig": "abc123"},
+    )
+    with pytest.raises(ValueError, match=PAGINATION_BACKEND_SET_CHANGED):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="f1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_cursor_context={"backend_set_sig": "def456"},
         )

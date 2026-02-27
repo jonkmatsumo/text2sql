@@ -1,6 +1,7 @@
 """MCP tool: execute_sql_query - Execute read-only SQL queries."""
 
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
@@ -121,8 +122,9 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "KEYSET_PARTITION_SET_CHANGED",
     "KEYSET_ISOLATION_UNSAFE",
     "KEYSET_REPLICA_LAG_UNSAFE",
-    "KEYSET_FEDERATED_ORDERING_UNSAFE",
-    "OFFSET_FEDERATED_UNSUPPORTED",
+    "PAGINATION_FEDERATED_ORDERING_UNSAFE",
+    "PAGINATION_FEDERATED_UNSUPPORTED",
+    "PAGINATION_BACKEND_SET_CHANGED",
 }
 
 
@@ -432,6 +434,17 @@ def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
     return None
 
 
+def _bounded_pagination_reject_reason_code(raw_reason_code: Any) -> str | None:
+    return _bounded_keyset_rejection_reason_code(raw_reason_code)
+
+
+def _normalize_execution_topology(raw_value: Any) -> str:
+    normalized = str(raw_value or "").strip().lower()
+    if normalized == "federated":
+        return "federated"
+    return "single_backend"
+
+
 def _normalize_keyset_context_value(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -563,6 +576,93 @@ def _extract_keyset_cursor_context(conn: object | None) -> dict[str, str]:
     return context
 
 
+def _normalize_backend_set_member(raw_member: Any) -> tuple[str, str | None, str | None] | None:
+    backend_id: str | None = None
+    region: str | None = None
+    role: str | None = None
+
+    if isinstance(raw_member, str):
+        backend_id = _normalize_keyset_context_value(raw_member)
+    elif isinstance(raw_member, dict):
+        backend_id = _normalize_keyset_context_value(
+            raw_member.get("backend_id")
+            or raw_member.get("backend")
+            or raw_member.get("id")
+            or raw_member.get("node_id")
+        )
+        region_raw = _normalize_keyset_context_value(raw_member.get("region"))
+        region = region_raw.lower() if region_raw else None
+        role = _normalize_keyset_db_role(raw_member.get("role") or raw_member.get("db_role"))
+    elif isinstance(raw_member, (list, tuple)) and raw_member:
+        backend_id = _normalize_keyset_context_value(raw_member[0])
+        if len(raw_member) > 1:
+            region_raw = _normalize_keyset_context_value(raw_member[1])
+            region = region_raw.lower() if region_raw else None
+        if len(raw_member) > 2:
+            role = _normalize_keyset_db_role(raw_member[2])
+
+    if backend_id is None:
+        return None
+    return backend_id, region, role
+
+
+def _extract_backend_set_signature(
+    conn: object | None,
+    *,
+    keyset_cursor_context: dict[str, str] | None = None,
+) -> str | None:
+    if conn is None:
+        return None
+
+    normalized_members: set[tuple[str, str | None, str | None]] = set()
+    backend_set_candidates = (
+        "keyset_backend_set",
+        "backend_set",
+        "active_backend_set",
+        "active_backends",
+        "backend_membership",
+    )
+    for attr_name in backend_set_candidates:
+        raw_value = getattr(conn, attr_name, None)
+        if isinstance(raw_value, (list, tuple, set)):
+            for raw_member in raw_value:
+                member = _normalize_backend_set_member(raw_member)
+                if member is not None:
+                    normalized_members.add(member)
+        elif raw_value is not None:
+            member = _normalize_backend_set_member(raw_value)
+            if member is not None:
+                normalized_members.add(member)
+        if normalized_members:
+            break
+
+    if not normalized_members and isinstance(keyset_cursor_context, dict):
+        fallback_member = _normalize_backend_set_member(
+            {
+                "backend_id": keyset_cursor_context.get("node_id"),
+                "region": keyset_cursor_context.get("region"),
+                "role": keyset_cursor_context.get("db_role"),
+            }
+        )
+        if fallback_member is not None:
+            normalized_members.add(fallback_member)
+
+    if not normalized_members:
+        return None
+
+    canonical_members: list[dict[str, str]] = []
+    for backend_id, region, role in sorted(normalized_members):
+        payload = {"backend_id": backend_id}
+        if region:
+            payload["region"] = region
+        if role:
+            payload["role"] = role
+        canonical_members.append(payload)
+
+    canonical_json = json.dumps(canonical_members, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()[:16]
+
+
 async def _extract_keyset_replica_lag_seconds(conn: object | None) -> float | None:
     if conn is None:
         return None
@@ -638,6 +738,19 @@ def _is_keyset_isolation_safe(isolation_level: str | None) -> bool:
 
 def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None:
     schema_metadata = metadata if isinstance(metadata, dict) else {}
+    execution_topology = None
+    if "pagination.execution_topology" in schema_metadata:
+        execution_topology = _normalize_execution_topology(
+            schema_metadata.get("pagination.execution_topology")
+        )
+    raw_federated_ordering_supported = schema_metadata.get(
+        "pagination.federated.ordering_supported"
+    )
+    federated_ordering_supported = (
+        bool(raw_federated_ordering_supported)
+        if raw_federated_ordering_supported is not None
+        else None
+    )
     schema_used = bool(schema_metadata.get("pagination.keyset.schema_used"))
     schema_strict = bool(schema_metadata.get("pagination.keyset.schema_strict"))
     schema_stale = bool(schema_metadata.get("pagination.keyset.schema_stale"))
@@ -676,6 +789,8 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
         schema_metadata.get("pagination.keyset.partition_signature_available")
     )
     partition_set_changed = bool(schema_metadata.get("pagination.keyset.partition_set_changed"))
+    backend_set_sig_present = bool(schema_metadata.get("pagination.backend_set_sig_present"))
+    backend_set_mismatch = bool(schema_metadata.get("pagination.backend_set_mismatch"))
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -688,9 +803,19 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     rejection_reason_code = _bounded_keyset_rejection_reason_code(
         schema_metadata.get("pagination.keyset.rejection_reason_code")
     )
+    pagination_reject_reason_code = (
+        _bounded_pagination_reject_reason_code(schema_metadata.get("pagination.reject_reason_code"))
+        or rejection_reason_code
+    )
 
     span = trace.get_current_span()
     if span is not None and span.is_recording():
+        if execution_topology is not None:
+            span.set_attribute("pagination.execution_topology", execution_topology)
+        if federated_ordering_supported is not None:
+            span.set_attribute(
+                "pagination.federated.ordering_supported", federated_ordering_supported
+            )
         span.set_attribute("pagination.keyset.schema_used", schema_used)
         span.set_attribute("pagination.keyset.schema_strict", schema_strict)
         span.set_attribute("pagination.keyset.schema_stale", schema_stale)
@@ -714,12 +839,16 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
             partition_signature_available,
         )
         span.set_attribute("pagination.keyset.partition_set_changed", partition_set_changed)
+        span.set_attribute("pagination.backend_set_sig_present", backend_set_sig_present)
+        span.set_attribute("pagination.backend_set_mismatch", backend_set_mismatch)
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
         span.set_attribute("pagination.keyset.isolation_enforced", isolation_enforced)
         if rejection_reason_code is not None:
             span.set_attribute("pagination.keyset.rejection_reason_code", rejection_reason_code)
+        if pagination_reject_reason_code is not None:
+            span.set_attribute("pagination.reject_reason_code", pagination_reject_reason_code)
 
 
 def _query_contains_limit_or_offset(sql: str, provider: str) -> bool:
@@ -788,6 +917,9 @@ def _record_result_contract_observability(
     next_keyset_cursor: str | None = None,
     execution_topology: str | None = None,
     federated_ordering_supported: bool | None = None,
+    backend_set_sig_present: bool | None = None,
+    backend_set_mismatch: bool | None = None,
+    pagination_reject_reason_code: str | None = None,
 ) -> None:
     span = trace.get_current_span()
     if span is None or not span.is_recording():
@@ -822,6 +954,15 @@ def _record_result_contract_observability(
         span.set_attribute(
             "pagination.federated.ordering_supported", bool(federated_ordering_supported)
         )
+    if backend_set_sig_present is not None:
+        span.set_attribute("pagination.backend_set_sig_present", bool(backend_set_sig_present))
+    if backend_set_mismatch is not None:
+        span.set_attribute("pagination.backend_set_mismatch", bool(backend_set_mismatch))
+    bounded_reject_reason_code = _bounded_pagination_reject_reason_code(
+        pagination_reject_reason_code
+    )
+    if bounded_reject_reason_code is not None:
+        span.set_attribute("pagination.reject_reason_code", bounded_reject_reason_code)
     span.set_attribute("db.result.bytes_returned", int(bytes_returned))
     span.set_attribute("db.result.execution_duration_ms", int(execution_duration_ms))
 
@@ -1339,9 +1480,13 @@ def _construct_error_response(
     if updates:
         error_meta = error_meta.model_copy(update=updates)
 
-    keyset_rejection_reason = _bounded_keyset_rejection_reason_code(meta_dict.get("reason_code"))
-    if keyset_rejection_reason is not None:
-        envelope_meta["pagination.keyset.rejection_reason_code"] = keyset_rejection_reason
+    pagination_rejection_reason = _bounded_pagination_reject_reason_code(
+        meta_dict.get("reason_code")
+    )
+    if pagination_rejection_reason is not None:
+        envelope_meta["pagination.reject_reason_code"] = pagination_rejection_reason
+        if envelope_meta.get("pagination_mode_used") == "keyset":
+            envelope_meta["pagination.keyset.rejection_reason_code"] = pagination_rejection_reason
 
     _record_tenant_enforcement_observability(envelope_meta)
     _record_session_guardrail_observability(envelope_meta)
@@ -1714,6 +1859,8 @@ async def handler(
     if pagination_mode == "keyset":
         tenant_enforcement_metadata["pagination.keyset.partial_page"] = False
         tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = False
+        tenant_enforcement_metadata["pagination.backend_set_sig_present"] = False
+        tenant_enforcement_metadata["pagination.backend_set_mismatch"] = False
         tenant_enforcement_metadata["pagination.keyset.byte_budget"] = max(
             0, int(resource_limits.max_bytes)
         )
@@ -1771,6 +1918,8 @@ async def handler(
             supports_cancel=True,
             supports_pagination=True,
             execution_model="sync",
+            execution_topology="single_backend",
+            supports_federated_deterministic_ordering=False,
         )
     tenant_mode_raw = getattr(caps, "tenant_enforcement_mode", None)
     tenant_enforcement_mode = (
@@ -2347,6 +2496,16 @@ async def handler(
     pagination_requested = bool(
         page_token or page_size or keyset_cursor or pagination_mode == "keyset"
     )
+    execution_topology = _normalize_execution_topology(getattr(caps, "execution_topology", None))
+    federated_ordering_supported = bool(
+        getattr(caps, "supports_federated_deterministic_ordering", False)
+    )
+    if pagination_requested:
+        tenant_enforcement_metadata["pagination.execution_topology"] = execution_topology
+        tenant_enforcement_metadata["pagination.federated.ordering_supported"] = (
+            federated_ordering_supported
+        )
+        tenant_enforcement_metadata["pagination.reject_reason_code"] = None
     if pagination_requested and not (
         supports_server_pagination
         or (supports_offset_pagination_wrapper and supports_query_wrapping_subselect)
@@ -2362,20 +2521,16 @@ async def handler(
             },
             envelope_metadata=tenant_enforcement_metadata,
         )
-    is_federated = getattr(caps, "execution_topology", None) == "federated"
-    if (
-        pagination_mode == "keyset"
-        and is_federated
-        and not getattr(caps, "supports_federated_deterministic_ordering", False)
-    ):
+    is_federated = execution_topology == "federated"
+    if pagination_mode == "keyset" and is_federated and not federated_ordering_supported:
         return _construct_error_response(
             execution_started_at,
             "Keyset pagination is not supported for federated backends "
             "without deterministic ordering.",
-            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata={
-                "reason_code": "KEYSET_FEDERATED_ORDERING_UNSAFE",
+                "reason_code": "PAGINATION_FEDERATED_ORDERING_UNSAFE",
                 "required_capability": "federated_deterministic_ordering",
             },
             envelope_metadata=tenant_enforcement_metadata,
@@ -2386,10 +2541,10 @@ async def handler(
         return _construct_error_response(
             execution_started_at,
             "Offset pagination is not supported for federated backends.",
-            category=ErrorCategory.UNSUPPORTED_CAPABILITY,
+            category=ErrorCategory.INVALID_REQUEST,
             provider=provider,
             metadata={
-                "reason_code": "OFFSET_FEDERATED_UNSUPPORTED",
+                "reason_code": "PAGINATION_FEDERATED_UNSUPPORTED",
                 "required_capability": "deterministic_federated_ordering",
             },
             envelope_metadata=tenant_enforcement_metadata,
@@ -2482,7 +2637,18 @@ async def handler(
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             keyset_cursor_context = _extract_keyset_cursor_context(conn)
+            backend_set_sig = _extract_backend_set_signature(
+                conn,
+                keyset_cursor_context=keyset_cursor_context,
+            )
+            if backend_set_sig:
+                keyset_cursor_context["backend_set_sig"] = backend_set_sig
+            if pagination_mode == "keyset":
+                tenant_enforcement_metadata["pagination.backend_set_sig_present"] = bool(
+                    backend_set_sig
+                )
             partition_signature = keyset_cursor_context.get("partition_signature")
+            backend_signature = backend_set_sig or partition_signature
 
             keyset_signature_for_fingerprint = (
                 json.dumps(keyset_order_signature, separators=(",", ":"))
@@ -2498,42 +2664,8 @@ async def handler(
                 max_bytes=int(resource_limits.max_bytes),
                 max_execution_ms=int(resource_limits.max_execution_ms),
                 order_signature=keyset_signature_for_fingerprint,
-                backend_signature=partition_signature,
+                backend_signature=backend_signature,
             )
-
-            if pagination_mode == "keyset" and keyset_cursor:
-                from dal.keyset_pagination import KEYSET_ORDER_MISMATCH, decode_keyset_cursor
-
-                try:
-                    keyset_values = decode_keyset_cursor(
-                        keyset_cursor,
-                        expected_fingerprint=query_fingerprint,
-                        secret=pagination_token_secret,
-                        expected_keys=keyset_order_signature,
-                    )
-                except ValueError as e:
-                    reason_code = "execution_pagination_keyset_cursor_invalid"
-                    if KEYSET_ORDER_MISMATCH in str(e):
-                        reason_code = KEYSET_ORDER_MISMATCH
-                    return _construct_error_response(
-                        execution_started_at,
-                        message=str(e),
-                        category=ErrorCategory.INVALID_REQUEST,
-                        provider=provider,
-                        metadata={"reason_code": reason_code},
-                        envelope_metadata=tenant_enforcement_metadata,
-                    )
-                if len(keyset_values) != len(keyset_order_keys):
-                    return _construct_error_response(
-                        execution_started_at,
-                        message="Keyset cursor value count mismatch with ORDER BY columns.",
-                        category=ErrorCategory.INVALID_REQUEST,
-                        provider=provider,
-                        metadata={
-                            "reason_code": "execution_pagination_keyset_cursor_column_mismatch"
-                        },
-                        envelope_metadata=tenant_enforcement_metadata,
-                    )
             raw_session_guardrail_metadata = getattr(conn, "session_guardrail_metadata", {})
             if isinstance(raw_session_guardrail_metadata, dict):
                 session_guardrail_metadata = {
@@ -2565,6 +2697,7 @@ async def handler(
                     KEYSET_SHARD_MISMATCH,
                     KEYSET_SNAPSHOT_MISMATCH,
                     KEYSET_TOPOLOGY_MISMATCH,
+                    PAGINATION_BACKEND_SET_CHANGED,
                     apply_keyset_pagination,
                     canonicalize_keyset_sql,
                     decode_keyset_cursor,
@@ -2577,8 +2710,12 @@ async def handler(
                 keyset_shard_id = keyset_cursor_context.get("shard_id")
                 keyset_shard_key_hash = keyset_cursor_context.get("shard_key_hash")
                 keyset_partition_signature = keyset_cursor_context.get("partition_signature")
+                keyset_backend_set_sig = keyset_cursor_context.get("backend_set_sig")
                 tenant_enforcement_metadata["pagination.keyset.snapshot_id_present"] = bool(
                     keyset_cursor_context.get("snapshot_id")
+                )
+                tenant_enforcement_metadata["pagination.backend_set_sig_present"] = bool(
+                    keyset_backend_set_sig
                 )
                 tenant_enforcement_metadata["pagination.keyset.db_role"] = (
                     keyset_db_role if keyset_db_role in {"primary", "replica"} else "unknown"
@@ -2696,14 +2833,14 @@ async def handler(
                         if key not in {"shard_id", "shard_key_hash"}
                     }
 
-                if keyset_cursor and expected_cursor_context:
+                if keyset_cursor:
                     try:
-                        _ = decode_keyset_cursor(
+                        keyset_values = decode_keyset_cursor(
                             keyset_cursor,
                             expected_fingerprint=query_fingerprint,
                             secret=pagination_token_secret,
                             expected_keys=keyset_order_signature,
-                            expected_cursor_context=expected_cursor_context,
+                            expected_cursor_context=expected_cursor_context or None,
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -2727,6 +2864,9 @@ async def handler(
                             tenant_enforcement_metadata[
                                 "pagination.keyset.partition_set_changed"
                             ] = True
+                        elif PAGINATION_BACKEND_SET_CHANGED in str(e):
+                            reason_code = PAGINATION_BACKEND_SET_CHANGED
+                            tenant_enforcement_metadata["pagination.backend_set_mismatch"] = True
                         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
                             reason_code
                         )
@@ -2736,6 +2876,17 @@ async def handler(
                             category=ErrorCategory.INVALID_REQUEST,
                             provider=provider,
                             metadata={"reason_code": reason_code},
+                            envelope_metadata=tenant_enforcement_metadata,
+                        )
+                    if len(keyset_values) != len(keyset_order_keys):
+                        return _construct_error_response(
+                            execution_started_at,
+                            message="Keyset cursor value count mismatch with ORDER BY columns.",
+                            category=ErrorCategory.INVALID_REQUEST,
+                            provider=provider,
+                            metadata={
+                                "reason_code": "execution_pagination_keyset_cursor_column_mismatch"
+                            },
                             envelope_metadata=tenant_enforcement_metadata,
                         )
 
@@ -3272,6 +3423,21 @@ async def handler(
                 "pagination.keyset.streaming_terminated": tenant_enforcement_metadata.get(
                     "pagination.keyset.streaming_terminated"
                 ),
+                "pagination.execution_topology": tenant_enforcement_metadata.get(
+                    "pagination.execution_topology"
+                ),
+                "pagination.federated.ordering_supported": tenant_enforcement_metadata.get(
+                    "pagination.federated.ordering_supported"
+                ),
+                "pagination.backend_set_sig_present": tenant_enforcement_metadata.get(
+                    "pagination.backend_set_sig_present"
+                ),
+                "pagination.backend_set_mismatch": tenant_enforcement_metadata.get(
+                    "pagination.backend_set_mismatch"
+                ),
+                "pagination.reject_reason_code": tenant_enforcement_metadata.get(
+                    "pagination.reject_reason_code"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
@@ -3310,9 +3476,16 @@ async def handler(
                 "pagination.keyset.cursor_emitted"
             ),
             next_keyset_cursor=tenant_enforcement_metadata.get("next_keyset_cursor"),
-            execution_topology=getattr(caps, "execution_topology", None),
-            federated_ordering_supported=getattr(
-                caps, "supports_federated_deterministic_ordering", None
+            execution_topology=tenant_enforcement_metadata.get("pagination.execution_topology"),
+            federated_ordering_supported=tenant_enforcement_metadata.get(
+                "pagination.federated.ordering_supported"
+            ),
+            backend_set_sig_present=tenant_enforcement_metadata.get(
+                "pagination.backend_set_sig_present"
+            ),
+            backend_set_mismatch=tenant_enforcement_metadata.get("pagination.backend_set_mismatch"),
+            pagination_reject_reason_code=tenant_enforcement_metadata.get(
+                "pagination.reject_reason_code"
             ),
         )
 
