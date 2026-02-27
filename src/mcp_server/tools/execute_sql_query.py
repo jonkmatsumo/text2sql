@@ -139,6 +139,13 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "QUERY_MISMATCH",
     "LEGACY_ACCEPTED",
 }
+_CURSOR_AGE_BUCKET_ALLOWLIST = {
+    "0_59",
+    "60_299",
+    "300_899",
+    "900_3599",
+    "3600_plus",
+}
 
 
 @dataclass(frozen=True)
@@ -474,6 +481,32 @@ def _normalize_cursor_age_seconds(raw_value: Any) -> int | None:
     return min(int(numeric), 604800)
 
 
+def _cursor_age_bucket(age_seconds: int | None) -> str | None:
+    if age_seconds is None:
+        return None
+    bounded_age = _normalize_cursor_age_seconds(age_seconds)
+    if bounded_age is None:
+        return None
+    if bounded_age < 60:
+        return "0_59"
+    if bounded_age < 300:
+        return "60_299"
+    if bounded_age < 900:
+        return "300_899"
+    if bounded_age < 3600:
+        return "900_3599"
+    return "3600_plus"
+
+
+def _normalize_cursor_age_bucket(raw_value: Any) -> str | None:
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip()
+    if normalized in _CURSOR_AGE_BUCKET_ALLOWLIST:
+        return normalized
+    return None
+
+
 def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
     if not isinstance(reason_code, str):
         return None
@@ -504,9 +537,13 @@ def _apply_cursor_decode_metadata(
         envelope_metadata["pagination.cursor.issued_at_present"] = bool(
             metadata.get("issued_at_present")
         )
+        envelope_metadata["cursor_issued_at_present"] = bool(metadata.get("issued_at_present"))
     cursor_age_seconds = _normalize_cursor_age_seconds(metadata.get("age_s"))
     if cursor_age_seconds is not None:
         envelope_metadata["pagination.cursor.age_s"] = cursor_age_seconds
+        age_bucket = _cursor_age_bucket(cursor_age_seconds)
+        if age_bucket is not None:
+            envelope_metadata["cursor_age_bucket"] = age_bucket
     if "expired" in metadata:
         envelope_metadata["pagination.cursor.expired"] = bool(metadata.get("expired"))
     if "skew_detected" in metadata:
@@ -516,10 +553,13 @@ def _apply_cursor_decode_metadata(
         validation_outcome = _cursor_validation_outcome_from_reason_code(fallback_reason_code)
     if validation_outcome is not None:
         envelope_metadata["pagination.cursor.validation_outcome"] = validation_outcome
+        envelope_metadata["cursor_validation_outcome"] = validation_outcome
     if fallback_reason_code == "PAGINATION_CURSOR_EXPIRED":
         envelope_metadata["pagination.cursor.expired"] = True
     if fallback_reason_code == "PAGINATION_CURSOR_CLOCK_SKEW":
         envelope_metadata["pagination.cursor.skew_detected"] = True
+    if fallback_reason_code == "PAGINATION_CURSOR_ISSUED_AT_INVALID":
+        envelope_metadata.setdefault("cursor_issued_at_present", False)
 
 
 def _normalize_keyset_context_value(value: Any) -> str | None:
@@ -871,14 +911,26 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
     legacy_cursor_issued_at_accepted = bool(
         schema_metadata.get("pagination.cursor.legacy_issued_at_accepted")
     )
+    cursor_issued_at_present = None
+    if "cursor_issued_at_present" in schema_metadata:
+        cursor_issued_at_present = bool(schema_metadata.get("cursor_issued_at_present"))
+    elif "pagination.cursor.issued_at_present" in schema_metadata:
+        cursor_issued_at_present = bool(schema_metadata.get("pagination.cursor.issued_at_present"))
     cursor_age_seconds = _normalize_cursor_age_seconds(
         schema_metadata.get("pagination.cursor.age_s")
     )
+    cursor_age_bucket = _normalize_cursor_age_bucket(schema_metadata.get("cursor_age_bucket"))
+    if cursor_age_bucket is None:
+        cursor_age_bucket = _cursor_age_bucket(cursor_age_seconds)
     cursor_expired = bool(schema_metadata.get("pagination.cursor.expired"))
     cursor_skew_detected = bool(schema_metadata.get("pagination.cursor.skew_detected"))
     cursor_validation_outcome = _normalize_cursor_validation_outcome(
         schema_metadata.get("pagination.cursor.validation_outcome")
     )
+    if cursor_validation_outcome is None:
+        cursor_validation_outcome = _normalize_cursor_validation_outcome(
+            schema_metadata.get("cursor_validation_outcome")
+        )
     replica_lag_seconds = _normalize_non_negative_float(
         schema_metadata.get("pagination.keyset.replica_lag_seconds")
     )
@@ -934,14 +986,19 @@ def _record_keyset_schema_observability(metadata: dict[str, Any] | None) -> None
                 "pagination.cursor.legacy_issued_at_accepted",
                 legacy_cursor_issued_at_accepted,
             )
+        if cursor_issued_at_present is not None:
+            span.set_attribute("cursor_issued_at_present", cursor_issued_at_present)
         if cursor_age_seconds is not None:
             span.set_attribute("pagination.cursor.age_s", cursor_age_seconds)
+        if cursor_age_bucket is not None:
+            span.set_attribute("cursor_age_bucket", cursor_age_bucket)
         if "pagination.cursor.expired" in schema_metadata:
             span.set_attribute("pagination.cursor.expired", cursor_expired)
         if "pagination.cursor.skew_detected" in schema_metadata:
             span.set_attribute("pagination.cursor.skew_detected", cursor_skew_detected)
         if cursor_validation_outcome is not None:
             span.set_attribute("pagination.cursor.validation_outcome", cursor_validation_outcome)
+            span.set_attribute("cursor_validation_outcome", cursor_validation_outcome)
         if replica_lag_seconds is not None:
             span.set_attribute("pagination.keyset.replica_lag_seconds", replica_lag_seconds)
         span.set_attribute("pagination.keyset.isolation_level", isolation_level)
@@ -3597,6 +3654,13 @@ async def handler(
                 ),
                 "pagination.reject_reason_code": tenant_enforcement_metadata.get(
                     "pagination.reject_reason_code"
+                ),
+                "cursor_issued_at_present": tenant_enforcement_metadata.get(
+                    "cursor_issued_at_present"
+                ),
+                "cursor_age_bucket": tenant_enforcement_metadata.get("cursor_age_bucket"),
+                "cursor_validation_outcome": tenant_enforcement_metadata.get(
+                    "cursor_validation_outcome"
                 ),
             },
         )

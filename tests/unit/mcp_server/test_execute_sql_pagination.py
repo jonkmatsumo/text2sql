@@ -5,7 +5,7 @@ import json
 import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -720,6 +720,87 @@ async def test_execute_sql_query_offset_follow_up_expired_cursor_sanitized():
     serialized = json.dumps(second)
     assert "LEAK_SENTINEL_OFFSET_333" not in serialized
     assert expired_token not in serialized
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_clock():
+    """Offset cursor metadata/spans should expose bounded deterministic validation telemetry."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=1,
+        fingerprint=fingerprint,
+        issued_at=1_000,
+        max_age_s=600,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+        patch("dal.pagination_cursor.time.time", return_value=1_120),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=1,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    metadata = result["metadata"]
+    assert "error" not in result
+    assert metadata["cursor_issued_at_present"] is True
+    assert metadata["cursor_age_bucket"] == "60_299"
+    assert metadata["cursor_validation_outcome"] == "OK"
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["cursor_issued_at_present"] == metadata["cursor_issued_at_present"]
+    assert attrs["cursor_age_bucket"] == metadata["cursor_age_bucket"]
+    assert attrs["cursor_validation_outcome"] == metadata["cursor_validation_outcome"]
 
 
 @pytest.mark.asyncio

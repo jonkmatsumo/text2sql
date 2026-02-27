@@ -982,6 +982,8 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
         execution_model="sync",
     )
     sql = "SELECT id FROM users WHERE note = 'LEAK_SENTINEL_KEYSET_222' ORDER BY id ASC"
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
 
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
@@ -989,6 +991,7 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
         patch("dal.database.Database.get_connection") as mock_get_conn,
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
     ):
 
         class _Conn:
@@ -1040,7 +1043,18 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
         )
 
     page_two = json.loads(page_two_payload)
+    metadata = page_two["metadata"]
     assert page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    assert metadata["cursor_issued_at_present"] is True
+    assert metadata["cursor_validation_outcome"] == "EXPIRED"
+    assert metadata["cursor_age_bucket"] == "3600_plus"
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["cursor_issued_at_present"] == metadata["cursor_issued_at_present"]
+    assert attrs["cursor_age_bucket"] == metadata["cursor_age_bucket"]
+    assert attrs["cursor_validation_outcome"] == metadata["cursor_validation_outcome"]
     serialized = json.dumps(page_two)
     assert "LEAK_SENTINEL_KEYSET_222" not in serialized
     assert expired_cursor not in serialized
