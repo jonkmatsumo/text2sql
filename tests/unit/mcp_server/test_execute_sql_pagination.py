@@ -1,14 +1,20 @@
 """Tests for execute_sql_query pagination handling."""
 
+import base64
 import json
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from dal.execution_resource_limits import ExecutionResourceLimits
-from dal.offset_pagination import build_query_fingerprint, encode_offset_pagination_token
+from dal.offset_pagination import (
+    build_cursor_query_fingerprint,
+    build_query_fingerprint,
+    encode_offset_pagination_token,
+)
 from mcp_server.tools.execute_sql_query import handler
 
 
@@ -32,6 +38,35 @@ def test_build_query_fingerprint_changes_with_order_signature():
         order_signature='["id|desc|nulls_first"]',
     )
     assert fingerprint_asc != fingerprint_desc
+
+
+def test_build_cursor_query_fingerprint_normalizes_sql_variants():
+    """Strict cursor query fingerprints should normalize SQL whitespace variants."""
+    cursor_fp_compact = build_cursor_query_fingerprint(
+        sql="SELECT id FROM users ORDER BY id ASC",
+        provider="postgres",
+        pagination_mode="keyset",
+        order_signature='["id|asc|nulls_last"]',
+    )
+    cursor_fp_spaced = build_cursor_query_fingerprint(
+        sql="  SELECT   id   FROM users   ORDER BY id ASC  ",
+        provider="postgres",
+        pagination_mode="keyset",
+        order_signature='["id|asc|nulls_last"]',
+    )
+    assert cursor_fp_compact == cursor_fp_spaced
+
+
+def test_build_cursor_query_fingerprint_changes_with_pagination_mode():
+    """Pagination mode should be part of strict cursor query fingerprint identity."""
+    base_kwargs = {
+        "sql": "SELECT id FROM users ORDER BY id ASC",
+        "provider": "postgres",
+        "order_signature": '["id|asc|nulls_last"]',
+    }
+    assert build_cursor_query_fingerprint(**base_kwargs, pagination_mode="offset") != (
+        build_cursor_query_fingerprint(**base_kwargs, pagination_mode="keyset")
+    )
 
 
 @pytest.mark.asyncio
@@ -139,7 +174,7 @@ async def test_execute_sql_query_pagination_metadata():
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_conn_ctx(),
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
     ):
         payload = await handler(
@@ -187,7 +222,7 @@ async def test_execute_sql_query_pagination_bounds():
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_conn_ctx(),
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
     ):
         payload = await handler(
@@ -460,7 +495,7 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         ),
         patch(
             "mcp_server.tools.execute_sql_query.Database.get_connection",
-            return_value=_conn_ctx(),
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
         ),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
     ):
@@ -477,6 +512,295 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         result["error"]["details_safe"]["reason_code"]
         == "execution_pagination_offset_exceeds_limit"
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable_classification():
+    """Expired offset cursors should return stable invalid-request classification fields."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        issued_at=0,
+        max_age_s=1,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_mode(monkeypatch):
+    """Offset cursor strict binding should reject mismatched query fingerprints."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        query_fp="query-fp-a",
+    )
+    monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.build_cursor_query_fingerprint",
+            return_value="query-fp-b",
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["error_code"] == "VALIDATION_ERROR"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
+    assert result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_CURSOR_QUERY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_follow_up_expired_cursor_sanitized():
+    """Follow-up offset requests with expired cursors should reject without SQL/cursor leakage."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}, {"id": 2}, {"id": 3}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    sql = "SELECT 1 AS id, 'LEAK_SENTINEL_OFFSET_333' AS note"
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            side_effect=lambda *_args, **_kwargs: _conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        first_payload = await handler(sql, tenant_id=1, page_size=2)
+        first = json.loads(first_payload)
+        token = first["metadata"]["next_page_token"]
+        assert token
+
+        padded = token + "=" * (-len(token) % 4)
+        token_wrapper = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        token_wrapper["p"]["issued_at"] = 0
+        token_wrapper["p"]["max_age_s"] = 1
+        expired_token = (
+            base64.urlsafe_b64encode(json.dumps(token_wrapper).encode("utf-8"))
+            .decode("ascii")
+            .rstrip("=")
+        )
+
+        second_payload = await handler(
+            sql,
+            tenant_id=1,
+            page_size=2,
+            page_token=expired_token,
+        )
+
+    second = json.loads(second_payload)
+    assert second["error"]["details_safe"]["reason_code"] == "PAGINATION_CURSOR_EXPIRED"
+    serialized = json.dumps(second)
+    assert "LEAK_SENTINEL_OFFSET_333" not in serialized
+    assert expired_token not in serialized
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_clock():
+    """Offset cursor metadata/spans should expose bounded deterministic validation telemetry."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=1,
+        fingerprint=fingerprint,
+        issued_at=1_000,
+        max_age_s=600,
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
+        patch("dal.pagination_cursor.time.time", return_value=1_120),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=1,
+            page_token=token,
+        )
+
+    result = json.loads(payload)
+    metadata = result["metadata"]
+    assert "error" not in result
+    assert metadata["cursor_issued_at_present"] is True
+    assert metadata["cursor_age_bucket"] == "60_299"
+    assert metadata["cursor_validation_outcome"] == "OK"
+
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert attrs["cursor_issued_at_present"] == metadata["cursor_issued_at_present"]
+    assert attrs["cursor_age_bucket"] == metadata["cursor_age_bucket"]
+    assert attrs["cursor_validation_outcome"] == metadata["cursor_validation_outcome"]
 
 
 @pytest.mark.asyncio

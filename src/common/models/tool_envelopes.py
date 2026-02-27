@@ -327,6 +327,22 @@ class ExecuteSQLQueryMetadata(BaseModel):
         validation_alias="pagination.reject_reason_code",
         serialization_alias="pagination.reject_reason_code",
     )
+    cursor_issued_at_present: Optional[bool] = Field(
+        None,
+        description="True when the pagination cursor included issued_at metadata",
+    )
+    cursor_age_bucket: Optional[Literal["0_59", "60_299", "300_899", "900_3599", "3600_plus"]] = (
+        Field(
+            None,
+            description="Bucketed cursor age used for bounded telemetry parity checks",
+        )
+    )
+    cursor_validation_outcome: Optional[
+        Literal["OK", "EXPIRED", "SKEW", "INVALID", "QUERY_MISMATCH", "LEGACY_ACCEPTED"]
+    ] = Field(
+        None,
+        description="Bounded cursor-validation outcome classification",
+    )
 
     @model_validator(mode="before")
     @classmethod

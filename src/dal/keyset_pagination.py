@@ -10,6 +10,13 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 import sqlglot
 from sqlglot import exp
 
+from dal.pagination_cursor import (
+    bounded_cursor_age_seconds,
+    cursor_now_epoch_seconds,
+    normalize_optional_int,
+    normalize_strict_int,
+)
+
 KEYSET_REQUIRES_STABLE_TIEBREAKER = "KEYSET_REQUIRES_STABLE_TIEBREAKER"
 KEYSET_ORDER_MISMATCH = "KEYSET_ORDER_MISMATCH"
 KEYSET_ORDER_COLUMN_NOT_FOUND = "KEYSET_ORDER_COLUMN_NOT_FOUND"
@@ -22,6 +29,10 @@ KEYSET_TOPOLOGY_MISMATCH = "KEYSET_TOPOLOGY_MISMATCH"
 KEYSET_SHARD_MISMATCH = "KEYSET_SHARD_MISMATCH"
 KEYSET_PARTITION_SET_CHANGED = "KEYSET_PARTITION_SET_CHANGED"
 PAGINATION_BACKEND_SET_CHANGED = "PAGINATION_BACKEND_SET_CHANGED"
+PAGINATION_CURSOR_EXPIRED = "PAGINATION_CURSOR_EXPIRED"
+PAGINATION_CURSOR_ISSUED_AT_INVALID = "PAGINATION_CURSOR_ISSUED_AT_INVALID"
+PAGINATION_CURSOR_CLOCK_SKEW = "PAGINATION_CURSOR_CLOCK_SKEW"
+PAGINATION_CURSOR_QUERY_MISMATCH = "PAGINATION_CURSOR_QUERY_MISMATCH"
 
 
 @runtime_checkable
@@ -212,13 +223,26 @@ def encode_keyset_cursor(
     fingerprint: str,
     secret: Optional[str] = None,
     cursor_context: Optional[Dict[str, str]] = None,
+    issued_at: int | None = None,
+    max_age_s: int | None = None,
+    now_epoch_seconds: int | None = None,
+    query_fp: str | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
-    payload = {
+    payload: Dict[str, Any] = {
         "v": [_json_serializable(v) for v in values],
         "k": keys,
         "f": fingerprint,
+        "issued_at": cursor_now_epoch_seconds(
+            now_epoch_seconds=issued_at if issued_at is not None else now_epoch_seconds
+        ),
     }
+    normalized_max_age = normalize_optional_int(max_age_s)
+    if normalized_max_age is not None:
+        payload["max_age_s"] = normalized_max_age
+    normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
+    if normalized_query_fp:
+        payload["query_fp"] = normalized_query_fp
     normalized_context = _normalize_cursor_context(cursor_context)
     if normalized_context:
         payload["c"] = normalized_context
@@ -235,6 +259,12 @@ def decode_keyset_cursor(
     secret: Optional[str] = None,
     expected_keys: Optional[List[str]] = None,
     expected_cursor_context: Optional[Dict[str, str]] = None,
+    require_issued_at: bool = True,
+    decode_metadata: Optional[Dict[str, Any]] = None,
+    max_age_seconds: int | None = 3600,
+    clock_skew_seconds: int = 300,
+    now_epoch_seconds: int | None = None,
+    expected_query_fp: str | None = None,
 ) -> List[Any]:
     """Decode and validate a keyset cursor."""
     try:
@@ -245,6 +275,14 @@ def decode_keyset_cursor(
 
         json_data = base64.urlsafe_b64decode(cursor).decode()
         payload = json.loads(json_data)
+
+        if secret:
+            stored_sig = payload.get("s")
+            payload_for_sig = {k: v for k, v in payload.items() if k != "s"}
+            if not stored_sig or not hmac.compare_digest(
+                stored_sig, _calculate_signature(payload_for_sig, secret)
+            ):
+                raise ValueError("Invalid cursor: signature mismatch.")
 
         payload_context = _normalize_cursor_context(payload.get("c"))
         required_context = _normalize_cursor_context(expected_cursor_context)
@@ -269,6 +307,63 @@ def decode_keyset_cursor(
                 )
                 raise ValueError(f"Invalid cursor: {reason_code}.")
 
+        issued_at = normalize_strict_int(payload.get("issued_at"))
+        if isinstance(decode_metadata, dict):
+            decode_metadata["expired"] = False
+            decode_metadata["skew_detected"] = False
+            decode_metadata["issued_at_present"] = issued_at is not None
+        if issued_at is None:
+            if require_issued_at:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "INVALID"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_ISSUED_AT_INVALID}.")
+            if isinstance(decode_metadata, dict):
+                decode_metadata["legacy_issued_at_accepted"] = True
+                decode_metadata["validation_outcome"] = "LEGACY_ACCEPTED"
+        if issued_at is not None:
+            max_age_payload = payload.get("max_age_s")
+            max_age_s = None
+            if max_age_payload is not None:
+                max_age_s = normalize_strict_int(max_age_payload)
+                if max_age_s is None:
+                    if isinstance(decode_metadata, dict):
+                        decode_metadata["validation_outcome"] = "INVALID"
+                    raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_ISSUED_AT_INVALID}.")
+            effective_max_age_s = max_age_s
+            if effective_max_age_s is None:
+                effective_max_age_s = normalize_optional_int(max_age_seconds)
+            if effective_max_age_s is None or effective_max_age_s <= 0:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "INVALID"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_ISSUED_AT_INVALID}.")
+            now_epoch = cursor_now_epoch_seconds(now_epoch_seconds=now_epoch_seconds)
+            skew_seconds = max(0, int(clock_skew_seconds))
+            if issued_at > now_epoch + skew_seconds:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["age_s"] = 0
+                    decode_metadata["skew_detected"] = True
+                    decode_metadata["validation_outcome"] = "SKEW"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_CLOCK_SKEW}.")
+            age_seconds = now_epoch - issued_at
+            if isinstance(decode_metadata, dict):
+                decode_metadata["age_s"] = bounded_cursor_age_seconds(age_seconds)
+            if age_seconds > int(effective_max_age_s):
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["expired"] = True
+                    decode_metadata["validation_outcome"] = "EXPIRED"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_EXPIRED}.")
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "OK"
+        expected_query_fingerprint = (
+            str(expected_query_fp).strip() if isinstance(expected_query_fp, str) else None
+        )
+        if expected_query_fingerprint:
+            query_fp = payload.get("query_fp")
+            payload_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
+            if payload_query_fp != expected_query_fingerprint:
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "QUERY_MISMATCH"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_QUERY_MISMATCH}.")
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
         if expected_keys is not None:
@@ -276,14 +371,6 @@ def decode_keyset_cursor(
             payload_keys = raw_keys if isinstance(raw_keys, list) else []
             if payload_keys != expected_keys:
                 raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
-
-        if secret:
-            stored_sig = payload.get("s")
-            payload_for_sig = {k: v for k, v in payload.items() if k != "s"}
-            if not stored_sig or not hmac.compare_digest(
-                stored_sig, _calculate_signature(payload_for_sig, secret)
-            ):
-                raise ValueError("Invalid cursor: signature mismatch.")
 
         return payload.get("v", [])
     except Exception as e:
