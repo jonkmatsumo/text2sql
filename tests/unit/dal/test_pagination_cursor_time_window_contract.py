@@ -309,3 +309,44 @@ def test_keyset_decode_accepts_cursor_within_ttl_window():
         now_epoch_seconds=1_099,
     )
     assert decoded == [5]
+
+
+def test_offset_decode_rejects_query_fingerprint_mismatch_in_strict_mode():
+    """Offset cursor should reject strict query fingerprint mismatches."""
+    token = encode_offset_pagination_token(
+        offset=5,
+        limit=10,
+        fingerprint="fp1",
+        issued_at=1_000,
+        query_fp="query-a",
+    )
+    with pytest.raises(OffsetPaginationTokenError) as exc_info:
+        decode_offset_pagination_token(
+            token=token,
+            expected_fingerprint="fp1",
+            expected_query_fp="query-b",
+            max_length=2048,
+            max_age_seconds=100,
+            now_epoch_seconds=1_050,
+        )
+    assert exc_info.value.reason_code == "PAGINATION_CURSOR_QUERY_MISMATCH"
+
+
+def test_keyset_decode_rejects_query_fingerprint_mismatch_in_strict_mode():
+    """Keyset cursor should reject strict query fingerprint mismatches."""
+    cursor = encode_keyset_cursor(
+        [5],
+        ["id|asc|nulls_last"],
+        "fp1",
+        issued_at=1_000,
+        query_fp="query-a",
+    )
+    with pytest.raises(ValueError, match="PAGINATION_CURSOR_QUERY_MISMATCH"):
+        decode_keyset_cursor(
+            cursor,
+            expected_fingerprint="fp1",
+            expected_keys=["id|asc|nulls_last"],
+            expected_query_fp="query-b",
+            max_age_seconds=100,
+            now_epoch_seconds=1_050,
+        )

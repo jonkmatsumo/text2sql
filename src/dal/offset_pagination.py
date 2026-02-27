@@ -76,6 +76,27 @@ def build_query_fingerprint(
     return hashlib.sha256(raw).hexdigest()
 
 
+def build_cursor_query_fingerprint(
+    *,
+    sql: str,
+    provider: str,
+    pagination_mode: str,
+    order_signature: str | None = None,
+) -> str:
+    """Build a stable fingerprint for strict cursor replay protection checks."""
+    sql_normalized = " ".join((sql or "").strip().split())
+    normalized_mode = (pagination_mode or "").strip().lower() or "offset"
+    payload = {
+        "sql": sql_normalized,
+        "provider": (provider or "").strip().lower(),
+        "pagination_mode": normalized_mode,
+    }
+    if order_signature is not None:
+        payload["order_signature"] = " ".join(order_signature.strip().split())
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def encode_offset_pagination_token(
     *,
     offset: int,
@@ -265,11 +286,6 @@ def decode_offset_pagination_token(
             )
         if isinstance(decode_metadata, dict):
             decode_metadata["validation_outcome"] = "OK"
-    if fingerprint != expected_fingerprint:
-        raise OffsetPaginationTokenError(
-            reason_code="execution_pagination_page_token_fingerprint_mismatch",
-            message="Pagination token does not match the current query.",
-        )
     expected_query_fingerprint = (
         str(expected_query_fp).strip() if isinstance(expected_query_fp, str) else None
     )
@@ -281,6 +297,11 @@ def decode_offset_pagination_token(
                 reason_code=PAGINATION_CURSOR_QUERY_MISMATCH,
                 message="Pagination token does not match the current query fingerprint.",
             )
+    if fingerprint != expected_fingerprint:
+        raise OffsetPaginationTokenError(
+            reason_code="execution_pagination_page_token_fingerprint_mismatch",
+            message="Pagination token does not match the current query.",
+        )
 
     return OffsetPaginationToken(
         offset=offset,

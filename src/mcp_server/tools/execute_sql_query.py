@@ -38,6 +38,7 @@ from dal.error_classification import emit_classified_error, extract_error_metada
 from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.offset_pagination import (
     OffsetPaginationTokenError,
+    build_cursor_query_fingerprint,
     build_query_fingerprint,
     decode_offset_pagination_token,
     encode_offset_pagination_token,
@@ -2660,6 +2661,9 @@ async def handler(
         0, int(get_env_int("PAGINATION_CURSOR_CLOCK_SKEW_SECONDS", 300) or 300)
     )
     cursor_require_issued_at = get_env_bool("PAGINATION_CURSOR_REQUIRE_ISSUED_AT", True)
+    cursor_bind_query_fingerprint = get_env_bool(
+        "PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", pagination_mode == "keyset"
+    )
     max_offset_pages = max(
         1,
         int(
@@ -2742,6 +2746,7 @@ async def handler(
         pagination_token_secret_raw = (get_env_str("MCP_PAGINATION_TOKEN_SECRET", "") or "").strip()
         pagination_token_secret = pagination_token_secret_raw or None
         query_fingerprint = None  # Bound to backend signature inside connection block
+        cursor_query_fingerprint = None
 
         async with Database.get_connection(tenant_id=tenant_id, read_only=True) as conn:
             keyset_cursor_context = _extract_keyset_cursor_context(conn)
@@ -2762,6 +2767,12 @@ async def handler(
                 json.dumps(keyset_order_signature, separators=(",", ":"))
                 if keyset_order_signature
                 else None
+            )
+            cursor_query_fingerprint = build_cursor_query_fingerprint(
+                sql=effective_sql_query,
+                provider=provider,
+                pagination_mode=pagination_mode,
+                order_signature=keyset_signature_for_fingerprint,
             )
             query_fingerprint = build_query_fingerprint(
                 sql=effective_sql_query,
@@ -2954,6 +2965,9 @@ async def handler(
                             decode_metadata=keyset_decode_metadata,
                             max_age_seconds=cursor_max_age_seconds,
                             clock_skew_seconds=cursor_clock_skew_seconds,
+                            expected_query_fp=(
+                                cursor_query_fingerprint if cursor_bind_query_fingerprint else None
+                            ),
                         )
                     except ValueError as e:
                         reason_code = "execution_pagination_keyset_cursor_invalid"
@@ -3113,6 +3127,9 @@ async def handler(
                             decode_metadata=offset_decode_metadata,
                             max_age_seconds=cursor_max_age_seconds,
                             clock_skew_seconds=cursor_clock_skew_seconds,
+                            expected_query_fp=(
+                                cursor_query_fingerprint if cursor_bind_query_fingerprint else None
+                            ),
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
@@ -3156,6 +3173,9 @@ async def handler(
                             fingerprint=query_fingerprint,
                             secret=pagination_token_secret or None,
                             max_age_s=cursor_max_age_seconds,
+                            query_fp=(
+                                cursor_query_fingerprint if cursor_bind_query_fingerprint else None
+                            ),
                         )
                     else:
                         next_token = None
@@ -3367,6 +3387,7 @@ async def handler(
                     secret=pagination_token_secret,
                     cursor_context=keyset_cursor_context or None,
                     max_age_s=cursor_max_age_seconds,
+                    query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True

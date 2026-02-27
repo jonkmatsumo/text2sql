@@ -307,14 +307,6 @@ def decode_keyset_cursor(
                 )
                 raise ValueError(f"Invalid cursor: {reason_code}.")
 
-        if payload.get("f") != expected_fingerprint:
-            raise ValueError("Invalid cursor: fingerprint mismatch.")
-        if expected_keys is not None:
-            raw_keys = payload.get("k", [])
-            payload_keys = raw_keys if isinstance(raw_keys, list) else []
-            if payload_keys != expected_keys:
-                raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
-
         issued_at = normalize_strict_int(payload.get("issued_at"))
         if isinstance(decode_metadata, dict):
             decode_metadata["expired"] = False
@@ -372,6 +364,13 @@ def decode_keyset_cursor(
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "QUERY_MISMATCH"
                 raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_QUERY_MISMATCH}.")
+        if payload.get("f") != expected_fingerprint:
+            raise ValueError("Invalid cursor: fingerprint mismatch.")
+        if expected_keys is not None:
+            raw_keys = payload.get("k", [])
+            payload_keys = raw_keys if isinstance(raw_keys, list) else []
+            if payload_keys != expected_keys:
+                raise ValueError(f"Invalid cursor: {KEYSET_ORDER_MISMATCH}.")
 
         return payload.get("v", [])
     except Exception as e:
