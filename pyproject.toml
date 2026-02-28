@@ -66,7 +66,8 @@ markers = [
     "requires_db: requires live database services",
     "requires_mcp: requires live MCP server connection",
     "requires_control_db: requires control-plane database with schema",
-    "dataset_synthetic: require synthetic dataset"
+    "dataset_synthetic: require synthetic dataset",
+    "pagination: cursor guardrail and pagination token tests"
 ]
 
 [tool.black]
