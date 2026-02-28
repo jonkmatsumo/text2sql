@@ -30,6 +30,16 @@ if str(src_dir) not in sys.path:
     print(f"conftest.py: Added {src_dir} to sys.path")
 
 
+@pytest.fixture(autouse=True)
+def _allow_unsigned_cursors_in_tests(monkeypatch):
+    """Allow unsigned cursors by default in tests.
+
+    Production requires PAGINATION_CURSOR_SIGNING_SECRET to be set (fail-closed).
+    Tests that verify signing behavior should override this via monkeypatch.
+    """
+    monkeypatch.setenv("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET", "true")
+
+
 def pytest_collection_modifyitems(config, items):
     """Skipping integration tests unless RUN_INTEGRATION_TESTS=1."""
     run_integration = os.getenv("RUN_INTEGRATION_TESTS", "0") == "1"
