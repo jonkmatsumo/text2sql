@@ -11,6 +11,8 @@ from dal.keyset_pagination import (
     encode_keyset_cursor,
 )
 
+pytestmark = pytest.mark.pagination
+
 
 def test_keyset_cursor_roundtrip():
     """Test successful encoding and decoding of a keyset cursor."""

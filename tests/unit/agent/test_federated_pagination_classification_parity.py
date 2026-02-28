@@ -16,6 +16,8 @@ from dal.capabilities import BackendCapabilities
 from dal.keyset_pagination import encode_keyset_cursor
 from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_handler
 
+pytestmark = pytest.mark.pagination
+
 
 class _BackendSetConn:
     def __init__(self, backend_set: list[dict[str, str]] | None):

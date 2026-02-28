@@ -9,6 +9,8 @@ import pytest
 from dal.capabilities import BackendCapabilities
 from mcp_server.tools.execute_sql_query import handler
 
+pytestmark = pytest.mark.pagination
+
 
 class BaseMockConn:
     """Base mock connection for testing."""

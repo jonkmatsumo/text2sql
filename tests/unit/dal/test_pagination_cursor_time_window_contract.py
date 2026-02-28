@@ -14,6 +14,8 @@ from dal.offset_pagination import (
     encode_offset_pagination_token,
 )
 
+pytestmark = pytest.mark.pagination
+
 
 def _decode_base64_json(token: str) -> dict:
     padded = token + "=" * (-len(token) % 4)

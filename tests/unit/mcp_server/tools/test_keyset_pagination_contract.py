@@ -7,6 +7,8 @@ import pytest
 
 from mcp_server.tools.execute_sql_query import handler
 
+pytestmark = pytest.mark.pagination
+
 
 @pytest.mark.asyncio
 async def test_execute_sql_query_keyset_order_by_required():

@@ -2708,6 +2708,8 @@ async def handler(
             envelope_metadata=tenant_enforcement_metadata,
         )
 
+    # Cursor guardrail env vars — all fail-closed with safe defaults.
+    # See dal/pagination_cursor.py module docstring for full semantics.
     max_page_token_len = get_env_int(
         "EXECUTION_PAGINATION_TOKEN_MAX_LENGTH", _DEFAULT_PAGE_TOKEN_MAX_LENGTH
     )
