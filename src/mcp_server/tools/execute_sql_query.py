@@ -143,6 +143,8 @@ _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "INVALID",
     "QUERY_MISMATCH",
     "LEGACY_ACCEPTED",
+    "SIGNATURE_INVALID",
+    "SECRET_MISSING",
 }
 _CURSOR_AGE_BUCKET_ALLOWLIST = {
     "0_59",
@@ -521,6 +523,8 @@ def _cursor_validation_outcome_from_reason_code(reason_code: Any) -> str | None:
         "PAGINATION_CURSOR_CLOCK_SKEW": "SKEW",
         "PAGINATION_CURSOR_ISSUED_AT_INVALID": "INVALID",
         "PAGINATION_CURSOR_QUERY_MISMATCH": "QUERY_MISMATCH",
+        "PAGINATION_CURSOR_SIGNATURE_INVALID": "SIGNATURE_INVALID",
+        "PAGINATION_CURSOR_SECRET_MISSING": "SECRET_MISSING",
     }
     return mapping.get(reason)
 
@@ -2744,6 +2748,9 @@ async def handler(
         _pagination_signing_available = False
     else:
         _pagination_signing_available = True
+    tenant_enforcement_metadata["pagination.cursor.signing_secret_configured"] = (
+        _pagination_signing_available
+    )
     if page_token is not None:
         normalized_page_token = page_token.strip()
         if not normalized_page_token:
@@ -3079,6 +3086,9 @@ async def handler(
                             reason_code = "PAGINATION_CURSOR_CLOCK_SKEW"
                         elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
                             reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
+                        elif "PAGINATION_CURSOR_SIGNATURE_INVALID" in str(e):
+                            reason_code = "PAGINATION_CURSOR_SIGNATURE_INVALID"
+                            tenant_enforcement_metadata["pagination.cursor.signature_valid"] = False
                         _apply_cursor_decode_metadata(
                             tenant_enforcement_metadata,
                             keyset_decode_metadata,
@@ -3095,6 +3105,8 @@ async def handler(
                             metadata={"reason_code": reason_code},
                             envelope_metadata=tenant_enforcement_metadata,
                         )
+                    if pagination_token_secret:
+                        tenant_enforcement_metadata["pagination.cursor.signature_valid"] = True
                     _apply_cursor_decode_metadata(
                         tenant_enforcement_metadata, keyset_decode_metadata
                     )
@@ -3215,6 +3227,8 @@ async def handler(
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
+                        if pagination_token_secret:
+                            tenant_enforcement_metadata["pagination.cursor.signature_valid"] = True
                         _apply_cursor_decode_metadata(
                             tenant_enforcement_metadata, offset_decode_metadata
                         )

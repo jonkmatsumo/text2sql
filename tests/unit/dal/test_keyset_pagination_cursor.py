@@ -58,12 +58,12 @@ def test_keyset_cursor_secret_validation():
     assert decode_keyset_cursor(cursor, fingerprint, secret=secret) == values
 
     # Failure with wrong secret
-    with pytest.raises(ValueError, match="signature mismatch"):
+    with pytest.raises(ValueError, match="PAGINATION_CURSOR_SIGNATURE_INVALID"):
         decode_keyset_cursor(cursor, fingerprint, secret="wrong-secret")
 
     # Failure if secret expected but missing in cursor
     cursor_no_secret = encode_keyset_cursor(values, keys, fingerprint)
-    with pytest.raises(ValueError, match="signature mismatch"):
+    with pytest.raises(ValueError, match="PAGINATION_CURSOR_SIGNATURE_INVALID"):
         decode_keyset_cursor(cursor_no_secret, fingerprint, secret=secret)
 
 

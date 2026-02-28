@@ -11,6 +11,7 @@ import sqlglot
 from sqlglot import exp
 
 from dal.pagination_cursor import (
+    PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
     cursor_now_epoch_seconds,
     normalize_optional_int,
@@ -282,7 +283,9 @@ def decode_keyset_cursor(
             if not stored_sig or not hmac.compare_digest(
                 stored_sig, _calculate_signature(payload_for_sig, secret)
             ):
-                raise ValueError("Invalid cursor: signature mismatch.")
+                if isinstance(decode_metadata, dict):
+                    decode_metadata["validation_outcome"] = "SIGNATURE_INVALID"
+                raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_SIGNATURE_INVALID}.")
 
         payload_context = _normalize_cursor_context(payload.get("c"))
         required_context = _normalize_cursor_context(expected_cursor_context)
