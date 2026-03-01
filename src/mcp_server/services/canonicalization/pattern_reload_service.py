@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from common.constants.ml_operability import (
+    RELOAD_FAILURE_REASON_BUILD_PIPELINE_FAILED,
+    RELOAD_FAILURE_REASON_RELOAD_EXCEPTION,
+)
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
 logger = logging.getLogger(__name__)
@@ -17,6 +21,7 @@ class ReloadResult:
     reload_id: str
     duration_ms: float
     error: Optional[str] = None
+    reason_code: Optional[str] = None
     pattern_count: Optional[int] = None
 
 
@@ -58,6 +63,7 @@ class PatternReloadService:
             return ReloadResult(
                 success=True,
                 error=None,
+                reason_code=None,
                 reloaded_at=datetime.now(timezone.utc),
                 pattern_count=count,
                 reload_id=reload_id,
@@ -65,15 +71,21 @@ class PatternReloadService:
             )
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000
+            reason_code = (
+                RELOAD_FAILURE_REASON_BUILD_PIPELINE_FAILED
+                if "Failed to build pipeline" in str(e)
+                else RELOAD_FAILURE_REASON_RELOAD_EXCEPTION
+            )
 
             logger.error(
                 f"Pattern reload failed (source={source}, reload_id={reload_id}, "
-                f"duration_ms={duration_ms:.2f}): {e}",
+                f"duration_ms={duration_ms:.2f}, reason_code={reason_code}): {e}",
                 exc_info=True,
             )
             return ReloadResult(
                 success=False,
                 error=str(e),
+                reason_code=reason_code,
                 reloaded_at=datetime.now(timezone.utc),
                 pattern_count=None,
                 reload_id=reload_id,
