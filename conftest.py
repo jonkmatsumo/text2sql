@@ -31,13 +31,13 @@ if str(src_dir) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
-def _allow_unsigned_cursors_in_tests(monkeypatch):
-    """Allow unsigned cursors by default in tests.
+def _set_pagination_signing_secret(monkeypatch):
+    """Provide an explicit signing secret for all pagination tests.
 
     Production requires PAGINATION_CURSOR_SIGNING_SECRET to be set (fail-closed).
     Tests that verify signing behavior should override this via monkeypatch.
     """
-    monkeypatch.setenv("PAGINATION_CURSOR_ALLOW_INSECURE_DEV_SECRET", "true")
+    monkeypatch.setenv("PAGINATION_CURSOR_SIGNING_SECRET", "test-pagination-secret")
 
 
 def pytest_collection_modifyitems(config, items):

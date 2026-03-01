@@ -338,7 +338,16 @@ class ExecuteSQLQueryMetadata(BaseModel):
         )
     )
     cursor_validation_outcome: Optional[
-        Literal["OK", "EXPIRED", "SKEW", "INVALID", "QUERY_MISMATCH", "LEGACY_ACCEPTED"]
+        Literal[
+            "OK",
+            "EXPIRED",
+            "SKEW",
+            "INVALID",
+            "QUERY_MISMATCH",
+            "LEGACY_ACCEPTED",
+            "SIGNATURE_INVALID",
+            "SECRET_MISSING",
+        ]
     ] = Field(
         None,
         description="Bounded cursor-validation outcome classification",

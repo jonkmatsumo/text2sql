@@ -1,6 +1,8 @@
 """Tests for execute_sql_query pagination handling."""
 
 import base64
+import hashlib
+import hmac
 import json
 import time
 from contextlib import asynccontextmanager
@@ -16,6 +18,8 @@ from dal.offset_pagination import (
     encode_offset_pagination_token,
 )
 from mcp_server.tools.execute_sql_query import handler
+
+_TEST_SECRET = "test-pagination-secret"
 
 
 def test_build_query_fingerprint_changes_with_order_signature():
@@ -486,7 +490,9 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         max_bytes=limits.max_bytes,
         max_execution_ms=limits.max_execution_ms,
     )
-    token = encode_offset_pagination_token(offset=999, limit=2, fingerprint=fingerprint)
+    token = encode_offset_pagination_token(
+        offset=999, limit=2, fingerprint=fingerprint, secret=_TEST_SECRET
+    )
 
     with (
         patch(
@@ -551,6 +557,7 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         fingerprint=fingerprint,
         issued_at=0,
         max_age_s=1,
+        secret=_TEST_SECRET,
     )
 
     with (
@@ -619,6 +626,7 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         fingerprint=fingerprint,
         issued_at=int(time.time()),
         query_fp="query-fp-a",
+        secret=_TEST_SECRET,
     )
     monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
 
@@ -702,8 +710,17 @@ async def test_execute_sql_query_offset_follow_up_expired_cursor_sanitized():
         token_wrapper = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
         token_wrapper["p"]["issued_at"] = 0
         token_wrapper["p"]["max_age_s"] = 1
+        # Re-sign inner payload after tampering
+        inner_bytes = json.dumps(token_wrapper["p"], separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
+        token_wrapper["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), inner_bytes, digestmod=hashlib.sha256
+        ).hexdigest()
         expired_token = (
-            base64.urlsafe_b64encode(json.dumps(token_wrapper).encode("utf-8"))
+            base64.urlsafe_b64encode(
+                json.dumps(token_wrapper, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            )
             .decode("ascii")
             .rstrip("=")
         )
@@ -761,6 +778,7 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         fingerprint=fingerprint,
         issued_at=1_000,
         max_age_s=600,
+        secret=_TEST_SECRET,
     )
 
     with (

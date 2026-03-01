@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import hmac
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -6,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcp_server.tools.execute_sql_query import handler
+
+_TEST_SECRET = "test-pagination-secret"
 
 pytestmark = pytest.mark.pagination
 
@@ -774,6 +778,7 @@ async def test_execute_sql_query_keyset_cursor_invalid_fingerprint():
             ["id|asc|nulls_last"],
             "old-fingerprint",
             query_fp="query-fp",
+            secret=_TEST_SECRET,
         )
 
         sql = "SELECT id FROM users ORDER BY id ASC"
@@ -832,6 +837,7 @@ async def test_execute_sql_query_keyset_cursor_expired_reason_code_stable():
             "ttl-fingerprint",
             issued_at=0,
             max_age_s=1,
+            secret=_TEST_SECRET,
         )
 
         payload = await handler(
@@ -890,6 +896,7 @@ async def test_execute_sql_query_keyset_cursor_clock_skew_reason_code_stable():
             "ttl-fingerprint",
             issued_at=4_000_000_000,
             max_age_s=3600,
+            secret=_TEST_SECRET,
         )
 
         payload = await handler(
@@ -952,6 +959,7 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
             ["id|asc|nulls_last"],
             "stable-fingerprint",
             query_fp="different-query-fp",
+            secret=_TEST_SECRET,
         )
 
         payload = await handler(
@@ -1028,10 +1036,16 @@ async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
         cursor_payload = json.loads(
             base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
         )
+        cursor_payload.pop("s", None)
         cursor_payload["issued_at"] = 0
         cursor_payload["max_age_s"] = 1
+        # Re-sign after tampering
+        sig_data = json.dumps(cursor_payload, sort_keys=True)
+        cursor_payload["s"] = hmac.new(
+            _TEST_SECRET.encode(), sig_data.encode(), hashlib.sha256
+        ).hexdigest()
         expired_cursor = (
-            base64.urlsafe_b64encode(json.dumps(cursor_payload).encode("utf-8"))
+            base64.urlsafe_b64encode(json.dumps(cursor_payload, sort_keys=True).encode("utf-8"))
             .decode("ascii")
             .rstrip("=")
         )
@@ -1102,6 +1116,7 @@ async def test_execute_sql_query_keyset_cursor_rejects_order_mismatch():
             ["id|asc|nulls_last"],
             "stable-fingerprint",
             query_fp="query-fp",
+            secret=_TEST_SECRET,
         )
         payload = await handler(
             "SELECT id FROM users ORDER BY id DESC",
@@ -3106,6 +3121,7 @@ async def test_execute_sql_query_keyset_rewrite_applied():
             ["id|asc|nulls_last"],
             "test-fingerprint",
             query_fp="query-fp",
+            secret=_TEST_SECRET,
         )
 
         await handler(
