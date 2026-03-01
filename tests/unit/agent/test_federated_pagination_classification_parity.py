@@ -18,6 +18,8 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 
 pytestmark = pytest.mark.pagination
 
+_TEST_SECRET = "test-pagination-secret"
+
 
 class _BackendSetConn:
     def __init__(self, backend_set: list[dict[str, str]] | None):
@@ -125,16 +127,28 @@ def _reason_code_from_agent_error_metadata(error_metadata: dict) -> str | None:
 
 
 def _tamper_keyset_cursor(
-    cursor: str, *, issued_at: int | None = None, max_age_s: int | None = None
+    cursor: str,
+    *,
+    issued_at: int | None = None,
+    max_age_s: int | None = None,
+    secret: str = _TEST_SECRET,
 ) -> str:
-    """Mutate keyset cursor payload fields for replay/ttl regression coverage."""
+    """Mutate keyset cursor payload fields and re-sign for regression coverage."""
+    import hashlib
+    import hmac as _hmac
+
     padded = cursor + "=" * (-len(cursor) % 4)
     payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    payload.pop("s", None)
     if issued_at is not None:
         payload["issued_at"] = issued_at
     if max_age_s is not None:
         payload["max_age_s"] = max_age_s
-    return base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
+    if secret:
+        sig_data = json.dumps(payload, sort_keys=True)
+        payload["s"] = _hmac.new(secret.encode(), sig_data.encode(), hashlib.sha256).hexdigest()
+    raw = json.dumps(payload, sort_keys=True)
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
 
 
 @pytest.mark.asyncio
@@ -272,6 +286,7 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         ["id|asc|nulls_last"],
         "stable-fingerprint",
         query_fp="cursor-query-fp",
+        secret=_TEST_SECRET,
     )
     with (
         patch(

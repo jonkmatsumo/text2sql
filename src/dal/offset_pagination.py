@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dal.pagination_cursor import (
+    PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
     cursor_now_epoch_seconds,
     normalize_optional_int,
@@ -206,8 +207,10 @@ def decode_offset_pagination_token(
     signature = raw_wrapper.get("s")
     if secret_value:
         if not isinstance(signature, str) or not signature:
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "SIGNATURE_INVALID"
             raise OffsetPaginationTokenError(
-                reason_code="execution_pagination_page_token_signature_invalid",
+                reason_code=PAGINATION_CURSOR_SIGNATURE_INVALID,
                 message="Invalid pagination token signature.",
             )
         payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -215,8 +218,10 @@ def decode_offset_pagination_token(
             secret_value.encode("utf-8"), payload_bytes, digestmod=hashlib.sha256
         ).hexdigest()
         if not hmac.compare_digest(signature, expected_signature):
+            if isinstance(decode_metadata, dict):
+                decode_metadata["validation_outcome"] = "SIGNATURE_INVALID"
             raise OffsetPaginationTokenError(
-                reason_code="execution_pagination_page_token_signature_invalid",
+                reason_code=PAGINATION_CURSOR_SIGNATURE_INVALID,
                 message="Invalid pagination token signature.",
             )
 
