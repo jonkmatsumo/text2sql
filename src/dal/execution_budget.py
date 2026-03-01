@@ -246,3 +246,31 @@ def budget_snapshot_fingerprint(snapshot: Any) -> str:
     normalized = ExecutionBudget.from_snapshot(snapshot).to_snapshot()
     raw = json.dumps(normalized, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def rows_remaining_bucket(remaining_rows: int) -> str:
+    """Bucket remaining rows into a bounded low-cardinality label."""
+    value = max(0, min(int(remaining_rows), _BUDGET_INT_MAX))
+    if value == 0:
+        return "0"
+    if value <= 10:
+        return "1_10"
+    if value <= 100:
+        return "11_100"
+    if value <= 500:
+        return "101_500"
+    return "501_plus"
+
+
+def bytes_remaining_bucket(remaining_bytes: int) -> str:
+    """Bucket remaining bytes into a bounded low-cardinality label."""
+    value = max(0, min(int(remaining_bytes), _BUDGET_INT_MAX))
+    if value == 0:
+        return "0"
+    if value <= 1_024:
+        return "1_1k"
+    if value <= 16_384:
+        return "1k_16k"
+    if value <= 262_144:
+        return "16k_256k"
+    return "256k_plus"

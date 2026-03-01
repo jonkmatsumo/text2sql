@@ -43,6 +43,8 @@ from dal.execution_budget import (
     ExecutionBudget,
     ExecutionBudgetExceededError,
     ExecutionBudgetSnapshotError,
+    bytes_remaining_bucket,
+    rows_remaining_bucket,
 )
 from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.offset_pagination import (
@@ -144,6 +146,12 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     "PAGINATION_CURSOR_CLOCK_SKEW",
     "PAGINATION_CURSOR_QUERY_MISMATCH",
+    PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
+    PAGINATION_BUDGET_SNAPSHOT_INVALID,
+}
+_PAGINATION_BUDGET_REASON_ALLOWLIST = {
     PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
     PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
@@ -476,6 +484,52 @@ def _bounded_keyset_rejection_reason_code(raw_reason_code: Any) -> str | None:
 
 def _bounded_pagination_reject_reason_code(raw_reason_code: Any) -> str | None:
     return _bounded_keyset_rejection_reason_code(raw_reason_code)
+
+
+def _bounded_pagination_budget_reason_code(raw_reason_code: Any) -> str | None:
+    reason_code = raw_reason_code.strip() if isinstance(raw_reason_code, str) else ""
+    if reason_code in _PAGINATION_BUDGET_REASON_ALLOWLIST:
+        return reason_code
+    return None
+
+
+def _apply_execution_budget_metadata(
+    envelope_metadata: dict[str, Any],
+    budget: ExecutionBudget,
+    *,
+    reason_code: str | None = None,
+) -> None:
+    if not isinstance(envelope_metadata, dict):
+        return
+    bounded_reason_code = _bounded_pagination_budget_reason_code(reason_code)
+    exhausted = bounded_reason_code is not None or budget.exhausted_reason_code() is not None
+    envelope_metadata["pagination.budget.rows_remaining_bucket"] = rows_remaining_bucket(
+        budget.rows_remaining
+    )
+    envelope_metadata["pagination.budget.bytes_remaining_bucket"] = bytes_remaining_bucket(
+        budget.bytes_remaining
+    )
+    envelope_metadata["pagination.budget.exhausted"] = bool(exhausted)
+    envelope_metadata["pagination.budget.reason_code"] = bounded_reason_code
+
+
+def _record_execution_budget_observability(metadata: dict[str, Any] | None) -> None:
+    budget_metadata = metadata if isinstance(metadata, dict) else {}
+    rows_bucket = budget_metadata.get("pagination.budget.rows_remaining_bucket")
+    bytes_bucket = budget_metadata.get("pagination.budget.bytes_remaining_bucket")
+    exhausted = bool(budget_metadata.get("pagination.budget.exhausted"))
+    reason_code = _bounded_pagination_budget_reason_code(
+        budget_metadata.get("pagination.budget.reason_code")
+    )
+    span = trace.get_current_span()
+    if span is not None and span.is_recording():
+        if isinstance(rows_bucket, str):
+            span.set_attribute("pagination.budget.rows_remaining_bucket", rows_bucket)
+        if isinstance(bytes_bucket, str):
+            span.set_attribute("pagination.budget.bytes_remaining_bucket", bytes_bucket)
+        span.set_attribute("pagination.budget.exhausted", exhausted)
+        if reason_code is not None:
+            span.set_attribute("pagination.budget.reason_code", reason_code)
 
 
 def _normalize_execution_topology(raw_value: Any) -> str:
@@ -1673,6 +1727,7 @@ def _construct_error_response(
     _record_sandbox_observability(envelope_meta)
     _record_timeout_observability(envelope_meta)
     _record_keyset_schema_observability(envelope_meta)
+    _record_execution_budget_observability(envelope_meta)
 
     envelope = ExecuteSQLQueryResponseEnvelope(
         rows=[],
@@ -2075,8 +2130,14 @@ async def handler(
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+    _apply_execution_budget_metadata(tenant_enforcement_metadata, execution_budget)
 
     def _budget_violation_response(reason_code: str) -> str:
+        _apply_execution_budget_metadata(
+            tenant_enforcement_metadata,
+            execution_budget,
+            reason_code=reason_code,
+        )
         tenant_enforcement_metadata["pagination.reject_reason_code"] = reason_code
         if pagination_mode == "keyset":
             tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
@@ -3146,6 +3207,11 @@ async def handler(
                         )
                     except ExecutionBudgetSnapshotError:
                         reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
+                        _apply_execution_budget_metadata(
+                            tenant_enforcement_metadata,
+                            execution_budget,
+                            reason_code=reason_code,
+                        )
                         tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
                             reason_code
                         )
@@ -3157,6 +3223,7 @@ async def handler(
                             metadata={"reason_code": reason_code},
                             envelope_metadata=tenant_enforcement_metadata,
                         )
+                    _apply_execution_budget_metadata(tenant_enforcement_metadata, execution_budget)
                     pre_exhaustion_reason = execution_budget.exhausted_reason_code()
                     if pre_exhaustion_reason is not None:
                         return _budget_violation_response(pre_exhaustion_reason)
@@ -3297,6 +3364,10 @@ async def handler(
                                     "budget."
                                 ),
                             )
+                        _apply_execution_budget_metadata(
+                            tenant_enforcement_metadata,
+                            execution_budget,
+                        )
                         if pagination_token_secret:
                             tenant_enforcement_metadata["pagination.cursor.signature_valid"] = True
                         _apply_cursor_decode_metadata(
@@ -3499,6 +3570,7 @@ async def handler(
             )
         except ExecutionBudgetExceededError as budget_exc:
             return _budget_violation_response(budget_exc.reason_code)
+        _apply_execution_budget_metadata(tenant_enforcement_metadata, execution_budget)
         if size_truncated:
             next_token = None
             if pagination_mode == "keyset" and streaming:
@@ -3815,6 +3887,18 @@ async def handler(
                 "pagination.cursor.issued_at_present": tenant_enforcement_metadata.get(
                     "pagination.cursor.issued_at_present"
                 ),
+                "pagination.budget.rows_remaining_bucket": tenant_enforcement_metadata.get(
+                    "pagination.budget.rows_remaining_bucket"
+                ),
+                "pagination.budget.bytes_remaining_bucket": tenant_enforcement_metadata.get(
+                    "pagination.budget.bytes_remaining_bucket"
+                ),
+                "pagination.budget.exhausted": tenant_enforcement_metadata.get(
+                    "pagination.budget.exhausted"
+                ),
+                "pagination.budget.reason_code": tenant_enforcement_metadata.get(
+                    "pagination.budget.reason_code"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
@@ -3827,6 +3911,7 @@ async def handler(
         _record_sandbox_observability(tenant_enforcement_metadata)
         _record_timeout_observability(tenant_enforcement_metadata)
         _record_keyset_schema_observability(tenant_enforcement_metadata)
+        _record_execution_budget_observability(tenant_enforcement_metadata)
         _record_result_contract_observability(
             partial=is_truncated,
             partial_reason=partial_reason,
@@ -3893,6 +3978,13 @@ async def handler(
             offset_decode_metadata,
             fallback_reason_code=e.reason_code,
         )
+        bounded_budget_reason = _bounded_pagination_budget_reason_code(e.reason_code)
+        if bounded_budget_reason is not None:
+            _apply_execution_budget_metadata(
+                tenant_enforcement_metadata,
+                execution_budget,
+                reason_code=bounded_budget_reason,
+            )
         return _construct_error_response(
             execution_started_at,
             message=str(e),

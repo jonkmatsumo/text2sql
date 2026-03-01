@@ -3629,6 +3629,19 @@ async def test_execute_sql_query_keyset_observability_parity_with_metadata():
             attrs["pagination.keyset.cursor_emitted"]
             == metadata["pagination.keyset.cursor_emitted"]
         )
+        assert (
+            attrs["pagination.budget.rows_remaining_bucket"]
+            == metadata["pagination.budget.rows_remaining_bucket"]
+        )
+        assert (
+            attrs["pagination.budget.bytes_remaining_bucket"]
+            == metadata["pagination.budget.bytes_remaining_bucket"]
+        )
+        assert attrs["pagination.budget.exhausted"] == metadata["pagination.budget.exhausted"]
+        assert metadata["pagination.budget.exhausted"] is False
+        assert metadata.get("pagination.budget.reason_code") is None
+        assert "pagination.budget.rows_remaining" not in attrs
+        assert "pagination.budget.bytes_remaining" not in attrs
 
 
 @pytest.mark.asyncio
@@ -4281,6 +4294,8 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_BYTE_LIMIT", "true")
     monkeypatch.setenv("EXECUTION_RESOURCE_MAX_EXECUTION_MS", "100000")
     monkeypatch.setenv("EXECUTION_RESOURCE_ENFORCE_TIMEOUT", "true")
+    mock_span = MagicMock()
+    mock_span.is_recording.return_value = True
 
     with (
         patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
@@ -4288,6 +4303,7 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
         patch("dal.database.Database.get_connection") as mock_get_conn,
         patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
         patch("mcp_server.utils.auth.validate_role", return_value=None),
+        patch("mcp_server.tools.execute_sql_query.trace.get_current_span", return_value=mock_span),
     ):
 
         class _Conn:
@@ -4310,6 +4326,7 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
         assert "error" not in page_one
         cursor = page_one["metadata"]["next_keyset_cursor"]
         assert cursor
+        mock_span.reset_mock()
 
         page_two = json.loads(
             await handler(
@@ -4325,6 +4342,39 @@ async def test_execute_sql_query_keyset_rejects_when_global_row_budget_exceeded(
     assert (
         page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
     )
+    metadata = page_two["metadata"]
+    assert metadata["pagination.budget.exhausted"] is True
+    assert metadata["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    assert metadata["pagination.budget.rows_remaining_bucket"] in {
+        "0",
+        "1_10",
+        "11_100",
+        "101_500",
+        "501_plus",
+    }
+    assert metadata["pagination.budget.bytes_remaining_bucket"] in {
+        "0",
+        "1_1k",
+        "1k_16k",
+        "16k_256k",
+        "256k_plus",
+    }
+    attrs = {}
+    for call in mock_span.set_attribute.call_args_list:
+        key, value = call.args
+        attrs[key] = value
+    assert (
+        attrs["pagination.budget.rows_remaining_bucket"]
+        == metadata["pagination.budget.rows_remaining_bucket"]
+    )
+    assert (
+        attrs["pagination.budget.bytes_remaining_bucket"]
+        == metadata["pagination.budget.bytes_remaining_bucket"]
+    )
+    assert attrs["pagination.budget.exhausted"] is True
+    assert attrs["pagination.budget.reason_code"] == "PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED"
+    assert "pagination.budget.rows_remaining" not in attrs
+    assert "pagination.budget.bytes_remaining" not in attrs
 
 
 @pytest.mark.asyncio
