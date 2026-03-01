@@ -43,6 +43,7 @@ class OffsetPaginationToken:
     max_age_s: int | None = None
     legacy_issued_at_accepted: bool = False
     query_fingerprint: str | None = None
+    budget_snapshot: dict[str, Any] | None = None
 
 
 def build_query_fingerprint(
@@ -108,6 +109,7 @@ def encode_offset_pagination_token(
     max_age_s: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
+    budget_snapshot: dict[str, Any] | None = None,
 ) -> str:
     """Encode a deterministic opaque pagination token."""
     payload: dict[str, Any] = {
@@ -125,6 +127,8 @@ def encode_offset_pagination_token(
     normalized_query_fp = str(query_fp).strip() if isinstance(query_fp, str) else ""
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
+    if budget_snapshot is not None:
+        payload["budget_snapshot"] = budget_snapshot
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     wrapper: dict[str, Any] = {"p": payload}
     secret_value = (secret or "").strip()
@@ -256,6 +260,7 @@ def decode_offset_pagination_token(
             )
     query_fp = payload.get("query_fp")
     query_fingerprint = str(query_fp).strip() if isinstance(query_fp, str) else None
+    budget_snapshot = payload.get("budget_snapshot")
     if issued_at is not None:
         effective_max_age_s = max_age_s
         if effective_max_age_s is None:
@@ -316,4 +321,5 @@ def decode_offset_pagination_token(
         max_age_s=max_age_s,
         legacy_issued_at_accepted=legacy_issued_at_accepted,
         query_fingerprint=query_fingerprint,
+        budget_snapshot=budget_snapshot if isinstance(budget_snapshot, dict) else budget_snapshot,
     )

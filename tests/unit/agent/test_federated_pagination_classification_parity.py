@@ -19,6 +19,14 @@ from mcp_server.tools.execute_sql_query import handler as mcp_execute_sql_query_
 pytestmark = pytest.mark.pagination
 
 _TEST_SECRET = "test-pagination-secret"
+_BUDGET_SNAPSHOT = {
+    "max_total_rows": 1000,
+    "max_total_bytes": 1_000_000,
+    "max_total_duration_ms": 60_000,
+    "consumed_rows": 0,
+    "consumed_bytes": 0,
+    "consumed_duration_ms": 0,
+}
 
 
 class _BackendSetConn:
@@ -287,6 +295,7 @@ async def test_cursor_query_mismatch_classification_parity_between_mcp_and_agent
         "stable-fingerprint",
         query_fp="cursor-query-fp",
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
     with (
         patch(

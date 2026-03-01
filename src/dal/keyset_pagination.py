@@ -228,6 +228,7 @@ def encode_keyset_cursor(
     max_age_s: int | None = None,
     now_epoch_seconds: int | None = None,
     query_fp: str | None = None,
+    budget_snapshot: Dict[str, Any] | None = None,
 ) -> str:
     """Encode keyset values and keys into an opaque base64 cursor."""
     payload: Dict[str, Any] = {
@@ -247,6 +248,8 @@ def encode_keyset_cursor(
     normalized_context = _normalize_cursor_context(cursor_context)
     if normalized_context:
         payload["c"] = normalized_context
+    if budget_snapshot is not None:
+        payload["budget_snapshot"] = budget_snapshot
     if secret:
         payload["s"] = _calculate_signature(payload, secret)
 
@@ -367,6 +370,8 @@ def decode_keyset_cursor(
                 if isinstance(decode_metadata, dict):
                     decode_metadata["validation_outcome"] = "QUERY_MISMATCH"
                 raise ValueError(f"Invalid cursor: {PAGINATION_CURSOR_QUERY_MISMATCH}.")
+        if isinstance(decode_metadata, dict):
+            decode_metadata["budget_snapshot"] = payload.get("budget_snapshot")
         if payload.get("f") != expected_fingerprint:
             raise ValueError("Invalid cursor: fingerprint mismatch.")
         if expected_keys is not None:

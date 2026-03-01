@@ -35,6 +35,15 @@ from dal.capability_negotiation import (
 )
 from dal.database import Database
 from dal.error_classification import emit_classified_error, extract_error_metadata
+from dal.execution_budget import (
+    PAGINATION_BUDGET_SNAPSHOT_INVALID,
+    PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
+    ExecutionBudget,
+    ExecutionBudgetExceededError,
+    ExecutionBudgetSnapshotError,
+)
 from dal.execution_resource_limits import ExecutionResourceLimits
 from dal.offset_pagination import (
     OffsetPaginationTokenError,
@@ -135,6 +144,10 @@ _KEYSET_REJECTION_REASON_ALLOWLIST = {
     "PAGINATION_CURSOR_ISSUED_AT_INVALID",
     "PAGINATION_CURSOR_CLOCK_SKEW",
     "PAGINATION_CURSOR_QUERY_MISMATCH",
+    PAGINATION_GLOBAL_ROW_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_BYTE_BUDGET_EXCEEDED,
+    PAGINATION_GLOBAL_TIME_BUDGET_EXCEEDED,
+    PAGINATION_BUDGET_SNAPSHOT_INVALID,
 }
 _CURSOR_VALIDATION_OUTCOME_ALLOWLIST = {
     "OK",
@@ -1991,7 +2004,8 @@ async def handler(
     keyset_allow_cross_shard = bool(get_env_bool("KEYSET_ALLOW_CROSS_SHARD", False))
     try:
         resource_limits = ExecutionResourceLimits.from_env()
-    except ValueError:
+        execution_budget = ExecutionBudget.from_resource_limits(resource_limits)
+    except (ValueError, ExecutionBudgetSnapshotError):
         return _construct_error_response(
             execution_started_at,
             message="Execution resource limits are misconfigured.",
@@ -2061,6 +2075,19 @@ async def handler(
             tenant_enforcement_metadata["pagination.keyset.streaming_terminated"] = False
     tenant_enforcement_metadata.update(session_guardrail_metadata)
     tenant_enforcement_metadata.update(sandbox_metadata)
+
+    def _budget_violation_response(reason_code: str) -> str:
+        tenant_enforcement_metadata["pagination.reject_reason_code"] = reason_code
+        if pagination_mode == "keyset":
+            tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = reason_code
+        return _construct_error_response(
+            execution_started_at,
+            message="Pagination request exceeds the configured global execution budget.",
+            category=ErrorCategory.INVALID_REQUEST,
+            provider=provider,
+            metadata={"reason_code": reason_code},
+            envelope_metadata=tenant_enforcement_metadata,
+        )
 
     from mcp_server.utils.auth import validate_role
 
@@ -2820,6 +2847,7 @@ async def handler(
         applied_page_size = page_size
         conn = None
         offset_decode_metadata: dict[str, Any] | None = None
+        offset_next_token_payload: dict[str, int] | None = None
         query_fingerprint = None  # Bound to backend signature inside connection block
         cursor_query_fingerprint = None
 
@@ -3086,6 +3114,8 @@ async def handler(
                             reason_code = "PAGINATION_CURSOR_CLOCK_SKEW"
                         elif "PAGINATION_CURSOR_QUERY_MISMATCH" in str(e):
                             reason_code = "PAGINATION_CURSOR_QUERY_MISMATCH"
+                        elif PAGINATION_BUDGET_SNAPSHOT_INVALID in str(e):
+                            reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
                         elif "PAGINATION_CURSOR_SIGNATURE_INVALID" in str(e):
                             reason_code = "PAGINATION_CURSOR_SIGNATURE_INVALID"
                             tenant_enforcement_metadata["pagination.cursor.signature_valid"] = False
@@ -3110,6 +3140,26 @@ async def handler(
                     _apply_cursor_decode_metadata(
                         tenant_enforcement_metadata, keyset_decode_metadata
                     )
+                    try:
+                        execution_budget = ExecutionBudget.from_snapshot(
+                            keyset_decode_metadata.get("budget_snapshot")
+                        )
+                    except ExecutionBudgetSnapshotError:
+                        reason_code = PAGINATION_BUDGET_SNAPSHOT_INVALID
+                        tenant_enforcement_metadata["pagination.keyset.rejection_reason_code"] = (
+                            reason_code
+                        )
+                        return _construct_error_response(
+                            execution_started_at,
+                            message="Invalid keyset cursor budget snapshot.",
+                            category=ErrorCategory.INVALID_REQUEST,
+                            provider=provider,
+                            metadata={"reason_code": reason_code},
+                            envelope_metadata=tenant_enforcement_metadata,
+                        )
+                    pre_exhaustion_reason = execution_budget.exhausted_reason_code()
+                    if pre_exhaustion_reason is not None:
+                        return _budget_violation_response(pre_exhaustion_reason)
                     if len(keyset_values) != len(keyset_order_keys):
                         return _construct_error_response(
                             execution_started_at,
@@ -3160,7 +3210,8 @@ async def handler(
 
             async def _fetch_rows():
                 """Fetch rows from the database."""
-                nonlocal columns, next_token, offset_decode_metadata
+                nonlocal columns, next_token, offset_decode_metadata, offset_next_token_payload
+                nonlocal execution_budget
                 fetch_page = getattr(conn, "fetch_page", None)
                 fetch_page_with_columns = getattr(conn, "fetch_page_with_columns", None)
                 offset_pagination_requested = pagination_mode == "offset" and bool(
@@ -3227,6 +3278,25 @@ async def handler(
                         )
                         pagination_offset = token_payload.offset
                         pagination_limit = token_payload.limit
+                        try:
+                            execution_budget_from_token = ExecutionBudget.from_snapshot(
+                                token_payload.budget_snapshot
+                            )
+                        except ExecutionBudgetSnapshotError as exc:
+                            raise OffsetPaginationTokenError(
+                                reason_code=PAGINATION_BUDGET_SNAPSHOT_INVALID,
+                                message=str(exc),
+                            ) from exc
+                        execution_budget = execution_budget_from_token
+                        pre_exhaustion_reason = execution_budget.exhausted_reason_code()
+                        if pre_exhaustion_reason is not None:
+                            raise OffsetPaginationTokenError(
+                                reason_code=pre_exhaustion_reason,
+                                message=(
+                                    "Pagination request exceeds the configured global execution "
+                                    "budget."
+                                ),
+                            )
                         if pagination_token_secret:
                             tenant_enforcement_metadata["pagination.cursor.signature_valid"] = True
                         _apply_cursor_decode_metadata(
@@ -3268,16 +3338,10 @@ async def handler(
                                 reason_code=PAGINATION_CURSOR_SECRET_MISSING,
                                 message="Cursor signing secret is not configured.",
                             )
-                        next_token = encode_offset_pagination_token(
-                            offset=pagination_offset + pagination_limit,
-                            limit=pagination_limit,
-                            fingerprint=query_fingerprint,
-                            secret=pagination_token_secret or None,
-                            max_age_s=cursor_max_age_seconds,
-                            query_fp=(
-                                cursor_query_fingerprint if cursor_bind_query_fingerprint else None
-                            ),
-                        )
+                        offset_next_token_payload = {
+                            "offset": pagination_offset + pagination_limit,
+                            "limit": pagination_limit,
+                        }
                     else:
                         next_token = None
                     return rows
@@ -3427,10 +3491,33 @@ async def handler(
         result_rows = byte_limit_result.rows
         bytes_returned = byte_limit_result.bytes_returned
         execution_duration_ms = max(0, int((time.monotonic() - execution_started_at) * 1000))
+        try:
+            execution_budget = execution_budget.consume(
+                rows=len(result_rows),
+                bytes_returned=bytes_returned,
+                duration_ms=execution_duration_ms,
+            )
+        except ExecutionBudgetExceededError as budget_exc:
+            return _budget_violation_response(budget_exc.reason_code)
         if size_truncated:
             next_token = None
             if pagination_mode == "keyset" and streaming:
                 streaming_terminated_early = True
+
+        if (
+            pagination_mode == "offset"
+            and offset_next_token_payload is not None
+            and not size_truncated
+        ):
+            next_token = encode_offset_pagination_token(
+                offset=int(offset_next_token_payload["offset"]),
+                limit=int(offset_next_token_payload["limit"]),
+                fingerprint=query_fingerprint or "",
+                secret=pagination_token_secret or None,
+                max_age_s=cursor_max_age_seconds,
+                query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
+                budget_snapshot=execution_budget.to_snapshot(),
+            )
 
         if include_columns and not columns:
             columns = _build_columns_from_rows(result_rows)
@@ -3498,6 +3585,7 @@ async def handler(
                     cursor_context=keyset_cursor_context or None,
                     max_age_s=cursor_max_age_seconds,
                     query_fp=(cursor_query_fingerprint if cursor_bind_query_fingerprint else None),
+                    budget_snapshot=execution_budget.to_snapshot(),
                 )
                 tenant_enforcement_metadata["next_keyset_cursor"] = next_keyset_cursor
                 tenant_enforcement_metadata["pagination.keyset.cursor_emitted"] = True

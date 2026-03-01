@@ -20,6 +20,14 @@ from dal.offset_pagination import (
 from mcp_server.tools.execute_sql_query import handler
 
 _TEST_SECRET = "test-pagination-secret"
+_BUDGET_SNAPSHOT = {
+    "max_total_rows": 1000,
+    "max_total_bytes": 1_000_000,
+    "max_total_duration_ms": 60_000,
+    "consumed_rows": 0,
+    "consumed_bytes": 0,
+    "consumed_duration_ms": 0,
+}
 
 
 def test_build_query_fingerprint_changes_with_order_signature():
@@ -491,7 +499,11 @@ async def test_execute_sql_query_offset_pagination_offset_cap_enforced(monkeypat
         max_execution_ms=limits.max_execution_ms,
     )
     token = encode_offset_pagination_token(
-        offset=999, limit=2, fingerprint=fingerprint, secret=_TEST_SECRET
+        offset=999,
+        limit=2,
+        fingerprint=fingerprint,
+        secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -558,6 +570,7 @@ async def test_execute_sql_query_offset_pagination_rejects_expired_cursor_stable
         issued_at=0,
         max_age_s=1,
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
@@ -627,6 +640,7 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
         issued_at=int(time.time()),
         query_fp="query-fp-a",
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
     monkeypatch.setenv("PAGINATION_CURSOR_BIND_QUERY_FINGERPRINT", "true")
 
@@ -779,6 +793,7 @@ async def test_execute_sql_query_offset_cursor_telemetry_parity_deterministic_cl
         issued_at=1_000,
         max_age_s=600,
         secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
     )
 
     with (
