@@ -678,6 +678,91 @@ async def test_execute_sql_query_offset_pagination_query_fp_mismatch_in_strict_m
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_offset_budget_snapshot_tamper_is_rejected():
+    """Offset token budget tampering should fail closed with stable reason code."""
+    caps = SimpleNamespace(
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=False,
+        execution_model="sync",
+        supports_offset_pagination_wrapper=True,
+        supports_query_wrapping_subselect=True,
+    )
+
+    class _Conn:
+        async def fetch(self, sql, *params):
+            _ = sql, params
+            return [{"id": 1}]
+
+    @asynccontextmanager
+    async def _conn_ctx(*_args, **_kwargs):
+        yield _Conn()
+
+    limits = ExecutionResourceLimits.from_env()
+    fingerprint = build_query_fingerprint(
+        sql="SELECT 1 AS id",
+        params=[],
+        tenant_id=1,
+        provider="postgres",
+        max_rows=limits.max_rows,
+        max_bytes=limits.max_bytes,
+        max_execution_ms=limits.max_execution_ms,
+    )
+    token = encode_offset_pagination_token(
+        offset=0,
+        limit=2,
+        fingerprint=fingerprint,
+        issued_at=int(time.time()),
+        secret=_TEST_SECRET,
+        budget_snapshot=_BUDGET_SNAPSHOT,
+    )
+
+    padded = token + "=" * (-len(token) % 4)
+    wrapper = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    wrapper["p"]["budget_snapshot"]["consumed_rows"] = 1
+    inner_bytes = json.dumps(wrapper["p"], separators=(",", ":"), sort_keys=True).encode("utf-8")
+    wrapper["s"] = hmac.new(
+        _TEST_SECRET.encode("utf-8"), inner_bytes, digestmod=hashlib.sha256
+    ).hexdigest()
+    tampered_token = (
+        base64.urlsafe_b64encode(
+            json.dumps(wrapper, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+    with (
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_capabilities",
+            return_value=caps,
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_query_target_provider",
+            return_value="postgres",
+        ),
+        patch(
+            "mcp_server.tools.execute_sql_query.Database.get_connection",
+            return_value=_conn_ctx(),
+        ),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+        payload = await handler(
+            "SELECT 1 AS id",
+            tenant_id=1,
+            page_size=2,
+            page_token=tampered_token,
+        )
+
+    result = json.loads(payload)
+    assert result["error"]["category"] == "invalid_request"
+    assert result["error"]["details_safe"]["reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    assert (
+        result["metadata"]["pagination.reject_reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_offset_follow_up_expired_cursor_sanitized():
     """Follow-up offset requests with expired cursors should reject without SQL/cursor leakage."""
     caps = SimpleNamespace(

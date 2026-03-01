@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -237,3 +239,10 @@ class ExecutionBudget:
             consumed_bytes=next_bytes,
             consumed_duration_ms=next_duration,
         )
+
+
+def budget_snapshot_fingerprint(snapshot: Any) -> str:
+    """Return a deterministic hash for a validated budget snapshot."""
+    normalized = ExecutionBudget.from_snapshot(snapshot).to_snapshot()
+    raw = json.dumps(normalized, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()

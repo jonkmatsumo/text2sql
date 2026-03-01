@@ -9,6 +9,12 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from dal.execution_budget import (
+    PAGINATION_BUDGET_SNAPSHOT_INVALID,
+    ExecutionBudget,
+    ExecutionBudgetSnapshotError,
+    budget_snapshot_fingerprint,
+)
 from dal.pagination_cursor import (
     PAGINATION_CURSOR_SIGNATURE_INVALID,
     bounded_cursor_age_seconds,
@@ -128,7 +134,9 @@ def encode_offset_pagination_token(
     if normalized_query_fp:
         payload["query_fp"] = normalized_query_fp
     if budget_snapshot is not None:
-        payload["budget_snapshot"] = budget_snapshot
+        normalized_budget_snapshot = ExecutionBudget.from_snapshot(budget_snapshot).to_snapshot()
+        payload["budget_snapshot"] = normalized_budget_snapshot
+        payload["budget_fp"] = budget_snapshot_fingerprint(normalized_budget_snapshot)
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     wrapper: dict[str, Any] = {"p": payload}
     secret_value = (secret or "").strip()
@@ -261,6 +269,24 @@ def decode_offset_pagination_token(
     query_fp = payload.get("query_fp")
     query_fingerprint = str(query_fp).strip() if isinstance(query_fp, str) else None
     budget_snapshot = payload.get("budget_snapshot")
+    budget_fp = payload.get("budget_fp")
+    normalized_budget_snapshot: dict[str, Any] | None = None
+    if budget_snapshot is not None or budget_fp is not None:
+        try:
+            normalized_budget_snapshot = ExecutionBudget.from_snapshot(
+                budget_snapshot
+            ).to_snapshot()
+            expected_budget_fp = budget_snapshot_fingerprint(normalized_budget_snapshot)
+        except ExecutionBudgetSnapshotError as exc:
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_BUDGET_SNAPSHOT_INVALID,
+                message=str(exc),
+            ) from exc
+        if not isinstance(budget_fp, str) or budget_fp != expected_budget_fp:
+            raise OffsetPaginationTokenError(
+                reason_code=PAGINATION_BUDGET_SNAPSHOT_INVALID,
+                message="Invalid pagination budget snapshot fingerprint.",
+            )
     if issued_at is not None:
         effective_max_age_s = max_age_s
         if effective_max_age_s is None:
@@ -321,5 +347,5 @@ def decode_offset_pagination_token(
         max_age_s=max_age_s,
         legacy_issued_at_accepted=legacy_issued_at_accepted,
         query_fingerprint=query_fingerprint,
-        budget_snapshot=budget_snapshot if isinstance(budget_snapshot, dict) else budget_snapshot,
+        budget_snapshot=normalized_budget_snapshot,
     )

@@ -993,6 +993,160 @@ async def test_execute_sql_query_keyset_cursor_query_fp_mismatch_reason_code_sta
 
 
 @pytest.mark.asyncio
+async def test_execute_sql_query_keyset_budget_snapshot_tamper_is_rejected():
+    """Budget snapshot tampering must be rejected even when cursor signature is recomputed."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        )
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        budget_snapshot = dict(payload.get("budget_snapshot") or {})
+        budget_snapshot["consumed_rows"] = int(budget_snapshot.get("consumed_rows", 0)) + 1
+        payload["budget_snapshot"] = budget_snapshot
+        payload.pop("s", None)
+        signature_data = json.dumps(payload, sort_keys=True)
+        payload["s"] = hmac.new(
+            _TEST_SECRET.encode("utf-8"), signature_data.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        tampered_cursor = (
+            base64.urlsafe_b64encode(json.dumps(payload, sort_keys=True).encode("utf-8"))
+            .decode("ascii")
+            .rstrip("=")
+        )
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=tampered_cursor,
+                page_size=2,
+            )
+        )
+
+    assert page_two["error"]["category"] == "invalid_request"
+    assert page_two["error"]["details_safe"]["reason_code"] == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    assert (
+        page_two["metadata"]["pagination.keyset.rejection_reason_code"]
+        == "PAGINATION_BUDGET_SNAPSHOT_INVALID"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_sql_query_keyset_budget_snapshot_valid_continuation():
+    """Valid budget snapshots should allow continuation within accumulated request totals."""
+    caps = SimpleNamespace(
+        provider_name="postgres",
+        tenant_enforcement_mode="rls_session",
+        supports_column_metadata=True,
+        supports_cancel=True,
+        supports_pagination=True,
+        execution_model="sync",
+    )
+    sql = "SELECT id FROM users ORDER BY id ASC"
+
+    with (
+        patch("dal.database.Database.get_query_target_capabilities", return_value=caps),
+        patch("dal.database.Database.get_query_target_provider", return_value="postgres"),
+        patch("dal.database.Database.get_connection") as mock_get_conn,
+        patch("agent.validation.policy_enforcer.PolicyEnforcer.validate_sql", return_value=None),
+        patch("mcp_server.utils.auth.validate_role", return_value=None),
+    ):
+
+        class _Conn:
+            def __init__(self, rows):
+                self._rows = list(rows)
+                self.session_guardrail_metadata = {}
+
+            async def fetch(self, _query, *_args):
+                return list(self._rows)
+
+        class _ConnCtx:
+            def __init__(self, conn):
+                self._conn = conn
+
+            async def __aenter__(self):
+                return self._conn
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        mock_get_conn.side_effect = [
+            _ConnCtx(_Conn([{"id": 1}, {"id": 2}, {"id": 3}])),
+            _ConnCtx(_Conn([{"id": 3}])),
+        ]
+
+        page_one = json.loads(
+            await handler(sql, tenant_id=1, pagination_mode="keyset", page_size=2)
+        )
+        cursor = page_one["metadata"]["next_keyset_cursor"]
+        assert cursor
+        padded = cursor + "=" * (-len(cursor) % 4)
+        cursor_payload = json.loads(
+            base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+        )
+        assert isinstance(cursor_payload.get("budget_snapshot"), dict)
+        assert isinstance(cursor_payload.get("budget_fp"), str)
+
+        page_two = json.loads(
+            await handler(
+                sql,
+                tenant_id=1,
+                pagination_mode="keyset",
+                keyset_cursor=cursor,
+                page_size=2,
+            )
+        )
+
+    assert "error" not in page_two
+    assert page_two["rows"] == [{"id": 3}]
+
+
+@pytest.mark.asyncio
 async def test_execute_sql_query_keyset_follow_up_expired_cursor_sanitized():
     """Follow-up keyset requests with expired cursors should reject without SQL/cursor leakage."""
     caps = SimpleNamespace(
