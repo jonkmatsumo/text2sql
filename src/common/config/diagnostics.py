@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from common.config.env import get_env_bool, get_env_int, get_env_str
+from common.config.model_manager_operability import (
+    ModelManagerHardeningFlags,
+    build_model_manager_diagnostics_snapshot,
+)
 
 
 def _safe_env_int(name: str, default: int) -> int:
@@ -44,6 +48,7 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
         get_schema_snapshot_cache_size,
     )
 
+    model_manager_flags = ModelManagerHardeningFlags.from_env()
     diagnostics = {
         "diagnostics_schema_version": 1,
         "active_database_provider": get_env_str("QUERY_TARGET_BACKEND", "postgres"),
@@ -72,7 +77,15 @@ def build_operator_diagnostics(*, debug: bool = False) -> dict[str, Any]:
             "disable_prefetch": _safe_env_bool("DISABLE_PREFETCH", False),
             "disable_schema_refresh": _safe_env_bool("DISABLE_SCHEMA_REFRESH", False),
             "disable_llm_retries": _safe_env_bool("DISABLE_LLM_RETRIES", False),
+            "model_manager_strict_reload_mode": model_manager_flags.strict_reload_mode,
+            "model_manager_strict_schema_mode": model_manager_flags.strict_schema_mode,
+            "model_manager_schema_mismatch_warn_only": (
+                model_manager_flags.schema_mismatch_warn_only
+            ),
+            "model_manager_calibration_strict_mode": model_manager_flags.calibration_strict_mode,
+            "model_manager_drift_strict_mode": model_manager_flags.drift_strict_mode,
         },
+        "model_manager": build_model_manager_diagnostics_snapshot(flags=model_manager_flags),
     }
     if debug:
         from agent.runtime_metrics import get_stage_latency_breakdown

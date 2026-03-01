@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from common.constants.ml_operability import RELOAD_FAILURE_REASON_RELOAD_EXCEPTION
 from mcp_server.services.canonicalization.pattern_reload_service import PatternReloadService
 from mcp_server.services.canonicalization.spacy_pipeline import CanonicalizationService
 
@@ -24,6 +25,7 @@ async def test_reload_success():
         # Assert
         assert result.success is True
         assert result.error is None
+        assert result.reason_code is None
         assert result.pattern_count == 42
         assert result.reloaded_at is not None
         assert result.reload_id is not None
@@ -48,6 +50,7 @@ async def test_reload_failure():
         # Assert
         assert result.success is False
         assert result.error == "DB Connection Failed"
+        assert result.reason_code == RELOAD_FAILURE_REASON_RELOAD_EXCEPTION
         assert result.pattern_count is None
         assert result.reloaded_at is not None
         assert result.reload_id is not None
