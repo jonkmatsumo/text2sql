@@ -352,6 +352,30 @@ class ExecuteSQLQueryMetadata(BaseModel):
         None,
         description="Bounded cursor-validation outcome classification",
     )
+    pagination_cursor_signing_secret_configured: Optional[bool] = Field(
+        None,
+        description="True when cursor signing secret is configured (fail-closed indicator)",
+        validation_alias="pagination.cursor.signing_secret_configured",
+        serialization_alias="pagination.cursor.signing_secret_configured",
+    )
+    pagination_cursor_signature_valid: Optional[bool] = Field(
+        None,
+        description="True when cursor HMAC signature was verified successfully",
+        validation_alias="pagination.cursor.signature_valid",
+        serialization_alias="pagination.cursor.signature_valid",
+    )
+    pagination_cursor_legacy_issued_at_accepted: Optional[bool] = Field(
+        None,
+        description="True when a legacy cursor without issued_at was accepted",
+        validation_alias="pagination.cursor.legacy_issued_at_accepted",
+        serialization_alias="pagination.cursor.legacy_issued_at_accepted",
+    )
+    pagination_cursor_issued_at_present: Optional[bool] = Field(
+        None,
+        description="True when the pagination cursor included issued_at in its payload",
+        validation_alias="pagination.cursor.issued_at_present",
+        serialization_alias="pagination.cursor.issued_at_present",
+    )
 
     @model_validator(mode="before")
     @classmethod

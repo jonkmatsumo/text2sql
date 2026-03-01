@@ -3715,6 +3715,18 @@ async def handler(
                 "cursor_validation_outcome": tenant_enforcement_metadata.get(
                     "cursor_validation_outcome"
                 ),
+                "pagination.cursor.signing_secret_configured": tenant_enforcement_metadata.get(
+                    "pagination.cursor.signing_secret_configured"
+                ),
+                "pagination.cursor.signature_valid": tenant_enforcement_metadata.get(
+                    "pagination.cursor.signature_valid"
+                ),
+                "pagination.cursor.legacy_issued_at_accepted": tenant_enforcement_metadata.get(
+                    "pagination.cursor.legacy_issued_at_accepted"
+                ),
+                "pagination.cursor.issued_at_present": tenant_enforcement_metadata.get(
+                    "pagination.cursor.issued_at_present"
+                ),
             },
         )
         # print(f"DEBUG: metadata={envelope_metadata}")
